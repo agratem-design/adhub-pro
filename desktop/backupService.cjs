@@ -505,7 +505,7 @@ async function restoreBackupToLocal(filePath, localConfig = {}, onProgress = () 
   const host = localConfig.host || '127.0.0.1';
   const port = localConfig.port || '54322';
   const dbname = localConfig.dbname || 'postgres';
-  const user = localConfig.user || 'supabase_admin';
+  const user = localConfig.user || 'postgres';
   const password = localConfig.password || 'postgres';
 
   if (!fs.existsSync(filePath)) {
@@ -542,7 +542,6 @@ async function restoreBackupToLocal(filePath, localConfig = {}, onProgress = () 
         '--port', String(port),
         '--username', user,
         '--dbname', dbname,
-        '--schema=public',
         '--clean',
         '--if-exists',
         '--no-owner',

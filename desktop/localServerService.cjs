@@ -114,6 +114,27 @@ function ensureSupabaseInitialized(onProgress = () => {}) {
       console.warn('supabase init warning:', e.message);
     }
   }
+
+  // Ensure heavy/unsupported analytics on Windows are disabled to prevent crashes & slowness
+  if (fs.existsSync(configPath)) {
+    try {
+      let configContent = fs.readFileSync(configPath, 'utf8');
+      let modified = false;
+      if (configContent.includes('[analytics]\nenabled = true') || configContent.includes('[analytics]\r\nenabled = true')) {
+        configContent = configContent.replace(/\[analytics\]\r?\nenabled\s*=\s*true/, '[analytics]\nenabled = false');
+        modified = true;
+      }
+      if (configContent.includes('[edge_runtime]\nenabled = true') || configContent.includes('[edge_runtime]\r\nenabled = true')) {
+        configContent = configContent.replace(/\[edge_runtime\]\r?\nenabled\s*=\s*true/, '[edge_runtime]\nenabled = false');
+        modified = true;
+      }
+      if (modified) {
+        fs.writeFileSync(configPath, configContent, 'utf8');
+      }
+    } catch (err) {
+      console.warn('Could not optimize config.toml:', err.message);
+    }
+  }
 }
 
 /**

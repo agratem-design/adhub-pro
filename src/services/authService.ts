@@ -115,32 +115,32 @@ export const loginUser = async (credentials: LoginCredentials): Promise<{ user: 
 
     if (trimmedInput.includes('@')) {
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: trimmedInput,
+        email: trimmedInput.toLowerCase(),
         password,
       });
 
       if (error || !data.user) {
+        const msg = error?.message || '';
+        if (msg.includes('fetch') || msg.includes('Failed to fetch') || msg.includes('Network') || msg.includes('connection')) {
+          return { user: null, error: 'تعذر الاتصال بقاعدة البيانات. يرجى التأكد من تشغيل السيرفر المحلي أو الاتصال بالإنترنت' };
+        }
         return { user: null, error: 'البريد الإلكتروني/اسم المستخدم أو كلمة المرور غير صحيحة' };
       }
 
       authUserId = data.user.id;
       authEmail = data.user.email ?? null;
     } else {
-      // محاولة تسجيل الدخول باسم المستخدم عبر الـ Edge Function أولاً
-      const { data: tokenData, error: invokeError } = await supabase.functions.invoke('auth-username-login', {
-        body: { emailOrUsername: trimmedInput, password },
-      });
+      // 1. محاولة جلب البريد المرتبط باسم المستخدم عبر الـ RPC الآمن
+      let resolvedEmail: string | null = null;
+      try {
+        const { data: rpcEmail } = await supabase.rpc('get_email_by_username', { p_username: trimmedInput });
+        if (rpcEmail) {
+          resolvedEmail = rpcEmail;
+        }
+      } catch (e) {}
 
-      if (!invokeError && tokenData?.access_token && tokenData?.refresh_token) {
-        await supabase.auth.setSession({
-          access_token: tokenData.access_token,
-          refresh_token: tokenData.refresh_token,
-        });
-
-        authUserId = tokenData.user?.id ?? null;
-        authEmail = tokenData.user?.email ?? null;
-      } else {
-        // في حال تعذر الوصول للـ Edge Function (مثل البيئة المحلية)، البحث عن بريد المستخدم من profiles والتحقق من كلمة المرور عبر قاعدة البيانات
+      // 2. إذا لم يتوفر الـ RPC، محاولة الاستعلام المباشر من profiles
+      if (!resolvedEmail) {
         try {
           const { data: prof } = await supabase
             .from('profiles')
@@ -149,22 +149,43 @@ export const loginUser = async (credentials: LoginCredentials): Promise<{ user: 
             .maybeSingle();
 
           if (prof?.email) {
-            const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
-              email: prof.email,
-              password,
-            });
-
-            if (!signInErr && signInData.user) {
-              authUserId = signInData.user.id;
-              authEmail = signInData.user.email ?? prof.email;
-            } else {
-              return { user: null, error: 'البريد الإلكتروني/اسم المستخدم أو كلمة المرور غير صحيحة' };
-            }
-          } else {
-            return { user: null, error: 'البريد الإلكتروني/اسم المستخدم أو كلمة المرور غير صحيحة' };
+            resolvedEmail = prof.email;
           }
-        } catch {
+        } catch (e) {}
+      }
+
+      if (resolvedEmail) {
+        const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+          email: resolvedEmail.toLowerCase(),
+          password,
+        });
+
+        if (!signInErr && signInData.user) {
+          authUserId = signInData.user.id;
+          authEmail = signInData.user.email ?? resolvedEmail;
+        } else {
+          const msg = signInErr?.message || '';
+          if (msg.includes('fetch') || msg.includes('Failed to fetch') || msg.includes('Network') || msg.includes('connection')) {
+            return { user: null, error: 'تعذر الاتصال بقاعدة البيانات. يرجى التأكد من تشغيل السيرفر المحلي أو الاتصال بالإنترنت' };
+          }
           return { user: null, error: 'البريد الإلكتروني/اسم المستخدم أو كلمة المرور غير صحيحة' };
+        }
+      } else {
+        // محاولة بديلة عبر Edge Function
+        const { data: tokenData, error: invokeError } = await supabase.functions.invoke('auth-username-login', {
+          body: { emailOrUsername: trimmedInput, password },
+        });
+
+        if (!invokeError && tokenData?.access_token && tokenData?.refresh_token) {
+          await supabase.auth.setSession({
+            access_token: tokenData.access_token,
+            refresh_token: tokenData.refresh_token,
+          });
+
+          authUserId = tokenData.user?.id ?? null;
+          authEmail = tokenData.user?.email ?? null;
+        } else {
+          return { user: null, error: 'اسم المستخدم أو كلمة المرور غير صحيحة' };
         }
       }
     }
