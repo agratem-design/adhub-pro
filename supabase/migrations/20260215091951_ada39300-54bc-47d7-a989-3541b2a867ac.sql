@@ -1,0 +1,1 @@
+DELETE FROM customer_payments WHERE id = '8ab7f5de-6f6a-4dc0-b52c-bfb5f5bab7a4';

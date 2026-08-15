@@ -1,0 +1,179 @@
+/* تخصيص محرر النصوص الغني */
+.rich-text-editor .quill {
+  background: hsl(var(--background));
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+}
+
+.rich-text-editor .ql-toolbar {
+  background: hsl(var(--muted));
+  border-radius: 8px 8px 0 0;
+  border: none;
+  border-bottom: 1px solid hsl(var(--border));
+  padding: 8px;
+}
+
+.rich-text-editor .ql-container {
+  border: none;
+  font-family: inherit;
+  font-size: 14px;
+  min-height: 200px;
+}
+
+.rich-text-editor .ql-editor {
+  min-height: 200px;
+  padding: 15px;
+  direction: rtl;
+  text-align: right;
+}
+
+.rich-text-editor .ql-editor.ql-blank::before {
+  right: 15px;
+  left: auto;
+  text-align: right;
+  color: hsl(var(--muted-foreground));
+  font-style: normal;
+}
+
+/* تنسيق الأزرار */
+.rich-text-editor .ql-toolbar button {
+  width: 28px;
+  height: 28px;
+  padding: 3px;
+}
+
+.rich-text-editor .ql-toolbar button:hover {
+  background: hsl(var(--accent));
+  border-radius: 4px;
+}
+
+.rich-text-editor .ql-toolbar button.ql-active {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-radius: 4px;
+}
+
+.rich-text-editor .ql-toolbar .ql-stroke {
+  stroke: hsl(var(--foreground));
+}
+
+.rich-text-editor .ql-toolbar .ql-fill {
+  fill: hsl(var(--foreground));
+}
+
+.rich-text-editor .ql-toolbar button:hover .ql-stroke,
+.rich-text-editor .ql-toolbar button.ql-active .ql-stroke {
+  stroke: hsl(var(--primary-foreground));
+}
+
+.rich-text-editor .ql-toolbar button:hover .ql-fill,
+.rich-text-editor .ql-toolbar button.ql-active .ql-fill {
+  fill: hsl(var(--primary-foreground));
+}
+
+/* Font families - تخصيص الخطوط */
+.rich-text-editor .ql-font-arial {
+  font-family: 'Arial', sans-serif !important;
+}
+
+.rich-text-editor .ql-font-tahoma {
+  font-family: 'Tahoma', sans-serif !important;
+}
+
+.rich-text-editor .ql-font-times {
+  font-family: 'Times New Roman', serif !important;
+}
+
+.rich-text-editor .ql-font-courier {
+  font-family: 'Courier New', monospace !important;
+}
+
+.rich-text-editor .ql-font-sans-serif {
+  font-family: sans-serif !important;
+}
+
+/* Font picker labels */
+.rich-text-editor .ql-picker.ql-font .ql-picker-label[data-value="arial"]::before,
+.rich-text-editor .ql-picker.ql-font .ql-picker-item[data-value="arial"]::before {
+  content: 'Arial';
+  font-family: 'Arial', sans-serif;
+}
+
+.rich-text-editor .ql-picker.ql-font .ql-picker-label[data-value="tahoma"]::before,
+.rich-text-editor .ql-picker.ql-font .ql-picker-item[data-value="tahoma"]::before {
+  content: 'Tahoma';
+  font-family: 'Tahoma', sans-serif;
+}
+
+.rich-text-editor .ql-picker.ql-font .ql-picker-label[data-value="times"]::before,
+.rich-text-editor .ql-picker.ql-font .ql-picker-item[data-value="times"]::before {
+  content: 'Times New Roman';
+  font-family: 'Times New Roman', serif;
+}
+
+.rich-text-editor .ql-picker.ql-font .ql-picker-label[data-value="courier"]::before,
+.rich-text-editor .ql-picker.ql-font .ql-picker-item[data-value="courier"]::before {
+  content: 'Courier New';
+  font-family: 'Courier New', monospace;
+}
+
+.rich-text-editor .ql-picker.ql-font .ql-picker-label[data-value="sans-serif"]::before,
+.rich-text-editor .ql-picker.ql-font .ql-picker-item[data-value="sans-serif"]::before {
+  content: 'Sans Serif';
+  font-family: sans-serif;
+}
+
+/* تخصيص عرض المحتوى المنسق */
+.ql-editor h1 {
+  font-size: 2em;
+  font-weight: bold;
+  margin: 0.67em 0;
+}
+
+.ql-editor h2 {
+  font-size: 1.5em;
+  font-weight: bold;
+  margin: 0.75em 0;
+}
+
+.ql-editor h3 {
+  font-size: 1.17em;
+  font-weight: bold;
+  margin: 0.83em 0;
+}
+
+.ql-editor p {
+  margin-bottom: 1em;
+}
+
+.ql-editor ul,
+.ql-editor ol {
+  padding-right: 1.5em;
+  margin-bottom: 1em;
+}
+
+.ql-editor blockquote {
+  border-right: 4px solid hsl(var(--primary));
+  padding-right: 16px;
+  margin: 1em 0;
+  font-style: italic;
+}
+
+.ql-editor code {
+  background: hsl(var(--muted));
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+.ql-editor pre {
+  background: hsl(var(--muted));
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.ql-editor img {
+  max-width: 100%;
+  height: auto;
+}

@@ -1,0 +1,1 @@
+ALTER TABLE public.print_reprints ADD COLUMN IF NOT EXISTS defect_image_url TEXT;

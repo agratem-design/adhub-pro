@@ -1,0 +1,21 @@
+-- إضافة الأعمدة الجديدة لإعدادات الطباعة
+ALTER TABLE print_settings 
+ADD COLUMN IF NOT EXISTS header_style TEXT DEFAULT 'classic',
+ADD COLUMN IF NOT EXISTS logo_size_preset TEXT DEFAULT 'medium',
+ADD COLUMN IF NOT EXISTS company_tax_id TEXT DEFAULT '',
+ADD COLUMN IF NOT EXISTS company_email TEXT DEFAULT '',
+ADD COLUMN IF NOT EXISTS company_website TEXT DEFAULT '',
+ADD COLUMN IF NOT EXISTS company_subtitle_color TEXT DEFAULT '#666666',
+ADD COLUMN IF NOT EXISTS customer_text_color TEXT DEFAULT '#333333',
+ADD COLUMN IF NOT EXISTS table_text_color TEXT DEFAULT '#000000',
+ADD COLUMN IF NOT EXISTS footer_text_color TEXT DEFAULT '#666666',
+ADD COLUMN IF NOT EXISTS header_margin_bottom INTEGER DEFAULT 20,
+ADD COLUMN IF NOT EXISTS document_title_margin_top INTEGER DEFAULT 10,
+ADD COLUMN IF NOT EXISTS document_title_alignment TEXT DEFAULT 'center',
+ADD COLUMN IF NOT EXISTS show_tax_id BOOLEAN DEFAULT false,
+ADD COLUMN IF NOT EXISTS show_email BOOLEAN DEFAULT false,
+ADD COLUMN IF NOT EXISTS show_website BOOLEAN DEFAULT false,
+ADD COLUMN IF NOT EXISTS document_info_text_color TEXT DEFAULT '#000000',
+ADD COLUMN IF NOT EXISTS document_info_bg_color TEXT DEFAULT 'transparent',
+ADD COLUMN IF NOT EXISTS document_info_alignment TEXT DEFAULT 'left',
+ADD COLUMN IF NOT EXISTS document_info_margin_top INTEGER DEFAULT 0;

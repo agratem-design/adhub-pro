@@ -1,0 +1,5 @@
+ALTER TABLE public."Contract" 
+  ADD COLUMN IF NOT EXISTS pricing_mode TEXT,
+  ADD COLUMN IF NOT EXISTS duration_months INTEGER,
+  ADD COLUMN IF NOT EXISTS duration_days INTEGER,
+  ADD COLUMN IF NOT EXISTS use_30_day_month BOOLEAN;

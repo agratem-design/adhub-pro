@@ -1,0 +1,1 @@
+ALTER TABLE public.distribution_items DROP CONSTRAINT distribution_items_partner_check;

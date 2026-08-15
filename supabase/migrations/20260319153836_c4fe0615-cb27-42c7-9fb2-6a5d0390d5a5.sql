@@ -1,0 +1,1 @@
+CREATE POLICY "Anyone can read field photos" ON public.field_photos FOR SELECT TO anon USING (true); CREATE POLICY "Anyone can insert field photos" ON public.field_photos FOR INSERT TO anon WITH CHECK (true);

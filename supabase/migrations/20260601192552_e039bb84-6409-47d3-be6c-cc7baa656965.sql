@@ -1,0 +1,1 @@
+ALTER TABLE public.municipality_collection_items ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'متاحة';

@@ -1,0 +1,1 @@
+UPDATE system_settings SET setting_value = 'postimg' WHERE setting_key = 'image_upload_provider';

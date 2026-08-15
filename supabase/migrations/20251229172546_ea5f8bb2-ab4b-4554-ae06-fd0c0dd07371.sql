@@ -1,0 +1,20 @@
+-- إضافة حقول جديدة لتخصيص عناصر الفاتورة
+ALTER TABLE public.print_settings
+  ADD COLUMN IF NOT EXISTS document_title_ar TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS document_title_en TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS show_document_number BOOLEAN DEFAULT true,
+  ADD COLUMN IF NOT EXISTS show_document_date BOOLEAN DEFAULT true,
+  ADD COLUMN IF NOT EXISTS date_format TEXT DEFAULT 'ar-LY',
+  ADD COLUMN IF NOT EXISTS show_customer_section BOOLEAN DEFAULT true,
+  ADD COLUMN IF NOT EXISTS customer_section_title TEXT DEFAULT 'بيانات العميل',
+  ADD COLUMN IF NOT EXISTS customer_section_bg_color TEXT DEFAULT '#f8f9fa',
+  ADD COLUMN IF NOT EXISTS customer_section_border_color TEXT DEFAULT '#D4AF37',
+  ADD COLUMN IF NOT EXISTS table_header_bg_color TEXT DEFAULT '#D4AF37',
+  ADD COLUMN IF NOT EXISTS table_header_text_color TEXT DEFAULT '#ffffff',
+  ADD COLUMN IF NOT EXISTS table_border_color TEXT DEFAULT '#e5e5e5',
+  ADD COLUMN IF NOT EXISTS table_row_even_color TEXT DEFAULT '#f8f9fa',
+  ADD COLUMN IF NOT EXISTS table_row_odd_color TEXT DEFAULT '#ffffff',
+  ADD COLUMN IF NOT EXISTS summary_bg_color TEXT DEFAULT '#f0e6d2',
+  ADD COLUMN IF NOT EXISTS summary_border_color TEXT DEFAULT '#D4AF37',
+  ADD COLUMN IF NOT EXISTS border_radius INTEGER DEFAULT 8,
+  ADD COLUMN IF NOT EXISTS border_width INTEGER DEFAULT 1;

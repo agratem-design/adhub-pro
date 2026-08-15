@@ -1,0 +1,893 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* نظام التصميم - ذهبي احترافي */
+
+@layer base {
+  :root {
+    --background: 36 25% 98%;
+    --foreground: 0 0% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 12%;
+
+    --primary: 38 82% 35%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 38 85% 45%;
+
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 18%;
+
+    --muted: 0 0% 94%;
+    --muted-foreground: 0 0% 35%;
+
+    --accent: 38 50% 93%;
+    --accent-foreground: 38 70% 22%;
+
+    --destructive: 0 68% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 85%;
+    --input: 0 0% 85%;
+    --ring: 38 82% 35%;
+
+    --radius: 0.75rem;
+
+    --gradient-primary: linear-gradient(135deg, hsl(38 82% 35%) 0%, hsl(34 72% 26%) 100%);
+    --gradient-secondary: linear-gradient(135deg, hsl(0 0% 100%) 0%, hsl(38 20% 97%) 100%);
+    --gradient-dark: linear-gradient(135deg, hsl(0 0% 98%) 0%, hsl(38 15% 96%) 100%);
+    --gradient-luxury: linear-gradient(135deg, hsl(0 0% 100%) 0%, hsl(38 20% 97%) 50%, hsl(38 30% 95%) 100%);
+    --gradient-hero: linear-gradient(135deg, hsl(0 0% 14%) 0%, hsl(38 55% 30%) 50%, hsl(38 82% 35%) 100%);
+    --gradient-card: linear-gradient(145deg, hsl(0 0% 100%) 0%, hsl(38 15% 98%) 100%);
+
+    --shadow-gold: 0 6px 20px -6px hsl(38 80% 46% / 0.15);
+    --shadow-luxury: 0 8px 30px -8px hsl(38 80% 46% / 0.2);
+    --shadow-luxury-xl: 0 24px 60px -20px hsl(38 80% 46% / 0.28), 0 8px 24px -10px hsl(0 0% 14% / 0.08);
+    --shadow-card: 0 1px 2px hsl(0 0% 14% / 0.04), 0 2px 8px hsl(0 0% 14% / 0.03);
+    --shadow-soft: 0 1px 2px hsl(0 0% 14% / 0.03);
+    --shadow-hover: 0 6px 16px -4px hsl(38 80% 46% / 0.14);
+
+    --surface-1: 0 0% 100%;
+    --surface-2: 38 25% 97%;
+    --surface-3: 38 30% 94%;
+    --border-luxury: 38 60% 70%;
+    --gradient-radial-glow: radial-gradient(ellipse at top, hsl(38 80% 46% / 0.10) 0%, transparent 60%);
+    --gradient-page-hero: linear-gradient(135deg, hsl(38 50% 96%) 0%, hsl(0 0% 100%) 50%, hsl(38 40% 95%) 100%);
+
+    --transition-luxury: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-glow: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+    --transition-smooth: all 0.15s ease-in-out;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 14%;
+    --sidebar-primary: 38 80% 46%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 95%;
+    --sidebar-accent-foreground: 0 0% 14%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-ring: 38 80% 46%;
+
+    --green: 152 65% 38%;
+    --yellow: 38 80% 46%;
+    --red: 0 68% 50%;
+    --orange: 25 85% 50%;
+    --purple: 262 75% 52%;
+    --blue: 217 80% 52%;
+  }
+
+  .dark {
+    --background: 0 0% 5%;
+    --foreground: 43 20% 90%;
+
+    --card: 0 0% 8%;
+    --card-foreground: 43 20% 90%;
+
+    --popover: 0 0% 8%;
+    --popover-foreground: 43 20% 90%;
+
+    --primary: 43 85% 55%;
+    --primary-foreground: 0 0% 0%;
+    --primary-glow: 43 90% 65%;
+
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 43 15% 85%;
+
+    --muted: 0 0% 14%;
+    --muted-foreground: 0 0% 65%;
+
+    --accent: 43 40% 20%;
+    --accent-foreground: 43 85% 65%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 43 85% 55%;
+
+    --gradient-primary: linear-gradient(135deg, hsl(43 85% 55%) 0%, hsl(38 80% 45%) 100%);
+    --gradient-secondary: linear-gradient(135deg, hsl(0 0% 12%) 0%, hsl(43 20% 14%) 100%);
+    --gradient-dark: linear-gradient(135deg, hsl(0 0% 5%) 0%, hsl(0 0% 8%) 100%);
+    --gradient-luxury: linear-gradient(135deg, hsl(0 0% 5%) 0%, hsl(43 20% 12%) 50%, hsl(43 30% 18%) 100%);
+    --gradient-hero: linear-gradient(135deg, hsl(0 0% 5%) 0%, hsl(43 50% 20%) 50%, hsl(43 85% 55%) 100%);
+    --gradient-card: linear-gradient(145deg, hsl(0 0% 9%) 0%, hsl(43 15% 10%) 100%);
+
+    --shadow-gold: 0 6px 20px -6px hsl(43 85% 55% / 0.3);
+    --shadow-luxury: 0 8px 30px -8px hsl(43 85% 55% / 0.4);
+    --shadow-luxury-xl: 0 30px 80px -20px hsl(43 85% 55% / 0.45), 0 10px 30px -10px hsl(0 0% 0% / 0.6);
+    --shadow-card: 0 4px 12px hsl(0 0% 0% / 0.5);
+    --shadow-soft: 0 2px 8px hsl(0 0% 0% / 0.4);
+    --shadow-hover: 0 6px 16px -4px hsl(43 85% 55% / 0.35);
+
+    --surface-1: 0 0% 7%;
+    --surface-2: 43 15% 10%;
+    --surface-3: 43 20% 13%;
+    --border-luxury: 43 70% 45%;
+    --gradient-radial-glow: radial-gradient(ellipse at top, hsl(43 85% 55% / 0.18) 0%, transparent 55%);
+    --gradient-page-hero: linear-gradient(135deg, hsl(0 0% 6%) 0%, hsl(43 30% 10%) 50%, hsl(0 0% 7%) 100%);
+
+    --sidebar-background: 0 0% 4%;
+    --sidebar-foreground: 43 20% 85%;
+    --sidebar-primary: 43 85% 55%;
+    --sidebar-primary-foreground: 0 0% 0%;
+    --sidebar-accent: 0 0% 10%;
+    --sidebar-accent-foreground: 43 20% 90%;
+    --sidebar-border: 0 0% 14%;
+    --sidebar-ring: 43 85% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    /* منع تحديد النص غير المرغوب على الموبايل */
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Doran', 'Cairo', 'Tajawal', sans-serif;
+    font-size: 80%;
+    height: 100%;
+    /* ❗️ لا تضع overflow:hidden هنا — يتعارض مع Radix UI Dialog ويسبب التجميد */
+    overflow: auto;
+    direction: rtl !important;
+    text-align: right;
+    /* تحسين اللمس على الموبايل */
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: none;
+  }
+
+  html {
+    font-size: 80%;
+    height: 100%;
+    direction: rtl !important;
+    overscroll-behavior: none;
+  }
+
+  #root {
+    height: 100%;
+    direction: rtl !important;
+    /* overflow هنا وليس على body حتى لا يتعارض مع Dialog */
+    overflow: hidden;
+  }
+
+  /* ✅ استخدام خط Manrope للأرقام والمقاسات */
+  .font-numbers,
+  [data-numbers],
+  .size-text,
+  .price-text,
+  .stat-number,
+  .font-manrope {
+    font-family: 'Manrope', sans-serif !important;
+    font-feature-settings: 'tnum' on, 'lnum' on;
+  }
+
+  /* ✅ تطبيق خط Manrope تلقائياً على الإحصائيات والأسعار */
+  .expenses-stat-value {
+    font-family: 'Manrope', sans-serif !important;
+    font-feature-settings: 'tnum' on, 'lnum' on;
+  }
+}
+
+/* ✅ NEW: إضافة فئات CSS للألوان الجديدة */
+.text-green {
+  color: hsl(var(--green));
+}
+
+.text-yellow {
+  color: hsl(var(--yellow));
+}
+
+.text-red {
+  color: hsl(var(--red));
+}
+
+.text-orange {
+  color: hsl(var(--orange));
+}
+
+.text-purple {
+  color: hsl(var(--purple));
+}
+
+.text-blue {
+  color: hsl(var(--blue));
+}
+
+/* ✅ تحسين النوافذ المنبثقة التفاعلية - تباين ممتاز لجميع الأوضاع */
+.system-dialog {
+  background: hsl(var(--card));
+  backdrop-filter: blur(12px);
+  border: 1px solid hsl(var(--primary) / 0.35);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.3), 0 0 20px hsl(var(--primary) / 0.1);
+}
+
+.system-dialog-header {
+  background: linear-gradient(135deg, hsl(var(--primary) / 0.08), hsl(var(--primary) / 0.02));
+  border-bottom: 1px solid hsl(var(--primary) / 0.2);
+  padding: 14px 22px;
+  border-radius: 12px 12px 0 0;
+}
+
+.system-dialog-title {
+  color: hsl(var(--primary));
+  font-weight: 700;
+  font-size: 14px;
+  text-align: right;
+  direction: rtl;
+}
+
+.system-dialog-content {
+  padding: 22px;
+  color: hsl(var(--foreground));
+  text-align: right;
+  direction: rtl;
+}
+
+.system-dialog-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  padding-top: 16px;
+  border-top: 1px solid hsl(var(--border) / 0.6);
+}
+
+.system-btn-primary {
+  background: var(--gradient-primary);
+  color: hsl(var(--primary-foreground));
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  box-shadow: 0 2px 6px hsl(var(--primary) / 0.15);
+}
+
+.system-btn-primary:hover {
+  opacity: 0.95;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px hsl(var(--primary) / 0.3);
+}
+
+.system-btn-secondary {
+  background: hsl(var(--secondary));
+  color: hsl(var(--secondary-foreground));
+  border: 1px solid hsl(var(--border));
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.system-btn-secondary:hover {
+  background: hsl(var(--muted));
+  border-color: hsl(var(--border) / 0.8);
+  transform: translateY(-1px);
+}
+
+/* ✅ تحسين نافذة confirm - متوافقة تماماً */
+.custom-confirm-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.custom-confirm-dialog {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--primary) / 0.35);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.4), 0 0 20px hsl(var(--primary) / 0.15);
+  min-width: 320px;
+  max-width: 420px;
+}
+
+/* Expenses Page Styles */
+.expenses-container {
+  @apply space-y-6;
+  direction: rtl;
+}
+
+.expenses-stats-grid {
+  @apply grid grid-cols-1 md:grid-cols-4 gap-4;
+}
+
+.expenses-stat-card {
+  @apply p-6;
+}
+
+.expenses-stat-content {
+  @apply flex items-center justify-between;
+}
+
+.expenses-stat-text {
+  @apply text-sm font-medium text-muted-foreground;
+}
+
+.expenses-stat-value {
+  @apply text-2xl font-bold;
+}
+
+.expenses-stat-icon {
+  @apply h-8 w-8;
+}
+
+.expenses-actions {
+  @apply flex gap-4;
+}
+
+.expenses-action-btn {
+  @apply flex items-center gap-2;
+}
+
+/* Preview Card Styles */
+.expenses-preview-card {
+  @apply border-2 border-primary/30 bg-gradient-to-br from-card to-primary/10 shadow-lg rounded-lg;
+}
+
+/* ✅ Ensure dropdowns appear above maps and other elements */
+[data-radix-popper-content-wrapper],
+[data-radix-select-content],
+[data-radix-popover-content],
+.command-wrapper {
+  z-index: 9999 !important;
+}
+
+/* Custom scrollbar for summary cards */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: hsl(var(--muted) / 0.3);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary) / 0.5);
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary) / 0.7);
+}
+
+.expenses-preview-title {
+  @apply text-xl font-bold text-primary text-center;
+}
+
+.expenses-preview-grid {
+  @apply grid grid-cols-1 md:grid-cols-4 gap-6;
+}
+
+.expenses-preview-item {
+  @apply bg-card/80 backdrop-blur-sm rounded-lg p-4 shadow-md border border-primary/20;
+}
+
+.expenses-preview-label {
+  @apply text-sm font-semibold text-primary mb-2;
+}
+
+.expenses-preview-value {
+  @apply text-2xl font-bold text-foreground;
+}
+
+.expenses-preview-text {
+  @apply text-sm font-medium text-muted-foreground;
+}
+
+.expenses-table-container {
+  @apply overflow-x-auto;
+}
+
+.expenses-contract-number {
+  @apply font-medium;
+}
+
+.expenses-amount-calculated {
+  @apply font-medium text-primary;
+}
+
+.expenses-amount-excluded {
+  @apply text-muted-foreground line-through;
+}
+
+.expenses-actions-cell {
+  @apply flex items-center gap-2;
+}
+
+.expenses-dialog-content {
+  @apply max-w-md;
+}
+
+.expenses-dialog-form {
+  @apply space-y-4;
+}
+
+.expenses-form-label {
+  @apply text-sm font-medium;
+}
+
+.expenses-form-grid {
+  @apply grid grid-cols-2 gap-4;
+}
+
+.expenses-loading {
+  @apply flex items-center justify-center h-64;
+  direction: rtl;
+}
+
+.expenses-loading-spinner {
+  @apply h-6 w-6 animate-spin ml-2;
+}
+
+.expenses-empty-state {
+  @apply text-center text-muted-foreground;
+}
+
+/* Custom Colors for Expenses */
+.stat-blue {
+  @apply text-blue-400;
+}
+
+.stat-green {
+  @apply text-green-400;
+}
+
+.stat-red {
+  @apply text-red-400;
+}
+
+.stat-purple {
+  @apply text-purple-400;
+}
+
+/* ✅ NEW: إضافة فئات CSS للبطاقات والتفاعلات - نمط فاخر */
+.card-elegant {
+  @apply bg-card border border-border rounded-lg shadow-sm hover:shadow-luxury hover:border-primary/30 transition-all duration-300;
+}
+
+.card-hover {
+  @apply hover:bg-card hover:shadow-luxury hover:border-primary/20 hover:scale-[1.02] transition-all duration-300;
+}
+
+.btn-primary {
+  @apply bg-gradient-to-r from-primary to-accent text-primary-foreground hover:shadow-luxury hover:scale-105 transition-all duration-300;
+}
+
+.section-header {
+  @apply text-2xl font-bold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent;
+}
+
+.text-muted {
+  @apply text-muted-foreground;
+}
+
+/* تأثيرات الهوفر المحسنة */
+.hover-lift {
+  @apply transition-all duration-300 hover:shadow-luxury hover:-translate-y-1;
+}
+
+.hover-glow {
+  @apply transition-all duration-300 hover:shadow-gold hover:border-primary/50;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .expenses-stats-grid {
+    @apply grid-cols-1;
+  }
+
+  .expenses-preview-grid {
+    @apply grid-cols-2;
+  }
+
+  .expenses-actions {
+    @apply flex-col;
+  }
+}
+
+/* Print Styles */
+@media print {
+
+  .expenses-actions,
+  .expenses-dialog-content {
+    @apply hidden;
+  }
+
+  .expenses-table-container {
+    @apply overflow-visible;
+  }
+}
+
+/* ===== Landing Page Art Deco Animations ===== */
+@keyframes hero-reveal {
+  0% { opacity: 0; transform: translateY(40px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes hero-line-grow {
+  0% { transform: scaleX(0); }
+  100% { transform: scaleX(1); }
+}
+
+@keyframes float-diamond {
+  0%, 100% { transform: translateY(0) rotate(45deg); }
+  50% { transform: translateY(-20px) rotate(45deg); }
+}
+
+@keyframes float-circle {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-15px) scale(1.05); }
+}
+
+@keyframes gold-shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes counter-reveal {
+  0% { opacity: 0; transform: translateY(30px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes corner-ornament {
+  0% { opacity: 0; transform: scale(0); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes subtle-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+
+@keyframes slide-up-stagger {
+  0% { opacity: 0; transform: translateY(60px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.animate-hero-reveal {
+  animation: hero-reveal 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  opacity: 0;
+}
+
+.animate-hero-reveal-delay-1 {
+  animation: hero-reveal 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.15s forwards;
+  opacity: 0;
+}
+
+.animate-hero-reveal-delay-2 {
+  animation: hero-reveal 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards;
+  opacity: 0;
+}
+
+.animate-hero-reveal-delay-3 {
+  animation: hero-reveal 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.45s forwards;
+  opacity: 0;
+}
+
+.animate-hero-reveal-delay-4 {
+  animation: hero-reveal 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.6s forwards;
+  opacity: 0;
+}
+
+.animate-hero-line {
+  animation: hero-line-grow 1s cubic-bezier(0.16, 1, 0.3, 1) 0.5s forwards;
+  transform: scaleX(0);
+  transform-origin: right;
+}
+
+.animate-float-diamond {
+  animation: float-diamond 4s ease-in-out infinite;
+}
+
+.animate-float-circle {
+  animation: float-circle 5s ease-in-out infinite;
+}
+
+.animate-gold-shimmer {
+  background-size: 200% auto;
+  animation: gold-shimmer 3s linear infinite;
+}
+
+.animate-counter-reveal {
+  animation: counter-reveal 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  opacity: 0;
+}
+
+.animate-corner-ornament {
+  animation: corner-ornament 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.8s forwards;
+  opacity: 0;
+}
+
+.animate-subtle-pulse {
+  animation: subtle-pulse 3s ease-in-out infinite;
+}
+
+.animate-slide-up-1 { animation: slide-up-stagger 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards; opacity: 0; }
+.animate-slide-up-2 { animation: slide-up-stagger 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.2s forwards; opacity: 0; }
+.animate-slide-up-3 { animation: slide-up-stagger 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards; opacity: 0; }
+.animate-slide-up-4 { animation: slide-up-stagger 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.4s forwards; opacity: 0; }
+
+/* Art Deco pattern background */
+.art-deco-pattern {
+  background-image: 
+    linear-gradient(30deg, hsl(var(--primary) / 0.03) 12%, transparent 12.5%, transparent 87%, hsl(var(--primary) / 0.03) 87.5%),
+    linear-gradient(150deg, hsl(var(--primary) / 0.03) 12%, transparent 12.5%, transparent 87%, hsl(var(--primary) / 0.03) 87.5%),
+    linear-gradient(30deg, hsl(var(--primary) / 0.03) 12%, transparent 12.5%, transparent 87%, hsl(var(--primary) / 0.03) 87.5%),
+    linear-gradient(150deg, hsl(var(--primary) / 0.03) 12%, transparent 12.5%, transparent 87%, hsl(var(--primary) / 0.03) 87.5%);
+  background-size: 80px 140px;
+  background-position: 0 0, 0 0, 40px 70px, 40px 70px;
+}
+
+/* Landing page body override - allow scroll */
+.landing-page-body {
+  overflow: auto !important;
+  height: auto !important;
+}
+
+/* تصغير المسافات والحشوات بنسبة 20% */
+@layer utilities {
+  .container {
+    padding-left: 1.6rem !important;
+    padding-right: 1.6rem !important;
+  }
+}
+
+/* Sidebar component classes */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--sidebar-border)) transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 3px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--sidebar-border) / 0.5);
+  border-radius: 4px;
+}
+
+.sidebar-item {
+  @apply w-full flex items-center gap-2.5 px-3 py-[8px] rounded-lg text-[13px] font-medium transition-all duration-200 relative;
+  @apply text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground;
+}
+
+.sidebar-item-active {
+  @apply bg-primary text-primary-foreground;
+  box-shadow: 0 2px 8px hsl(var(--primary) / 0.25);
+}
+
+.sidebar-item-active:hover {
+  @apply bg-primary/90 text-primary-foreground;
+}
+
+.sidebar-icon {
+  @apply h-[18px] w-[18px] shrink-0;
+}
+
+.sidebar-label {
+  @apply truncate;
+}
+
+.sidebar-section-header {
+  @apply w-full flex items-center gap-2 px-3 py-[7px] rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all duration-200;
+  @apply text-sidebar-foreground/45 hover:text-sidebar-foreground/65 hover:bg-sidebar-accent/30;
+}
+
+.sidebar-sub-item {
+  @apply w-full flex items-center gap-2 px-2.5 py-[6px] rounded-lg text-[12px] transition-all duration-200;
+  @apply text-sidebar-foreground/60 hover:bg-sidebar-accent/40 hover:text-sidebar-foreground/80;
+}
+
+.sidebar-sub-item-active {
+  background-color: hsl(var(--primary) / 0.1);
+  @apply text-primary font-semibold;
+}
+
+.sidebar-sub-item-active:hover {
+  background-color: hsl(var(--primary) / 0.15);
+}
+
+.sidebar-footer-btn {
+  @apply w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[11px] font-medium transition-all duration-200;
+  @apply text-sidebar-foreground/45 hover:text-sidebar-foreground hover:bg-sidebar-accent/40;
+}
+
+/* Mobile bottom nav safe area */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Force native/system number display for date inputs and numeric fields */
+input[type="date"],
+input[type="number"],
+input[type="time"],
+input[type="datetime-local"] {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" on, "lnum" on;
+}
+
+/* Ensure consistent number rendering across all browsers */
+.font-system-ui {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Apply system font to date/number inputs for consistent display */
+input[type="date"]::-webkit-datetime-edit,
+input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+input[type="date"]::-webkit-datetime-edit-text,
+input[type="date"]::-webkit-datetime-edit-day-field,
+input[type="date"]::-webkit-datetime-edit-month-field,
+input[type="date"]::-webkit-datetime-edit-year-field {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Hide number input spinners/arrows */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* AI Chat custom scrollbar */
+.ai-chat-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--primary) / 0.25) transparent;
+}
+.ai-chat-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.ai-chat-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ai-chat-scroll::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--primary) / 0.25);
+  border-radius: 9999px;
+}
+.ai-chat-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--primary) / 0.4);
+}
+
+/* AI table number direction fix */
+.ai-markdown-content .direction-ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.ai-markdown-content td.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* AI table horizontal scroll indicator */
+.ai-table-wrapper {
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+/* Force RTL direction globally on all major layouts */
+#root, 
+.h-screen, 
+.bg-background, 
+main, 
+.min-h-screen,
+.space-y-6,
+.space-y-8 {
+  direction: rtl !important;
+}
+
+/* ✅ إصلاح مشكلة تجمد النظام بعد إغلاق النوافذ المنبثقة */
+/* Radix UI يضع pointer-events:none على body عند فتح الديالوج ويحذفها عند الإغلاق */
+/* body[data-scroll-locked] يعني أن الديالوج مفتوح */
+body[data-scroll-locked] {
+  overflow: hidden !important;
+  /* لا توقف التفاعل مع الخلفية */
+  pointer-events: none;
+}
+
+body[data-scroll-locked] [data-radix-popper-content-wrapper],
+body[data-scroll-locked] [role="dialog"],
+body[data-scroll-locked] [data-radix-dialog-overlay],
+body[data-scroll-locked] [data-radix-dialog-content] {
+  pointer-events: auto !important;
+}
+
+/* ✅ تحسين شامل وتجاوب تام للهاتف لجميع النوافذ المنبثقة والجداول والعناصر */
+@media (max-width: 768px) {
+  /* تحجيم متناسق لكافة عناصر الشاشات العادية على الهاتف */
+  html {
+    font-size: 72% !important;
+  }
+
+  /* 1. النوافذ المنبثقة (Dialogs & Modals) */
+  [role="dialog"],
+  [data-radix-dialog-content] {
+    width: calc(100vw - 1.5rem) !important;
+    max-width: calc(100vw - 1.5rem) !important;
+    max-height: 88dvh !important;
+    padding: 1rem !important;
+    border-radius: 1rem !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    overscroll-behavior: contain;
+  }
+
+  /* 2. تحسين استجابة اللمس بدون فرض ارتفاعات ضخمة */
+  button,
+  [role="button"],
+  a,
+  input,
+  select {
+    touch-action: manipulation !important;
+  }
+
+  /* 3. القوائم المنسدلة والـ Popovers على الهاتف */
+  [data-radix-popper-content-wrapper],
+  [role="popover"],
+  [role="listbox"] {
+    max-width: calc(100vw - 1.5rem) !important;
+    max-height: 60vh !important;
+    overflow-y: auto !important;
+  }
+
+  /* 4. زر الإغلاق داخل النوافذ */
+  [role="dialog"] button[class*="absolute"] {
+    width: 32px !important;
+    height: 32px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+}
+
+@media (max-width: 480px) {
+  html {
+    font-size: 68% !important;
+  }
+}

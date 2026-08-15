@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">الفارس الذهبي</string>
+    <string name="title_activity_main">الفارس الذهبي</string>
+    <string name="package_name">com.alfares.adhubpro</string>
+    <string name="custom_url_scheme">com.alfares.adhubpro</string>
+</resources>

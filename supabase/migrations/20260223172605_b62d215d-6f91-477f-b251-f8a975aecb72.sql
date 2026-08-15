@@ -1,0 +1,1 @@
+UPDATE system_settings SET setting_value = 'supabase_storage' WHERE setting_key = 'image_upload_provider';

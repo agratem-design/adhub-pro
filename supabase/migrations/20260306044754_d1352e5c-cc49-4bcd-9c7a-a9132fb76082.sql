@@ -1,0 +1,1 @@
+UPDATE print_settings SET header_swap = true WHERE document_type = 'account_statement';

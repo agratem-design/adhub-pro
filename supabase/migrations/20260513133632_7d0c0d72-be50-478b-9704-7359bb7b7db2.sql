@@ -1,0 +1,1 @@
+ALTER TABLE public.paused_billboards ADD COLUMN IF NOT EXISTS net_rent numeric NOT NULL DEFAULT 0;

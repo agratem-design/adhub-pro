@@ -1,0 +1,23 @@
+{
+  "appId": "com.alfares.adhubpro",
+  "productName": "AdHub Pro",
+  "npmRebuild": false,
+  "directories": {
+    "output": "dist_desktop"
+  },
+  "files": [
+    "dist/**/*",
+    "desktop/main.cjs",
+    "desktop/preload.cjs",
+    "desktop/backupService.cjs",
+    "public/favicon.ico"
+  ],
+  "asar": true,
+  "win": {
+    "target": ["portable", "dir"],
+    "icon": "public/favicon.ico"
+  },
+  "portable": {
+    "artifactName": "AdHub-Pro.exe"
+  }
+}

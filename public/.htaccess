@@ -1,0 +1,16 @@
+# Enable serving of image files
+<FilesMatch "\.(jpg|jpeg|png|gif|webp|bmp|svg)$">
+    Header set Cache-Control "public, max-age=31536000"
+    Header set Access-Control-Allow-Origin "*"
+</FilesMatch>
+
+# Enable directory browsing for image folder (optional, for debugging)
+Options +Indexes
+
+# Ensure proper MIME types
+AddType image/jpeg .jpg .jpeg
+AddType image/png .png
+AddType image/gif .gif
+AddType image/webp .webp
+AddType image/bmp .bmp
+AddType image/svg+xml .svg

@@ -1,0 +1,75 @@
+# Logs and Diagnostics
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Node Modules & Dependencies
+node_modules/
+
+# Frontend and Web Builds
+dist/
+dist-ssr/
+build/
+out/
+.vite/
+
+# Desktop / Electron Packaging & Binary Outputs
+dist_app/
+dist_desktop/
+desktop/app_stage/
+desktop/release/
+desktop/dist/
+release/
+*.asar
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+
+# Android / Capacitor Build Outputs
+android/.gradle/
+android/build/
+android/app/build/
+android/captures/
+*.apk
+*.aab
+
+# Backups, Dumps & Temp Files
+*.dump
+*.tmp
+*.bak
+*.sql.gz
+*.zip
+*.rar
+*.7z
+*.tar.gz
+AdHub_Backups/
+backups/
+supabase/.temp/
+.supabase/
+
+# Environment and Secret Files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.local
+
+# Editor & OS Artifacts
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

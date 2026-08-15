@@ -1,0 +1,1 @@
+ALTER TABLE installation_teams ADD COLUMN IF NOT EXISTS friend_company_id uuid REFERENCES friend_companies(id) ON DELETE SET NULL;

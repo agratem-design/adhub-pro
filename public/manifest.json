@@ -1,0 +1,19 @@
+{
+  "name": "الفارس الذهبي للدعاية والإعلان",
+  "short_name": "الفارس الذهبي",
+  "description": "منصة متكاملة لحجز وإدارة اللوحات الإعلانية",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#d6ac40",
+  "dir": "rtl",
+  "lang": "ar",
+  "icons": [
+    {
+      "src": "/logo-symbol.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

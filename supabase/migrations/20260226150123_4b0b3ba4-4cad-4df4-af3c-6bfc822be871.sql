@@ -1,0 +1,1 @@
+UPDATE roles SET permissions = array_append(permissions, 'database_setup') WHERE name = 'admin' AND NOT ('database_setup' = ANY(permissions));

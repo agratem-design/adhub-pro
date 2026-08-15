@@ -1,0 +1,1 @@
+ALTER TABLE public.print_settings ADD COLUMN IF NOT EXISTS header_swap boolean DEFAULT false;

@@ -1,0 +1,1 @@
+GRANT SELECT, INSERT ON TABLE public.field_photos TO anon; GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.field_photos TO authenticated;

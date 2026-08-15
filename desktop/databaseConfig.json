@@ -1,0 +1,23 @@
+{
+  "cloud": {
+    "projectId": "atqjaiebixuzomrfwilu",
+    "url": "https://atqjaiebixuzomrfwilu.supabase.co",
+    "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0cWphaWViaXh1em9tcmZ3aWx1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTcxOTkxOTcsImV4cCI6MjA3Mjc3NTE5N30.OGAQFsAl1Eo1tmPZ93VZoSL5tO2FYZa_szeRvUmoj-4",
+    "host": "aws-1-eu-north-1.pooler.supabase.com",
+    "port": "5432",
+    "user": "postgres.atqjaiebixuzomrfwilu",
+    "password": "Zer4oBi57gZ",
+    "dbname": "postgres"
+  },
+  "local": {
+    "projectId": "adhub_local_supabase",
+    "url": "http://127.0.0.1:54321",
+    "anonKey": "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH",
+    "host": "127.0.0.1",
+    "port": "54322",
+    "user": "postgres",
+    "password": "postgres",
+    "dbname": "postgres",
+    "studioUrl": "http://127.0.0.1:54323"
+  }
+}

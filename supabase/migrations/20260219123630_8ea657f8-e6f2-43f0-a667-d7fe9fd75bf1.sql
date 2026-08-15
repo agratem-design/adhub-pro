@@ -1,0 +1,1 @@
+UPDATE installation_task_items SET faces_to_install = 2 WHERE faces_to_install IS DISTINCT FROM 2;

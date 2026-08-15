@@ -1,0 +1,1 @@
+UPDATE billboards SET billboard_type = 'برجية' WHERE (billboard_type IS NULL OR billboard_type = '' OR billboard_type = 'غير محدد') AND "Size" NOT IN ('10x4', '4x10', '12x4', '4x12', '13x5', '5x13')

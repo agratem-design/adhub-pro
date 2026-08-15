@@ -1,0 +1,1 @@
+ALTER TABLE public.billboard_print_customization ADD COLUMN IF NOT EXISTS pin_color text DEFAULT '';

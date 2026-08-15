@@ -1,0 +1,77 @@
+@media print {
+  /* إخفاء العناصر غير الضرورية */
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* تنسيق الجدول للطباعة */
+  table {
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+
+  /* تنسيق النص */
+  body {
+    font-size: 12pt;
+  }
+
+  /* إزالة الألوان الخلفية */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* تنسيق العنوان */
+  h1 {
+    font-size: 18pt;
+    margin-bottom: 10pt;
+  }
+
+  /* تنسيق البطاقات */
+  .card {
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+  }
+
+  /* تعطيل الأزرار التفاعلية */
+  .print\:pointer-events-none {
+    pointer-events: none !important;
+    text-decoration: none !important;
+    color: inherit !important;
+  }
+
+  /* تنسيق الجدول */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th, td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: right;
+  }
+
+  th {
+    background-color: #f3f4f6 !important;
+    font-weight: bold;
+  }
+
+  /* تنسيق الصفحة */
+  @page {
+    margin: 1cm;
+    size: A4 landscape;
+  }
+}

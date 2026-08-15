@@ -1,0 +1,1 @@
+ALTER TABLE public.customer_payments ADD COLUMN transfer_image_url text;

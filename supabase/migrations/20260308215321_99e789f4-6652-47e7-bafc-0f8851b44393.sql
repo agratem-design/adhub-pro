@@ -1,0 +1,1 @@
+ALTER TABLE print_settings ADD COLUMN IF NOT EXISTS table_border_radius integer DEFAULT 0;

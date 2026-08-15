@@ -1,0 +1,4 @@
+-- Add missing columns to offers table
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS ad_type TEXT;
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS currency TEXT DEFAULT 'LYD';
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS exchange_rate NUMERIC DEFAULT 1;

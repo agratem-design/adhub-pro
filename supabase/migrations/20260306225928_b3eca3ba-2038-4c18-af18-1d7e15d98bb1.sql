@@ -1,0 +1,1 @@
+ALTER TABLE installation_teams ADD COLUMN IF NOT EXISTS phone_number text;

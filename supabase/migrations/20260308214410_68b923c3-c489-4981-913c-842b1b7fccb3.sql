@@ -1,0 +1,1 @@
+ALTER TABLE public.print_settings ADD COLUMN IF NOT EXISTS show_hijri_date boolean DEFAULT false;
