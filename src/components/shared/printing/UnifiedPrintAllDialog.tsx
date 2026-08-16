@@ -1453,14 +1453,12 @@ export function UnifiedPrintAllDialog({
 
   const buildPdfBlobFromHtml = async (html: string, isLandscape = false): Promise<Blob> => {
     const preparedHtml = await prepareHtmlForPdf(html, isLandscape);
-    // Use mm units to match print preview exactly
     const PAGE_W_MM = isLandscape ? 297 : 210;
     const PAGE_H_MM = isLandscape ? 210 : 297;
-    const pageCountEstimate = (preparedHtml.match(/class="page"/g) || []).length || 1;
 
     const iframe = document.createElement('iframe');
-    // Set iframe width in mm so CSS mm-based positioning matches print preview
-    iframe.style.cssText = `position:fixed;left:-99999px;top:0;width:${PAGE_W_MM}mm;height:${PAGE_H_MM * pageCountEstimate + 50}mm;border:none;opacity:0;pointer-events:none;`;
+    // Position iframe in viewport with 0 opacity so layout and Canvas 2D engine have exact font metrics & dimensions
+    iframe.style.cssText = `position:fixed;left:0;top:0;width:${PAGE_W_MM}mm;height:${PAGE_H_MM}mm;border:none;opacity:0;pointer-events:none;z-index:-99999;`;
     document.body.appendChild(iframe);
 
     try {
@@ -1473,26 +1471,43 @@ export function UnifiedPrintAllDialog({
 
       const overrideStyle = iframeDoc.createElement('style');
       overrideStyle.textContent = `
-        html, body { margin:0!important; padding:0!important; width:${PAGE_W_MM}mm!important; background:#fff!important; overflow:visible!important; }
-        * { -webkit-print-color-adjust:exact!important; print-color-adjust:exact!important; }
-        .page { width:${PAGE_W_MM}mm!important; height:${PAGE_H_MM}mm!important; margin:0!important; overflow:hidden!important; page-break-after:always!important; }
-        .page:last-child { page-break-after:auto!important; }
-        .background, .background img { width:${PAGE_W_MM}mm!important; height:${PAGE_H_MM}mm!important; }
-        .page-background { width:${PAGE_W_MM}mm!important; height:${PAGE_H_MM}mm!important; background-size:${PAGE_W_MM}mm ${PAGE_H_MM}mm!important; }
-
-        /* PDF-only vertical compensations — html2canvas rasterizes with slightly different font metrics */
-        .billboard-name { transform: translateY(-4mm) !important; }
-        .size { transform: translateY(-5mm) !important; line-height: 1.1 !important; font-size: 36px !important; }
-        .faces-count { transform: translateY(-4mm) !important; line-height: 1.3 !important; }
-        .location-info { transform: translateY(-4mm) !important; }
-        .landmark-info { transform: translateY(-4mm) !important; }
-        .design-label { transform: translateY(-4mm) !important; }
-        .designs-section { transform: translateY(-3mm) !important; }
-        .contract-number { transform: translateY(-3mm) !important; }
-        .previous-ad-row { transform: translateY(-3mm) !important; font-weight: 700 !important; }
-        .installation-date { transform: translateY(-3mm) !important; }
-        .print-type { transform: translateY(-3mm) !important; }
-        /* High quality background rendering */
+        html, body {
+          margin: 0 !important;
+          padding: 0 !important;
+          width: ${PAGE_W_MM}mm !important;
+          background: #ffffff !important;
+          overflow: visible !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          color-adjust: exact !important;
+        }
+        * {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          color-adjust: exact !important;
+          box-sizing: border-box;
+        }
+        .page {
+          width: ${PAGE_W_MM}mm !important;
+          height: ${PAGE_H_MM}mm !important;
+          margin: 0 !important;
+          overflow: hidden !important;
+          page-break-after: always !important;
+          background: #ffffff !important;
+          box-shadow: none !important;
+        }
+        .page:last-child {
+          page-break-after: auto !important;
+        }
+        .background, .background img {
+          width: 100% !important;
+          height: 100% !important;
+        }
+        .page-background {
+          width: ${PAGE_W_MM}mm !important;
+          height: ${PAGE_H_MM}mm !important;
+          background-size: ${PAGE_W_MM}mm ${PAGE_H_MM}mm !important;
+        }
         .background img {
           image-rendering: -webkit-optimize-contrast !important;
           image-rendering: crisp-edges !important;
@@ -1500,34 +1515,87 @@ export function UnifiedPrintAllDialog({
       `;
       iframeDoc.head.appendChild(overrideStyle);
 
-      // No pdfOffsetStyle needed — mm units match print preview exactly
+      // Wait for document ready
+      if (iframeDoc.readyState !== 'complete') {
+        await new Promise<void>((resolve) => {
+          iframe.contentWindow?.addEventListener('load', () => resolve(), { once: true });
+          setTimeout(resolve, 2000);
+        });
+      }
 
-      // Wait for iframe load
-      await new Promise<void>((resolve) => {
-        let settled = false;
-        const done = () => { if (settled) return; settled = true; resolve(); };
-        if (iframe.contentWindow && iframeDoc.readyState !== 'complete') {
-          iframe.contentWindow.addEventListener('load', done, { once: true });
-        }
-        setTimeout(done, 2000);
-      });
-
-      // Wait for fonts to load in iframe — prevents fallback font metrics causing displacement
+      // Wait for fonts to load in iframe
       try {
-        if (iframe.contentDocument?.fonts) {
+        if (iframeDoc.fonts) {
           await Promise.race([
-            iframe.contentDocument.fonts.ready,
+            iframeDoc.fonts.ready,
             new Promise(r => setTimeout(r, 3000)),
           ]);
-          // Give an extra tick for font metrics to settle
           await new Promise(r => setTimeout(r, 200));
         }
       } catch {}
 
-
-      // Wait for images
+      // Wait for all images inside iframe
       const images = Array.from(iframeDoc.getElementsByTagName('img'));
-      await Promise.all(images.map(img => img.complete ? Promise.resolve() : new Promise<void>(r => { img.onload = () => r(); img.onerror = () => r(); })));
+      await Promise.all(images.map(img => {
+        if (img.complete) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+        });
+      }));
+
+      // Trigger overlay calculations if any overlay containers exist
+      try {
+        const containers = iframeDoc.querySelectorAll('.overlay-container');
+        containers.forEach(function(container: any) {
+          const bgImg = container.querySelector('.billboard-image');
+          const cutoutImg = container.querySelector('.overlay-cutout');
+          if (!bgImg || !cutoutImg) return;
+
+          const cw = container.clientWidth;
+          const ch = container.clientHeight;
+          const nw = bgImg.naturalWidth;
+          const nh = bgImg.naturalHeight;
+          if (!cw || !ch || !nw || !nh) return;
+
+          const imgRatio = nw / nh;
+          const boxRatio = cw / ch;
+
+          let renderW = cw;
+          let renderH = ch;
+          let renderLeft = 0;
+          let renderTop = 0;
+
+          if (imgRatio > boxRatio) {
+            renderH = cw / imgRatio;
+            renderTop = (ch - renderH) / 2;
+          } else {
+            renderW = ch * imgRatio;
+            renderLeft = (cw - renderW) / 2;
+          }
+
+          const xPct = parseFloat(cutoutImg.getAttribute('data-x') || '50');
+          const yPct = parseFloat(cutoutImg.getAttribute('data-y') || '50');
+          const scale = parseFloat(cutoutImg.getAttribute('data-scale') || '1');
+          const rot = parseFloat(cutoutImg.getAttribute('data-rot') || '0');
+          const isV2 = cutoutImg.getAttribute('data-anchor') === 'v2';
+
+          const overlayLeftPx = renderLeft + (xPct / 100) * renderW;
+          const overlayTopPx = renderTop + (yPct / 100) * renderH;
+          const overlayWidthPx = (27.15 / 100) * renderW;
+
+          const translateY = isV2 ? '-100%' : '-50%';
+          const transformOrigin = isV2 ? 'bottom center' : 'center center';
+
+          cutoutImg.style.left = overlayLeftPx + 'px';
+          cutoutImg.style.top = overlayTopPx + 'px';
+          cutoutImg.style.width = overlayWidthPx + 'px';
+          cutoutImg.style.transform = `translate(-50%, ${translateY}) scale(${scale}) rotate(${rot}deg)`;
+          cutoutImg.style.transformOrigin = transformOrigin;
+        });
+      } catch (e) {
+        console.warn('Overlay adjustment failed:', e);
+      }
 
       const pages = Array.from(iframeDoc.querySelectorAll('.page')) as HTMLElement[];
       if (pages.length === 0) throw new Error('لا توجد صفحات للتصدير');
@@ -1540,21 +1608,25 @@ export function UnifiedPrintAllDialog({
       const a4H = isLandscape ? 210 : 297;
       const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation, compress: true });
 
-      const pxW = isLandscape ? 1123 : 794;
-      const pxH = isLandscape ? 794 : 1123;
-
       for (let i = 0; i < pages.length; i++) {
-        iframe.style.height = `${pxH}px`;
-        iframeDoc.body.style.width = `${pxW}px`;
-        iframeDoc.body.style.height = `${pxH}px`;
-
-        const canvas = await html2canvas(pages[i], {
-          scale: 3, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff',
-          foreignObjectRendering: true, imageTimeout: 15000,
+        const pageEl = pages[i];
+        
+        // 2D Canvas rendering - Canvas 2D engine matching print preview exactly
+        const canvas = await html2canvas(pageEl, {
+          scale: 2.5,
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          backgroundColor: '#ffffff',
+          foreignObjectRendering: false, // Pure Canvas 2D engine
+          imageTimeout: 15000,
+          scrollX: 0,
+          scrollY: 0,
         });
-        const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+        const imgData = canvas.toDataURL('image/jpeg', 0.96);
         if (i > 0) pdf.addPage('a4', orientation);
-        pdf.addImage(imgData, 'JPEG', 0, 0, a4W, a4H);
+        pdf.addImage(imgData, 'JPEG', 0, 0, a4W, a4H, undefined, 'FAST');
       }
 
       return pdf.output('blob');
@@ -1613,9 +1685,7 @@ export function UnifiedPrintAllDialog({
 
       const isTableLandscape = printMode === 'table' && tableSettings.page_orientation === 'landscape';
       const html = printMode === 'table' ? await generateTablePrintHTML() : await generatePrintHTML();
-      const preparedHtml = await prepareHtmlForPdf(html, isTableLandscape);
-      const { htmlToPdfBlobOptimized } = await import('@/utils/pdfHelpers');
-      const pdfBlob = await htmlToPdfBlobOptimized(preparedHtml, `upload_${contextNumber}.pdf`, { marginMm: [0, 0, 0, 0], landscape: isTableLandscape });
+      const pdfBlob = await buildPdfBlobFromHtml(html, isTableLandscape);
       const base64Data = await blobToBase64(pdfBlob);
       const { uploadFileToGoogleDrive } = await import('@/services/imageUploadService');
 

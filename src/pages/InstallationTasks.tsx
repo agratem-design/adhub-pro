@@ -234,7 +234,15 @@ export default function InstallationTasks() {
   
   // Print all contract billboards dialog
   const [printAllDialogOpen, setPrintAllDialogOpen] = useState(false);
-  const [selectedContractForPrint, setSelectedContractForPrint] = useState<{ contractNumber: number; customerName: string; adType?: string; taskId?: string } | null>(null);
+  const [selectedContractForPrint, setSelectedContractForPrint] = useState<{
+    contractNumber: number;
+    customerName: string;
+    adType?: string;
+    taskId?: string;
+    taskIds?: string[];
+    taskType?: string;
+    reinstallationNumber?: number | null;
+  } | null>(null);
   
   // Print settings dialog state
   const [printSettingsDialogTaskId, setPrintSettingsDialogTaskId] = useState<string | null>(null);
@@ -2167,8 +2175,18 @@ export default function InstallationTasks() {
                 setSelectedTaskForDesign(selectedTaskId); setBulkDesignDialogOpen(true);
               }}
               onEditTaskType={() => { setSelectedTaskForEdit({ id: selectedTaskId, taskType: selectedTaskObj.task_type || 'installation' }); setEditTaskTypeDialogOpen(true); }}
-              onTransferBillboards={() => { setSelectedTaskForTransfer({ taskId: selectedTaskId, teamId: selectedTaskObj.team_id, teamName: selectedTeam?.team_name || 'غير محدد', contractId: selectedTaskObj.contract_id }); setTransferDialogOpen(true); }}
-              onPrintAll={() => { setSelectedContractForPrint({ contractNumber: selectedTaskObj.contract_id, customerName: selectedTaskContract?.['Customer Name'] || 'غير محدد', adType: selectedTaskContract?.['Ad Type'] || '', taskId: selectedTaskObj.id }); setPrintAllDialogOpen(true); }}
+              onPrintAll={() => {
+                setSelectedContractForPrint({
+                  contractNumber: selectedTaskObj.contract_id,
+                  customerName: selectedTaskContract?.['Customer Name'] || 'غير محدد',
+                  adType: selectedTaskContract?.['Ad Type'] || '',
+                  taskId: selectedTaskObj.id,
+                  taskIds: [selectedTaskObj.id],
+                  taskType: selectedTaskObj.task_type || 'installation',
+                  reinstallationNumber: (selectedTaskObj as any).reinstallation_number ?? null,
+                });
+                setPrintAllDialogOpen(true);
+              }}
               onDelete={async () => { if (await systemConfirm({ title: 'تأكيد الحذف', message: 'هل أنت متأكد من حذف مهمة التركيب؟', variant: 'destructive', confirmText: 'حذف' })) { deleteTaskMutation.mutate(selectedTaskId); setSelectedTaskId(null); } }}
               onDuplicateAsReinstallation={async () => {
                 if (await systemConfirm({
@@ -2514,11 +2532,21 @@ export default function InstallationTasks() {
             }}
             onAddTask={() => setAddTaskDialogOpen(true)}
             onRefresh={handleRefreshAll}
-            onPrintTask={(taskId) => { setPrintTaskId(taskId); setPrintDialogOpen(true); }}
-            onPrintAll={(taskId) => {
-              const t = tasks.find(x => x.id === taskId);
+            onPrintAll={(taskParam) => {
+              const taskIds = Array.isArray(taskParam) ? taskParam : [taskParam];
+              const firstTaskId = taskIds[0];
+              const t = tasks.find(x => x.id === firstTaskId);
               if (!t) return;
-              setSelectedContractForPrint({ contractNumber: t.contract_id, customerName: contractById[t.contract_id]?.['Customer Name'] || 'غير محدد', adType: contractById[t.contract_id]?.['Ad Type'] || '', taskId });
+              const contract = contractById[t.contract_id];
+              setSelectedContractForPrint({
+                contractNumber: t.contract_id,
+                customerName: contract?.['Customer Name'] || 'غير محدد',
+                adType: contract?.['Ad Type'] || '',
+                taskId: taskIds.length === 1 ? firstTaskId : undefined,
+                taskIds: taskIds,
+                taskType: t.task_type || 'installation',
+                reinstallationNumber: (t as any).reinstallation_number ?? null,
+              });
               setPrintAllDialogOpen(true);
             }}
             onSendWhatsApp={(taskId) => {
@@ -3249,17 +3277,37 @@ export default function InstallationTasks() {
 
       {/* Print All Contract Billboards Dialog */}
       {selectedContractForPrint && (() => {
+        const targetTaskIds = selectedContractForPrint.taskIds && selectedContractForPrint.taskIds.length > 0
+          ? new Set(selectedContractForPrint.taskIds)
+          : selectedContractForPrint.taskId
+            ? new Set([selectedContractForPrint.taskId])
+            : null;
+
         const contractTaskItems = allTaskItems.filter(item => {
+          if (targetTaskIds) {
+            return targetTaskIds.has(item.task_id);
+          }
           const itemTask = tasks.find(t => t.id === item.task_id);
           if (!itemTask) return false;
-          return itemTask.contract_id === selectedContractForPrint.contractNumber || 
+          const matchContract = itemTask.contract_id === selectedContractForPrint.contractNumber || 
                  (itemTask.contract_ids && itemTask.contract_ids.includes(selectedContractForPrint.contractNumber));
+          if (!matchContract) return false;
+          if (selectedContractForPrint.taskType) {
+            const itemTaskType = itemTask.task_type || 'installation';
+            if (itemTaskType !== selectedContractForPrint.taskType) return false;
+            if (itemTaskType === 'reinstallation') {
+              return (itemTask.reinstallation_number ?? null) === (selectedContractForPrint.reinstallationNumber ?? null);
+            }
+          }
+          return true;
         });
+
         const bulkPrintItems: BillboardPrintItem[] = contractTaskItems.map(item => {
           const itemTask = tasks.find(t => t.id === item.task_id);
           const taskDesigns = item.task_id ? designsByTask[item.task_id] : null;
-          const designA = item.design_face_a || (taskDesigns && taskDesigns[0]?.design_face_a);
-          const designB = item.design_face_b || (taskDesigns && taskDesigns[0]?.design_face_b);
+          const matchedDesign = item.selected_design_id ? taskDesigns?.find((d: any) => d.id === item.selected_design_id) : null;
+          const designA = item.design_face_a || matchedDesign?.design_face_a_url || matchedDesign?.design_face_a || (taskDesigns && (taskDesigns[0]?.design_face_a_url || taskDesigns[0]?.design_face_a));
+          const designB = item.design_face_b || matchedDesign?.design_face_b_url || matchedDesign?.design_face_b || (taskDesigns && (taskDesigns[0]?.design_face_b_url || taskDesigns[0]?.design_face_b));
           return {
             id: item.id,
             billboard_id: item.billboard_id,
@@ -3278,6 +3326,12 @@ export default function InstallationTasks() {
         const contractObj = contractById[selectedContractForPrint.contractNumber];
         const custPhone = contractObj?.customer_id ? (customerPhones as Record<string, string>)[contractObj.customer_id] || '' : '';
 
+        const isReinstallation = selectedContractForPrint.taskType === 'reinstallation';
+        const reinstallNum = selectedContractForPrint.reinstallationNumber;
+        const dialogTitle = isReinstallation
+          ? `طباعة إعادة تركيب${reinstallNum ? ` (${reinstallNum})` : ''} - عقد #${selectedContractForPrint.contractNumber} (${bulkPrintItems.length} لوحة)`
+          : undefined;
+
         return (
           <UnifiedPrintAllDialog
             open={printAllDialogOpen}
@@ -3291,6 +3345,7 @@ export default function InstallationTasks() {
             teams={teamById}
             showTeamFilter={true}
             customerPhone={custPhone}
+            title={dialogTitle}
           />
         );
       })()}

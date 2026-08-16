@@ -73,7 +73,7 @@ interface Props {
   onAddTask: () => void;
   onRefresh: () => void;
   onPrintTask: (taskId: string) => void;
-  onPrintAll: (taskId: string) => void;
+  onPrintAll: (taskId: string | string[]) => void;
   onSendWhatsApp?: (taskId: string) => void;
   onDistributeDesigns: (taskId: string) => void;
   onManageDesigns: (taskId: string) => void;
@@ -1656,7 +1656,7 @@ export const InstallationTasksTable: React.FC<Props> = ({
                               size="sm"
                               variant="outline"
                               className="h-8 px-2.5 rounded-xl text-[11px] font-semibold gap-1 bg-muted/30 border-border/30 text-muted-foreground hover:bg-primary/10 hover:text-primary hover:border-primary/20 transition-all"
-                              onClick={() => onPrintAll(firstTask.id)}
+                              onClick={() => onPrintAll(groupTasks.map(t => t.id))}
                             >
                               <FileText className="h-3.5 w-3.5" />
                               طباعة الكل
