@@ -3,13 +3,14 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { createContract } from '@/services/contractService';
 import type { Billboard } from '@/types';
 import { getPriceFor, getDailyPriceFor, CustomerType } from '@/data/pricing';
 import { isBillboardAvailable, checkBillboardConflicts, type BillboardConflict } from '@/utils/contractUtils';
 import { BillboardConflictDialog } from '@/components/contracts/BillboardConflictDialog';
+import { MissingContractNumbersDialog } from '@/components/contracts/MissingContractNumbersDialog';
 import { useContractForm } from '@/hooks/useContractForm';
 import { useContractCalculations } from '@/hooks/useContractCalculations';
 import { useContractInstallments } from '@/hooks/useContractInstallments';
@@ -22,7 +23,7 @@ import { BillboardFilters } from '@/components/contracts/edit/BillboardFilters';
 import SelectableGoogleHomeMap from '@/components/Map/SelectableGoogleHomeMap';
 import { InstallationCostSummary } from '@/components/contracts/InstallationCostSummary';
 import { DesignManager, type BillboardDesign } from '@/components/contracts/DesignManager';
-import { DollarSign, Settings, PaintBucket, List, Map as MapIcon } from 'lucide-react';
+import { DollarSign, Settings, PaintBucket, List, Map as MapIcon, Hash, Sparkles, RotateCcw } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // ✅ NEW: Currency options
@@ -37,10 +38,15 @@ const CURRENCIES = [
 
 export default function ContractCreate() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [billboards, setBillboards] = useState<Billboard[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [nextContractNumber, setNextContractNumber] = useState<string>('');
+  const [autoContractNumber, setAutoContractNumber] = useState<string>('');
+  const [customContractNumber, setCustomContractNumber] = useState<number | null>(null);
+  const [selectedGapYear, setSelectedGapYear] = useState<number | string | null>(null);
+  const [missingNumbersDialogOpen, setMissingNumbersDialogOpen] = useState<boolean>(false);
   const [pricingCategories, setPricingCategories] = useState<string[]>([]);
 
   // ✅ NEW: Print pricing state with enable/disable toggle
@@ -459,7 +465,24 @@ export default function ContractCreate() {
     }
   }, [calculations.finalTotal, installments.length]);
 
-  // Get next contract number
+  // Read initial contract_number from URL query params (if navigated from Gaps detector)
+  useEffect(() => {
+    const paramNum = searchParams.get('contract_number');
+    const paramYear = searchParams.get('year');
+    if (paramNum) {
+      const parsed = parseInt(paramNum, 10);
+      if (parsed > 0) {
+        setCustomContractNumber(parsed);
+        setNextContractNumber(String(parsed));
+        if (paramYear) {
+          setSelectedGapYear(paramYear);
+          updateFormData({ startDate: `${paramYear}-01-01` });
+        }
+      }
+    }
+  }, [searchParams]);
+
+  // Get next auto contract number
   useEffect(() => {
     (async () => {
       try {
@@ -471,16 +494,33 @@ export default function ContractCreate() {
 
         if (!error && data && data.length > 0) {
           const lastNumber = parseInt(data[0].Contract_Number) || 0;
-          setNextContractNumber(String(lastNumber + 1));
+          const autoNum = String(lastNumber + 1);
+          setAutoContractNumber(autoNum);
+          if (!customContractNumber && !searchParams.get('contract_number')) {
+            setNextContractNumber(autoNum);
+          }
         } else {
-          setNextContractNumber('1');
+          setAutoContractNumber('1');
+          if (!customContractNumber && !searchParams.get('contract_number')) {
+            setNextContractNumber('1');
+          }
         }
       } catch (e) {
         console.warn('Failed to get next contract number, using 1');
-        setNextContractNumber('1');
+        setAutoContractNumber('1');
+        if (!customContractNumber && !searchParams.get('contract_number')) {
+          setNextContractNumber('1');
+        }
       }
     })();
-  }, []);
+  }, [customContractNumber]);
+
+  const resetToAutoContractNumber = () => {
+    setCustomContractNumber(null);
+    setSelectedGapYear(null);
+    setNextContractNumber(autoContractNumber || '1');
+    toast.info(`تم استعادة الترقيم التسلسلي التلقائي (#${autoContractNumber || '1'})`);
+  };
 
   // ✅ Load billboards with availability filter — cross-check active contracts
   useEffect(() => {
@@ -732,6 +772,8 @@ export default function ContractCreate() {
         friend_rental_includes_installation: friendRentalIncludesInstallation,
         friend_rental_operating_fee_enabled: friendRentalOperatingFeeEnabled,
         friend_rental_operating_fee_rate: friendRentalOperatingFeeRate,
+        contract_number: customContractNumber || (nextContractNumber ? Number(nextContractNumber) : undefined),
+        Contract_Number: customContractNumber || (nextContractNumber ? Number(nextContractNumber) : undefined),
       };
       
       if (formData.customerId) payload.customer_id = formData.customerId;
@@ -795,12 +837,29 @@ export default function ContractCreate() {
         }}
       />
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="section-header">إنشاء عقد جديد {nextContractNumber && `#${nextContractNumber}`}</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="section-header">إنشاء عقد جديد {nextContractNumber && `#${nextContractNumber}`}</h1>
+            {customContractNumber && (
+              <Badge className="bg-amber-500 text-black font-bold text-xs gap-1">
+                <Sparkles className="w-3 h-3" />
+                رقم ناقص (#{customContractNumber})
+              </Badge>
+            )}
+          </div>
           <p className="page-subtitle">إنشاء عقد إيجار جديد مع نظام دفعات ديناميكي وتكلفة طباعة وعملات متعددة</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setMissingNumbersDialogOpen(true)}
+            className="gap-1.5 rounded-xl border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 font-bold shadow-sm"
+          >
+            <Hash className="h-4 w-4 text-amber-500" />
+            <span>إضافة عقد لرقم ناقص</span>
+          </Button>
           <Button variant="outline" onClick={() => navigate('/admin/contracts')}>
             عودة
           </Button>
@@ -809,6 +868,36 @@ export default function ContractCreate() {
           </Button>
         </div>
       </div>
+
+      {/* Custom Gap Contract Number Banner */}
+      {customContractNumber && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-3 px-4 flex flex-wrap items-center justify-between gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center font-bold text-sm">
+              #{nextContractNumber}
+            </div>
+            <div>
+              <div className="text-sm font-bold text-foreground">
+                يتم إنشاء هذا العقد بالرقم المتروك: #{nextContractNumber} {selectedGapYear ? `(سنة ${selectedGapYear})` : ''}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                سيتم ملء هذه الفجوة في التسلسل بدلاً من توليد رقم تسلسلي جديد (#{autoContractNumber}).
+              </div>
+            </div>
+          </div>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={resetToAutoContractNumber}
+            className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-amber-500/10 rounded-xl"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span>استعادة الرقم التلقائي (#{autoContractNumber})</span>
+          </Button>
+        </div>
+      )}
       
       <div className="flex flex-col lg:flex-row gap-6">
         {/* Main Content */}
@@ -1307,6 +1396,21 @@ export default function ContractCreate() {
           currencySymbol={currentCurrency.symbol}
         />
       </div>
+
+      {/* Missing Contract Numbers Finder Dialog */}
+      <MissingContractNumbersDialog
+        open={missingNumbersDialogOpen}
+        onOpenChange={setMissingNumbersDialogOpen}
+        initialYear={selectedGapYear ? (selectedGapYear === 'all' ? 'all' : Number(selectedGapYear)) : undefined}
+        onSelectMissingNumber={(gapNumber, gapYear) => {
+          setCustomContractNumber(gapNumber);
+          setNextContractNumber(String(gapNumber));
+          setSelectedGapYear(gapYear);
+          if (gapYear && typeof gapYear === 'number') {
+            updateFormData({ startDate: `${gapYear}-01-01` });
+          }
+        }}
+      />
     </div>
   );
 }

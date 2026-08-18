@@ -758,7 +758,7 @@ export function UnifiedPrintAllDialog({
       }
 
       pages.push(`
-        <div class="page">
+        <div class="page" data-print-page>
           <div class="background"><img src="${customBackgroundUrl}" alt="" /></div>
 
           ${contextType !== 'contract' && contextType !== 'offer' && contextType !== 'installation' && contextType !== 'removal' ? `
@@ -939,7 +939,6 @@ export function UnifiedPrintAllDialog({
             transform: translateZ(0);
             backface-visibility: hidden;
             image-rendering: -webkit-optimize-contrast;
-            image-rendering: crisp-edges;
           }
 
           .absolute-field {
@@ -1025,7 +1024,7 @@ export function UnifiedPrintAllDialog({
           }
         </style>
       </head>
-      <body>
+      <body class="print-portrait" data-orientation="portrait">
         ${pages.join('\n')}
         <script>
           function adjustOverlayPositions() {
@@ -1342,9 +1341,9 @@ export function UnifiedPrintAllDialog({
           }
         </style>
       </head>
-      <body>
+      <body class="${isLandscape ? 'print-landscape' : 'print-portrait'}" data-orientation="${isLandscape ? 'landscape' : 'portrait'}">
         ${pages.map((pageContent) => `
-          <div class="page">
+          <div class="page" data-print-page>
             <div class="page-background"></div>
             <div class="page-content">${pageContent}</div>
           </div>
@@ -1523,24 +1522,42 @@ export function UnifiedPrintAllDialog({
         });
       }
 
-      // Wait for fonts to load in iframe
+      // Wait for fonts to load in iframe with status tracking
       try {
         if (iframeDoc.fonts) {
+          let fontTimeoutId: any;
+          const fontTimeoutPromise = new Promise<void>((resolve) => {
+            fontTimeoutId = setTimeout(() => {
+              if (iframeDoc.fonts.status !== 'loaded') {
+                console.warn('[Print PDF Iframe] Fonts not fully loaded. Status:', iframeDoc.fonts.status);
+              }
+              resolve();
+            }, 3000);
+          });
           await Promise.race([
-            iframeDoc.fonts.ready,
-            new Promise(r => setTimeout(r, 3000)),
+            iframeDoc.fonts.ready.then(() => clearTimeout(fontTimeoutId)),
+            fontTimeoutPromise,
           ]);
-          await new Promise(r => setTimeout(r, 200));
+          await new Promise(r => setTimeout(r, 100));
         }
       } catch {}
 
-      // Wait for all images inside iframe
+      // Wait for all images with decode and naturalWidth verification
       const images = Array.from(iframeDoc.getElementsByTagName('img'));
-      await Promise.all(images.map(img => {
-        if (img.complete) return Promise.resolve();
+      await Promise.all(images.map((img) => {
+        if (img.complete && img.naturalWidth > 0) {
+          if (typeof img.decode === 'function') {
+            return img.decode().catch(() => Promise.resolve());
+          }
+          return Promise.resolve();
+        }
         return new Promise<void>((resolve) => {
-          img.onload = () => resolve();
-          img.onerror = () => resolve();
+          const done = () => resolve();
+          img.addEventListener('load', done, { once: true });
+          img.addEventListener('error', () => {
+            console.warn('[Print PDF Iframe] Image failed to load:', img.src);
+            resolve();
+          }, { once: true });
         });
       }));
 
@@ -1597,7 +1614,17 @@ export function UnifiedPrintAllDialog({
         console.warn('Overlay adjustment failed:', e);
       }
 
-      const pages = Array.from(iframeDoc.querySelectorAll('.page')) as HTMLElement[];
+      const rawPages = Array.from(iframeDoc.querySelectorAll('[data-print-page], .page')) as HTMLElement[];
+      const pages = rawPages.filter((el) => {
+        let parent = el.parentElement;
+        while (parent && parent !== iframeDoc.body) {
+          if (parent.hasAttribute('data-print-page') || parent.classList.contains('page')) {
+            return false;
+          }
+          parent = parent.parentElement;
+        }
+        return true;
+      });
       if (pages.length === 0) throw new Error('لا توجد صفحات للتصدير');
 
       const { jsPDF } = await import('jspdf');
@@ -1611,14 +1638,14 @@ export function UnifiedPrintAllDialog({
       for (let i = 0; i < pages.length; i++) {
         const pageEl = pages[i];
         
-        // 2D Canvas rendering - Canvas 2D engine matching print preview exactly
+        // html2canvas CanvasRenderer path (foreignObjectRendering disabled)
         const canvas = await html2canvas(pageEl, {
           scale: 2.5,
           useCORS: true,
-          allowTaint: true,
+          allowTaint: false,
           logging: false,
           backgroundColor: '#ffffff',
-          foreignObjectRendering: false, // Pure Canvas 2D engine
+          foreignObjectRendering: false, // html2canvas CanvasRenderer path
           imageTimeout: 15000,
           scrollX: 0,
           scrollY: 0,

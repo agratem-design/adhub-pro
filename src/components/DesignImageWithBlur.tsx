@@ -19,6 +19,9 @@ export const DesignImageWithBlur: React.FC<DesignImageWithBlurProps> = ({
   const [isLoaded, setIsLoaded] = useState(false);
   const [useFallback, setUseFallback] = useState(false);
 
+  // Resolve image URL for offline mode - ALWAYS call hooks at the top level
+  const { src: resolvedSrc, localFallback } = useResolvedImage(src);
+
   useEffect(() => {
     setHasError(false);
     setIsLoaded(false);
@@ -48,8 +51,6 @@ export const DesignImageWithBlur: React.FC<DesignImageWithBlurProps> = ({
     );
   }
 
-  // Resolve image URL for offline mode
-  const { src: resolvedSrc, localFallback } = useResolvedImage(src);
   const displaySrc = useFallback && localFallback ? localFallback : (resolvedSrc || src);
 
   return (

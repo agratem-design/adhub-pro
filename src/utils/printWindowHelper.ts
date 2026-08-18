@@ -212,20 +212,20 @@ export function injectPrintActionBar(
           width: 100% !important;
           height: auto !important;
           min-height: 100vh !important;
-          overflow-x: hidden !important;
+          overflow-x: auto !important;
           overflow-y: auto !important;
           scroll-behavior: smooth;
         }
         body {
           background: #181b22 !important;
           color: #000;
-          padding-top: 76px !important;
+          padding-top: 66px !important;
           padding-bottom: 40px !important;
           margin: 0 !important;
           min-height: 100vh !important;
           width: 100% !important;
           height: auto !important;
-          overflow-x: hidden !important;
+          overflow-x: auto !important;
           overflow-y: visible !important;
           display: flex !important;
           flex-direction: column !important;
@@ -239,7 +239,7 @@ export function injectPrintActionBar(
           left: 0;
           right: 0;
           z-index: 999999;
-          background: rgba(22, 25, 33, 0.95);
+          background: rgba(22, 25, 33, 0.96);
           backdrop-filter: blur(12px);
           -webkit-backdrop-filter: blur(12px);
           border-bottom: 1px solid rgba(232, 204, 100, 0.25);
@@ -357,47 +357,86 @@ export function injectPrintActionBar(
           animation: spin 0.6s linear infinite;
         }
 
-        /* Screen Preview Responsive Card Wrapper */
-        .page, .print-page, .invoice-box, .receipt-container, .table-page, .template-container {
-          margin: 16px auto !important;
+        /* Screen Preview Fixed A4 Card Layout - EXACT Same Dimensions as Print */
+        body.print-portrait .page,
+        body.print-portrait [data-print-page] {
+          width: 210mm !important;
+          min-width: 210mm !important;
+          max-width: 210mm !important;
+          height: 297mm !important;
+          min-height: 297mm !important;
+          max-height: 297mm !important;
+          margin: 0 !important;
           background: #ffffff !important;
           box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45) !important;
           border-radius: 4px;
+          position: relative !important;
+          overflow: hidden !important;
+          box-sizing: border-box !important;
+          flex-shrink: 0 !important;
+        }
+
+        body.print-landscape .page,
+        body.print-landscape [data-print-page] {
+          width: 297mm !important;
+          min-width: 297mm !important;
+          max-width: 297mm !important;
+          height: 210mm !important;
+          min-height: 210mm !important;
+          max-height: 210mm !important;
+          margin: 0 !important;
+          background: #ffffff !important;
+          box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45) !important;
+          border-radius: 4px;
+          position: relative !important;
+          overflow: hidden !important;
+          box-sizing: border-box !important;
+          flex-shrink: 0 !important;
+        }
+
+        /* Two-Tier Wrapper for Mobile Scaling without mutating .page */
+        .page-scale-wrapper {
+          display: flex;
+          justify-content: center;
+          align-items: flex-start;
+          overflow: hidden;
+          margin: 16px auto;
+          position: relative;
+        }
+
+        .page-scaler {
+          display: block;
+          transform-origin: top center;
         }
 
         /* Mobile specific screen adjustments */
         @media (max-width: 768px) {
           body {
-            padding-top: 88px !important;
-            padding-left: 6px !important;
-            padding-right: 6px !important;
+            padding-top: 60px !important;
+            padding-left: 0 !important;
+            padding-right: 0 !important;
           }
           .bar-content {
-            flex-direction: column;
-            align-items: stretch;
+            flex-direction: row;
+            justify-content: space-between;
+            align-items: center;
             gap: 6px;
           }
           .bar-title-section {
-            display: flex;
-            max-width: 100%;
-            justify-content: center;
-            font-size: 11.5px;
-            padding: 4px 8px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 6px;
+            display: none;
           }
           .bar-buttons {
-            justify-content: center;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
             gap: 4px;
           }
           .print-mobile-action-bar .btn {
-            padding: 6px 8px;
-            font-size: 12px;
+            padding: 8px 6px;
+            font-size: 11.5px;
             flex: 1;
-          }
-          .page, .print-page, .invoice-box, .receipt-container {
-            max-width: 100% !important;
-            transform-origin: top center;
+            min-height: 38px;
+            justify-content: center;
           }
         }
       }
@@ -406,6 +445,7 @@ export function injectPrintActionBar(
       @media print {
         @page {
           margin: 0;
+          size: ${landscape ? 'A4 landscape' : 'A4 portrait'};
         }
         * {
           -webkit-print-color-adjust: exact !important;
@@ -427,12 +467,46 @@ export function injectPrintActionBar(
           padding: 0 !important;
           margin: 0 !important;
         }
-        .page, .print-page, .invoice-box, .receipt-container, .template-container {
+        .page-scale-wrapper, .page-scaler {
+          display: block !important;
+          width: auto !important;
+          height: auto !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          transform: none !important;
+          overflow: visible !important;
+          position: static !important;
+        }
+        body.print-portrait .page,
+        body.print-portrait [data-print-page] {
+          width: 210mm !important;
+          height: 297mm !important;
           box-shadow: none !important;
           margin: 0 !important;
           border-radius: 0 !important;
+          transform: none !important;
+          page-break-after: always !important;
+          page-break-inside: avoid !important;
+          overflow: hidden !important;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
+        }
+        body.print-landscape .page,
+        body.print-landscape [data-print-page] {
+          width: 297mm !important;
+          height: 210mm !important;
+          box-shadow: none !important;
+          margin: 0 !important;
+          border-radius: 0 !important;
+          transform: none !important;
+          page-break-after: always !important;
+          page-break-inside: avoid !important;
+          overflow: hidden !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .page:last-child, [data-print-page]:last-child {
+          page-break-after: auto !important;
         }
         .background {
           display: block !important;
@@ -457,12 +531,89 @@ export function injectPrintActionBar(
   `;
 
   const injectedScript = `
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script>
       (function() {
         var docTitle = "${escapedTitle}";
         var safeFileName = "${escapedSafeFileName}";
+        var isLandscape = ${landscape ? 'true' : 'false'};
         document.title = safeFileName;
+
+        // Helper: Official Page Contract (Prevents selecting nested containers)
+        function getPrintPages() {
+          var rawCandidates = Array.from(document.querySelectorAll('[data-print-page], .page'));
+          return rawCandidates.filter(function(el) {
+            var parent = el.parentElement;
+            while (parent && parent !== document.body) {
+              if (parent.hasAttribute('data-print-page') || parent.classList.contains('page')) {
+                return false;
+              }
+              parent = parent.parentElement;
+            }
+            return true;
+          });
+        }
+
+        // Mobile Scaling on External Wrappers Only (Keeps .page untouched at native dimensions)
+        function applyMobileScale() {
+          var isLandscapeDoc = document.body.classList.contains('print-landscape') || isLandscape;
+          var pageMmW = isLandscapeDoc ? 297 : 210;
+          var pageMmH = isLandscapeDoc ? 210 : 297;
+          var pagePxW = pageMmW * 3.779528;
+          var pagePxH = pageMmH * 3.779528;
+          var screenW = window.innerWidth;
+          var previewPadding = 16;
+          var availW = screenW - previewPadding;
+
+          var pages = getPrintPages();
+          pages.forEach(function(page) {
+            var scaler = page.parentElement;
+            var wrapper = scaler ? scaler.parentElement : null;
+
+            if (!scaler || !scaler.classList.contains('page-scaler')) {
+              wrapper = document.createElement('div');
+              wrapper.className = 'page-scale-wrapper';
+              scaler = document.createElement('div');
+              scaler.className = 'page-scaler';
+
+              page.parentNode.insertBefore(wrapper, page);
+              scaler.appendChild(page);
+              wrapper.appendChild(scaler);
+            }
+
+            var scale = availW < pagePxW ? (availW / pagePxW) : 1;
+
+            if (scale < 1) {
+              var scaledW = Math.round(pagePxW * scale);
+              var scaledH = Math.round(pagePxH * scale);
+
+              wrapper.style.width = scaledW + 'px';
+              wrapper.style.height = scaledH + 'px';
+              wrapper.style.margin = '12px auto';
+
+              scaler.style.width = Math.round(pagePxW) + 'px';
+              scaler.style.height = Math.round(pagePxH) + 'px';
+              scaler.style.transform = 'scale(' + scale + ')';
+              scaler.style.transformOrigin = 'top center';
+            } else {
+              wrapper.style.width = '';
+              wrapper.style.height = '';
+              wrapper.style.margin = '16px auto';
+
+              scaler.style.width = '';
+              scaler.style.height = '';
+              scaler.style.transform = '';
+              scaler.style.transformOrigin = '';
+            }
+          });
+        }
+
+        window.addEventListener('resize', applyMobileScale);
+        window.addEventListener('DOMContentLoaded', applyMobileScale);
+        window.addEventListener('load', applyMobileScale);
+        setTimeout(applyMobileScale, 60);
+        setTimeout(applyMobileScale, 300);
         
         // 1. Native Print Trigger with suggested document title for Windows Microsoft Print to PDF
         window.__triggerNativePrint = function() {
@@ -478,8 +629,8 @@ export function injectPrintActionBar(
           }
         };
 
-        // 2. Direct PDF Download via Native Electron printToPDF or in-browser html2pdf
-        window.__triggerDownloadPdf = function() {
+        // 2. DOM rasterization through html2canvas using its Canvas renderer (foreignObjectRendering disabled)
+        window.__triggerDownloadPdf = async function() {
           var progress = document.getElementById('pdf-progress-indicator');
           var btnPdf = document.getElementById('btn-download-pdf');
           var bar = document.getElementById('print-action-toolbar');
@@ -493,7 +644,7 @@ export function injectPrintActionBar(
 
             desktop.saveAsPDF({
               title: safeFileName,
-              landscape: ${landscape ? 'true' : 'false'},
+              landscape: isLandscape,
               pageSize: 'A4'
             }).then(function(res) {
               if (progress) progress.style.display = 'none';
@@ -510,36 +661,101 @@ export function injectPrintActionBar(
 
           if (progress) progress.style.display = 'flex';
           if (btnPdf) btnPdf.disabled = true;
-          if (bar) bar.style.display = 'none';
 
-          var cleanFileName = safeFileName + '.pdf';
+          try {
+            // Wait for fonts to load with timeout tracking
+            if (document.fonts) {
+              var fontTimeoutId;
+              var fontTimeoutPromise = new Promise(function(resolve) {
+                fontTimeoutId = setTimeout(function() {
+                  if (document.fonts.status !== 'loaded') {
+                    console.warn('[Print PDF] Fonts took longer than expected to load. Current status:', document.fonts.status);
+                  }
+                  resolve();
+                }, 3000);
+              });
+              await Promise.race([
+                document.fonts.ready.then(function() { clearTimeout(fontTimeoutId); }),
+                fontTimeoutPromise
+              ]);
+              await new Promise(function(r) { setTimeout(r, 100); });
+            }
 
-          var opt = {
-            margin: 0,
-            filename: cleanFileName,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, logging: false },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: '${landscape ? 'landscape' : 'portrait'}' }
-          };
+            // Wait for all images to complete loading with decode verification
+            var imgs = Array.from(document.querySelectorAll('img'));
+            await Promise.all(imgs.map(function(img) {
+              if (img.complete && img.naturalWidth > 0) {
+                if (typeof img.decode === 'function') {
+                  return img.decode().catch(function() { return Promise.resolve(); });
+                }
+                return Promise.resolve();
+              }
+              return new Promise(function(resolve) {
+                var done = function() { resolve(); };
+                img.addEventListener('load', done, { once: true });
+                img.addEventListener('error', function() {
+                  console.warn('[Print PDF] Image failed to load:', img.src);
+                  resolve();
+                }, { once: true });
+              });
+            }));
 
-          if (window.html2pdf) {
-            window.html2pdf().set(opt).from(document.body).save().then(function() {
-              if (progress) progress.style.display = 'none';
-              if (bar) bar.style.display = '';
-              if (btnPdf) btnPdf.disabled = false;
-            }).catch(function(err) {
-              console.error('html2pdf generation error:', err);
-              if (progress) progress.style.display = 'none';
-              if (bar) bar.style.display = '';
-              if (btnPdf) btnPdf.disabled = false;
-              alert('حدث خطأ أثناء إنشاء PDF، سيتم محاولة الطباعة التقليدية.');
-              window.__triggerNativePrint();
-            });
-          } else {
-            if (bar) bar.style.display = '';
+            // Execute 3D cutout overlay calculations if present
+            if (typeof adjustOverlayPositions === 'function') {
+              adjustOverlayPositions();
+            }
+
+            var pages = getPrintPages();
+            if (pages.length === 0) {
+              throw new Error('لا توجد صفحات للتصدير');
+            }
+
+            var jsPDFClass = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+            var html2canvasFunc = window.html2canvas;
+
+            if (!jsPDFClass || !html2canvasFunc) {
+              throw new Error('مكتبات Canvas 2D غير محملة');
+            }
+
+            var orientation = isLandscape ? 'landscape' : 'portrait';
+            var a4W = isLandscape ? 297 : 210;
+            var a4H = isLandscape ? 210 : 297;
+
+            var pdf = new jsPDFClass({ unit: 'mm', format: 'a4', orientation: orientation, compress: true });
+
+            for (var i = 0; i < pages.length; i++) {
+              var pageEl = pages[i];
+
+              // html2canvas CanvasRenderer path (foreignObjectRendering disabled)
+              var canvas = await html2canvasFunc(pageEl, {
+                scale: 2.5,
+                useCORS: true,
+                allowTaint: false,
+                logging: false,
+                backgroundColor: '#ffffff',
+                foreignObjectRendering: false, // html2canvas CanvasRenderer path
+                imageTimeout: 15000,
+                scrollX: 0,
+                scrollY: 0,
+              });
+
+              var imgData = canvas.toDataURL('image/jpeg', 0.96);
+              if (i > 0) pdf.addPage('a4', orientation);
+              pdf.addImage(imgData, 'JPEG', 0, 0, a4W, a4H, undefined, 'FAST');
+
+              // Free memory immediately
+              canvas.width = 1;
+              canvas.height = 1;
+            }
+
+            pdf.save(safeFileName + '.pdf');
+          } catch (err) {
+            console.error('Canvas 2D PDF export error:', err);
+            alert('حدث خطأ أثناء تصدير PDF، سيتم فتح نافذة الطباعة المباشرة.');
+            window.__triggerNativePrint();
+          } finally {
             if (progress) progress.style.display = 'none';
             if (btnPdf) btnPdf.disabled = false;
-            window.__triggerNativePrint();
           }
         };
 
@@ -595,11 +811,28 @@ export function injectPrintActionBar(
     processedHtml = `${injectedStyles}${processedHtml}`;
   }
 
-  // 5. Inject Action Toolbar at the top of <body>
+  // 5. Inject Orientation classes and Action Toolbar on <body>
+  const orientationClass = landscape ? 'print-landscape' : 'print-portrait';
+  const orientationAttr = landscape ? 'landscape' : 'portrait';
+
   if (processedHtml.includes('<body')) {
-    processedHtml = processedHtml.replace(/(<body[^>]*>)/i, `$1\n${actionToolbarHtml}\n`);
+    processedHtml = processedHtml.replace(
+      /<body([^>]*)>/i,
+      (match, p1) => {
+        let attrs = p1 || '';
+        if (attrs.includes('class="')) {
+          attrs = attrs.replace('class="', `class="${orientationClass} `);
+        } else if (attrs.includes("class='")) {
+          attrs = attrs.replace("class='", `class='${orientationClass} `);
+        } else {
+          attrs += ` class="${orientationClass}"`;
+        }
+        attrs += ` data-orientation="${orientationAttr}"`;
+        return `<body${attrs}>\n${actionToolbarHtml}\n`;
+      }
+    );
   } else {
-    processedHtml = `${actionToolbarHtml}\n${processedHtml}`;
+    processedHtml = `<body class="${orientationClass}" data-orientation="${orientationAttr}">\n${actionToolbarHtml}\n${processedHtml}</body>`;
   }
 
   // 6. Inject script before </body>

@@ -6,7 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { FileText, Search, Eye, Edit, Trash2, Download, Calendar, User, Building, Send, Ruler } from 'lucide-react';
+import { FileText, Search, Eye, Edit, Trash2, Download, Calendar, User, Building, Send, Ruler, Hash } from 'lucide-react';
+import { MissingContractNumbersDialog } from '@/components/contracts/MissingContractNumbersDialog';
 import { useNavigate } from 'react-router-dom';
 import { toast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -18,6 +19,7 @@ export const ContractsTable = () => {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [missingNumbersOpen, setMissingNumbersOpen] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -217,9 +219,9 @@ export const ContractsTable = () => {
             <Send className="h-4 w-4" />
             {sendingAlerts ? 'جاري الإرسال...' : 'إرسال تنبيهات'}
           </Button>
-          <Button variant="outline" className="gap-2">
-            <Download className="h-4 w-4" />
-            تصدير
+          <Button variant="outline" className="gap-2" onClick={() => setMissingNumbersOpen(true)}>
+            <Hash className="h-4 w-4 text-amber-500" />
+            أرقام ناقصة
           </Button>
           <Button className="gap-2" onClick={() => navigate('/admin/contracts/new')}>
             <FileText className="h-4 w-4" />
@@ -549,6 +551,12 @@ export const ContractsTable = () => {
         </CardContent>
       </Card>
 
+      {/* Missing Contract Numbers Dialog */}
+      <MissingContractNumbersDialog
+        open={missingNumbersOpen}
+        onOpenChange={setMissingNumbersOpen}
+        onSelectMissingNumber={(num, yr) => navigate(`/admin/contracts/new?contract_number=${num}&year=${yr}`)}
+      />
     </div>
   );
 };

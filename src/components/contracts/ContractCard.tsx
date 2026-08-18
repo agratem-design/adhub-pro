@@ -141,7 +141,11 @@ export const ContractCard: React.FC<ContractCardProps> = ({
     }
   }, [contract, isVisible]);
 
-  // فحص حالة إظهار لوحات العقد في المتاح
+  const [visibilityState, setVisibilityState] = useState<'ALL_ON' | 'ALL_OFF' | 'MIXED'>('ALL_OFF');
+  const [forceVisibleCount, setForceVisibleCount] = useState<number>(0);
+  const [forceHiddenCount, setForceHiddenCount] = useState<number>(0);
+
+  // فحص حالة إظهار لوحات العقد في المتاح مع الحفاظ التام على أولوية الإخفاء القسري (false)
   useEffect(() => {
     if (!isVisible) return;
     const billboardIdsStr = (contract as any).billboard_ids;
@@ -151,8 +155,23 @@ export const ContractCard: React.FC<ContractCardProps> = ({
     supabase.from('billboards').select('ID, is_visible_in_available').in('ID', ids)
       .then(({ data }) => {
         if (data && data.length > 0) {
-          // العقد مفعّل "إظهار في المتاح" إذا كانت جميع لوحاته قيمتها true
-          setShowInAvailable(data.every(b => b.is_visible_in_available === true));
+          const trueCount = data.filter(b => b.is_visible_in_available === true).length;
+          const falseCount = data.filter(b => b.is_visible_in_available === false).length;
+          const modifiableCount = data.length - falseCount;
+
+          setForceVisibleCount(trueCount);
+          setForceHiddenCount(falseCount);
+
+          if (modifiableCount > 0 && trueCount === modifiableCount) {
+            setVisibilityState('ALL_ON');
+            setShowInAvailable(true);
+          } else if (trueCount === 0) {
+            setVisibilityState('ALL_OFF');
+            setShowInAvailable(false);
+          } else {
+            setVisibilityState('MIXED');
+            setShowInAvailable(false);
+          }
         }
       });
   }, [isVisible, contract]);
@@ -1686,11 +1705,40 @@ export const ContractCard: React.FC<ContractCardProps> = ({
                     if (ids.length === 0) return;
                     try {
                       setTogglingAvailable(true);
-                      const newVal = !showInAvailable;
-                      const { error } = await supabase.from('billboards').update({ is_visible_in_available: newVal ? true : null }).in('ID', ids);
+
+                      // جلب الحالة الحالية للوحات لضمان عدم لمس اللوحات المحظورة (false)
+                      const { data: currentBbRows, error: fetchErr } = await supabase
+                        .from('billboards')
+                        .select('ID, is_visible_in_available')
+                        .in('ID', ids);
+
+                      if (fetchErr) throw fetchErr;
+
+                      // استبعاد أي لوحة تحمل false (إخفاء إداري أو صيانة)
+                      const modifiableIds = (currentBbRows || [])
+                        .filter((b: any) => b.is_visible_in_available !== false)
+                        .map((b: any) => b.ID);
+
+                      if (modifiableIds.length === 0) {
+                        toast.info('جميع لوحات هذا العقد في وضع الإخفاء الإداري / الصيانة (false) ولا يمكن تفعيل إظهارها.');
+                        return;
+                      }
+
+                      // إذا كانت مفعّلة بالكامل أو مختلطة، فالضغط عليها يلغي الإظهار ويوحد القابلة للتعديل كـ null
+                      const newVal = visibilityState === 'ALL_OFF';
+                      const { error } = await supabase
+                        .from('billboards')
+                        .update({ is_visible_in_available: newVal ? true : null })
+                        .in('ID', modifiableIds);
+
                       if (error) throw error;
+
                       setShowInAvailable(newVal);
-                      toast.success(newVal ? 'تم إظهار اللوحات في المتاح' : 'تم إلغاء إظهار اللوحات في المتاح');
+                      setVisibilityState(newVal ? 'ALL_ON' : 'ALL_OFF');
+                      setForceVisibleCount(newVal ? modifiableIds.length : 0);
+
+                      const hiddenNote = forceHiddenCount > 0 ? ` (مع الإبقاء على ${forceHiddenCount} لوحة مخفية إدارياً)` : '';
+                      toast.success(newVal ? `تم إظهار لوحات العقد في المتاح${hiddenNote}` : `تم إلغاء إظهار اللوحات في المتاح${hiddenNote}`);
                       onRefresh();
                     } catch (e: any) {
                       console.error(e);
@@ -1700,8 +1748,12 @@ export const ContractCard: React.FC<ContractCardProps> = ({
                     }
                   }}
                 >
-                  <Eye className="h-4 w-4 ml-2" />
-                  {showInAvailable ? 'إخفاء اللوحات من المتاح' : 'إظهار اللوحات في المتاح'}
+                  <Eye className="h-4 w-4 ml-2 text-primary" />
+                  {visibilityState === 'ALL_ON'
+                    ? 'إخفاء اللوحات من المتاح'
+                    : visibilityState === 'MIXED'
+                    ? `إلغاء الإظهار الجزئي (${forceVisibleCount} مفعلة)`
+                    : 'إظهار اللوحات في المتاح'}
                 </DropdownMenuItem>
 
                 <DropdownMenuSeparator />

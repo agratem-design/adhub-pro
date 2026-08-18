@@ -16,7 +16,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { BillboardTaskCard } from '@/components/tasks/BillboardTaskCard';
-import { AllInstallationsSummary } from './AllInstallationsSummary';
+import { TaskTotalCostSummary } from '@/components/tasks/TaskTotalCostSummary';
 import ImageLightbox from '@/components/Map/ImageLightbox';
 import { cn } from '@/lib/utils';
 // Calendar and Popover kept for potential future use
@@ -325,58 +325,18 @@ export const InstallationTaskDetail: React.FC<Props> = ({
     });
   }, [searchQuery]);
 
-  const replacedBillboards = useMemo(() =>
-    filterBySearch(sortBillboards(billboardsWithData.filter(b => 
-      b.item.replacement_status === 'replaced' || b.item.replacement_status === 'reinstalled'
-    ))),
-    [billboardsWithData, sortBillboards, filterBySearch]
-  );
-
-  const replacedIds = useMemo(() => new Set(replacedBillboards.map(b => b.item.id)), [replacedBillboards]);
-
   const incompleteBillboards = useMemo(() =>
     filterBySearch(sortBillboards(billboardsWithData.filter(b => 
-      b.item.status !== 'completed' && !replacedIds.has(b.item.id)
+      b.item.status !== 'completed'
     ))),
-    [billboardsWithData, sortBillboards, filterBySearch, replacedIds]
+    [billboardsWithData, sortBillboards, filterBySearch]
   );
   const completedBillboards = useMemo(() =>
     filterBySearch(sortBillboards(billboardsWithData.filter(b => 
-      b.item.status === 'completed' || b.item.installation_date != null || (b.item.reinstall_count || 0) > 0
+      b.item.status === 'completed'
     ))),
     [billboardsWithData, sortBillboards, filterBySearch]
   );
-
-  const maxReinstallCount = useMemo(() => {
-    return Math.max(0, ...billboardsWithData.map(b => b.item.reinstall_count || 0));
-  }, [billboardsWithData]);
-
-  const reinstallSections = useMemo(() => {
-    if (maxReinstallCount === 0) return [];
-
-    const sections = [];
-
-    // Section 1: التركيب الأصلي (المرة الأولى)
-    sections.push({
-      id: 'orig',
-      title: `قائمة اللوحات - التركيب الأصلي (المرة الأولى) (${completedBillboards.length})`,
-      items: completedBillboards,
-      icon: <CheckCircle2 className="h-4 w-4 text-emerald-500" />,
-    });
-
-    // Section 2..N: إعادات التركيب لكل مرة
-    for (let r = 1; r <= maxReinstallCount; r++) {
-      const reItems = filterBySearch(sortBillboards(billboardsWithData.filter(b => (b.item.reinstall_count || 0) >= r)));
-      sections.push({
-        id: `re-${r}`,
-        title: `قائمة اللوحات - إعادة تركيب رقم ${r} (المرة ${r + 1}) (${reItems.length})`,
-        items: reItems,
-        icon: <RefreshCw className="h-4 w-4 text-amber-500" />,
-      });
-    }
-
-    return sections;
-  }, [maxReinstallCount, completedBillboards, billboardsWithData, filterBySearch, sortBillboards]);
 
   const selectedCount = selectedItemsForCompletion.length + selectedItemsForDate.length;
   const hasSelection = selectedCount > 0;
@@ -806,12 +766,13 @@ export const InstallationTaskDetail: React.FC<Props> = ({
         <div className="flex-1 min-w-0 flex flex-col gap-4 p-4 lg:p-6">
 
           {/* Cost Summary Component */}
-          <AllInstallationsSummary
-            siblingTasks={siblingTasks.length > 0 ? siblingTasks : [task]}
-            currentTaskId={task.id}
+          <TaskTotalCostSummary
+            taskId={task.id}
+            taskItems={taskItems}
             billboards={billboardById}
             installationPrices={installationPricingByBillboard}
             onRefresh={onRefreshItems}
+            taskType={task.task_type || 'installation'}
             disabled={false}
           />
 
@@ -908,77 +869,39 @@ export const InstallationTaskDetail: React.FC<Props> = ({
             </BillboardSection>
           )}
 
-          {/* Reinstallation Sections (Split into separate lists per iteration) */}
-          {reinstallSections.length > 0 ? (
-            reinstallSections.map((sec) => (
-              <BillboardSection
-                key={sec.id}
-                title={sec.title}
-                icon={sec.icon}
-                defaultOpen={true}
-              >
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {sec.items.map(({ item, billboard, price }) => (
-                    <BillboardTaskCard
-                      key={`${sec.id}-${item.id}`}
-                      item={item}
-                      billboard={billboard}
-                      installationPrice={price}
-                      isSelected={selectedItemsForCompletion.includes(item.id) || selectedItemsForDate.includes(item.id)}
-                      isCompleted={item.status === 'completed' || item.installation_date != null || (item.reinstall_count || 0) > 0}
-                      isPrintActive={printBillboardIds.has(Number(item.billboard_id))}
-                      printPricePerMeter={Number(task?.default_price_per_meter) || 0}
-                      taskDesigns={taskDesigns}
-                      allItems={taskItems}
-                      onDelete={undefined}
-                      onSelectionChange={checked => onSelectionChange(item.id, checked)}
-                      onUncomplete={() => onUncomplete(item.id)}
-                      onEditDesign={onManageDesigns}
-                      onPrint={() => onPrintBillboard(item.task_id)}
-                      onAddInstalledImage={() => onAddInstalledImage(item)}
-                      onRefresh={onRefreshItems}
-                      pausedInfo={pausedMap[Number(item.billboard_id)]}
-                      replacementInfo={replacementMap[Number(item.billboard_id)]}
-                    />
-                  ))}
-                </div>
-              </BillboardSection>
-            ))
-          ) : (
-            /* Completed Billboards */
-            completedBillboards.length > 0 && (
-              <BillboardSection
-                title={`لوحات مكتملة (${completedBillboards.length})`}
-                icon={<CheckCircle2 className="h-4 w-4 text-emerald-400" />}
-                defaultOpen={true}
-              >
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {completedBillboards.map(({ item, billboard, price }) => (
-                    <BillboardTaskCard
-                      key={item.id}
-                      item={item}
-                      billboard={billboard}
-                      installationPrice={price}
-                      isSelected={selectedItemsForCompletion.includes(item.id) || selectedItemsForDate.includes(item.id)}
-                      isCompleted
-                      isPrintActive={printBillboardIds.has(Number(item.billboard_id))}
-                      printPricePerMeter={Number(task?.default_price_per_meter) || 0}
-                      taskDesigns={taskDesigns}
-                      allItems={taskItems}
-                      onDelete={undefined}
-                      onSelectionChange={checked => onSelectionChange(item.id, checked)}
-                      onUncomplete={() => onUncomplete(item.id)}
-                      onEditDesign={onManageDesigns}
-                      onPrint={() => onPrintBillboard(item.task_id)}
-                      onAddInstalledImage={() => onAddInstalledImage(item)}
-                      onRefresh={onRefreshItems}
-                      pausedInfo={pausedMap[Number(item.billboard_id)]}
-                      replacementInfo={replacementMap[Number(item.billboard_id)]}
-                    />
-                  ))}
-                </div>
-              </BillboardSection>
-            )
+          {/* Completed Billboards */}
+          {completedBillboards.length > 0 && (
+            <BillboardSection
+              title={`لوحات مكتملة (${completedBillboards.length})`}
+              icon={<CheckCircle2 className="h-4 w-4 text-emerald-400" />}
+              defaultOpen={incompleteBillboards.length === 0}
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+                {completedBillboards.map(({ item, billboard, price }) => (
+                  <BillboardTaskCard
+                    key={item.id}
+                    item={item}
+                    billboard={billboard}
+                    installationPrice={price}
+                    isSelected={selectedItemsForCompletion.includes(item.id) || selectedItemsForDate.includes(item.id)}
+                    isCompleted
+                    isPrintActive={printBillboardIds.has(Number(item.billboard_id))}
+                    printPricePerMeter={Number(task?.default_price_per_meter) || 0}
+                    taskDesigns={taskDesigns}
+                    allItems={taskItems}
+                    onDelete={undefined}
+                    onSelectionChange={checked => onSelectionChange(item.id, checked)}
+                    onUncomplete={() => onUncomplete(item.id)}
+                    onEditDesign={onManageDesigns}
+                    onPrint={() => onPrintBillboard(item.task_id)}
+                    onAddInstalledImage={() => onAddInstalledImage(item)}
+                    onRefresh={onRefreshItems}
+                    pausedInfo={pausedMap[Number(item.billboard_id)]}
+                    replacementInfo={replacementMap[Number(item.billboard_id)]}
+                  />
+                ))}
+              </div>
+            </BillboardSection>
           )}
 
 

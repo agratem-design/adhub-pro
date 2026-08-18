@@ -21,6 +21,7 @@ import { UnifiedPrintAllDialog } from '@/components/shared/printing';
 import { SendAlertsDialog } from '@/components/contracts/SendAlertsDialog';
 import { SendContractReportDialog } from '@/components/contracts/SendContractReportDialog';
 import { QuickContractDialog } from '@/components/contracts/QuickContractDialog';
+import { MissingContractNumbersDialog } from '@/components/contracts/MissingContractNumbersDialog';
 import { ContractCard } from '@/components/contracts/ContractCard';
 import { DoubleBillboardDetector } from '@/components/contracts/DoubleBillboardDetector';
 import { ContractStats } from '@/components/contracts/ContractStats';
@@ -111,6 +112,7 @@ export default function Contracts() {
   const [alertsDialogOpen, setAlertsDialogOpen] = useState(false);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [missingNumbersOpen, setMissingNumbersOpen] = useState(false);
   
   // Print All Dialog state
   const [printAllDialogOpen, setPrintAllDialogOpen] = useState(false);
@@ -1293,14 +1295,26 @@ export default function Contracts() {
               <span>تقرير</span>
             </Button>
             {canCreateOrDelete && (
-              <Button
-                size="sm"
-                className="gap-1.5 rounded-full h-8 sm:h-9 px-3 sm:px-4 text-xs font-bold bg-gradient-to-l from-primary to-primary/80 hover:shadow-[var(--shadow-luxury)] transition-shadow"
-                onClick={() => setQuickCreateOpen(true)}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>عقد جديد</span>
-              </Button>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setMissingNumbersOpen(true)}
+                  className="gap-1.5 rounded-full h-8 sm:h-9 px-2.5 sm:px-3 text-xs border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 font-bold"
+                  title="البحث عن فجوات الترقيم وإضافة عقد برقم مفقود"
+                >
+                  <Hash className="h-3.5 w-3.5 text-amber-500" />
+                  <span>أرقام ناقصة</span>
+                </Button>
+                <Button
+                  size="sm"
+                  className="gap-1.5 rounded-full h-8 sm:h-9 px-3 sm:px-4 text-xs font-bold bg-gradient-to-l from-primary to-primary/80 hover:shadow-[var(--shadow-luxury)] transition-shadow"
+                  onClick={() => setQuickCreateOpen(true)}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>عقد جديد</span>
+                </Button>
+              </div>
             )}
           </>
         }
@@ -2867,6 +2881,13 @@ export default function Contracts() {
       <QuickContractDialog
         open={quickCreateOpen}
         onOpenChange={setQuickCreateOpen}
+      />
+
+      {/* Missing Contract Numbers Finder Dialog */}
+      <MissingContractNumbersDialog
+        open={missingNumbersOpen}
+        onOpenChange={setMissingNumbersOpen}
+        onSelectMissingNumber={(num, yr) => navigate(`/admin/contracts/new?contract_number=${num}&year=${yr}`)}
       />
 
       {/* Unified Print All Dialog */}

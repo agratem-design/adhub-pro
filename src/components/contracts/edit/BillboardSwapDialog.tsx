@@ -16,6 +16,7 @@ import { ArrowLeftRight, Search, Loader2, AlertTriangle, MapPin, Ruler, Image as
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { addBillboardsToContract, removeBillboardFromContract } from '@/services/contractService';
+import { transferBillboardBetweenContracts } from '@/services/contractBillboardSwapService';
 import { removeBillboardFromAllTasks, addBillboardToExistingTasks } from '@/services/smartBillboardService';
 import { normalizeSize, displaySize } from '@/lib/utils';
 
@@ -247,14 +248,23 @@ export function BillboardSwapDialog({
       const sourceBbId = Number(billboardId);
 
       if (mode === 'move') {
-        // === One-way move ===
+        // === One-way move via Atomic Transfer RPC ===
         await removeBillboardFromAllTasks(sourceContractNum, sourceBbId);
-        await removeBillboardFromContract(String(sourceContractNum), String(sourceBbId));
-        await addBillboardsToContract(String(targetContractNum), [String(sourceBbId)], {
-          start_date: startDate || '',
-          end_date: endDate || '',
-          customer_name: '',
-        });
+        
+        await transferBillboardBetweenContracts(
+          sourceContractNum,
+          targetContractNum,
+          sourceBbId,
+          Number((contract as any)?.version || 1),
+          Number(selectedContract.version || 1),
+          {
+            startDate: startDate || selectedContract['Contract Date'] || '',
+            endDate: endDate || selectedContract['End Date'] || '',
+            customerName: selectedContract['Customer Name'] || '',
+            adType: selectedContract['Ad Type'] || '',
+          }
+        );
+
         const { added } = await addBillboardToExistingTasks(targetContractNum, sourceBbId);
         const taskMsg = added.length > 0 ? `\nتم إضافتها لـ: ${added.join('، ')}` : '';
         toast.success(`تم نقل "${billboardName}" إلى العقد #${targetContractNum}${taskMsg}`);

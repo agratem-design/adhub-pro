@@ -267,37 +267,82 @@ export async function executeBillboardSwap(params: SwapBillboardParams): Promise
       } as any);
     }
 
-    // ج. تحديث حالة اللوحات في جدول billboards
-    await Promise.all([
-      // تحرير اللوحة القديمة لتصبح متاحة
-      supabase.from('billboards').update({
-        Contract_Number: null,
-        Customer_Name: null,
-        Ad_Type: null,
-        Rent_Start_Date: null,
-        Rent_End_Date: null,
-        Status: 'متاح',
-        is_visible_in_available: true,
-      } as any).eq('ID', originalBillboardId),
+    // ج. تنفيذ الاستبدال عبر PostgreSQL Atomic RPC (Server-side single transaction with Mandatory Version Check)
+    const effectiveCustomerName = customerName || contract['Customer Name'] || null;
+    const effectiveAdType = adType || contract['Ad Type'] || null;
+    const expectedContractVersion = Number(contract.version || 1);
 
-      // حجز اللوحة البديلة للعقد
-      supabase.from('billboards').update({
-        Contract_Number: contractNumber,
-        Customer_Name: customerName || contract['Customer Name'] || null,
-        Ad_Type: adType || contract['Ad Type'] || null,
-        Rent_Start_Date: effectiveDate,
-        Rent_End_Date: contractEndDate,
-        Status: 'مؤجرة',
-        is_visible_in_available: false,
-      } as any).eq('ID', replacementBillboardId),
-    ]);
+    try {
+      const { data: swapRpcRes, error: swapRpcErr } = await supabase.rpc('execute_billboard_swap_atomic', {
+        p_contract_number: Number(contractNumber),
+        p_original_billboard_id: Number(originalBillboardId),
+        p_replacement_billboard_id: Number(replacementBillboardId),
+        p_expected_version: expectedContractVersion,
+        p_updated_billboard_ids: updatedIds.join(','),
+        p_updated_prices_json: JSON.stringify(updatedPricesArray),
+        p_effective_date: effectiveDate || null,
+        p_contract_end_date: contractEndDate || null,
+        p_customer_name: effectiveCustomerName,
+        p_ad_type: effectiveAdType,
+      });
 
-    // د. تحديث العقد بقائمة اللوحات والأسعار المحدثة
-    await supabase.from('Contract').update({
-      billboard_ids: updatedIds.join(','),
-      billboard_prices: JSON.stringify(updatedPricesArray),
-      billboards_count: updatedIds.length,
-    } as any).eq('Contract_Number', contractNumber);
+      if (swapRpcErr) {
+        if (swapRpcErr.message?.includes('CONTRACT_VERSION_CONFLICT')) {
+          throw new Error('تم تعديل هذا العقد بواسطة مستخدم آخر. يرجى إعادة تحميل الصفحة والمحاولة مرة أخرى.');
+        }
+        console.warn('RPC execute_billboard_swap_atomic failed, falling back to direct updates:', swapRpcErr);
+
+        // Fallback: Client-side updates with false preservation
+        const { data: swapBbs } = await supabase
+          .from('billboards')
+          .select('ID, is_visible_in_available')
+          .in('ID', [originalBillboardId, replacementBillboardId]);
+
+        const origFlag = swapBbs?.find(b => b.ID === originalBillboardId)?.is_visible_in_available;
+        const replFlag = swapBbs?.find(b => b.ID === replacementBillboardId)?.is_visible_in_available;
+
+        const origPreserved = origFlag === false ? false : null;
+        const replPreserved = replFlag === false ? false : null;
+
+        const [origRes, replRes] = await Promise.all([
+          supabase.from('billboards').update({
+            Contract_Number: null,
+            Customer_Name: null,
+            Ad_Type: null,
+            Rent_Start_Date: null,
+            Rent_End_Date: null,
+            Status: 'متاح',
+            is_visible_in_available: origPreserved,
+          } as any).eq('ID', originalBillboardId),
+
+          supabase.from('billboards').update({
+            Contract_Number: contractNumber,
+            Customer_Name: effectiveCustomerName,
+            Ad_Type: effectiveAdType,
+            Rent_Start_Date: effectiveDate,
+            Rent_End_Date: contractEndDate,
+            Status: 'محجوز',
+            is_visible_in_available: replPreserved,
+          } as any).eq('ID', replacementBillboardId),
+        ]);
+
+        if (origRes.error) throw new Error('فشل في تحرير اللوحة المستبدلة: ' + origRes.error.message);
+        if (replRes.error) throw new Error('فشل في حجز اللوحة البديلة: ' + replRes.error.message);
+
+        const { error: contractUpdateErr } = await supabase.from('Contract').update({
+          billboard_ids: updatedIds.join(','),
+          billboard_prices: JSON.stringify(updatedPricesArray),
+          billboards_count: updatedIds.length,
+        } as any).eq('Contract_Number', contractNumber);
+
+        if (contractUpdateErr) throw new Error('فشل في تحديث بيانات العقد: ' + contractUpdateErr.message);
+      } else {
+        console.log('✅ Executed atomic billboard swap RPC successfully:', swapRpcRes);
+      }
+    } catch (swapErr) {
+      console.error('Swap execution error:', swapErr);
+      throw swapErr;
+    }
 
     // هـ. تسجيل سجل النشاط (Audit Log)
     try {
@@ -497,4 +542,42 @@ export async function executeQuickPause(params: {
       newBillboardIds: [],
     };
   }
+}
+
+/**
+ * نقل لوحة ذرياً بين عقدين عبر PostgreSQL Atomic RPC
+ * Single Database Transaction with Mandatory Optimistic Versioning
+ */
+export async function transferBillboardBetweenContracts(
+  sourceContractNumber: number,
+  targetContractNumber: number,
+  billboardId: number,
+  expectedSourceVersion: number,
+  expectedTargetVersion: number,
+  targetMeta: {
+    startDate?: string;
+    endDate?: string;
+    customerName?: string;
+    adType?: string;
+  }
+) {
+  const { data, error } = await supabase.rpc('transfer_contract_billboard_atomic', {
+    p_source_contract_number: sourceContractNumber,
+    p_target_contract_number: targetContractNumber,
+    p_billboard_id: billboardId,
+    p_expected_source_version: expectedSourceVersion,
+    p_expected_target_version: expectedTargetVersion,
+    p_target_start_date: targetMeta.startDate || null,
+    p_target_end_date: targetMeta.endDate || null,
+    p_target_customer_name: targetMeta.customerName || null,
+    p_target_ad_type: targetMeta.adType || null,
+  });
+
+  if (error) {
+    if (error.message?.includes('CONTRACT_VERSION_CONFLICT')) {
+      throw new Error('تم تعديل أحد العقدين بواسطة مستخدم آخر. يرجى إعادة تحميل الصفحة والمحاولة مرة أخرى.');
+    }
+    throw error;
+  }
+  return data;
 }

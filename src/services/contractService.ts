@@ -247,20 +247,46 @@ export async function createContract(contractData: ContractData) {
   console.log('Operating fee rate:', operatingFeeRate, '%');
   console.log('Operating fee calculated:', operatingFee);
 
-  // Get next contract number
-  let nextContractNumber = 1;
-  try {
-    const { data, error } = await supabase
-      .from('Contract')
-      .select('Contract_Number')
-      .order('Contract_Number', { ascending: false })
-      .limit(1);
+  // Get next or custom contract number
+  let nextContractNumber = Number(
+    contractData.Contract_Number ||
+    contractData.contract_number ||
+    (contractPayload as any).contract_number ||
+    (contractPayload as any).custom_contract_number
+  );
 
-    if (!error && data && data.length > 0) {
-      nextContractNumber = (Number(data[0].Contract_Number) || 0) + 1;
+  if (nextContractNumber && !isNaN(nextContractNumber) && nextContractNumber > 0) {
+    // Validate if the custom contract number already exists in the database
+    try {
+      const { data: existingContract, error: checkError } = await supabase
+        .from('Contract')
+        .select('Contract_Number, "Customer Name"')
+        .eq('Contract_Number', nextContractNumber)
+        .maybeSingle();
+
+      if (existingContract && existingContract.Contract_Number) {
+        throw new Error(`رقم العقد #${nextContractNumber} مسجل بالفعل لـ "${existingContract['Customer Name'] || 'عميل آخر'}". يرجى اختيار رقم متاح.`);
+      }
+    } catch (checkErr: any) {
+      if (checkErr?.message?.includes('مسجل بالفعل')) throw checkErr;
+      console.warn('Could not verify contract number existence:', checkErr);
     }
-  } catch (e) {
-    console.warn('Failed to get next contract number, using 1');
+  } else {
+    // Auto-generate next sequential contract number
+    nextContractNumber = 1;
+    try {
+      const { data, error } = await supabase
+        .from('Contract')
+        .select('Contract_Number')
+        .order('Contract_Number', { ascending: false })
+        .limit(1);
+
+      if (!error && data && data.length > 0) {
+        nextContractNumber = (Number(data[0].Contract_Number) || 0) + 1;
+      }
+    } catch (e) {
+      console.warn('Failed to get next contract number, using 1');
+    }
   }
 
   // ✅ FIXED: Handle installments data properly
@@ -379,24 +405,52 @@ export async function createContract(contractData: ContractData) {
   }
 
   // محاولة الإدراج في جدول Contract
+  const idsStr = (billboard_ids || []).join(',');
+
   try {
-    const { data, error } = await supabase
-      .from('Contract')
-      .insert(insertPayload)
-      .select()
-      .single();
+    // 1. Primary path: PostgreSQL Single Database Transaction RPC
+    const { data: createRpcRes, error: createRpcErr } = await supabase.rpc('create_contract_atomic', {
+      p_contract_payload: insertPayload as any,
+      p_billboard_ids: idsStr || null,
+      p_start_date: contractData.start_date || null,
+      p_end_date: contractData.end_date || null,
+      p_customer_name: contractData.customer_name || null,
+      p_ad_type: contractData.ad_type || null,
+    });
 
-    contract = data;
-    contractError = error;
+    if (createRpcErr) {
+      console.warn('create_contract_atomic RPC failed, falling back to direct insertion:', createRpcErr);
 
-    if (error) {
-      console.warn('Failed to insert into Contract table:', formatSupabaseErr(error));
-      throw error;
+      // Fallback: Direct insert
+      const { data, error } = await supabase
+        .from('Contract')
+        .insert(insertPayload)
+        .select()
+        .single();
+
+      if (error) throw error;
+      contract = data;
+
+      if (billboard_ids && billboard_ids.length > 0) {
+        await addBillboardsToContract(String(contract.Contract_Number), billboard_ids, {
+          start_date: contractData.start_date || '',
+          end_date: contractData.end_date || '',
+          customer_name: contractData.customer_name || '',
+        });
+      }
     } else {
-      console.log('Successfully inserted into Contract table:', contract);
+      console.log('✅ Created contract atomically via create_contract_atomic RPC:', createRpcRes);
+      // Fetch newly created contract row for return
+      const { data: freshContract } = await supabase
+        .from('Contract')
+        .select('*')
+        .eq('Contract_Number', createRpcRes.contract_number)
+        .single();
+
+      contract = freshContract || { ...insertPayload, Contract_Number: createRpcRes.contract_number, version: 1 };
     }
   } catch (e) {
-    console.error('Contract table insertion failed:', formatSupabaseErr(e));
+    console.error('Contract creation failed:', formatSupabaseErr(e));
     throw new Error('فشل في حفظ العقد في قاعدة البيانات. تفاصيل الخطأ: ' + formatSupabaseErr(e));
   }
 
@@ -404,87 +458,55 @@ export async function createContract(contractData: ContractData) {
     throw new Error('فشل في إنشاء العقد');
   }
 
-  // تحديث اللوحات المرتبطة بالعقد
+  const newContractNumber = contract.Contract_Number;
+
+  // ✅ Insert friend_billboard_rentals for friend billboards in this new contract
   if (billboard_ids && billboard_ids.length > 0) {
-    console.log('Updating billboards with contract:', billboard_ids);
+    try {
+      const { data: bbData } = await supabase
+        .from('billboards')
+        .select('ID, friend_company_id, own_company_id, Price')
+        .in('ID', billboard_ids.map(Number));
 
-    const newContractNumber = contract?.Contract_Number ?? contract?.id ?? contract?.contract_number;
+      if (bbData && bbData.length > 0) {
+        let parsedFriendCosts: any[] = [];
+        if (friend_rental_data) {
+          try {
+            parsedFriendCosts = typeof friend_rental_data === 'string'
+              ? JSON.parse(friend_rental_data)
+              : friend_rental_data;
+          } catch (e) {}
+        }
 
-    if (!newContractNumber) {
-      console.warn('No contract number found, skipping billboard updates');
-    } else {
-      for (const billboard_id of billboard_ids) {
-        try {
-          const { error: billboardError } = await supabase
-            .from('billboards')
-            .update({
-              Contract_Number: newContractNumber,
-              Rent_Start_Date: contractData.start_date,
-              Rent_End_Date: contractData.end_date,
-              Customer_Name: contractData.customer_name,
-              Ad_Type: contractData.ad_type || '',
-              Status: 'محجوز'
-            })
-            .eq('ID', Number(billboard_id));
+        const friendRentalsToInsert = bbData
+          .filter((b: any) => (b.friend_company_id || b.own_company_id))
+          .map((b: any) => {
+            const companyId = b.friend_company_id || b.own_company_id;
+            const matchingCost = Array.isArray(parsedFriendCosts)
+              ? parsedFriendCosts.find((f: any) => String(f.billboardId) === String(b.ID))
+              : null;
+            const cost = matchingCost ? Number(matchingCost.friendRentalCost || matchingCost.friend_rental_cost || 0) : (Number(b.Price) || 0);
 
-          if (billboardError) {
-            console.error(`Failed to update billboard ${billboard_id}:`, billboardError);
-            // لا نوقف العملية بسبب فشل تحديث لوحة واحدة
-          } else {
-            console.log(`Successfully updated billboard ${billboard_id}`);
-          }
-        } catch (e) {
-          console.error(`Error updating billboard ${billboard_id}:`, e);
+            return {
+              contract_number: newContractNumber,
+              billboard_id: b.ID,
+              friend_company_id: companyId,
+              start_date: contractData.start_date,
+              end_date: contractData.end_date,
+              customer_rental_price: Number(b.Price) || 0,
+              friend_rental_cost: cost || Number(b.Price) || 0,
+              notes: 'إنشاء تلقائي عند إنشاء العقد'
+            };
+          });
+
+        if (friendRentalsToInsert.length > 0) {
+          await supabase
+            .from('friend_billboard_rentals')
+            .upsert(friendRentalsToInsert, { onConflict: 'contract_number,billboard_id' });
         }
       }
-
-      // ✅ Insert friend_billboard_rentals for friend billboards in this new contract
-      try {
-        const { data: bbData } = await supabase
-          .from('billboards')
-          .select('ID, friend_company_id, own_company_id, Price')
-          .in('ID', billboard_ids.map(Number));
-
-        if (bbData && bbData.length > 0) {
-          let parsedFriendCosts: any[] = [];
-          if (friend_rental_data) {
-            try {
-              parsedFriendCosts = typeof friend_rental_data === 'string'
-                ? JSON.parse(friend_rental_data)
-                : friend_rental_data;
-            } catch (e) {}
-          }
-
-          const friendRentalsToInsert = bbData
-            .filter((b: any) => (b.friend_company_id || b.own_company_id))
-            .map((b: any) => {
-              const companyId = b.friend_company_id || b.own_company_id;
-              const matchingCost = Array.isArray(parsedFriendCosts)
-                ? parsedFriendCosts.find((f: any) => String(f.billboardId) === String(b.ID))
-                : null;
-              const cost = matchingCost ? Number(matchingCost.friendRentalCost || matchingCost.friend_rental_cost || 0) : (Number(b.Price) || 0);
-
-              return {
-                contract_number: newContractNumber,
-                billboard_id: b.ID,
-                friend_company_id: companyId,
-                start_date: contractData.start_date,
-                end_date: contractData.end_date,
-                customer_rental_price: Number(b.Price) || 0,
-                friend_rental_cost: cost || Number(b.Price) || 0,
-                notes: 'إنشاء تلقائي عند إنشاء العقد'
-              };
-            });
-
-          if (friendRentalsToInsert.length > 0) {
-            await supabase
-              .from('friend_billboard_rentals')
-              .upsert(friendRentalsToInsert, { onConflict: 'contract_number,billboard_id' });
-          }
-        }
-      } catch (friendErr) {
-        console.warn('Failed to insert friend rentals in createContract:', friendErr);
-      }
+    } catch (friendErr) {
+      console.warn('Failed to insert friend rentals in createContract:', friendErr);
     }
   }
 
@@ -1037,16 +1059,60 @@ export async function updateContract(contractId: string, updates: any) {
     throw error || new Error('لم يتم حفظ أي تغييرات (RLS أو رقم العقد غير صحيح)');
   }
 
-  // ✅ IMPORTANT: Sync billboard Days_Count with contract duration after successful update
-  // Contract duration is the SOURCE OF TRUTH for billboard days
-  const startDate = payload['Contract Date'] || payload.start_date;
-  const endDate = payload['End Date'] || payload.end_date;
-  if (startDate && endDate) {
+  // ✅ PRODUCTION ATOMIC RPC: Reconcile billboards table and Contract.billboard_ids atomically
+  // The PostgreSQL RPC function reconcile_contract_billboards_atomic guarantees all-or-nothing execution
+  const startDate = payload['Contract Date'] || payload.start_date || merged['Contract Date'] || merged.start_date;
+  const endDate = payload['End Date'] || payload.end_date || merged['End Date'] || merged.end_date;
+  const customerName = payload['Customer Name'] || merged['Customer Name'];
+  const adType = payload['Ad Type'] || merged['Ad Type'];
+
+  if (payload.billboard_ids !== undefined) {
+    const newIdsStr = typeof payload.billboard_ids === 'string'
+      ? payload.billboard_ids
+      : (Array.isArray(payload.billboard_ids) ? payload.billboard_ids.join(',') : '');
+
+    try {
+      // 1. Primary path: PostgreSQL Atomic RPC (Server-side single transaction with Mandatory Version Check)
+      const expectedVersion = Number(payload.version ?? merged?.version ?? 1);
+
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('reconcile_contract_billboards_atomic', {
+        p_contract_number: Number(contractId),
+        p_new_billboard_ids: newIdsStr,
+        p_start_date: startDate || null,
+        p_end_date: endDate || null,
+        p_customer_name: customerName || null,
+        p_ad_type: adType || null,
+        p_expected_version: expectedVersion,
+      });
+
+      if (rpcErr) {
+        if (rpcErr.message?.includes('CONTRACT_VERSION_CONFLICT')) {
+          throw new Error('تم تعديل هذا العقد بواسطة مستخدم آخر بعد فتحه لديك. يرجى إعادة تحميل العقد ومراجعة آخر التغييرات قبل الحفظ.');
+        }
+        console.warn('RPC reconcile_contract_billboards_atomic failed, executing fallback reconciliation:', rpcErr);
+        // Fallback to client-side reconciliation if RPC is not present
+        const prevIdsStr = (merged && merged.billboard_ids) ? String(merged.billboard_ids) : '';
+        const prevIds = prevIdsStr.split(',').map((s: string) => s.trim()).filter(Boolean);
+        const newIds = newIdsStr.split(',').map((s: string) => s.trim()).filter(Boolean);
+
+        await syncContractBillboardsReconciliation(contractId, prevIds, newIds, {
+          startDate,
+          endDate,
+          customerName,
+          adType,
+        });
+      } else {
+        console.log('✅ Executed atomic billboard reconciliation RPC successfully:', rpcRes);
+      }
+    } catch (reconcileErr) {
+      console.error('Failed to reconcile billboards during updateContract:', reconcileErr);
+      throw reconcileErr;
+    }
+  } else if (startDate && endDate) {
     try {
       await syncBillboardDaysWithContract(contractId, startDate, endDate);
     } catch (syncError) {
       console.warn('Failed to sync billboard Days_Count:', syncError);
-      // Don't throw - contract update succeeded
     }
   }
 
@@ -1054,46 +1120,137 @@ export async function updateContract(contractId: string, updates: any) {
 }
 
 /**
- * Sync billboard Days_Count with contract duration.
- * CRITICAL: Contract duration is the SOURCE OF TRUTH for billboard days.
- * This function MUST be called whenever contract dates change.
- * 
- * billboard.Days_Count = contract.end_date - contract.start_date
+ * Reconcile billboards table against Contract.billboard_ids
+ * - Links newly added billboards with Status='محجوز' and resets is_visible_in_available to null
+ * - Releases removed billboards with Status='متاح' and Contract_Number=null
+ * - Updates dates and customer for kept billboards
  */
-async function syncBillboardDaysWithContract(
-  contractNumber: string,
-  startDate: string,
-  endDate: string
+export async function syncContractBillboardsReconciliation(
+  contractNumber: string | number,
+  previousBillboardIds: (string | number)[],
+  updatedBillboardIds: (string | number)[],
+  contractMeta: {
+    startDate?: string;
+    endDate?: string;
+    customerName?: string;
+    adType?: string;
+  }
 ): Promise<void> {
-  // Calculate days count from contract dates
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  const diffTime = end.getTime() - start.getTime();
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const numericContract = Number(contractNumber);
+  const prevSet = new Set((previousBillboardIds || []).map(String).map(s => s.trim()).filter(Boolean));
+  const newSet = new Set((updatedBillboardIds || []).map(String).map(s => s.trim()).filter(Boolean));
 
-  if (diffDays <= 0) {
-    console.warn('Invalid contract dates for Days_Count calculation');
-    return;
+  const addedIds = Array.from(newSet).filter(id => !prevSet.has(id)).map(Number).filter(n => Number.isFinite(n) && n > 0);
+  const removedIds = Array.from(prevSet).filter(id => !newSet.has(id)).map(Number).filter(n => Number.isFinite(n) && n > 0);
+  const keptIds = Array.from(newSet).filter(id => prevSet.has(id)).map(Number).filter(n => Number.isFinite(n) && n > 0);
+
+  // 1. For newly added billboards -> link them to this contract while preserving false
+  if (addedIds.length > 0) {
+    const { data: currentRows } = await supabase
+      .from('billboards')
+      .select('ID, is_visible_in_available')
+      .in('ID', addedIds);
+
+    const falseIds = new Set((currentRows || []).filter((b: any) => b.is_visible_in_available === false).map((b: any) => b.ID));
+    const nonFalseIds = addedIds.filter(id => !falseIds.has(id));
+
+    const baseUpdate: any = {
+      Contract_Number: numericContract,
+      Customer_Name: contractMeta.customerName || null,
+      Ad_Type: contractMeta.adType || null,
+      Rent_Start_Date: contractMeta.startDate || null,
+      Rent_End_Date: contractMeta.endDate || null,
+      Status: 'محجوز',
+    };
+
+    if (contractMeta.startDate && contractMeta.endDate) {
+      const start = new Date(contractMeta.startDate);
+      const end = new Date(contractMeta.endDate);
+      const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays > 0) baseUpdate.Days_Count = String(diffDays);
+    }
+
+    if (nonFalseIds.length > 0) {
+      const { error: addErr } = await supabase
+        .from('billboards')
+        .update({ ...baseUpdate, is_visible_in_available: null } as any)
+        .in('ID', nonFalseIds);
+      if (addErr) throw new Error(`فشل في ربط اللوحات المضافة بالعقد #${numericContract}: ` + addErr.message);
+    }
+
+    if (falseIds.size > 0) {
+      const { error: addFalseErr } = await supabase
+        .from('billboards')
+        .update({ ...baseUpdate, is_visible_in_available: false } as any)
+        .in('ID', Array.from(falseIds));
+      if (addFalseErr) throw new Error(`فشل في ربط اللوحات المضافة بالعقد #${numericContract}: ` + addFalseErr.message);
+    }
   }
 
-  const daysCountStr = String(diffDays);
+  // 2. For removed billboards -> release them while preserving false
+  if (removedIds.length > 0) {
+    const { data: currentRemovedRows } = await supabase
+      .from('billboards')
+      .select('ID, is_visible_in_available')
+      .in('ID', removedIds);
 
-  // Update all billboards linked to this contract
-  const { error } = await supabase
-    .from('billboards')
-    .update({
-      Days_Count: daysCountStr,
-      Rent_Start_Date: startDate,
-      Rent_End_Date: endDate
-    })
-    .eq('Contract_Number', Number(contractNumber));
+    const falseIds = new Set((currentRemovedRows || []).filter((b: any) => b.is_visible_in_available === false).map((b: any) => b.ID));
+    const nonFalseIds = removedIds.filter(id => !falseIds.has(id));
 
-  if (error) {
-    console.error('Failed to sync billboard Days_Count:', error);
-    throw error;
+    const baseRelease: any = {
+      Contract_Number: null,
+      Customer_Name: null,
+      Ad_Type: null,
+      Rent_Start_Date: null,
+      Rent_End_Date: null,
+      Days_Count: null,
+      Status: 'متاح',
+    };
+
+    if (nonFalseIds.length > 0) {
+      const { error: remErr } = await supabase
+        .from('billboards')
+        .update({ ...baseRelease, is_visible_in_available: null } as any)
+        .in('ID', nonFalseIds)
+        .eq('Contract_Number', numericContract);
+      if (remErr) throw new Error(`فشل في تحرير اللوحات المستبعدة من العقد #${numericContract}: ` + remErr.message);
+    }
+
+    if (falseIds.size > 0) {
+      const { error: remFalseErr } = await supabase
+        .from('billboards')
+        .update({ ...baseRelease, is_visible_in_available: false } as any)
+        .in('ID', Array.from(falseIds))
+        .eq('Contract_Number', numericContract);
+      if (remFalseErr) throw new Error(`فشل في تحرير اللوحات المستبعدة من العقد #${numericContract}: ` + remFalseErr.message);
+    }
   }
 
-  console.log(`✅ Synced Days_Count=${daysCountStr} for billboards of contract #${contractNumber}`);
+  // 3. For kept billboards -> update dates and metadata
+  if (keptIds.length > 0 && (contractMeta.startDate || contractMeta.endDate || contractMeta.customerName)) {
+    const updateData: any = { Status: 'محجوز' };
+    if (contractMeta.startDate) updateData.Rent_Start_Date = contractMeta.startDate;
+    if (contractMeta.endDate) updateData.Rent_End_Date = contractMeta.endDate;
+    if (contractMeta.customerName) updateData.Customer_Name = contractMeta.customerName;
+    if (contractMeta.adType) updateData.Ad_Type = contractMeta.adType;
+
+    if (contractMeta.startDate && contractMeta.endDate) {
+      const start = new Date(contractMeta.startDate);
+      const end = new Date(contractMeta.endDate);
+      const diffDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays > 0) updateData.Days_Count = String(diffDays);
+    }
+
+    const { error: syncErr } = await supabase
+      .from('billboards')
+      .update(updateData as any)
+      .in('ID', keptIds)
+      .eq('Contract_Number', numericContract);
+
+    if (syncErr) {
+      console.error('Error syncing existing contract billboards:', syncErr);
+    }
+  }
 }
 
 export async function updateExpiredContracts() {
@@ -1144,9 +1301,8 @@ export async function autoReleaseExpiredBillboards() {
   }
 }
 
-// حذف عقد
+// حذف عقد ذرياً
 export async function deleteContract(contractNumber: string) {
-  // تحويل رقم العقد إلى رقم للتوافق مع عمود bigint
   const numericContractNumber = Number(contractNumber);
 
   if (isNaN(numericContractNumber)) {
@@ -1154,52 +1310,76 @@ export async function deleteContract(contractNumber: string) {
   }
 
   try {
-    // 1. حذف المدفوعات المرتبطة بالعقد
-    await supabase
-      .from('customer_payments')
-      .delete()
-      .eq('contract_number', numericContractNumber);
+    // 1. Primary path: PostgreSQL Atomic Deletion RPC (Single transaction)
+    const { data: rpcRes, error: rpcErr } = await supabase.rpc('delete_contract_atomic', {
+      p_contract_number: numericContractNumber,
+    });
 
-    // 2. حذف إيجارات الشركات الصديقة المرتبطة بالعقد
-    await supabase
-      .from('friend_billboard_rentals')
-      .delete()
-      .eq('contract_number', numericContractNumber);
+    if (rpcErr) {
+      console.warn('RPC delete_contract_atomic failed, falling back to sequential delete:', rpcErr);
 
-    // 3. حذف سجلات تاريخ اللوحات المرتبطة بالعقد
-    await supabase
-      .from('billboard_history')
-      .delete()
-      .eq('contract_number', numericContractNumber);
+      // 1. حذف المدفوعات المرتبطة بالعقد
+      await supabase
+        .from('customer_payments')
+        .delete()
+        .eq('contract_number', numericContractNumber);
 
-    // 4. حذف المهام المركبة المرتبطة بالعقد
-    await supabase
-      .from('composite_tasks')
-      .delete()
-      .eq('contract_id', numericContractNumber);
+      // 2. حذف إيجارات الشركات الصديقة المرتبطة بالعقد
+      await supabase
+        .from('friend_billboard_rentals')
+        .delete()
+        .eq('contract_number', numericContractNumber);
 
-    // 5. تحرير اللوحات
-    await supabase
-      .from('billboards')
-      .update({
+      // 3. حذف سجلات تاريخ اللوحات المرتبطة بالعقد
+      await supabase
+        .from('billboard_history')
+        .delete()
+        .eq('contract_number', numericContractNumber);
+
+      // 4. حذف المهام المركبة المرتبطة بالعقد
+      await supabase
+        .from('composite_tasks')
+        .delete()
+        .eq('contract_id', numericContractNumber);
+
+      // 5. تحرير اللوحات مع الحفاظ على false إن كانت صيانة
+      const { data: currentBbs } = await supabase
+        .from('billboards')
+        .select('ID, is_visible_in_available')
+        .eq('Contract_Number', numericContractNumber);
+
+      const falseIds = (currentBbs || []).filter((b: any) => b.is_visible_in_available === false).map((b: any) => b.ID);
+      const nonFalseIds = (currentBbs || []).filter((b: any) => b.is_visible_in_available !== false).map((b: any) => b.ID);
+
+      const baseRelease = {
         Status: 'متاح',
         Contract_Number: null,
         Customer_Name: null,
         Ad_Type: null,
         Rent_Start_Date: null,
-        Rent_End_Date: null
-      })
-      .eq('Contract_Number', numericContractNumber);
+        Rent_End_Date: null,
+        Days_Count: null,
+      };
 
-    // 6. حذف العقد
-    const { error } = await supabase
-      .from('Contract')
-      .delete()
-      .eq('Contract_Number', numericContractNumber);
+      if (nonFalseIds.length > 0) {
+        await supabase.from('billboards').update({ ...baseRelease, is_visible_in_available: null } as any).in('ID', nonFalseIds);
+      }
+      if (falseIds.length > 0) {
+        await supabase.from('billboards').update({ ...baseRelease, is_visible_in_available: false } as any).in('ID', falseIds);
+      }
 
-    if (error) {
-      console.error('خطأ في حذف العقد:', error);
-      throw error;
+      // 6. حذف العقد
+      const { error } = await supabase
+        .from('Contract')
+        .delete()
+        .eq('Contract_Number', numericContractNumber);
+
+      if (error) {
+        console.error('خطأ في حذف العقد:', error);
+        throw error;
+      }
+    } else {
+      console.log('✅ Executed atomic contract deletion RPC successfully:', rpcRes);
     }
   } catch (error) {
     console.error('خطأ أثناء حذف العقد والبيانات المرتبطة:', error);
@@ -1215,13 +1395,36 @@ export async function deleteContract(contractNumber: string) {
 export async function addBillboardsToContract(
   contractNumber: string,
   billboardIds: (string | number)[],
-  meta: { start_date: string; end_date: string; customer_name: string }
+  meta: { start_date?: string; end_date?: string; customer_name?: string }
 ) {
+  // If metadata is incomplete, fetch contract details from DB
+  let startDate = meta?.start_date;
+  let endDate = meta?.end_date;
+  let customerName = meta?.customer_name;
+
+  if (!startDate || !endDate || !customerName) {
+    try {
+      const { data: cData } = await supabase
+        .from('Contract')
+        .select('"Contract Date", "End Date", "Customer Name"')
+        .eq('Contract_Number', Number(contractNumber))
+        .maybeSingle();
+
+      if (cData) {
+        if (!startDate) startDate = cData['Contract Date'] || '';
+        if (!endDate) endDate = cData['End Date'] || '';
+        if (!customerName) customerName = cData['Customer Name'] || '';
+      }
+    } catch (e) {
+      console.warn('Failed to fetch contract metadata for addBillboardsToContract:', e);
+    }
+  }
+
   // Calculate days count from contract dates (source of truth)
   let daysCount: string | null = null;
-  if (meta.start_date && meta.end_date) {
-    const start = new Date(meta.start_date);
-    const end = new Date(meta.end_date);
+  if (startDate && endDate) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
     const diffTime = end.getTime() - start.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     if (diffDays > 0) {
@@ -1229,14 +1432,26 @@ export async function addBillboardsToContract(
     }
   }
 
+  // Fetch existing billboard is_visible_in_available flags to preserve Forced Hidden (false)
+  const { data: currentBbs } = await supabase
+    .from('billboards')
+    .select('ID, is_visible_in_available')
+    .in('ID', billboardIds.map(Number));
+
+  const currentMap = new Map((currentBbs || []).map(b => [b.ID, b.is_visible_in_available]));
+
   for (const id of billboardIds) {
+    const numId = Number(id);
+    const currentFlag = currentMap.get(numId);
+    const preservedVisibility = currentFlag === false ? false : null;
+
     const updateData: Record<string, any> = {
       Status: 'محجوز',
-      Contract_Number: contractNumber,
-      Customer_Name: meta.customer_name,
-      Rent_Start_Date: meta.start_date,
-      Rent_End_Date: meta.end_date,
-      is_visible_in_available: null,
+      Contract_Number: Number(contractNumber),
+      Customer_Name: customerName || null,
+      Rent_Start_Date: startDate || null,
+      Rent_End_Date: endDate || null,
+      is_visible_in_available: preservedVisibility,
     };
 
     // Update Days_Count based on contract duration
@@ -1247,7 +1462,7 @@ export async function addBillboardsToContract(
     const { error } = await supabase
       .from('billboards')
       .update(updateData as any)
-      .eq('ID', Number(id));
+      .eq('ID', numId);
     if (error) throw error;
   }
 
@@ -1281,7 +1496,16 @@ export async function removeBillboardFromContract(
     .eq('contract_number', numericContractNumber)
     .eq('billboard_id', numericBillboardId);
 
-  // 4. تحرير اللوحة
+  // 4. فحص حالة اللوحة للحفاظ التام على الإخفاء الإداري / الصيانة (false)
+  const { data: currentBb } = await supabase
+    .from('billboards')
+    .select('is_visible_in_available')
+    .eq('ID', numericBillboardId)
+    .maybeSingle();
+
+  const preservedVisibility = currentBb?.is_visible_in_available === false ? false : null;
+
+  // 5. تحرير اللوحة مع الحفاظ على false إن كانت صيانة
   const { error } = await supabase
     .from('billboards')
     .update({
@@ -1291,11 +1515,11 @@ export async function removeBillboardFromContract(
       Ad_Type: null,
       Rent_Start_Date: null,
       Rent_End_Date: null,
-      is_partnership: false,
-      partner_companies: null,
-    })
-    .eq('ID', numericBillboardId)
-    .eq('Contract_Number', Number(contractNumber));
+      Days_Count: null,
+      is_visible_in_available: preservedVisibility,
+    } as any)
+    .eq('ID', numericBillboardId);
+
   if (error) throw error;
 
   // تحديث بيانات اللوحات المحفوظة في العقد
