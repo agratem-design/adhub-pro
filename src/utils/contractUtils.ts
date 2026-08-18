@@ -2,38 +2,27 @@
  * Contract utility functions for handling expired contracts and billboard status
  */
 
+import { 
+  resolveBillboardAvailability, 
+  isDateExpired as serviceIsDateExpired,
+  checkMaintenanceOrRemoval,
+  normalizeDateOnly
+} from '@/services/billboardAvailabilityService';
+
 export const isContractExpired = (endDate: string | null): boolean => {
   if (!endDate) return false;
-  
-  try {
-    const contractEndDate = new Date(endDate);
-    const today = new Date();
-    
-    // Set time to start of day for accurate comparison
-    contractEndDate.setHours(23, 59, 59, 999);
-    today.setHours(0, 0, 0, 0);
-    
-    return contractEndDate < today;
-  } catch (error) {
-    console.error('Error parsing contract end date:', error);
-    return false;
-  }
+  return serviceIsDateExpired(endDate);
 };
 
 export const isContractActive = (startDate: string | null, endDate: string | null): boolean => {
   if (!startDate || !endDate) return false;
   
   try {
-    const contractStartDate = new Date(startDate);
-    const contractEndDate = new Date(endDate);
-    const today = new Date();
-    
-    // Set time boundaries for accurate comparison
-    contractStartDate.setHours(0, 0, 0, 0);
-    contractEndDate.setHours(23, 59, 59, 999);
-    today.setHours(12, 0, 0, 0); // Use noon to avoid timezone issues
-    
-    return today >= contractStartDate && today <= contractEndDate;
+    const todayStr = normalizeDateOnly(new Date())!;
+    const startStr = normalizeDateOnly(startDate);
+    const endStr = normalizeDateOnly(endDate);
+    if (!startStr || !endStr) return false;
+    return todayStr >= startStr && todayStr <= endStr;
   } catch (error) {
     console.error('Error checking contract active status:', error);
     return false;
@@ -64,66 +53,30 @@ export const shouldShowContractInfo = (billboard: any): boolean => {
   const contractNumber = billboard.Contract_Number || billboard.contractNumber;
   const endDate = billboard.Rent_End_Date || billboard.rent_end_date || billboard.contract?.end_date;
   
-  // If no contract number, don't show contract info
   if (!contractNumber) return false;
-  
-  // If no end date, assume contract is active
   if (!endDate) return true;
-  
-  // Only show contract info if contract is not expired
   return !isContractExpired(endDate);
 };
 
-const getBillboardContractNumber = (billboard: any) => billboard.Contract_Number || billboard.contractNumber;
-const getBillboardEndDate = (billboard: any) => billboard.Rent_End_Date || billboard.rent_end_date || billboard.contract?.end_date;
-const getBillboardStatus = (billboard: any) => (billboard.Status || billboard.status || '').toString().trim().toLowerCase();
-
 export const isBillboardBlockedFromAvailability = (billboard: any): boolean => {
-  const status = getBillboardStatus(billboard);
-  const maintenanceStatus = String(billboard.maintenance_status || '').trim().toLowerCase();
-  const maintenanceType = String(billboard.maintenance_type || '').trim();
-  
-  return (
-    status === 'إزالة' || status === 'ازالة' || status === 'removed' ||
-    maintenanceStatus === 'removed' || maintenanceStatus === 'تمت الإزالة' ||
-    maintenanceStatus === 'تحتاج ازالة لغرض التطوير' || maintenanceStatus === 'لم يتم التركيب' ||
-    maintenanceType === 'تمت الإزالة' || maintenanceType === 'تحتاج إزالة' || maintenanceType === 'لم يتم التركيب'
-  );
+  const check = checkMaintenanceOrRemoval(billboard);
+  return check.isRemoved || check.isMaintenance;
 };
 
 export const isBillboardAvailable = (billboard: any, ignoreVisibility = false): boolean => {
-  const contractNumber = getBillboardContractNumber(billboard);
-  const endDate = getBillboardEndDate(billboard);
-  const status = getBillboardStatus(billboard);
+  const resolution = resolveBillboardAvailability(billboard, (billboard as any)?.contracts || [], {
+    ignoreMarketingVisibility: ignoreVisibility,
+  });
 
   if (isBillboardBlockedFromAvailability(billboard)) {
     return false;
   }
 
   if (!ignoreVisibility) {
-    // مخفية يدوياً (مثل لوحات الشركات الصديقة)
-    if (billboard.is_visible_in_available === false) return false;
-    // ملاحظة: is_visible_in_available === true لم يعد يؤثر على التوفر العام
-    // يؤثر فقط على التصدير/النسخ في useBillboardExport
+    if (resolution.marketingVisibility === 'FORCE_HIDE') return false;
   }
 
-  // ✅ FIX: إذا كانت اللوحة مرتبطة بعقد نشط (غير منتهي) فهي ليست متاحة
-  // حتى لو كان حقل Status يقول "متاح" (قد لا يتزامن مع العقود الجديدة).
-  if (contractNumber && String(contractNumber).trim() && String(contractNumber).trim() !== '0') {
-    if (!endDate) return false; // عقد بلا تاريخ انتهاء = نشط
-    return isContractExpired(endDate);
-  }
-
-  if (status === 'available' || status === 'متاح') {
-    return true;
-  }
-
-  if (status === 'rented' || status === 'مؤجر' || status === 'مؤجرة' || status === 'محجوز' || status === 'booked') {
-    return !!endDate && isContractExpired(endDate);
-  }
-
-  // متاحة إذا لا يوجد عقد ولا حالة صريحة
-  return true;
+  return resolution.isAvailableNow;
 };
 
 export const generateMunicipalityCode = (name: string): string => {

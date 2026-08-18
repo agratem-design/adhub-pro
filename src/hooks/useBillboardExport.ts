@@ -4,11 +4,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { isBillboardAvailable, isBillboardBlockedFromAvailability, isContractExpired } from '@/utils/contractUtils';
 import { addExtraSheets } from '@/utils/excelExportSheets';
 import { normalizeGoogleImageUrl } from '@/utils/imageUtils';
+import { resolveBillboardAvailability, normalizeDateOnly } from '@/services/billboardAvailabilityService';
 
-// ✅ Active contract map keyed by billboard ID (string). Holds the contract with the LATEST
-// non-expired End Date for that billboard. Used to detect billboards that look "available" in
-// the billboards row (because a loan contract overwrote Rent_End_Date) but are actually still
-// covered by another active contract.
 type ActiveContractInfo = {
   contractNumber: string | number;
   startDate: string;
@@ -17,6 +14,7 @@ type ActiveContractInfo = {
   adType: string;
 };
 let activeContractMap: Map<string, ActiveContractInfo> = new Map();
+let allContractsCache: any[] = [];
 
 async function loadActiveContractsByBillboard(): Promise<Map<string, ActiveContractInfo>> {
   try {
@@ -26,13 +24,20 @@ async function loadActiveContractsByBillboard(): Promise<Map<string, ActiveContr
 
     const { data, error } = await supabase
       .from('Contract')
-      .select('Contract_Number, "Contract Date", "End Date", "Customer Name", "Ad Type", billboard_ids, billboard_prices')
-      .gte('End Date', todayStr);
+      .select('Contract_Number, "Contract Date", "End Date", "Customer Name", "Ad Type", billboard_ids, billboard_prices, billboards_released')
+      .order('Contract_Number', { ascending: false });
 
     if (error) throw error;
 
+    allContractsCache = data || [];
     const map = new Map<string, ActiveContractInfo>();
+
     (data || []).forEach((c: any) => {
+      const contractStatus = String(c.Status || c.status || '').trim().toLowerCase();
+      if (contractStatus === 'canceled' || contractStatus === 'ملغي' || c.billboards_released === true) {
+        return;
+      }
+
       const ids = String(c.billboard_ids || '')
         .split(',')
         .map((s) => s.trim())
@@ -79,6 +84,7 @@ async function loadActiveContractsByBillboard(): Promise<Map<string, ActiveContr
   } catch (e) {
     console.error('Failed to load active contracts map:', e);
     activeContractMap = new Map();
+    allContractsCache = [];
     return activeContractMap;
   }
 }
@@ -87,7 +93,6 @@ function getActiveContractForBillboard(billboard: any): ActiveContractInfo | und
   const id = String(billboard?.ID ?? billboard?.id ?? '').trim();
   if (!id) return undefined;
   const info = activeContractMap.get(id);
-  // ✅ If the contract's custom end date for this billboard is already expired, it is no longer an active contract.
   if (info && info.endDate && isContractExpired(info.endDate)) {
     return undefined;
   }
@@ -759,15 +764,17 @@ export const useBillboardExport = () => {
         }
       };
 
-      // Get contract dates for each billboard
+      // Get contract dates for each billboard using unified availability engine
       const exportData = await Promise.all(
         sortedBillboards.map(async (billboard: any, index: number) => {
-          const contractDates = await getContractDates(billboard);
+          const res = resolveBillboardAvailability(billboard, allContractsCache, { upcomingMonthsWindow: months });
           const billboardName = billboard.Billboard_Name || billboard.name || '';
           const imageFileName = billboardName ? `${billboardName}.jpg` : (billboard.image_name || '');
-          const hasActive = hasActiveContractForExport(billboard, isContractExpired);
-          const isForcedVisible = (billboard.is_visible_in_available === true);
-          const endDateDisplay = isForcedVisible ? '' : (hasActive ? (contractDates.endDate || '') : '');
+          
+          let endDateDisplay = '';
+          if (res.operationalStatus === 'RENTED' && res.currentRentEndDate) {
+            endDateDisplay = new Date(res.currentRentEndDate).toLocaleDateString('ar-LY');
+          }
           
           return {
             'ر.م': billboard.ID || billboard.id || '',
@@ -782,7 +789,8 @@ export const useBillboardExport = () => {
             'نوع اللوحة': billboard.billboard_type || 'غير محدد',
             'عدد الاوجه': getFaceCountText(billboard.Faces_Count || billboard.faces_count || billboard.faces || billboard.Number_of_Faces || billboard.Faces),
             'تاريخ انتهاء الإيجار': endDateDisplay,
-            'الحالة': isForcedVisible ? 'متاح الآن' : (hasActive ? 'ستتاح قريباً' : 'متاح الآن'),
+            'متاح اعتباراً من': res.availableFrom ? new Date(res.availableFrom).toLocaleDateString('ar-LY') : 'متاح الآن',
+            'الحالة': res.statusLabelArabic,
             'الترتيب مقاس': index + 1,
             '@IMAGE': imageFileName,
             'image_url': normalizeGoogleImageUrl(billboard.Image_URL || billboard.image || '')
@@ -1177,11 +1185,8 @@ export const useBillboardExport = () => {
   }
 
   function isAvailableForAvailableExports(billboard: any): boolean {
-    if (isExcludedBillboard(billboard)) return false;
-    if (billboard.is_visible_in_available === false) return false;
-    if (billboard.is_visible_in_available === true) return true;
-    if (getActiveContractForBillboard(billboard)) return false;
-    return isBillboardAvailable(billboard);
+    const res = resolveBillboardAvailability(billboard, allContractsCache);
+    return res.isMarketingVisible && (res.operationalStatus === 'AVAILABLE' || res.marketingVisibility === 'FORCE_SHOW');
   }
 
   function filterAvailableBillboards(
@@ -1191,47 +1196,22 @@ export const useBillboardExport = () => {
     return billboards.filter((billboard: any) => isAvailableForAvailableExports(billboard));
   }
 
-  // ✅ Helper: hesab huwa "fih ʿaqd nashit fiʿli" (متعمداً يحترم خريطة العقود النشطة)
   function hasActiveContractForExport(
     billboard: any,
     isContractExpired: (endDate: string | null) => boolean
   ): boolean {
-    const activeInfo = getActiveContractForBillboard(billboard);
-    if (activeInfo) return true;
-    const cn = billboard.Contract_Number || billboard.contractNumber;
-    if (!cn) return false;
-    const ed = billboard.Rent_End_Date ?? billboard.rent_end_date;
-    // عقد بلا تاريخ انتهاء = نشط؛ وإلا نشط إذا لم ينتهِ
-    if (!ed) return true;
-    return !isContractExpired(ed);
+    const res = resolveBillboardAvailability(billboard, allContractsCache);
+    return res.operationalStatus === 'RENTED';
   }
 
   function isAvailableOrUpcomingForExport(
     billboard: any,
-    fourMonthsFromNow: Date,
-    isContractExpired: (endDate: string | null) => boolean
+    _fourMonthsFromNow?: Date,
+    _isContractExpired?: (endDate: string | null) => boolean,
+    monthsAhead: number = 4
   ): boolean {
-    if (isExcludedBillboard(billboard)) return false;
-    if (billboard.is_visible_in_available === false) return false;
-    if (billboard.is_visible_in_available === true) return true;
-
-    const activeInfo = getActiveContractForBillboard(billboard);
-    const effectiveEndDate = activeInfo?.endDate
-      || billboard.Rent_End_Date
-      || billboard.rent_end_date;
-    const hasActive = hasActiveContractForExport(billboard, isContractExpired);
-
-    // متاحة فعلاً (لا يوجد عقد نشط)
-    if (!hasActive) return true;
-
-    // ضمن نافذة الانتهاء القادمة
-    if (effectiveEndDate) {
-      try {
-        if (new Date(effectiveEndDate) <= fourMonthsFromNow) return true;
-      } catch {}
-    }
-
-    return false;
+    const res = resolveBillboardAvailability(billboard, allContractsCache, { upcomingMonthsWindow: monthsAhead });
+    return res.isMarketingVisible;
   }
 
 

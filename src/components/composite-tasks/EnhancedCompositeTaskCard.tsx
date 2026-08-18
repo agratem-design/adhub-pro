@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { CompositeTaskWithDetails } from '@/types/composite-task';
-import { Wrench, Printer, Scissors, FileText, Edit, Eye, TrendingUp, FileOutput, Loader2, Trash2, Users, AlertTriangle, RefreshCw, Pencil, Check, X as XIcon } from 'lucide-react';
+import { Wrench, Printer, Scissors, FileText, Edit, Eye, TrendingUp, FileOutput, Loader2, Trash2, Users, AlertTriangle, RefreshCw, Pencil, Check, X as XIcon, Megaphone } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
@@ -299,19 +299,22 @@ export const EnhancedCompositeTaskCard: React.FC<EnhancedCompositeTaskCardProps>
             .eq('task_id', task.installation_task_id);
           
           if (installItems && installItems.length > 0) {
-            // جمع أرقام العقود الفريدة من اللوحات
             const uniqueContracts = new Set<number>();
             installItems.forEach((item: any) => {
-              if (item.billboard?.Contract_Number) {
-                uniqueContracts.add(item.billboard.Contract_Number);
+              const cNo = Number(item.billboard?.Contract_Number);
+              if (Number.isFinite(cNo) && cNo > 0) {
+                uniqueContracts.add(cNo);
               }
             });
-            contractIds = Array.from(uniqueContracts).filter(Boolean);
+            contractIds = Array.from(uniqueContracts);
           }
           
           // إذا لم نجد عقود من اللوحات، نستخدم contract_id المخزن
-          if (contractIds.length === 0) {
-            contractIds = [task.contract_id].filter(Boolean);
+          if (contractIds.length === 0 && task.contract_id) {
+            const cNo = Number(task.contract_id);
+            if (Number.isFinite(cNo) && cNo > 0) {
+              contractIds = [cNo];
+            }
           }
           
           // جلب أنواع الإعلان من جميع العقود
@@ -323,9 +326,9 @@ export const EnhancedCompositeTaskCard: React.FC<EnhancedCompositeTaskCardProps>
             
             setContractInfo({
               adTypes: contracts?.map(c => ({ 
-                contractId: c.Contract_Number, 
-                adType: c['Ad Type'] || 'غير محدد' 
-              })) || [],
+                contractId: Number(c.Contract_Number), 
+                adType: (c['Ad Type'] || '').trim() || 'غير محدد' 
+              })).filter(a => a.adType !== 'غير محدد') || [],
               contractIds: contractIds
             });
           } else {
@@ -333,18 +336,19 @@ export const EnhancedCompositeTaskCard: React.FC<EnhancedCompositeTaskCardProps>
           }
         } else {
           // جلب نوع الإعلان من العقد مباشرة
-          contractIds = [task.contract_id].filter(Boolean);
-          
-          if (contractIds.length > 0) {
+          const cNo = Number(task.contract_id);
+          if (Number.isFinite(cNo) && cNo > 0) {
+            contractIds = [cNo];
             const { data: contract } = await supabase
               .from('Contract')
               .select('"Ad Type"')
-              .eq('Contract_Number', task.contract_id)
-              .single();
+              .eq('Contract_Number', cNo)
+              .maybeSingle();
             
+            const rawAd = (contract?.['Ad Type'] || '').trim();
             setContractInfo({
-              adTypes: [{ contractId: task.contract_id, adType: contract?.['Ad Type'] || 'غير محدد' }],
-              contractIds: [task.contract_id]
+              adTypes: rawAd ? [{ contractId: cNo, adType: rawAd }] : [],
+              contractIds: [cNo]
             });
           } else {
             setContractInfo({ adTypes: [], contractIds: [] });
@@ -675,17 +679,21 @@ export const EnhancedCompositeTaskCard: React.FC<EnhancedCompositeTaskCardProps>
                 <span>{(task as any).task_name || 'انقر لإضافة اسم للمهمة...'}</span>
               </button>
             )}
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex gap-2 flex-wrap items-center">
               {getTaskTypeBadge(task.task_type)}
               {getStatusBadge(task.status)}
               {contractInfo?.adTypes && contractInfo.adTypes.length > 0 && (
                 contractInfo.adTypes.length === 1 ? (
-                  <Badge variant="secondary" className="bg-muted">{contractInfo.adTypes[0].adType}</Badge>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-black bg-amber-500/10 text-amber-300 border border-amber-500/30 shadow-sm">
+                    <Megaphone className="h-3 w-3 text-amber-400 shrink-0" />
+                    <span>نوع الإعلان: {contractInfo.adTypes[0].adType}</span>
+                  </span>
                 ) : (
                   contractInfo.adTypes.map((info, idx) => (
-                    <Badge key={idx} variant="secondary" className="text-xs bg-muted">
-                      #{info.contractId}: {info.adType}
-                    </Badge>
+                    <span key={idx} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-black bg-amber-500/10 text-amber-300 border border-amber-500/30 shadow-sm">
+                      <Megaphone className="h-3 w-3 text-amber-400 shrink-0" />
+                      <span>#{info.contractId}: {info.adType}</span>
+                    </span>
                   ))
                 )
               )}

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Trash2, Megaphone } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { fetchContractDesignUrls } from '@/lib/contractDesignUtils';
 
@@ -12,6 +12,8 @@ interface GroupedTasks {
   /** عقود فعلية من اللوحات (قد تكون متعددة) */
   contractIds: number[];
   customerName: string;
+  adType?: string;
+  adTypes?: string[];
   tasks: any[];
   totalCustomer: number;
   totalCompany: number;
@@ -193,6 +195,12 @@ export const CollapsibleGroupCard: React.FC<CollapsibleGroupCardProps> = ({
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="border-primary/30 text-primary">عقد #{group.contractId}</Badge>
+                        )}
+                        {group.adType && group.adType !== 'غير محدد' && (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-black bg-amber-500/10 text-amber-300 border border-amber-500/30 shadow-sm">
+                            <Megaphone className="h-3 w-3 text-amber-400 shrink-0" />
+                            <span>نوع الإعلان: {group.adType}</span>
+                          </span>
                         )}
                         {(() => {
                           const tasksCount = Math.max(group.contractIds.length, 1);

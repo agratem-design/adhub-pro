@@ -32,6 +32,7 @@ import { DesignZoomViewer } from './DesignZoomViewer';
 import { EnhancedDistributePaymentDialog } from '@/components/billing/EnhancedDistributePaymentDialog';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { resolveContractMarketingVisibility } from '@/services/billboardAvailabilityService';
 
 interface ContractCardProps {
   contract: Contract;
@@ -144,8 +145,9 @@ export const ContractCard: React.FC<ContractCardProps> = ({
   const [visibilityState, setVisibilityState] = useState<'ALL_ON' | 'ALL_OFF' | 'MIXED'>('ALL_OFF');
   const [forceVisibleCount, setForceVisibleCount] = useState<number>(0);
   const [forceHiddenCount, setForceHiddenCount] = useState<number>(0);
+  const [totalContractBoards, setTotalContractBoards] = useState<number>(0);
 
-  // فحص حالة إظهار لوحات العقد في المتاح مع الحفاظ التام على أولوية الإخفاء القسري (false)
+  // فحص حالة إظهار لوحات العقد في المتاح باستخدام المحرك الموحد
   useEffect(() => {
     if (!isVisible) return;
     const billboardIdsStr = (contract as any).billboard_ids;
@@ -155,17 +157,16 @@ export const ContractCard: React.FC<ContractCardProps> = ({
     supabase.from('billboards').select('ID, is_visible_in_available').in('ID', ids)
       .then(({ data }) => {
         if (data && data.length > 0) {
-          const trueCount = data.filter(b => b.is_visible_in_available === true).length;
-          const falseCount = data.filter(b => b.is_visible_in_available === false).length;
-          const modifiableCount = data.length - falseCount;
+          const visInfo = resolveContractMarketingVisibility(data as any);
 
-          setForceVisibleCount(trueCount);
-          setForceHiddenCount(falseCount);
+          setTotalContractBoards(visInfo.totalCount);
+          setForceVisibleCount(visInfo.forceShowCount);
+          setForceHiddenCount(visInfo.forceHideCount);
 
-          if (modifiableCount > 0 && trueCount === modifiableCount) {
+          if (visInfo.state === 'ON') {
             setVisibilityState('ALL_ON');
             setShowInAvailable(true);
-          } else if (trueCount === 0) {
+          } else if (visInfo.state === 'OFF') {
             setVisibilityState('ALL_OFF');
             setShowInAvailable(false);
           } else {
@@ -1726,6 +1727,17 @@ export const ContractCard: React.FC<ContractCardProps> = ({
 
                       // إذا كانت مفعّلة بالكامل أو مختلطة، فالضغط عليها يلغي الإظهار ويوحد القابلة للتعديل كـ null
                       const newVal = visibilityState === 'ALL_OFF';
+                      const contractNum = Number(contract.Contract_Number ?? contract.id);
+
+                      // 1. تحديث جدول العقود بالقرار الصريح للعقد (Scope C)
+                      if (Number.isFinite(contractNum)) {
+                        await supabase
+                          .from('Contract')
+                          .update({ is_visible_in_available: newVal ? true : null })
+                          .eq('Contract_Number', contractNum);
+                      }
+
+                      // 2. تحديث اللوحات المرتبطة بالعقد
                       const { error } = await supabase
                         .from('billboards')
                         .update({ is_visible_in_available: newVal ? true : null })
@@ -1752,7 +1764,7 @@ export const ContractCard: React.FC<ContractCardProps> = ({
                   {visibilityState === 'ALL_ON'
                     ? 'إخفاء اللوحات من المتاح'
                     : visibilityState === 'MIXED'
-                    ? `إلغاء الإظهار الجزئي (${forceVisibleCount} مفعلة)`
+                    ? `إلغاء الإظهار الجزئي (${forceVisibleCount}/${totalContractBoards || forceVisibleCount} مفعلة)`
                     : 'إظهار اللوحات في المتاح'}
                 </DropdownMenuItem>
 

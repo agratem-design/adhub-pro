@@ -8,9 +8,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -22,11 +28,11 @@ import {
   CheckCircle2, Clock, Package, Users,
   RefreshCw, XCircle, Printer, Scissors,
   Trash2, Edit, ChevronDown, Image as ImageIcon,
-  LayoutList, Layers, FileText, X, Wallet, Coins,
+  LayoutList, FileText, X, Wallet, Coins,
   ChevronLeft, ChevronRight, CalendarDays,
   DollarSign, TrendingUp, TrendingDown, Wrench,
   FileOutput, Loader2, AlertTriangle, ChevronUp, Percent,
-  FolderOpen, Download
+  FolderOpen, Download, Megaphone, MoreHorizontal, Eye
 } from 'lucide-react';
 import { exportContractImagesToZip } from '@/utils/exportContractImagesToZip';
 import { getContractWithBillboards } from '@/services/contractService';
@@ -52,6 +58,15 @@ interface CompositeTasksListEnhancedProps {
 
 type SortField = 'client' | 'contract' | 'revenue' | 'cost' | 'profit' | 'date' | 'status';
 type SortDir = 'asc' | 'desc';
+
+/** Helper to strictly normalize contract IDs as positive numbers */
+export const normalizeContractId = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  const str = String(value).trim();
+  if (!str) return null;
+  const num = Number(str);
+  return Number.isFinite(num) && num > 0 ? num : null;
+};
 
 const STATUS_CONFIG = {
   completed: {
@@ -115,7 +130,7 @@ const DesignPanel = ({
   return (
     <>
       <div
-        className="relative flex-shrink-0 overflow-hidden h-full cursor-pointer"
+        className="relative flex-shrink-0 overflow-hidden h-full cursor-pointer group/design"
         style={{ width: '100%', minHeight: '100%' }}
         onClick={() => url && setLightboxOpen(true)}
       >
@@ -123,75 +138,55 @@ const DesignPanel = ({
           <>
             <div className="absolute inset-0">
               <img src={url} alt="" className="w-full h-full object-cover scale-150 blur-xl opacity-50" aria-hidden="true" />
-              <div className="absolute inset-0 bg-black/40" />
+              <div className="absolute inset-0 bg-black/40 group-hover/design:bg-black/25 transition-colors" />
             </div>
-            <img src={url} alt="تصميم" className="relative w-full h-full object-contain z-10 p-2" style={{ minHeight: '100%' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            <img 
+              src={url} 
+              alt="تصميم الإعلان" 
+              className="relative w-full h-full object-contain z-10 p-2 transition-transform duration-200 group-hover/design:scale-105" 
+              style={{ minHeight: '100%' }} 
+              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} 
+            />
             {urls.length > 1 && (
-              <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 z-30 flex gap-1">
+              <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-30 flex gap-1 bg-black/50 px-1.5 py-0.5 rounded-full backdrop-blur-sm">
                 {urls.map((_, i) => (
-                  <button key={i} onClick={(e) => { e.stopPropagation(); setCurrentIdx(i); }}
-                    className={`w-1.5 h-1.5 rounded-full transition-all ${i === currentIdx % urls.length ? 'bg-white scale-125' : 'bg-white/40'}`} />
+                  <button 
+                    key={i} 
+                    onClick={(e) => { e.stopPropagation(); setCurrentIdx(i); }}
+                    className={`w-1.5 h-1.5 rounded-full transition-all ${i === currentIdx % urls.length ? 'bg-white scale-125' : 'bg-white/40 hover:bg-white/70'}`} 
+                  />
                 ))}
               </div>
             )}
+            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/design:opacity-100 transition-opacity z-20 flex items-center justify-center pointer-events-none">
+              <Eye className="w-5 h-5 text-white/90 drop-shadow" />
+            </div>
           </>
         ) : (
-          <div className="w-full h-full flex items-center justify-center"
-            style={{ minHeight: '100%', background: `linear-gradient(135deg, hsl(var(--muted)/0.6), ${accent}18)` }}>
-            <div className="flex flex-col items-center gap-2 opacity-40">
-              <ImageIcon className="h-10 w-10" style={{ color: accent }} />
-              <span className="text-[10px] text-muted-foreground">لا يوجد تصميم</span>
+          <div 
+            className="w-full h-full flex items-center justify-center"
+            style={{ minHeight: '100%', background: `linear-gradient(135deg, hsl(var(--muted)/0.4), ${accent}15)` }}
+          >
+            <div className="flex flex-col items-center gap-1.5 opacity-40">
+              <ImageIcon className="h-8 w-8" style={{ color: accent }} />
+              <span className="text-[10px] font-medium text-muted-foreground">لا يوجد تصميم</span>
             </div>
           </div>
         )}
-        <div className="absolute top-0 left-0 bottom-0 w-[4px]" style={{ background: accent, opacity: 0.85 }} />
+        <div className="absolute top-0 right-0 bottom-0 w-[3px]" style={{ background: accent, opacity: 0.85 }} />
       </div>
       {lightboxOpen && url && createPortal(
-        <div className="fixed inset-0 z-[99999] bg-black/90 backdrop-blur-md flex items-center justify-center" onClick={() => setLightboxOpen(false)}>
-          <button onClick={() => setLightboxOpen(false)} className="absolute top-4 right-4 z-10 p-3 bg-white/10 hover:bg-white/20 rounded-full transition-all border border-white/20">
-            <X className="w-6 h-6 text-white" />
+        <div className="fixed inset-0 z-[99999] bg-black/90 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setLightboxOpen(false)}>
+          <button 
+            onClick={() => setLightboxOpen(false)} 
+            className="absolute top-4 right-4 z-10 p-2.5 bg-white/10 hover:bg-white/20 rounded-full transition-all border border-white/20 text-white cursor-pointer"
+          >
+            <X className="w-5 h-5" />
           </button>
-          <img src={url} alt="معاينة" className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl" onClick={e => e.stopPropagation()} />
+          <img src={url} alt="معاينة التصميم" className="max-w-[90vw] max-h-[85vh] object-contain rounded-xl shadow-2xl" onClick={e => e.stopPropagation()} />
         </div>, document.body
       )}
     </>
-  );
-};
-
-/* ── Compact action button ── */
-const ActionBtn = ({ icon: Icon, label, onClick, danger = false, className: cls = '' }: {
-  icon: any; label: string; onClick: (e: React.MouseEvent) => void; danger?: boolean; className?: string;
-}) => (
-  <Tooltip>
-    <TooltipTrigger asChild>
-      <button onClick={e => { e.stopPropagation(); onClick(e); }}
-        className={`h-9 w-9 rounded-xl flex items-center justify-center transition-all duration-150 border
-          ${danger
-            ? 'text-red-400/70 border-red-500/15 hover:bg-red-500/15 hover:text-red-400 hover:border-red-500/30'
-            : 'text-muted-foreground border-border/40 hover:bg-indigo-500/12 hover:text-indigo-400 hover:border-indigo-500/30'
-          } ${cls}`}>
-        <Icon className="h-4 w-4" />
-      </button>
-    </TooltipTrigger>
-    <TooltipContent side="top" className="text-xs">{label}</TooltipContent>
-  </Tooltip>
-);
-
-/* ── Profit indicator ── */
-const ProfitIndicator = ({ profit, percentage }: { profit: number; percentage: number }) => {
-  const isProfit = profit >= 0;
-  return (
-    <div className="flex flex-col items-center gap-0.5">
-      <div className="flex items-baseline gap-1">
-        {isProfit ? <TrendingUp className="h-3 w-3 text-emerald-400" /> : <TrendingDown className="h-3 w-3 text-red-400" />}
-        <span className={`text-sm font-bold ${isProfit ? 'text-emerald-400' : 'text-red-400'}`}>
-          {profit.toLocaleString('ar-LY')}
-        </span>
-      </div>
-      <span className={`text-[10px] font-medium ${isProfit ? 'text-emerald-400/70' : 'text-red-400/70'}`}>
-        {percentage.toFixed(0)}%
-      </span>
-    </div>
   );
 };
 
@@ -205,8 +200,8 @@ const SortIcon = ({ field, sortField, sortDir }: { field: SortField; sortField: 
 
 /* ── Skeleton ── */
 const SkeletonCard = () => (
-  <div className="flex rounded-2xl overflow-hidden border border-border/50 bg-card" style={{ minHeight: 140 }}>
-    <Skeleton className="w-40 shrink-0 rounded-none rounded-r-2xl" />
+  <div className="flex rounded-2xl overflow-hidden border border-border/40 bg-card/60" style={{ minHeight: 140 }}>
+    <Skeleton className="w-40 shrink-0 rounded-none" />
     <div className="flex-1 p-5 flex flex-col gap-3">
       <Skeleton className="h-5 w-1/3 rounded-lg" />
       <Skeleton className="h-3.5 w-1/4 rounded" />
@@ -230,15 +225,14 @@ const TaskCardRow = ({
   onCreatePrintTask?: (installationTaskId: string) => void;
 }) => {
   const [dominantColor, setDominantColor] = useState<string | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [localDesignUrls, setLocalDesignUrls] = useState<string[]>(task.designUrls || []);
 
   useEffect(() => {
     if (task.designUrls && task.designUrls.length > 0) {
       setLocalDesignUrls(task.designUrls);
     } else if (task.contract_id) {
-      const contractNo = Number(task.contract_id);
-      if (Number.isFinite(contractNo)) {
+      const contractNo = normalizeContractId(task.contract_id);
+      if (contractNo) {
         fetchContractDesignUrls(contractNo).then(urls => {
           if (urls && urls.length > 0) {
             setLocalDesignUrls(urls);
@@ -249,377 +243,510 @@ const TaskCardRow = ({
   }, [task.designUrls, task.contract_id]);
 
   const cfg = STATUS_CONFIG[task.status as keyof typeof STATUS_CONFIG] || STATUS_CONFIG.pending;
-  const hasCutouts = task.customer_cutout_cost > 0 || task.company_cutout_cost > 0;
+  const hasCutouts = (task.customer_cutout_cost || 0) > 0 || (task.company_cutout_cost || 0) > 0;
 
-  // ✅ تعديل تكلفة الشركة والربح للمهام الجديدة (التركيب مشمول بالعقد)
+  // الحسابات المالية الدقيقة
   const isNewInstallation = task.task_type === 'new_installation';
   const rawCompanyTotal = task.company_total || 0;
   const companyInstall = task.company_installation_cost || 0;
-  const adjCompanyTotal = isNewInstallation ? rawCompanyTotal - companyInstall : rawCompanyTotal;
+  const adjCompanyTotal = isNewInstallation ? Math.max(0, rawCompanyTotal - companyInstall) : rawCompanyTotal;
   const customerTotalVal = task.customer_total || 0;
   const adjNetProfit = customerTotalVal - adjCompanyTotal;
   const adjProfitPct = customerTotalVal > 0 ? (adjNetProfit / customerTotalVal) * 100 : 0;
   const discountAmt = task.discount_amount || 0;
   const showInstallExcluded = isNewInstallation && companyInstall > 0;
 
-  const remainingDue = Math.max(0, (task.customer_total || 0) - (task._totalPaid || 0));
-  const isFullyPaid = remainingDue <= 0.01 && (task.customer_total || 0) > 0;
-  const containerBg = (task.customer_total || 0) > 0 
-    ? (isFullyPaid ? 'bg-emerald-500/5' : 'bg-rose-500/5') 
-    : 'bg-muted/10';
+  const remainingDue = Math.max(0, customerTotalVal - (task._totalPaid || 0));
+  const isFullyPaid = remainingDue <= 0.01 && customerTotalVal > 0;
 
   const cardBg = dominantColor
-    ? `linear-gradient(to left, rgba(${dominantColor}, 0.22) 0%, rgba(${dominantColor}, 0.10) 35%, rgba(${dominantColor}, 0.03) 70%, hsl(var(--card)) 100%)`
-    : `linear-gradient(to left, color-mix(in srgb, ${task.accent || '#6366f1'} 12%, transparent) 0%, color-mix(in srgb, ${task.accent || '#6366f1'} 4%, transparent) 35%, hsl(var(--card)) 100%)`;
+    ? `linear-gradient(to left, rgba(${dominantColor}, 0.15) 0%, rgba(${dominantColor}, 0.06) 35%, rgba(${dominantColor}, 0.02) 70%, hsl(var(--card)) 100%)`
+    : `linear-gradient(to left, color-mix(in srgb, ${task.accent || '#6366f1'} 8%, transparent) 0%, color-mix(in srgb, ${task.accent || '#6366f1'} 2%, transparent) 35%, hsl(var(--card)) 100%)`;
   const cardBorder = dominantColor
-    ? `1.5px solid rgba(${dominantColor}, 0.4)`
-    : `1.5px solid color-mix(in srgb, ${task.accent || '#6366f1'} 20%, hsl(var(--border)/0.5))`;
-  const cardShadow = dominantColor
-    ? `0 4px 24px rgba(${dominantColor}, 0.25), 0 0 0 1px rgba(${dominantColor}, 0.1)`
-    : '0 2px 16px rgba(0,0,0,0.18)';
+    ? `1px solid rgba(${dominantColor}, 0.35)`
+    : `1px solid color-mix(in srgb, ${task.accent || '#6366f1'} 15%, hsl(var(--border)/0.4))`;
+
+  // تجهيز نص نوع الإعلان
+  const adTypeDisplay = task.adType && task.adType.trim().length > 0 && task.adType !== 'غير محدد'
+    ? task.adType.trim()
+    : null;
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: idx * 0.025, ease: 'easeOut' }}
-      whileHover={{ y: -3, transition: { duration: 0.18 } }}
-      className="group relative rounded-2xl overflow-hidden cursor-pointer"
-      style={{ background: cardBg, border: cardBorder, boxShadow: cardShadow, minHeight: 140 }}
+      transition={{ delay: idx * 0.02, ease: 'easeOut' }}
+      className="group relative rounded-2xl overflow-hidden transition-all duration-200 hover:shadow-lg bg-card/60"
+      style={{ background: cardBg, border: cardBorder }}
     >
-      <div className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none"
-        style={{ boxShadow: dominantColor
-          ? `0 12px 40px rgba(${dominantColor}, 0.35), 0 0 0 2px rgba(${dominantColor}, 0.3)`
-          : `0 8px 32px rgba(0,0,0,0.30), 0 0 0 1px ${task.accent}33`
-        }} />
-
-      {/* Desktop layout */}
-      <div className="hidden md:flex h-full items-stretch">
-        {/* Design panel */}
-        <div className="w-[160px] lg:w-[180px] shrink-0 overflow-hidden relative" onClick={e => e.stopPropagation()}>
+      {/* Desktop & Laptop layout */}
+      <div className="hidden lg:grid grid-cols-[160px_minmax(260px,1.2fr)_215px_195px_170px] items-stretch min-h-[145px]">
+        {/* 1. Design Panel (Right in RTL) */}
+        <div className="shrink-0 overflow-hidden relative" onClick={e => e.stopPropagation()}>
           <DesignPanel urls={localDesignUrls} accent={task.accent} onColorExtracted={setDominantColor} />
           {localDesignUrls && localDesignUrls.length > 1 && (
-            <div className="absolute bottom-2.5 right-2.5 z-30 bg-black/60 backdrop-blur-sm text-white px-2 py-0.5 rounded-lg text-[9px] font-bold border border-white/10">
+            <div className="absolute bottom-2 right-2 z-30 bg-black/70 backdrop-blur-md text-white px-2 py-0.5 rounded-md text-[9px] font-bold border border-white/10 shadow">
               {localDesignUrls.length} تصاميم
             </div>
           )}
         </div>
 
-        <div className="flex flex-1 min-w-0 p-0 items-stretch">
-          {/* Info block */}
-          <div className="flex-1 min-w-0 px-4 lg:px-6 py-4 lg:py-5 flex flex-col justify-between gap-4">
-            <div className="space-y-1.5 text-right">
-              <div className="flex items-center gap-2 flex-wrap font-bold ">
-                {task.task_number && (
-                  <span className="text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full px-2 py-0.5 font-extrabold">
-                    م#{task.task_number}
-                  </span>
-                )}
-                <span className="text-base lg:text-lg font-black text-foreground leading-tight">{task.customer_name || 'غير محدد'}</span>
-                <span className={`text-[10px] rounded-full px-2 py-0.5 font-extrabold border ${
-                  task.task_type === 'new_installation'
-                    ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
-                    : 'bg-orange-500/10 text-orange-400 border-orange-500/20'
-                }`}>
-                  {task.task_type === 'new_installation' ? 'تركيب جديد' : `إعادة تركيب ${task.reinstallationNumber ? `(re${task.reinstallationNumber})` : ''}`}
-                </span>
-                {task.reinstallationNumber != null && (
-                  <span className="text-[10px] font-mono bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded-full px-2 py-0.5 font-extrabold">
-                    re{task.reinstallationNumber}-{task.contract_id}
-                  </span>
-                )}
-              </div>
-
-              {task.adType && task.adType !== 'غير محدد' && (
-                <p className="text-xs text-muted-foreground/85 font-medium">{task.adType}</p>
-              )}
-
-              {/* عناصر المهمة */}
-              <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                {task.installation_task_id && (
-                  <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                    <Wrench className="h-3 w-3" /> تركيب{task.teamName ? ` - ${task.teamName}` : ''}
-                  </span>
-                )}
-                {task.print_task_id && (
-                  <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                    <Printer className="h-3 w-3" /> طباعة{task.printerName ? ` - ${task.printerName}` : ''}
-                  </span>
-                )}
-                {hasCutouts && (
-                  <span className="inline-flex items-center gap-1.5 text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                    <Scissors className="h-3 w-3" /> مجسمات
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-              <span className="flex items-center gap-1.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-extrabold px-2.5 py-1 rounded-xl font-mono">
-                العقد: {task.contractIds && task.contractIds.length > 1 ? (
-                  <span className="flex items-center gap-1 flex-wrap text-indigo-400">
-                    {task.contractIds.slice(0, 3).map((cId) => `#${cId}`).join(', ')}
-                    {task.contractIds.length > 3 && ` +${task.contractIds.length - 3}`}
-                  </span>
-                ) : (
-                  <span className="text-indigo-400">#{task.contract_id}</span>
-                )}
-              </span>
-              <span className="flex items-center gap-1.5 bg-muted/40 border border-border/25 px-2.5 py-1 rounded-xl text-muted-foreground font-semibold">
-                <CalendarDays className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-                <span>{format(new Date(task.created_at), 'dd MMM yyyy', { locale: ar })}</span>
-              </span>
-            </div>
-          </div>
-
-          {/* Customer Due */}
-          <div className={`w-[175px] lg:w-[210px] shrink-0 px-5 py-4 flex flex-col justify-between gap-3 border-r border-border/20 ${containerBg}`} onClick={e => e.stopPropagation()}>
-            <div className="space-y-2">
-              <div className="text-[10px] font-bold text-muted-foreground/60 leading-none text-right">الحالة المالية للزبون</div>
-              
-              <div className="space-y-1.5 text-right">
-                <div className="flex items-center justify-between text-[10px] font-extrabold text-muted-foreground/77">
-                  <span>إجمالي العقد:</span>
-                  <span className="text-white text-[11px] font-black">{(task.customer_total || 0).toLocaleString('ar-LY')} د.ل</span>
-                </div>
-                <div className="flex items-center justify-between text-[10px] font-extrabold text-muted-foreground/77">
-                  <span>المدفوع:</span>
-                  <span className="text-emerald-400 text-[11px] font-black">{task._totalPaid.toLocaleString('ar-LY')} د.ل</span>
-                </div>
-                <div className="flex items-center justify-between text-[10px] font-extrabold border-t border-border/15 pt-1.5">
-                  <span className="text-muted-foreground/80">المتبقي:</span>
-                  {isFullyPaid ? (
-                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] font-black">
-                      تم السداد
-                    </span>
-                  ) : (
-                    <span className="text-rose-500 text-xs font-black">{remainingDue.toLocaleString('ar-LY')} د.ل</span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* نسبة السداد */}
-            {(task.customer_total || 0) > 0 && (
-              <div className="w-full space-y-1 text-right" dir="rtl">
-                <div className="flex items-center justify-between text-[9px] font-extrabold">
-                  <span className="text-muted-foreground/50">نسبة السداد</span>
-                  <span className={task._paymentPercentage >= 100 ? 'text-emerald-400' : task._paymentPercentage >= 50 ? 'text-amber-400' : 'text-rose-400'}>
-                    {task._paymentPercentage}%
-                  </span>
-                </div>
-                <div className="h-1.5 w-full bg-muted/40 rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full rounded-full transition-all duration-300 ${task._paymentPercentage >= 100 ? 'bg-emerald-500' : task._paymentPercentage >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`}
-                    style={{ width: `${Math.min(100, task._paymentPercentage)}%` }}
-                  />
-                </div>
-
-                {/* أرقام الدفعات */}
-                {task._payments && task._payments.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1 justify-end">
-                    {task._payments.map((p, pIdx) => (
-                      <button
-                        key={p.id}
-                        onClick={() => {
-                          if (p.distributed_payment_id) {
-                            onNavigateToPayment(p.distributed_payment_id, task.customer_id || '', task.customer_name || '');
-                          }
-                        }}
-                        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[8px] font-extrabold transition-all cursor-pointer hover:scale-105 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
-                        title={`دفعة #${p.rowNumber || (pIdx + 1)} - ${p.amount.toLocaleString('ar-LY')} د.ل`}
-                      >
-                        #{p.rowNumber || (pIdx + 1)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Financial stats */}
-          <div className="w-[160px] lg:w-[190px] shrink-0 px-5 lg:px-6 py-5 lg:py-6 flex flex-col justify-between gap-3 border-r border-border/20" onClick={e => e.stopPropagation()}>
-            <div className="space-y-2.5 text-right">
-              <div>
-                <div className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wide mb-1">
-                  التكلفة {showInstallExcluded && <span className="text-muted-foreground/50">(بدون تركيب)</span>}
-                </div>
-                <div className="text-base font-black text-orange-400">{adjCompanyTotal.toLocaleString('ar-LY')} <span className="text-[10px] font-medium text-orange-400/60">د.ل</span></div>
-              </div>
-              {discountAmt > 0 && (
-                <div>
-                  <div className="text-[10px] font-bold text-red-400/80 uppercase tracking-wide mb-1">الخصم</div>
-                  <div className="text-sm font-black text-red-400">−{discountAmt.toLocaleString('ar-LY')} <span className="text-[10px] font-medium text-red-400/60">د.ل</span></div>
-                </div>
-              )}
-            </div>
-            <div className="h-px bg-border/20 my-1" />
-            <ProfitIndicator profit={adjNetProfit} percentage={adjProfitPct} />
-          </div>
-
-          {/* Status block */}
-          <div className="w-[110px] lg:w-[125px] shrink-0 px-4 lg:px-5 py-5 lg:py-6 flex flex-col justify-center items-center gap-2 border-r border-border/20">
-            <span className={`inline-flex items-center gap-1 text-[11px] px-2.5 py-1.5 rounded-full border font-extrabold whitespace-nowrap shadow-sm ${cfg.color}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot} shrink-0 animate-pulse`} />
-              {cfg.label}
-            </span>
-            {task.invoice_generated && (
-              <span className="text-[10px] font-bold text-indigo-400/80 bg-indigo-500/5 border border-indigo-500/15 px-2 py-0.5 rounded-lg flex items-center gap-1 select-none">
-                <FileText className="h-3 w-3 text-indigo-500/70" /> فاتورة
-              </span>
-            )}
-          </div>
-
-          {/* Actions */}
-          <div className="w-[72px] lg:w-[82px] shrink-0 flex flex-col items-center justify-center gap-2 px-3 lg:px-4 py-5 border-r border-border/20" onClick={e => e.stopPropagation()}>
-            {deleteConfirm ? (
-              <div className="flex flex-col items-center gap-1.5">
-                <span className="text-[9px] text-red-400 font-extrabold text-center leading-tight">تأكيد؟</span>
-                <button onClick={() => { onDelete(task); setDeleteConfirm(false); }} className="w-full h-7 rounded-lg bg-red-500/20 text-red-400 text-[10px] font-extrabold hover:bg-red-500/35 transition-colors px-1">نعم</button>
-                <button onClick={() => setDeleteConfirm(false)} className="w-full h-7 rounded-lg bg-muted/65 text-muted-foreground text-[10px] hover:bg-muted transition-colors px-1">لا</button>
-              </div>
-            ) : (
-              <>
-                <ActionBtn icon={FileText} label="فاتورة الزبون" onClick={() => onOpenInvoice(task, 'customer')} />
-                {task.print_task_id ? (
-                  <ActionBtn icon={Printer} label="فاتورة المطبعة" onClick={() => onOpenInvoice(task, 'print_vendor')} />
-                ) : (
-                  task.installation_task_id && (
-                    <ActionBtn 
-                      icon={Printer} 
-                      label="إنشاء مهمة طباعة" 
-                    onClick={() => onCreatePrintTask?.(task.installation_task_id)} 
-                      color="text-cyan-400 hover:text-cyan-300"
-                    />
-                  )
-                )}
-                {task.installation_task_id && <ActionBtn icon={Users} label="فاتورة الفرقة" onClick={() => onOpenInvoice(task, 'installation_team')} />}
-                <div className="w-6 h-px bg-border/40 my-0.5" />
-                <ActionBtn icon={Edit} label="تعديل التكاليف" onClick={() => onEditCosts(task)} />
-                <ActionBtn icon={Trash2} label="حذف" onClick={() => setDeleteConfirm(true)} danger />
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Mobile layout */}
-      <div className="flex flex-col md:hidden px-4 py-5 gap-4 bg-card/60 backdrop-blur-md">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1 text-right">
-            <div className="flex items-center gap-1.5 flex-wrap">
+        {/* 2. Task Identity Section */}
+        <div className="p-4 flex flex-col justify-between gap-2.5 text-right border-l border-border/20">
+          <div className="space-y-2">
+            {/* Header: Customer & Task Number */}
+            <div className="flex items-center gap-2 flex-wrap">
               {task.task_number && (
-                <span className="text-[9px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded px-1 py-0.5 font-bold">
+                <span className="text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/25 rounded-md px-2 py-0.5 font-black">
                   م#{task.task_number}
                 </span>
               )}
-              <span className="text-base font-extrabold text-foreground truncate">{task.customer_name || 'غير مححدد'}</span>
+              <span className="text-base font-black text-foreground tracking-tight hover:text-primary transition-colors">
+                {task.customer_name || 'غير محدد'}
+              </span>
             </div>
-            <div className="flex flex-wrap gap-1.5">
-              <span className={`text-[9px] rounded-full px-2 py-0.5 font-extrabold border ${
+
+            {/* Badges: Task Type & Ad Type */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className={`text-[10px] rounded-md px-2 py-0.5 font-extrabold border ${
                 task.task_type === 'new_installation'
                   ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
                   : 'bg-orange-500/10 text-orange-400 border-orange-500/20'
               }`}>
-                {task.task_type === 'new_installation' ? 'جديد' : 'إعادة'}
+                {task.task_type === 'new_installation' ? 'تركيب جديد (شامل)' : `إعادة تركيب ${task.reinstallationNumber ? `(re${task.reinstallationNumber})` : ''}`}
               </span>
-              {task.reinstallationNumber != null && (
-                <span className="text-[9px] font-mono bg-orange-500/10 text-orange-400 border border-orange-500/20 rounded px-1.5 py-0.5 font-bold">
-                  re{task.reinstallationNumber}-{task.contract_id}
+
+              {/* Prominent Golden Ad Type Badge */}
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-black border transition-all ${
+                adTypeDisplay 
+                  ? 'bg-amber-500/10 text-amber-300 border-amber-500/30 shadow-sm' 
+                  : 'bg-muted/40 text-muted-foreground/60 border-border/30'
+              }`}>
+                <Megaphone className={`h-3 w-3 shrink-0 ${adTypeDisplay ? 'text-amber-400' : 'text-muted-foreground/50'}`} />
+                <span>{adTypeDisplay ? `نوع الإعلان: ${adTypeDisplay}` : 'نوع الإعلان غير محدد'}</span>
+              </span>
+            </div>
+
+            {/* Components: Team / Printer / Cutouts */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+              {task.installation_task_id && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                  <Wrench className="h-3 w-3" /> تركيب {task.teamName ? `· ${task.teamName}` : ''}
+                </span>
+              )}
+              {task.print_task_id && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                  <Printer className="h-3 w-3" /> طباعة {task.printerName ? `· ${task.printerName}` : ''}
+                </span>
+              )}
+              {hasCutouts && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-extrabold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <Scissors className="h-3 w-3" /> مجسمات
                 </span>
               )}
             </div>
           </div>
-          <span className={`inline-flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full border font-extrabold whitespace-nowrap shrink-0 ${cfg.color}`}>
+
+          {/* Footer: Contract & Date */}
+          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap pt-1 border-t border-border/15">
+            <span className="inline-flex items-center gap-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-extrabold px-2 py-0.5 rounded-md font-mono text-[11px]">
+              <FileText className="h-3 w-3 text-indigo-400" />
+              <span>العقد: #{task.contractIds && task.contractIds.length > 0 ? task.contractIds.join(', #') : task.contract_id}</span>
+            </span>
+            <span className="inline-flex items-center gap-1 text-muted-foreground/75 text-[11px] font-semibold">
+              <CalendarDays className="h-3 w-3 text-muted-foreground/50" />
+              <span>{format(new Date(task.created_at), 'dd MMM yyyy', { locale: ar })}</span>
+            </span>
+          </div>
+        </div>
+
+        {/* 3. Financial Status Widget */}
+        <div className="p-3.5 flex flex-col justify-between gap-2 border-l border-border/20 bg-muted/10 text-right" onClick={e => e.stopPropagation()}>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] font-bold text-muted-foreground/80 pb-1 border-b border-border/15">
+              <span className="flex items-center gap-1">
+                <Wallet className="h-3.5 w-3.5 text-muted-foreground/60" />
+                الحالة المالية للزبون
+              </span>
+            </div>
+
+            <div className="space-y-1 text-[11px]">
+              <div className="flex items-center justify-between font-bold">
+                <span className="text-muted-foreground/70">الإجمالي:</span>
+                <span className="font-black text-foreground">{customerTotalVal.toLocaleString('ar-LY')} د.ل</span>
+              </div>
+              <div className="flex items-center justify-between font-bold">
+                <span className="text-muted-foreground/70">المدفوع:</span>
+                <span className="font-black text-emerald-400">{task._totalPaid.toLocaleString('ar-LY')} د.ل</span>
+              </div>
+              <div className="flex items-center justify-between font-bold pt-1 border-t border-border/10">
+                <span className="text-muted-foreground/70">المتبقي:</span>
+                {isFullyPaid ? (
+                  <span className="text-[9px] font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
+                    مسدد بالكامل
+                  </span>
+                ) : (
+                  <span className="font-black text-rose-400">{remainingDue.toLocaleString('ar-LY')} د.ل</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Progress Bar & Payments */}
+          {customerTotalVal > 0 && (
+            <div className="space-y-1.5 pt-1 border-t border-border/15">
+              <div className="flex items-center justify-between text-[9px] font-bold text-muted-foreground/60">
+                <span>نسبة السداد</span>
+                <span className={task._paymentPercentage >= 100 ? 'text-emerald-400' : task._paymentPercentage >= 50 ? 'text-amber-400' : 'text-rose-400'}>
+                  {task._paymentPercentage}%
+                </span>
+              </div>
+              <div className="h-1.5 w-full bg-muted/40 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all duration-300 ${task._paymentPercentage >= 100 ? 'bg-emerald-500' : task._paymentPercentage >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                  style={{ width: `${Math.min(100, Math.max(0, task._paymentPercentage))}%` }}
+                />
+              </div>
+
+              {/* Payment Chips */}
+              {task._payments && task._payments.length > 0 && (
+                <div className="flex flex-wrap gap-1 justify-end pt-0.5">
+                  {task._payments.slice(0, 3).map((p: any, pIdx: number) => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        if (p.distributed_payment_id) {
+                          onNavigateToPayment(p.distributed_payment_id, task.customer_id || '', task.customer_name || '');
+                        }
+                      }}
+                      className="inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all cursor-pointer"
+                      title={`دفعة #${p.rowNumber || (pIdx + 1)} - ${p.amount.toLocaleString('ar-LY')} د.ل`}
+                    >
+                      #{p.rowNumber || (pIdx + 1)}
+                    </button>
+                  ))}
+                  {task._payments.length > 3 && (
+                    <span className="text-[8px] text-muted-foreground/60 font-bold self-center">
+                      +{task._payments.length - 3}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 4. Cost & Profit Widget */}
+        <div className="p-3.5 flex flex-col justify-between gap-2 border-l border-border/20 text-right" onClick={e => e.stopPropagation()}>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] font-bold text-muted-foreground/80 pb-1 border-b border-border/15">
+              <span className="flex items-center gap-1">
+                <Coins className="h-3.5 w-3.5 text-muted-foreground/60" />
+                التكلفة والأرباح
+              </span>
+            </div>
+
+            <div className="space-y-1 text-[11px]">
+              <div className="flex items-center justify-between font-bold">
+                <span className="text-muted-foreground/70">التكلفة:</span>
+                <span className="font-black text-orange-400">
+                  {adjCompanyTotal.toLocaleString('ar-LY')} <span className="text-[9px] font-normal text-muted-foreground">د.ل</span>
+                </span>
+              </div>
+              {showInstallExcluded && (
+                <div className="text-[9px] text-muted-foreground/60 text-left font-medium">
+                  (شامل التركيب)
+                </div>
+              )}
+              {discountAmt > 0 && (
+                <div className="flex items-center justify-between font-bold text-rose-400 text-[10px]">
+                  <span>الخصم:</span>
+                  <span>−{discountAmt.toLocaleString('ar-LY')} د.ل</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Profit Indicator */}
+          <div className="p-2 rounded-xl bg-card/60 border border-border/25 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1">
+              {adjNetProfit >= 0 ? (
+                <TrendingUp className="h-4 w-4 text-emerald-400 shrink-0" />
+              ) : (
+                <TrendingDown className="h-4 w-4 text-rose-400 shrink-0" />
+              )}
+              <span className={`text-xs font-black ${adjNetProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {adjNetProfit.toLocaleString('ar-LY')} <span className="text-[9px] font-normal">د.ل</span>
+              </span>
+            </div>
+            <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded ${
+              adjNetProfit >= 0 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+            }`}>
+              {customerTotalVal > 0 ? adjProfitPct.toFixed(0) : 0}%
+            </span>
+          </div>
+        </div>
+
+        {/* 5. Status & Smart Actions Panel (Left in RTL) */}
+        <div className="p-3.5 flex flex-col justify-between items-center gap-2 text-center" onClick={e => e.stopPropagation()}>
+          <div className="space-y-1.5 flex flex-col items-center">
+            <span className={`inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full border font-black whitespace-nowrap shadow-sm ${cfg.color}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot} shrink-0 animate-pulse`} />
+              {cfg.label}
+            </span>
+            {task.invoice_generated && (
+              <span className="text-[9px] font-bold text-indigo-400/80 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-md flex items-center gap-1 select-none">
+                <FileText className="h-2.5 w-2.5 text-indigo-400" /> فاتورة صادرة
+              </span>
+            )}
+          </div>
+
+          {/* Action Toolbar */}
+          <div className="flex items-center gap-1.5">
+            {/* Primary Action: Customer Invoice */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => onOpenInvoice(task, 'customer')}
+                  className="h-8.5 w-8.5 rounded-xl flex items-center justify-center bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/25 transition-all cursor-pointer"
+                  aria-label="فاتورة الزبون"
+                >
+                  <FileOutput className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">فاتورة الزبون</TooltipContent>
+            </Tooltip>
+
+            {/* Secondary Action: Print or Team */}
+            {task.print_task_id ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => onOpenInvoice(task, 'print_vendor')}
+                    className="h-8.5 w-8.5 rounded-xl flex items-center justify-center bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/25 transition-all cursor-pointer"
+                    aria-label="فاتورة المطبعة"
+                  >
+                    <Printer className="h-4 w-4" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">فاتورة المطبعة</TooltipContent>
+              </Tooltip>
+            ) : (
+              task.installation_task_id && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => onCreatePrintTask?.(task.installation_task_id)}
+                      className="h-8.5 w-8.5 rounded-xl flex items-center justify-center bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/25 transition-all cursor-pointer"
+                      aria-label="إنشاء مهمة طباعة"
+                    >
+                      <Printer className="h-4 w-4 animate-pulse" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">إنشاء مهمة طباعة</TooltipContent>
+                </Tooltip>
+              )
+            )}
+
+            {/* Prominent & Clear Edit Costs Action */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => onEditCosts(task)}
+                  className="h-8.5 w-8.5 rounded-xl flex items-center justify-center bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 transition-all shadow-sm cursor-pointer"
+                  aria-label="تعديل التكاليف"
+                >
+                  <Edit className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs font-bold">تعديل التكاليف</TooltipContent>
+            </Tooltip>
+
+            {/* More Menu Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button 
+                  className="h-8.5 w-8.5 rounded-xl flex items-center justify-center bg-muted/40 text-muted-foreground border border-border/40 hover:bg-muted/70 hover:text-foreground transition-all cursor-pointer"
+                  aria-label="المزيد من الإجراءات"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48 text-right font-tajawal rounded-xl border-border/40 shadow-xl" dir="rtl">
+                <DropdownMenuItem onClick={() => onOpenInvoice(task, 'customer')} className="gap-2 cursor-pointer text-xs">
+                  <FileOutput className="h-3.5 w-3.5 text-indigo-400" />
+                  <span>فاتورة الزبون</span>
+                </DropdownMenuItem>
+                {task.print_task_id && (
+                  <DropdownMenuItem onClick={() => onOpenInvoice(task, 'print_vendor')} className="gap-2 cursor-pointer text-xs">
+                    <Printer className="h-3.5 w-3.5 text-violet-400" />
+                    <span>فاتورة المطبعة</span>
+                  </DropdownMenuItem>
+                )}
+                {task.installation_task_id && (
+                  <DropdownMenuItem onClick={() => onOpenInvoice(task, 'installation_team')} className="gap-2 cursor-pointer text-xs">
+                    <Users className="h-3.5 w-3.5 text-teal-400" />
+                    <span>فاتورة الفرقة</span>
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={() => onEditCosts(task)} className="gap-2 cursor-pointer text-xs">
+                  <Edit className="h-3.5 w-3.5 text-amber-400" />
+                  <span>تعديل التكاليف</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={() => onDelete(task)} 
+                  className="gap-2 cursor-pointer text-xs text-rose-400 focus:text-rose-400 focus:bg-rose-500/10"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>حذف المهمة</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile & Tablet layout */}
+      <div className="flex flex-col lg:hidden p-4 gap-3 bg-card/60 backdrop-blur-md text-right">
+        {/* Header: Customer & Status */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {task.task_number && (
+                <span className="text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded px-1.5 py-0.5 font-bold">
+                  م#{task.task_number}
+                </span>
+              )}
+              <span className="text-base font-black text-foreground">{task.customer_name || 'غير محدد'}</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <span className={`text-[10px] rounded-md px-2 py-0.5 font-extrabold border ${
+                task.task_type === 'new_installation'
+                  ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                  : 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+              }`}>
+                {task.task_type === 'new_installation' ? 'جديد (شامل)' : 'إعادة تركيب'}
+              </span>
+
+              {/* Mobile Ad Type Badge */}
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black border ${
+                adTypeDisplay 
+                  ? 'bg-amber-500/10 text-amber-300 border-amber-500/30' 
+                  : 'bg-muted/40 text-muted-foreground/60 border-border/30'
+              }`}>
+                <Megaphone className="h-3 w-3 text-amber-400 shrink-0" />
+                <span>{adTypeDisplay ? adTypeDisplay : 'نوع الإعلان غير محدد'}</span>
+              </span>
+            </div>
+          </div>
+          <span className={`inline-flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full border font-black whitespace-nowrap shrink-0 ${cfg.color}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
             {cfg.label}
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground text-right">
-          <span className="flex items-center gap-1 bg-indigo-500/5 text-indigo-400 border border-indigo-500/10 px-2 py-0.5 rounded">
-            <FileText className="h-3 w-3 text-indigo-500/70" />
-            <span className="font-mono font-bold">#{task.contract_id}</span>
+        {/* Contract & Operations components */}
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground pt-1 border-t border-border/15">
+          <span className="flex items-center gap-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-md font-mono text-[11px] font-bold">
+            <FileText className="h-3 w-3" /> #{task.contract_id}
           </span>
-          {task.adType && task.adType !== 'غير محدد' && (
-            <span className="text-muted-foreground/80 truncate max-w-[120px] font-medium">{task.adType}</span>
+          {task.teamName && (
+            <span className="flex items-center gap-1 text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-md text-[10px] font-bold">
+              <Wrench className="h-3 w-3" /> {task.teamName}
+            </span>
           )}
-          <span className="flex items-center gap-1 font-semibold">
+          {task.printerName && (
+            <span className="flex items-center gap-1 text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-md text-[10px] font-bold">
+              <Printer className="h-3 w-3" /> {task.printerName}
+            </span>
+          )}
+          <span className="flex items-center gap-1 font-semibold text-[11px] mr-auto">
             <CalendarDays className="h-3 w-3 text-muted-foreground/50" />
             {format(new Date(task.created_at), 'dd/MM/yyyy', { locale: ar })}
           </span>
         </div>
 
-        {/* عناصر المهمة - موبايل */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-border/20">
-          {task.installation_task_id && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/15">
-              <Wrench className="h-3 w-3" /> تركيب
-            </span>
-          )}
-          {task.print_task_id && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/15">
-              <Printer className="h-3 w-3" /> طباعة
-            </span>
-          )}
-          {hasCutouts && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/15">
-              <Scissors className="h-3 w-3" /> مجسمات
-            </span>
-          )}
-        </div>
-
+        {/* Mobile Financial Summary Box */}
         <div className="bg-background/40 p-3 rounded-xl border border-border/20 grid grid-cols-3 gap-2 text-center text-xs">
           <div>
-            <div className="text-[10px] font-bold text-muted-foreground/60 mb-1">المالية للزبون</div>
-            {(task.customer_total || 0) > 0 ? (
-              <div className="text-[9px] text-right space-y-0.5 font-semibold text-muted-foreground/90 mx-auto w-fit" dir="rtl">
-                <div>الإجمالي: <span className="font-bold text-white">{(task.customer_total || 0).toLocaleString('ar-LY')} د.ل</span></div>
-                <div>المدفوع: <span className="font-bold text-emerald-400">{task._totalPaid.toLocaleString('ar-LY')} د.ل</span></div>
-                <div>المتبقي: {isFullyPaid ? (
-                  <span className="text-emerald-400 font-extrabold text-[8px] bg-emerald-500/10 px-1 rounded border border-emerald-500/15">مسدد</span>
-                ) : (
-                  <span className="font-black text-rose-400">{remainingDue.toLocaleString('ar-LY')} د.ل</span>
-                )}</div>
-              </div>
-            ) : (
-              <div className="text-[10px] font-bold text-muted-foreground/45">—</div>
-            )}
+            <div className="text-[10px] font-bold text-muted-foreground/60 mb-0.5">الزبون</div>
+            <div className="text-xs font-black text-foreground">{(task.customer_total || 0).toLocaleString('ar-LY')}</div>
+            <div className="text-[9px] text-emerald-400 font-bold">مدفوع: {task._totalPaid.toLocaleString('ar-LY')}</div>
           </div>
           <div>
             <div className="text-[10px] font-bold text-muted-foreground/60 mb-0.5">التكلفة</div>
             <div className="text-xs font-black text-orange-400">{adjCompanyTotal.toLocaleString('ar-LY')}</div>
             {discountAmt > 0 && (
-              <div className="text-[9px] font-bold text-red-500 mt-0.5">خصم −{discountAmt.toLocaleString('ar-LY')}</div>
+              <div className="text-[9px] font-bold text-rose-400">خصم: −{discountAmt.toLocaleString('ar-LY')}</div>
             )}
           </div>
           <div>
             <div className="text-[10px] font-bold text-muted-foreground/60 mb-0.5">الربح</div>
-            <ProfitIndicator profit={adjNetProfit} percentage={adjProfitPct} />
+            <div className={`text-xs font-black ${adjNetProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+              {adjNetProfit.toLocaleString('ar-LY')}
+            </div>
+            <div className={`text-[9px] font-bold ${adjNetProfit >= 0 ? 'text-emerald-400/80' : 'text-rose-400/80'}`}>
+              {customerTotalVal > 0 ? adjProfitPct.toFixed(0) : 0}%
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center justify-between pt-3 mt-1 border-t border-border/20 gap-2" onClick={e => e.stopPropagation()}>
-          <div className="flex gap-1.5">
-            <ActionBtn icon={FileText} label="فاتورة الزبون" onClick={() => onOpenInvoice(task, 'customer')} />
+        {/* Mobile Action Buttons */}
+        <div className="flex items-center justify-between pt-2 border-t border-border/20 gap-2" onClick={e => e.stopPropagation()}>
+          <div className="flex gap-1.5 flex-wrap">
+            <button
+              onClick={() => onOpenInvoice(task, 'customer')}
+              className="h-8 px-2.5 rounded-lg flex items-center gap-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-xs font-bold"
+            >
+              <FileOutput className="h-3.5 w-3.5" />
+              <span>فاتورة</span>
+            </button>
             {task.print_task_id ? (
-              <ActionBtn icon={Printer} label="فاتورة المطبعة" onClick={() => onOpenInvoice(task, 'print_vendor')} />
+              <button
+                onClick={() => onOpenInvoice(task, 'print_vendor')}
+                className="h-8 px-2.5 rounded-lg flex items-center gap-1 bg-violet-500/10 text-violet-400 border border-violet-500/20 text-xs font-bold"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                <span>المطبعة</span>
+              </button>
             ) : (
               task.installation_task_id && (
-                <ActionBtn 
-                  icon={Printer} 
-                  label="مهمة طباعة" 
-                  onClick={() => onCreatePrintTask?.(task.installation_task_id)} 
-                  color="text-cyan-400"
-                />
+                <button
+                  onClick={() => onCreatePrintTask?.(task.installation_task_id)}
+                  className="h-8 px-2.5 rounded-lg flex items-center gap-1 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-xs font-bold"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  <span>إنشاء طباعة</span>
+                </button>
               )
             )}
-            {task.installation_task_id && <ActionBtn icon={Users} label="فاتورة الفرقة" onClick={() => onOpenInvoice(task, 'installation_team')} />}
+            {task.installation_task_id && (
+              <button
+                onClick={() => onOpenInvoice(task, 'installation_team')}
+                className="h-8 px-2.5 rounded-lg flex items-center gap-1 bg-teal-500/10 text-teal-400 border border-teal-500/20 text-xs font-bold"
+              >
+                <Users className="h-3.5 w-3.5" />
+                <span>الفرقة</span>
+              </button>
+            )}
           </div>
           <div className="flex gap-1.5">
-            <ActionBtn icon={Edit} label="تعديل" onClick={() => onEditCosts(task)} />
-            <ActionBtn icon={Trash2} label="حذف" onClick={() => setDeleteConfirm(true)} danger />
+            <button
+              onClick={() => onEditCosts(task)}
+              className="h-8 px-3 rounded-lg flex items-center gap-1 bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs font-bold hover:bg-amber-500/25"
+              aria-label="تعديل التكاليف"
+            >
+              <Edit className="h-3.5 w-3.5" />
+              <span>تعديل</span>
+            </button>
+            <button
+              onClick={() => onDelete(task)}
+              className="h-8 w-8 rounded-lg flex items-center justify-center bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20"
+              aria-label="حذف"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
       </div>
@@ -710,7 +837,6 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     const nextTaskId = currentQueue[0];
     setPrintQueue(currentQueue.slice(1));
     
-    // Fetch items
     const { data } = await supabase
       .from('installation_task_items')
       .select('id, billboard_id, design_face_a, design_face_b, has_cutout, selected_design_id, faces_to_install')
@@ -721,7 +847,6 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       setSelectedTaskItems(data);
       setCreatePrintDialogOpen(true);
     } else {
-      // Skip this one and do next
       processNextInPrintQueue(currentQueue.slice(1));
     }
   }, []);
@@ -766,7 +891,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
 
   const PAGE_SIZE = 15;
 
-  // Fetch composite tasks
+  // 1. Fetch composite tasks
   const { data: compositeTasks = [], isLoading, refetch } = useQuery({
     queryKey: ['composite-tasks', customerId, filter],
     queryFn: async () => {
@@ -790,7 +915,6 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       );
 
       if (installationTaskIds.length > 0) {
-        // Fetch contract IDs and reinstallation info in parallel
         const [installItemsRes, installTasksRes] = await Promise.all([
           supabase
             .from('installation_task_items')
@@ -808,35 +932,38 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         const map = new Map<string, Set<number>>();
         installItems.forEach((row: any) => {
           const taskId = row.task_id as string;
-          const contractNo = row.billboard?.Contract_Number;
+          const contractNo = normalizeContractId(row.billboard?.Contract_Number);
           if (!taskId || !contractNo) return;
           if (!map.has(taskId)) map.set(taskId, new Set());
-          map.get(taskId)!.add(Number(contractNo));
+          map.get(taskId)!.add(contractNo);
         });
 
-        // Map reinstallation info
-        const reinstallInfoMap = new Map<string, { number: number | null; taskType: string }>();
+        const reinstallInfoMap = new Map<string, { number: number | null; taskType: string; contractId: number | null }>();
         installTasksData.forEach((it: any) => {
           reinstallInfoMap.set(it.id, { 
             number: it.reinstallation_number, 
-            taskType: it.task_type || 'installation' 
+            taskType: it.task_type || 'installation',
+            contractId: normalizeContractId(it.contract_id)
           });
         });
 
         tasks.forEach((t: any) => {
           const set = t.installation_task_id ? map.get(t.installation_task_id) : undefined;
           const derived = set ? Array.from(set) : [];
-          t._contractIds = derived.length > 0 ? derived : [t.contract_id].filter(Boolean);
-          
-          // Set reinstallation info
           const reinstallInfo = t.installation_task_id ? reinstallInfoMap.get(t.installation_task_id) : undefined;
+          
+          const directContract = normalizeContractId(t.contract_id) || reinstallInfo?.contractId;
+          const allCids = [...new Set([...derived, ...(directContract ? [directContract] : [])])];
+          
+          t._contractIds = allCids.length > 0 ? allCids : (directContract ? [directContract] : []);
           t._reinstallationNumber = reinstallInfo?.number ?? null;
         });
       }
 
       tasks.forEach((t: any) => {
         if (!t._contractIds || !Array.isArray(t._contractIds) || t._contractIds.length === 0) {
-          t._contractIds = [t.contract_id].filter(Boolean);
+          const c = normalizeContractId(t.contract_id);
+          t._contractIds = c ? [c] : [];
         }
       });
 
@@ -844,21 +971,39 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     },
   });
 
-  // Fetch design images and ad types for tasks
+  // 2. Fetch design images, ad types, and operations data with strict normalization
   const { data: taskExtras = {} } = useQuery({
     queryKey: ['composite-task-extras', compositeTasks.map(t => t.id).join(',')],
     enabled: compositeTasks.length > 0,
     queryFn: async () => {
-      const extras: Record<string, { designUrls: string[]; adType: string; teamName: string; reinstallationNumber: number | null; printerName: string }> = {};
+      const extras: Record<string, { 
+        designUrls: string[]; 
+        adTypes: string[];
+        adType: string; 
+        teamName: string; 
+        reinstallationNumber: number | null; 
+        printerName: string;
+        realInstallCost: number;
+      }> = {};
 
-      // Batch fetch designs from installation tasks
       const installIds = compositeTasks.map(t => t.installation_task_id).filter(Boolean) as string[];
       const printIds = compositeTasks.map(t => t.print_task_id).filter(Boolean) as string[];
-      const contractIds = [...new Set(compositeTasks.map(t => t.contract_id).filter(Boolean))];
+      
+      // Collect ALL unique normalized contract IDs from composite_tasks and related structures
+      const allContractIdsSet = new Set<number>();
+      compositeTasks.forEach((t: any) => {
+        const c1 = normalizeContractId(t.contract_id);
+        if (c1) allContractIdsSet.add(c1);
+        if (Array.isArray(t._contractIds)) {
+          t._contractIds.forEach((cid: unknown) => {
+            const c = normalizeContractId(cid);
+            if (c) allContractIdsSet.add(c);
+          });
+        }
+      });
 
       let installDesigns: any[] = [];
       let printDesigns: any[] = [];
-      let billboardDesigns: any[] = [];
       let contracts: any[] = [];
       let installTasks: any[] = [];
       let taskDesignsData: any[] = [];
@@ -866,158 +1011,75 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
 
       const promises: Promise<any>[] = [];
 
-      // 1. PRIMARY: Fetch from task_designs table for all installation tasks under these contracts
-      if (contractIds.length > 0 || installIds.length > 0) {
-        promises.push(
-          Promise.resolve(
-            supabase
-              .from('installation_tasks')
-              .select('id, contract_id')
-              .in('contract_id', contractIds.length > 0 ? contractIds : [-1])
-          ).then(async ({ data: installTasksForContracts }) => {
-            const allInstallTaskIds = [...new Set([
-              ...installIds,
-              ...(installTasksForContracts || []).map(t => t.id)
-            ])];
-
-            const taskToContractMap = new Map<string, number>();
-            (installTasksForContracts || []).forEach(t => {
-              if (t.id && t.contract_id) taskToContractMap.set(t.id, Number(t.contract_id));
-            });
-
-            if (allInstallTaskIds.length > 0) {
-              const { data: designs } = await supabase
-                .from('task_designs')
-                .select('task_id, design_face_a_url, design_face_b_url, design_order')
-                .in('task_id', allInstallTaskIds)
-                .order('design_order', { ascending: true });
-
-              taskDesignsData = (designs || []).map(d => ({
-                ...d,
-                contract_id: taskToContractMap.get(d.task_id) || null
-              }));
-            }
-          })
-        );
-      }
-
+      // Fetch installation tasks to ensure contract links
       if (installIds.length > 0) {
         promises.push(
-          Promise.resolve(supabase.from('installation_task_items')
-            .select('task_id, design_face_a, design_face_b')
-            .in('task_id', installIds))
-            .then(({ data }) => { installDesigns = data || []; })
+          supabase.from('installation_tasks')
+            .select('id, task_type, reinstallation_number, contract_id, team:installation_teams!installation_tasks_team_id_fkey(team_name)')
+            .in('id', installIds)
+            .then(({ data }) => {
+              installTasks = data || [];
+              (installTasks || []).forEach(it => {
+                const c = normalizeContractId(it.contract_id);
+                if (c) allContractIdsSet.add(c);
+              });
+            })
         );
         promises.push(
-          Promise.resolve(supabase.from('installation_tasks')
-            .select('id, task_type, reinstallation_number, contract_id, team:installation_teams!installation_tasks_team_id_fkey(team_name)')
-            .in('id', installIds))
-            .then(({ data }) => { installTasks = data || []; })
+          supabase.from('installation_task_items')
+            .select('task_id, design_face_a, design_face_b')
+            .in('task_id', installIds)
+            .then(({ data }) => { installDesigns = data || []; })
         );
       }
 
       if (printIds.length > 0) {
         promises.push(
-          Promise.resolve(supabase.from('print_task_items')
+          supabase.from('print_task_items')
             .select('task_id, design_face_a, design_face_b')
-            .in('task_id', printIds))
+            .in('task_id', printIds)
             .then(({ data }) => { printDesigns = data || []; })
         );
         promises.push(
-          Promise.resolve(supabase.from('print_tasks')
+          supabase.from('print_tasks')
             .select('id, printer:printers!print_tasks_printer_id_fkey(name)')
-            .in('id', printIds))
+            .in('id', printIds)
             .then(({ data }) => { printTasksData = data || []; })
-        );
-      }
-
-      if (contractIds.length > 0) {
-        promises.push(
-          Promise.resolve(supabase.from('Contract')
-            .select('"Contract_Number", "Ad Type"')
-            .in('Contract_Number', contractIds))
-            .then(({ data }) => { contracts = data || []; })
         );
       }
 
       await Promise.all(promises);
 
-      // For tasks with no designs, fetch from billboard_history scoped to the SAME contract
-      const taskIdsWithNoDesigns = new Set<string>();
-      const fallbackItemsByTask = new Map<string, Array<{ billboard_id: number; installation_date: string | null }>>();
-      const contractByInstallTaskId = new Map<string, number>();
-
-      compositeTasks.forEach(task => {
-        if (task.installation_task_id && task.contract_id) {
-          contractByInstallTaskId.set(task.installation_task_id, Number(task.contract_id));
-        }
-      });
-
-      installTasks.forEach((t: any) => {
-        if (t.id && t.contract_id) {
-          contractByInstallTaskId.set(t.id, Number(t.contract_id));
-        }
-      });
-
-      compositeTasks.forEach(task => {
-        if (!task.installation_task_id) return;
-        const hasDesign = 
-          taskDesignsData.some(d => (d.task_id === task.installation_task_id || Number(d.contract_id) === Number(task.contract_id)) && (d.design_face_a_url || d.design_face_b_url)) ||
-          installDesigns.some(d => d.task_id === task.installation_task_id && (d.design_face_a || d.design_face_b));
-        if (!hasDesign) taskIdsWithNoDesigns.add(task.installation_task_id);
-      });
-
-      let historyDesigns: any[] = [];
-      const historyByBillboardAndContract = new Map<string, any[]>();
-
-      if (taskIdsWithNoDesigns.size > 0) {
-        const { data: itemsWithBillboards } = await supabase
-          .from('installation_task_items')
-          .select('task_id, billboard_id, installation_date')
-          .in('task_id', Array.from(taskIdsWithNoDesigns));
-
-        (itemsWithBillboards || []).forEach((item: any) => {
-          if (!item.task_id || !item.billboard_id) return;
-          if (!fallbackItemsByTask.has(item.task_id)) fallbackItemsByTask.set(item.task_id, []);
-          fallbackItemsByTask.get(item.task_id)!.push({
-            billboard_id: Number(item.billboard_id),
-            installation_date: item.installation_date || null,
-          });
-        });
-
-        const allBillboardIds = [...new Set((itemsWithBillboards || []).map((i: any) => i.billboard_id).filter(Boolean))];
-        const fallbackContractIds = [...new Set(
-          Array.from(taskIdsWithNoDesigns)
-            .map(taskId => contractByInstallTaskId.get(taskId))
-            .filter((contractId): contractId is number => Number.isFinite(contractId))
-        )];
-
-        if (allBillboardIds.length > 0 && fallbackContractIds.length > 0) {
-          const { data: histData } = await supabase
-            .from('billboard_history')
-            .select('billboard_id, contract_number, design_face_a_url, design_face_b_url, installation_date')
-            .in('billboard_id', allBillboardIds)
-            .in('contract_number', fallbackContractIds)
-            .order('installation_date', { ascending: false });
-
-          historyDesigns = histData || [];
-
-          historyDesigns.forEach((row: any) => {
-            const key = `${row.billboard_id}:${row.contract_number}`;
-            if (!historyByBillboardAndContract.has(key)) historyByBillboardAndContract.set(key, []);
-            historyByBillboardAndContract.get(key)!.push(row);
-          });
-        }
+      // Now query Contract table for ALL gathered contract numbers
+      const finalUniqueContractIds = Array.from(allContractIdsSet);
+      if (finalUniqueContractIds.length > 0) {
+        const { data: contractsData } = await supabase
+          .from('Contract')
+          .select('"Contract_Number", "Ad Type", "Customer Name"')
+          .in('Contract_Number', finalUniqueContractIds);
+        contracts = contractsData || [];
       }
 
+      // Map contracts and ad types
       const adTypeMap = new Map<number, string>();
-      contracts.forEach((c: any) => { adTypeMap.set(c.Contract_Number, c['Ad Type'] || ''); });
+      contracts.forEach((c: any) => {
+        const cNum = normalizeContractId(c.Contract_Number);
+        const rawType = c['Ad Type'] || c.ad_type || '';
+        const cleanType = String(rawType).trim();
+        if (cNum && cleanType && cleanType !== 'غير محدد' && cleanType !== 'null') {
+          adTypeMap.set(cNum, cleanType);
+        }
+      });
 
       const teamNameMap = new Map<string, string>();
       const reinstallMap = new Map<string, number | null>();
+      const contractByInstallTaskId = new Map<string, number>();
+
       installTasks.forEach((t: any) => { 
         teamNameMap.set(t.id, t.team?.team_name || ''); 
         reinstallMap.set(t.id, t.task_type === 'reinstallation' ? (t.reinstallation_number || 1) : null);
+        const c = normalizeContractId(t.contract_id);
+        if (c) contractByInstallTaskId.set(t.id, c);
       });
 
       const printerNameMap = new Map<string, string>();
@@ -1025,12 +1087,13 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         printerNameMap.set(pt.id, pt.printer?.name || '');
       });
 
+      // Real installation costs
       const realInstallCostMap = new Map<string, number>();
-      if (installTaskIds.length > 0) {
+      if (installIds.length > 0) {
         const { data: realItems } = await supabase
           .from('installation_task_items')
           .select('task_id, customer_installation_cost, reinstall_count, customer_original_install_cost, customer_reinstall_cost')
-          .in('task_id', installTaskIds);
+          .in('task_id', installIds);
 
         (realItems || []).forEach((item: any) => {
           const isReinstalled = (item.reinstall_count || 0) > 0;
@@ -1043,13 +1106,13 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         });
       }
 
-      // 1. PRIMARY: Fetch contract design URLs using the exact ContractCard algorithm
+      // Fetch designs
       const contractDesignMap = new Map<number, string[]>();
       await Promise.all(
-        contractIds.map(async (cId) => {
-          const urls = await fetchContractDesignUrls(Number(cId));
+        finalUniqueContractIds.map(async (cId) => {
+          const urls = await fetchContractDesignUrls(cId);
           if (urls && urls.length > 0) {
-            contractDesignMap.set(Number(cId), urls);
+            contractDesignMap.set(cId, urls);
           }
         })
       );
@@ -1058,75 +1121,61 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         const seen = new Set<string>();
         const urls: string[] = [];
 
-        const contractUrls = contractDesignMap.get(Number(task.contract_id)) || [];
-        contractUrls.forEach(u => {
-          if (!seen.has(u)) {
-            seen.add(u);
-            urls.push(u);
-          }
-        });
-
-        // PRIMARY: From task_designs table (main design source)
-        if (urls.length === 0) {
-          taskDesignsData
-            .filter(d => (d.task_id && task.installation_task_id && String(d.task_id) === String(task.installation_task_id)) || (d.contract_id && task.contract_id && Number(d.contract_id) === Number(task.contract_id)))
-            .forEach(d => {
-              if (d.design_face_a_url && !seen.has(d.design_face_a_url)) { seen.add(d.design_face_a_url); urls.push(d.design_face_a_url); }
-              if (d.design_face_b_url && !seen.has(d.design_face_b_url)) { seen.add(d.design_face_b_url); urls.push(d.design_face_b_url); }
-            });
+        // Resolve candidate contract IDs for this task
+        const candidateContractIds: number[] = [];
+        const directC = normalizeContractId(task.contract_id);
+        if (directC) candidateContractIds.push(directC);
+        if (Array.isArray((task as any)._contractIds)) {
+          (task as any)._contractIds.forEach((cid: unknown) => {
+            const c = normalizeContractId(cid);
+            if (c && !candidateContractIds.includes(c)) candidateContractIds.push(c);
+          });
+        }
+        if (task.installation_task_id) {
+          const c = contractByInstallTaskId.get(task.installation_task_id);
+          if (c && !candidateContractIds.includes(c)) candidateContractIds.push(c);
         }
 
-        // From print task items
-        if (urls.length === 0) {
+        // Gather design images
+        candidateContractIds.forEach(cId => {
+          const contractUrls = contractDesignMap.get(cId) || [];
+          contractUrls.forEach(u => {
+            if (!seen.has(u)) {
+              seen.add(u);
+              urls.push(u);
+            }
+          });
+        });
+
+        // Fallback designs from print items
+        if (urls.length === 0 && task.print_task_id) {
           printDesigns.filter(d => d.task_id === task.print_task_id).forEach(d => {
             if (d.design_face_a && !seen.has(d.design_face_a)) { seen.add(d.design_face_a); urls.push(d.design_face_a); }
             if (d.design_face_b && !seen.has(d.design_face_b)) { seen.add(d.design_face_b); urls.push(d.design_face_b); }
           });
         }
 
-        // From installation task items
-        if (urls.length === 0) {
+        // Fallback designs from install items
+        if (urls.length === 0 && task.installation_task_id) {
           installDesigns.filter(d => d.task_id === task.installation_task_id).forEach(d => {
             if (d.design_face_a && !seen.has(d.design_face_a)) { seen.add(d.design_face_a); urls.push(d.design_face_a); }
             if (d.design_face_b && !seen.has(d.design_face_b)) { seen.add(d.design_face_b); urls.push(d.design_face_b); }
           });
         }
 
-        // Fallback: only from billboard_history of the SAME contract linked to this composite task
-        if (urls.length === 0 && task.installation_task_id && task.contract_id) {
-          const taskItems = fallbackItemsByTask.get(task.installation_task_id) || [];
-          const contractNo = contractByInstallTaskId.get(task.installation_task_id) ?? Number(task.contract_id);
-          const seenBillboards = new Set<number>();
-
-          taskItems.forEach(item => {
-            if (!item.billboard_id || seenBillboards.has(item.billboard_id)) return;
-            seenBillboards.add(item.billboard_id);
-
-            const historyKey = `${item.billboard_id}:${contractNo}`;
-            const candidates = historyByBillboardAndContract.get(historyKey) || [];
-            if (candidates.length === 0) return;
-
-            const picked = item.installation_date
-              ? candidates.find((h: any) => h.installation_date === item.installation_date) || candidates[0]
-              : candidates[0];
-
-            if (picked?.design_face_a_url && !seen.has(picked.design_face_a_url)) {
-              seen.add(picked.design_face_a_url);
-              urls.push(picked.design_face_a_url);
-            }
-            if (picked?.design_face_b_url && !seen.has(picked.design_face_b_url)) {
-              seen.add(picked.design_face_b_url);
-              urls.push(picked.design_face_b_url);
-            }
-          });
-        }
-
-        // NOTE: Removed billboards fallback - it shows current billboard designs
-        // which may belong to newer/different contracts, not the composite task's contract
+        // Resolve Ad Types strictly from Contract table
+        const taskAdTypes: string[] = [];
+        candidateContractIds.forEach(cid => {
+          const found = adTypeMap.get(cid);
+          if (found && !taskAdTypes.includes(found)) {
+            taskAdTypes.push(found);
+          }
+        });
 
         extras[task.id] = {
           designUrls: urls.slice(0, 4),
-          adType: adTypeMap.get(task.contract_id) || '',
+          adTypes: taskAdTypes,
+          adType: taskAdTypes.length > 0 ? taskAdTypes.join(' / ') : '',
           teamName: task.installation_task_id ? teamNameMap.get(task.installation_task_id) || '' : '',
           reinstallationNumber: task.installation_task_id ? reinstallMap.get(task.installation_task_id) ?? null : null,
           printerName: task.print_task_id ? printerNameMap.get(task.print_task_id) || '' : '',
@@ -1138,7 +1187,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     },
   });
 
-  // Fetch payments distributed to composite tasks (via composite_task_id)
+  // 3. Fetch payments distributed to composite tasks
   const { data: taskPayments = {} } = useQuery({
     queryKey: ['composite-task-payments', compositeTasks.map(t => t.id).join(',')],
     enabled: compositeTasks.length > 0,
@@ -1146,55 +1195,25 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       const taskIds = compositeTasks.map(t => t.id);
       if (taskIds.length === 0) return {};
 
-      // جلب الدفعات المرتبطة بالمهام المجمعة
       const { data } = await supabase
         .from('customer_payments')
-        .select('id, amount, distributed_payment_id, paid_at, composite_task_id, entry_type')
+        .select('id, amount, payment_date, entry_type, notes, composite_task_id, distributed_payment_id')
         .in('composite_task_id', taskIds)
-        .in('entry_type', ['receipt', 'payment', 'account_payment']);
+        .eq('entry_type', 'payment')
+        .order('payment_date', { ascending: true });
 
-      // جلب رقم الصف الفعلي لكل دفعة في حساب الزبون
-      const customerIds = [...new Set(compositeTasks.map(t => t.customer_id).filter(Boolean))];
-      let allCustomerPayments: any[] = [];
-      if (customerIds.length > 0) {
-        const { data: allPayments } = await supabase
-          .from('customer_payments')
-          .select('id, customer_id')
-          .in('customer_id', customerIds as string[])
-          .order('paid_at', { ascending: true })
-          .order('created_at', { ascending: true });
-        allCustomerPayments = allPayments || [];
-      }
-
-      // بناء خريطة رقم الصف لكل دفعة حسب الزبون
-      const paymentRowNumberMap = new Map<string, number>();
-      const customerPaymentCounters = new Map<string, number>();
-      allCustomerPayments.forEach((p: any) => {
-        const counter = (customerPaymentCounters.get(p.customer_id) || 0) + 1;
-        customerPaymentCounters.set(p.customer_id, counter);
-        paymentRowNumberMap.set(p.id, counter);
-      });
-
-      const map: Record<string, Array<{ id: string; amount: number; distributed_payment_id: string | null; paid_at: string; rowNumber: number }>> = {};
+      const map: Record<string, any[]> = {};
       (data || []).forEach((p: any) => {
-        const key = p.composite_task_id;
-        if (!key) return;
-        if (!map[key]) map[key] = [];
-        map[key].push({
-          id: p.id,
-          amount: Number(p.amount || 0),
-          distributed_payment_id: p.distributed_payment_id,
-          paid_at: p.paid_at,
-          rowNumber: paymentRowNumberMap.get(p.id) || 0,
-        });
+        if (!map[p.composite_task_id]) map[p.composite_task_id] = [];
+        map[p.composite_task_id].push(p);
       });
       return map;
     },
   });
 
-  // Enrich tasks
+  // 4. Enrich tasks with full relational properties
   const enriched = useMemo(() => compositeTasks.map((task: any) => {
-    const extra = taskExtras[task.id] || { designUrls: [], adType: '', teamName: '', reinstallationNumber: null, printerName: '', realInstallCost: 0 };
+    const extra = taskExtras[task.id] || { designUrls: [], adTypes: [], adType: '', teamName: '', reinstallationNumber: null, printerName: '', realInstallCost: 0 };
     const payments = taskPayments[task.id] || [];
     const totalPaid = payments.length > 0 
       ? payments.reduce((s: number, p: any) => s + p.amount, 0) 
@@ -1209,6 +1228,11 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     let h = 0;
     for (let i = 0; i < task.id.length; i++) h = task.id.charCodeAt(i) + ((h << 5) - h);
     const accent = `hsl(${Math.abs(h) % 360}, 55%, 58%)`;
+
+    const contractIds = task._contractIds && task._contractIds.length > 0 
+      ? task._contractIds 
+      : [task.contract_id].filter(Boolean);
+
     return {
       ...task,
       customer_installation_cost: realCustomerInstall,
@@ -1216,19 +1240,20 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       company_total: companyTotal,
       net_profit: netProfit,
       designUrls: extra.designUrls,
-      adType: extra.adType,
-      teamName: extra.teamName,
-      printerName: extra.printerName,
+      adTypes: extra.adTypes || (extra.adType ? [extra.adType] : []),
+      adType: extra.adType || '',
+      teamName: extra.teamName || '',
+      printerName: extra.printerName || '',
       reinstallationNumber: task._reinstallationNumber ?? extra.reinstallationNumber ?? null,
       accent,
-      contractIds: task._contractIds || [task.contract_id],
+      contractIds,
       _payments: payments,
       _totalPaid: totalPaid,
       _paymentPercentage: paymentPercentage,
     };
   }), [compositeTasks, taskExtras, taskPayments]);
 
-  // Stats
+  // Overall Stats
   const stats = useMemo(() => {
     const totalRevenue = enriched.reduce((s, t) => s + (t.customer_total || 0), 0);
     const totalPaid = enriched.reduce((s, t) => s + (t._totalPaid || 0), 0);
@@ -1249,12 +1274,15 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     let r = enriched;
     if (filterStatus !== 'all') r = r.filter(t => t.status === filterStatus);
     if (search) {
-      const s = search.toLowerCase();
+      const s = search.toLowerCase().trim();
       r = r.filter(t =>
         (t.customer_name || '').toLowerCase().includes(s) ||
         String(t.contract_id).includes(s) ||
         (t.adType || '').toLowerCase().includes(s) ||
-        ((t as any).task_name || '').toLowerCase().includes(s)
+        (t.teamName || '').toLowerCase().includes(s) ||
+        (t.printerName || '').toLowerCase().includes(s) ||
+        ((t as any).task_name || '').toLowerCase().includes(s) ||
+        (t.contractIds || []).some((c: any) => String(c).includes(s))
       );
     }
     return r;
@@ -1276,9 +1304,22 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     return sortDir === 'asc' ? cmp : -cmp;
   }), [filtered, sortField, sortDir]);
 
-  // Group tasks by installation_task_id
+  // Group tasks by contract and reinstallation status
   const grouped = useMemo(() => {
-    const groups: { key: string; label: string; contractId: number; customerName: string; adType: string; teamName: string; printerName: string; reinstallationNumber: number | null; tasks: typeof sorted }[] = [];
+    const groups: { 
+      key: string; 
+      label: string; 
+      contractId: number; 
+      contractIds: number[];
+      customerName: string; 
+      adTypes: string[];
+      adType: string; 
+      teamNames: string[];
+      printerNames: string[];
+      reinstallationNumber: number | null; 
+      tasks: typeof sorted;
+    }[] = [];
+    
     const groupMap = new Map<string, typeof sorted>();
     
     sorted.forEach(task => {
@@ -1291,20 +1332,37 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     groupMap.forEach((tasks, key) => {
       const first = tasks[0];
       const reinstallNum = first.reinstallationNumber;
+      
+      // Deduplicate contracts
+      const allGroupContractIds = [...new Set(
+        tasks.flatMap((t: any) => t.contractIds || [t.contract_id]).map(normalizeContractId).filter((id): id is number => id !== null)
+      )];
+
       const label = reinstallNum != null
         ? `إعادة تركيب re${reinstallNum}-${first.contract_id}`
-        : `عقد #${first.contract_id}`;
-      // جمع جميع أسماء الفرق والمطابع الفريدة من كل مهام المجموعة
+        : allGroupContractIds.length > 1
+          ? `عقود #${allGroupContractIds.join(', #')}`
+          : `عقد #${first.contract_id}`;
+
+      // Deduplicate teams & printers
       const uniqueTeams = [...new Set(tasks.map((t: any) => t.teamName).filter(Boolean))] as string[];
       const uniquePrinters = [...new Set(tasks.map((t: any) => t.printerName).filter(Boolean))] as string[];
+
+      // Deduplicate ad types
+      const uniqueAdTypes = [...new Set(
+        tasks.flatMap((t: any) => t.adTypes || (t.adType ? [t.adType] : [])).filter((a: string) => a && a !== 'غير محدد')
+      )] as string[];
+
       groups.push({
         key,
         label,
         contractId: first.contract_id,
+        contractIds: allGroupContractIds.length > 0 ? allGroupContractIds : [first.contract_id],
         customerName: first.customer_name || 'غير محدد',
-        adType: first.adType || '',
-        teamName: uniqueTeams.join(' / ') || '',
-        printerName: uniquePrinters.join(' / ') || '',
+        adTypes: uniqueAdTypes,
+        adType: uniqueAdTypes.join(' / ') || '',
+        teamNames: uniqueTeams,
+        printerNames: uniquePrinters,
         reinstallationNumber: reinstallNum,
         tasks,
       });
@@ -1315,7 +1373,6 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
 
   const totalPages = Math.ceil(grouped.length / PAGE_SIZE);
   
-  // Paginate on group level to avoid splitting a group across pages
   const paginatedGroups = useMemo(() => {
     const sliced = grouped.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
     return sliced.map(g => ({
@@ -1324,7 +1381,6 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       groupProfit: g.tasks.reduce((s: number, t: any) => s + (t.net_profit || 0), 0),
       groupCost: g.tasks.reduce((s: number, t: any) => s + (t.company_total || 0), 0),
     }));
-
   }, [grouped, page]);
 
   const toggleGroupCollapse = useCallback((key: string) => {
@@ -1341,7 +1397,6 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     try {
       setDiscountSaving(true);
       if (discountTarget === 'all') {
-        // Proportional distribution
         const totalGroupCost = groupTasks.reduce((s: number, t: any) => s + (t.customer_total || 0), 0);
         for (const task of groupTasks) {
           const ratio = totalGroupCost > 0 ? ((task.customer_total || 0) / totalGroupCost) : (1 / groupTasks.length);
@@ -1353,7 +1408,6 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           }).eq('id', task.id);
         }
       } else {
-        // Single task
         await supabase.from('composite_tasks').update({
           discount_amount: discountAmount,
           discount_reason: discountReason || null,
@@ -1419,7 +1473,6 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         .eq('id', data.id).single();
 
       if (taskData?.print_task_id) {
-        // Fetch total_area to calculate correct price_per_meter
         const { data: printTask } = await supabase.from('print_tasks')
           .select('total_area')
           .eq('id', taskData.print_task_id).single();
@@ -1437,7 +1490,6 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         }).eq('id', taskData.cutout_task_id);
       }
       if (taskData?.combined_invoice_id) {
-        // تحديث الفاتورة الموحدة بجميع البيانات
         await supabase.from('printed_invoices').update({
           print_cost: companyPrint + companyCutout,
           total_amount: customerTotal,
@@ -1450,13 +1502,11 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           updated_at: new Date().toISOString()
         } as any).eq('id', taskData.combined_invoice_id);
 
-        // مزامنة سجل الدين في حساب الزبون مع المبلغ الجديد
         const { data: compositeTask } = await supabase.from('composite_tasks')
           .select('customer_id, customer_name, contract_id')
           .eq('id', data.id).single();
 
         if (compositeTask) {
-          // تحديث سجل الدين المرتبط بالفاتورة
           await supabase.from('customer_payments')
             .update({
               amount: -customerTotal,
@@ -1501,12 +1551,14 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
   });
 
   const SortPill = ({ field, label }: { field: SortField; label: string }) => (
-    <button onClick={() => handleSort(field)}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-150 border ${
+    <button 
+      onClick={() => handleSort(field)}
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all duration-150 border cursor-pointer ${
         sortField === field
           ? 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30'
           : 'text-muted-foreground border-border/40 hover:text-indigo-400 hover:border-indigo-500/20'
-      }`}>
+      }`}
+    >
       {label}
       <SortIcon field={field} sortField={sortField} sortDir={sortDir} />
     </button>
@@ -1547,7 +1599,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       <div className="flex flex-col h-full gap-4.5" dir="rtl">
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-4 shrink-0">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-3.5 shrink-0">
           {[
             {
               label: 'إجمالي المهام',
@@ -1629,33 +1681,26 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           ].map(({ label, value, color, icon: Icon, bg, border, accent, pct, pctLabel }) => (
             <div
               key={label}
-              className={`bg-card/35 backdrop-blur-xl border ${border} rounded-[24px] p-4.5 sm:p-5 flex flex-col justify-between min-h-[145px] sm:min-h-[155px] shadow-card hover:shadow-luxury transition-all duration-300 ease-out hover:-translate-y-1 select-none relative overflow-hidden group`}
+              className={`bg-card/40 backdrop-blur-xl border ${border} rounded-[22px] p-4 flex flex-col justify-between min-h-[140px] shadow-sm hover:shadow-md transition-all duration-200 select-none relative overflow-hidden group`}
             >
-              {/* Glowing Accent Top Border */}
-              <div className={`absolute top-0 right-0 left-0 h-[3.5px] ${accent} opacity-70 group-hover:opacity-100 transition-opacity duration-300`} />
-
-              {/* Ambient Glow Orb */}
-              <div className={`absolute -right-6 -bottom-6 w-24 h-24 rounded-full bg-current opacity-0 group-hover:opacity-[0.06] blur-xl transition-all duration-500 pointer-events-none ${color}`} />
-
+              <div className={`absolute top-0 right-0 left-0 h-[3px] ${accent} opacity-70 group-hover:opacity-100 transition-opacity duration-300`} />
               <div className="flex items-start justify-between relative z-10">
-                <div className="text-right space-y-1.5">
-                  <p className="text-[11px] sm:text-xs font-bold text-muted-foreground/75 tracking-wide leading-none">{label}</p>
-                  <p className={`text-xl sm:text-2xl lg:text-[26px] font-black tracking-tight ${color}`}>{value}</p>
+                <div className="text-right space-y-1">
+                  <p className="text-[11px] font-bold text-muted-foreground/75 leading-none">{label}</p>
+                  <p className={`text-lg sm:text-xl font-black tracking-tight ${color}`}>{value}</p>
                 </div>
-                <div className={`p-2.5 rounded-[16px] ${bg} ${color} border border-white/5 shadow-inner group-hover:scale-110 transition-transform duration-300 shrink-0`}>
-                  <Icon className="h-4.5 w-4.5" />
+                <div className={`p-2 rounded-xl ${bg} ${color} border border-white/5 shadow-inner shrink-0`}>
+                  <Icon className="h-4 w-4" />
                 </div>
               </div>
-
-              {/* Progress Indicator */}
-              <div className="mt-4 sm:mt-5 space-y-1.5 relative z-10">
-                <div className="flex items-center justify-between text-[9px] sm:text-[10px] font-bold text-muted-foreground/50">
-                  <span className="font-tajawal">{pctLabel}</span>
+              <div className="mt-3 space-y-1 relative z-10">
+                <div className="flex items-center justify-between text-[9px] font-bold text-muted-foreground/50">
+                  <span>{pctLabel}</span>
                   <span>{pct}%</span>
                 </div>
                 <div className="h-1.5 w-full bg-muted/20 rounded-full overflow-hidden">
                   <div 
-                    className={`h-full ${accent} rounded-full transition-all duration-500 ease-out`}
+                    className={`h-full ${accent} rounded-full transition-all duration-300`}
                     style={{ width: `${pct}%` }}
                   />
                 </div>
@@ -1665,11 +1710,11 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         </div>
 
         {/* Toolbar Control Center */}
-        <div className="bg-card/45 backdrop-blur-md border border-border/30 rounded-[22px] p-4 flex flex-wrap gap-3 items-center shrink-0 shadow-sm">
-          <div className="relative flex-1 min-w-[140px] sm:min-w-[200px]">
+        <div className="bg-card/45 backdrop-blur-md border border-border/30 rounded-[22px] p-3.5 flex flex-wrap gap-3 items-center shrink-0 shadow-sm">
+          <div className="relative flex-1 min-w-[140px] sm:min-w-[220px]">
             <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50" />
             <Input 
-              placeholder="بحث بالاسم، رقم العقد..." 
+              placeholder="بحث بالاسم، رقم العقد، نوع الإعلان..." 
               value={search} 
               onChange={e => { setSearch(e.target.value); setPage(1); }}
               className="pr-10 bg-background/50 border-border/30 h-10 text-xs text-foreground placeholder:text-muted-foreground/65 focus-visible:ring-indigo-500/50 rounded-xl" 
@@ -1680,7 +1725,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
             <SelectTrigger className="w-[145px] h-10 bg-background/50 border-border/30 text-xs font-bold rounded-xl">
               <SelectValue placeholder="الحالة" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="font-tajawal">
               <SelectItem value="all">جميع الحالات</SelectItem>
               <SelectItem value="pending">معلقة</SelectItem>
               <SelectItem value="in_progress">قيد التنفيذ</SelectItem>
@@ -1693,7 +1738,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
             variant="outline" 
             size="sm" 
             onClick={() => refetch()} 
-            className="h-10 gap-2 border-border/30 bg-background/50 hover:bg-muted/40 text-xs font-bold rounded-xl"
+            className="h-10 gap-2 border-border/30 bg-background/50 hover:bg-muted/40 text-xs font-bold rounded-xl cursor-pointer"
           >
             <RefreshCw className="h-3.5 w-3.5 text-indigo-500" />
             تحديث البيانات
@@ -1712,18 +1757,18 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           </div>
         </div>
 
-        {/* Card list - grouped by installation task */}
-        <div className="flex flex-col gap-4 flex-1 overflow-y-auto pb-4 min-h-0">
+        {/* Card list - grouped by contract */}
+        <div className="flex flex-col gap-3.5 flex-1 overflow-y-auto pb-4 min-h-0">
           {isLoading ? (
-            Array.from({ length: 5 }).map((_, i) => (
-              <motion.div key={i} initial={{ opacity: 0 }} animate={{ opacity: 1 - i * 0.15 }} transition={{ delay: i * 0.06 }}>
+            Array.from({ length: 4 }).map((_, i) => (
+              <motion.div key={i} initial={{ opacity: 0 }} animate={{ opacity: 1 - i * 0.15 }} transition={{ delay: i * 0.05 }}>
                 <SkeletonCard />
               </motion.div>
             ))
           ) : paginatedGroups.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-32 gap-4 text-muted-foreground">
-              <Package className="h-16 w-16 opacity-10" />
-              <span className="text-sm opacity-60">لا توجد مهام مطابقة</span>
+            <div className="flex flex-col items-center justify-center py-28 gap-3 text-muted-foreground bg-card/20 rounded-3xl border border-border/20">
+              <Package className="h-14 w-14 opacity-20" />
+              <span className="text-sm font-bold opacity-70">لا توجد مهام مجمعة مطابقة لمعايير البحث</span>
             </div>
           ) : (
             paginatedGroups.map((group) => {
@@ -1731,298 +1776,232 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
               const isSingleTask = group.tasks.length === 1;
 
               return (
-                <div key={group.key} className="rounded-3xl border border-border/20 overflow-hidden bg-gradient-to-br from-card/50 to-card/25 backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.05)] hover:border-border/30 transition-all duration-300">
-                  {/* Group header - always visible */}
+                <div key={group.key} className="rounded-2xl border border-border/30 overflow-hidden bg-card/40 backdrop-blur-xl shadow-sm hover:border-border/50 transition-all duration-200">
+                  {/* Executive Group Header */}
                   <div
-                    className={`flex flex-wrap items-center justify-between gap-4 px-6 py-4 bg-muted/10 border-b border-border/20 ${!isSingleTask ? 'cursor-pointer hover:bg-muted/20' : ''} transition-all duration-200`}
+                    className={`flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 bg-muted/15 border-b border-border/20 ${!isSingleTask ? 'cursor-pointer hover:bg-muted/25' : ''} transition-colors select-none`}
                     onClick={() => !isSingleTask && toggleGroupCollapse(group.key)}
                   >
-                    <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap text-right">
-                      <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shadow-sm shrink-0">
-                        <FolderOpen className="h-4.5 w-4.5" />
+                    {/* Right: Client & Scope Info */}
+                    <div className="flex items-center gap-2 flex-wrap text-right min-w-0">
+                      <div className="p-1.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 shadow-sm shrink-0">
+                        <FolderOpen className="h-4 w-4" />
                       </div>
                       <span className="text-base font-black text-foreground tracking-tight">{group.customerName}</span>
-                      <span className="text-xs font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2.5 py-0.5 rounded-lg font-extrabold ">
+                      
+                      <span className="text-xs font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2.5 py-0.5 rounded-md font-black">
                         {group.label}
                       </span>
+                      
                       {group.reinstallationNumber != null && (
-                        <span className="text-[10px] font-mono bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2.5 py-0.5 rounded-lg font-extrabold ">
-                          re{group.reinstallationNumber}-{group.contractId}
+                        <span className="text-[10px] font-mono bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-0.5 rounded-md font-black">
+                          re${group.reinstallationNumber}-${group.contractId}
                         </span>
                       )}
+
+                      {/* Prominent Group Ad Type Badge */}
                       {group.adType && group.adType !== 'غير محدد' && (
-                        <span className="text-xs font-bold text-muted-foreground/80">{group.adType}</span>
-                      )}
-                      {group.teamName && (
-                        <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-blue-400 bg-blue-500/10 border border-blue-500/15 px-2.5 py-1 rounded-xl shadow-sm">
-                          <Users className="h-3.5 w-3.5" /> {group.teamName}
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-black bg-amber-500/10 text-amber-300 border border-amber-500/30 shadow-sm">
+                          <Megaphone className="h-3 w-3 text-amber-400 shrink-0" />
+                          <span>نوع الإعلان: {group.adType}</span>
                         </span>
                       )}
-                      {group.printerName && (
-                        <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-purple-400 bg-purple-500/10 border border-purple-500/15 px-2.5 py-1 rounded-xl shadow-sm">
-                          <Printer className="h-3.5 w-3.5" /> {group.printerName}
+
+                      {/* Deduplicated Teams */}
+                      {group.teamNames && group.teamNames.length > 0 && group.teamNames.map((tName, tIdx) => (
+                        <span key={tIdx} className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-md">
+                          <Wrench className="h-3 w-3" /> {tName}
                         </span>
-                      )}
+                      ))}
+
+                      {/* Deduplicated Printers */}
+                      {group.printerNames && group.printerNames.length > 0 && group.printerNames.map((pName, pIdx) => (
+                        <span key={pIdx} className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-400 bg-purple-500/10 border border-purple-500/20 px-2 py-0.5 rounded-md">
+                          <Printer className="h-3 w-3" /> {pName}
+                        </span>
+                      ))}
+
                       {!isSingleTask && (
-                        <span className="text-[10px] font-black bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full px-2.5 py-0.5">
+                        <span className="text-[10px] font-black bg-muted/60 text-muted-foreground border border-border/40 rounded-md px-2 py-0.5">
                           {group.tasks.length} مهام
                         </span>
                       )}
-                      <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-emerald-400 bg-emerald-500/10 border border-emerald-500/15 px-2.5 py-1 rounded-xl shadow-sm">
-                        <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
-                        تكلفة الزبون: {group.groupTotal.toLocaleString('ar-LY')} د.ل
-                      </span>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0 flex-wrap" onClick={e => e.stopPropagation()}>
-                      <div className="hidden sm:flex items-center gap-3 text-xs">
-                        <span className="text-emerald-400 font-black">إجمالي الزبون: {group.groupTotal.toLocaleString('ar-LY')} د.ل</span>
-                        <span className={`font-black ${group.groupProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          ربح: {group.groupProfit.toLocaleString('ar-LY')}
-                        </span>
+                    {/* Middle & Left: Executive Financials & Actions */}
+                    <div className="flex items-center gap-2.5 shrink-0 flex-wrap" onClick={e => e.stopPropagation()}>
+                      {/* Financial Executive Summary */}
+                      <div className="hidden sm:flex items-center gap-2 text-xs">
+                        <div className="px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-black">
+                          الإيراد: {group.groupTotal.toLocaleString('ar-LY')} د.ل
+                        </div>
+                        <div className="px-2.5 py-1 rounded-lg bg-orange-500/10 border border-orange-500/20 text-orange-400 font-bold">
+                          التكلفة: {group.groupCost.toLocaleString('ar-LY')} د.ل
+                        </div>
+                        <div className={`px-2.5 py-1 rounded-lg border font-black ${group.groupProfit >= 0 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'}`}>
+                          الربح: {group.groupProfit.toLocaleString('ar-LY')} د.ل
+                        </div>
                       </div>
 
-                      {/* ZIP Download */}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            disabled={zipDownloadingGroup === group.key}
-                            onClick={(e) => { e.stopPropagation(); handleDownloadGroupZip({ key: group.key, contractId: group.contractId, customerName: group.customerName }); }}
-                            className="h-8.5 w-8.5 rounded-xl flex items-center justify-center bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all hover:scale-105 disabled:opacity-50"
-                          >
-                            {zipDownloadingGroup === group.key ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>تحميل صور وCSV العقد كملف ZIP</TooltipContent>
-                      </Tooltip>
+                      {/* Actions Toolbar */}
+                      <div className="flex items-center gap-1.5">
+                        {/* ZIP Download */}
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              disabled={zipDownloadingGroup === group.key}
+                              onClick={(e) => { e.stopPropagation(); handleDownloadGroupZip({ key: group.key, contractId: group.contractId, customerName: group.customerName }); }}
+                              className="h-8.5 w-8.5 rounded-xl flex items-center justify-center bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all cursor-pointer disabled:opacity-50"
+                              aria-label="تحميل ZIP"
+                            >
+                              {zipDownloadingGroup === group.key ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">تحميل صور وCSV العقد كملف ZIP</TooltipContent>
+                        </Tooltip>
 
-                      {/* إضافة مهمة طباعة لكل المهام */}
-                      {(() => {
-                        const tasksToCreate = group.tasks.filter((t: any) => !t.print_task_id && t.installation_task_id);
-                        if (tasksToCreate.length === 0) return null;
-                        return (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                onClick={() => handleCreatePrintTasksForGroup(group.tasks)}
-                                className="h-8.5 rounded-xl flex items-center gap-1.5 px-3 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all hover:scale-105 text-xs font-bold"
-                              >
-                                <Printer className="h-3.5 w-3.5 animate-pulse" />
-                                <span>إنشاء مهمة طباعة ({tasksToCreate.length})</span>
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="text-xs">إنشاء مهمة طباعة للمهام غير المجهزة في التجميعة</TooltipContent>
-                          </Tooltip>
-                        );
-                      })()}
+                        {/* Create Print Tasks for all group */}
+                        {(() => {
+                          const tasksToCreate = group.tasks.filter((t: any) => !t.print_task_id && t.installation_task_id);
+                          if (tasksToCreate.length === 0) return null;
+                          return (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  onClick={() => handleCreatePrintTasksForGroup(group.tasks)}
+                                  className="h-8.5 rounded-xl flex items-center gap-1.5 px-2.5 bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20 transition-all text-xs font-bold cursor-pointer"
+                                >
+                                  <Printer className="h-3.5 w-3.5 animate-pulse" />
+                                  <span>إنشاء مهام طباعة ({tasksToCreate.length})</span>
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">إنشاء مهمة طباعة للمهام المتبقية</TooltipContent>
+                            </Tooltip>
+                          );
+                        })()}
 
-                      {/* Discount Popover */}
-                      <Popover open={discountPopoverGroup === group.key} onOpenChange={(open) => {
-                        if (open) {
-                          setDiscountPopoverGroup(group.key);
-                          const totalDiscount = group.tasks.reduce((s, t) => s + (t.discount_amount || 0), 0);
-                          setDiscountAmount(totalDiscount);
-                          setDiscountReason(group.tasks[0]?.discount_reason || '');
-                          setDiscountTarget('all');
-                        } else {
-                          setDiscountPopoverGroup(null);
-                        }
-                      }}>
-                        <PopoverTrigger asChild>
-                          <button className="h-8.5 w-8.5 rounded-xl flex items-center justify-center bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-all hover:scale-105">
-                            <Percent className="h-4 w-4" />
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[380px] p-5 rounded-2xl border-border/40 shadow-xl" side="bottom" align="end">
-                          <div className="space-y-5" dir="rtl">
-                            <div className="flex items-center justify-between">
-                              <h4 className="text-base font-extrabold text-foreground">إدارة الخصم</h4>
-                              <span className="text-[10px] font-bold text-muted-foreground bg-muted/40 px-2 py-1 rounded-md">
-                                {group.tasks.length} مهمة
-                              </span>
-                            </div>
-                            {/* Per-task breakdown */}
-                            <div className="border border-border/50 rounded-xl overflow-hidden text-xs bg-card/40">
-                              <table className="w-full">
-                                <thead className="bg-muted/40">
-                                  <tr>
-                                    <th className="text-right px-3 py-2 font-semibold text-muted-foreground">المهمة</th>
-                                    <th className="text-right px-3 py-2 font-semibold text-muted-foreground">الإجمالي</th>
-                                    <th className="text-right px-3 py-2 font-semibold text-muted-foreground">الخصم</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-border/30">
-                                  {group.tasks.map((t, i) => (
-                                    <tr key={t.id} className="hover:bg-muted/20">
-                                      <td className="px-3 py-2 font-mono text-foreground/85">{t.teamName || `مهمة ${i + 1}`}</td>
-                                      <td className="px-3 py-2 font-mono">{(t.customer_total || 0).toLocaleString('ar-LY')}</td>
-                                      <td className="px-3 py-2 font-mono text-amber-400">{(t.discount_amount || 0).toLocaleString('ar-LY')}</td>
+                        {/* Discount Management Popover */}
+                        <Popover open={discountPopoverGroup === group.key} onOpenChange={(open) => {
+                          if (open) {
+                            setDiscountPopoverGroup(group.key);
+                            const totalDiscount = group.tasks.reduce((s, t) => s + (t.discount_amount || 0), 0);
+                            setDiscountAmount(totalDiscount);
+                            setDiscountReason(group.tasks[0]?.discount_reason || '');
+                            setDiscountTarget('all');
+                          } else {
+                            setDiscountPopoverGroup(null);
+                          }
+                        }}>
+                          <PopoverTrigger asChild>
+                            <button 
+                              className="h-8.5 w-8.5 rounded-xl flex items-center justify-center bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-all cursor-pointer"
+                              aria-label="إدارة الخصم"
+                            >
+                              <Percent className="h-4 w-4" />
+                            </button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[380px] p-5 rounded-2xl border-border/40 shadow-xl" side="bottom" align="end">
+                            <div className="space-y-4 text-right" dir="rtl">
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-sm font-black text-foreground">إدارة الخصم للتجميعة</h4>
+                                <span className="text-[10px] font-bold text-muted-foreground bg-muted/40 px-2 py-0.5 rounded">
+                                  {group.tasks.length} مهمة
+                                </span>
+                              </div>
+                              <div className="border border-border/40 rounded-xl overflow-hidden text-xs bg-card/40">
+                                <table className="w-full">
+                                  <thead className="bg-muted/40">
+                                    <tr>
+                                      <th className="text-right px-3 py-2 font-bold text-muted-foreground">المهمة</th>
+                                      <th className="text-right px-3 py-2 font-bold text-muted-foreground">الإجمالي</th>
+                                      <th className="text-right px-3 py-2 font-bold text-muted-foreground">الخصم</th>
                                     </tr>
-                                  ))}
-                                </tbody>
-                                <tfoot className="bg-muted/30 font-extrabold">
-                                  <tr>
-                                    <td className="px-3 py-2">الإجمالي</td>
-                                    <td className="px-3 py-2 font-mono">{group.groupTotal.toLocaleString('ar-LY')}</td>
-                                    <td className="px-3 py-2 font-mono text-amber-400">{group.tasks.reduce((s, t) => s + (t.discount_amount || 0), 0).toLocaleString('ar-LY')}</td>
-                                  </tr>
-                                </tfoot>
-                              </table>
-                            </div>
-                            {/* Target selection */}
-                            <div className="space-y-2">
-                              <Label className="text-xs font-bold text-foreground/80">تطبيق على</Label>
-                              <Select value={discountTarget} onValueChange={(v) => setDiscountTarget(v as any)}>
-                                <SelectTrigger className="h-10 text-xs">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="all">تقسيم على الجميع</SelectItem>
-                                  {group.tasks.map((t, i) => (
-                                    <SelectItem key={t.id} value={t.id}>{t.teamName || `مهمة ${i + 1}`}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            {/* Amount & reason */}
-                            <div className="grid grid-cols-2 gap-3">
-                              <div className="space-y-2">
-                                <Label className="text-xs font-bold text-foreground/80">مبلغ الخصم</Label>
-                                <Input type="number" value={discountAmount} onChange={e => setDiscountAmount(Number(e.target.value))} className="h-10 text-sm" />
+                                  </thead>
+                                  <tbody className="divide-y divide-border/30 font-medium">
+                                    {group.tasks.map((t, i) => (
+                                      <tr key={t.id} className="hover:bg-muted/20">
+                                        <td className="px-3 py-1.5 font-mono">{t.teamName || `مهمة ${i + 1}`}</td>
+                                        <td className="px-3 py-1.5 font-mono">{(t.customer_total || 0).toLocaleString('ar-LY')}</td>
+                                        <td className="px-3 py-1.5 font-mono text-amber-400">{(t.discount_amount || 0).toLocaleString('ar-LY')}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
                               </div>
-                              <div className="space-y-2">
-                                <Label className="text-xs font-bold text-foreground/80">السبب</Label>
-                                <Input value={discountReason} onChange={e => setDiscountReason(e.target.value)} className="h-10 text-sm" placeholder="اختياري" />
+                              <div className="space-y-1.5">
+                                <Label className="text-xs font-bold text-foreground/80">تطبيق على</Label>
+                                <Select value={discountTarget} onValueChange={(v) => setDiscountTarget(v as any)}>
+                                  <SelectTrigger className="h-9 text-xs">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent className="font-tajawal">
+                                    <SelectItem value="all">تقسيم نسبي على الجميع</SelectItem>
+                                    {group.tasks.map((t, i) => (
+                                      <SelectItem key={t.id} value={t.id}>{t.teamName || `مهمة ${i + 1}`}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
                               </div>
+                              <div className="grid grid-cols-2 gap-2.5">
+                                <div className="space-y-1.5">
+                                  <Label className="text-xs font-bold text-foreground/80">مبلغ الخصم</Label>
+                                  <Input type="number" value={discountAmount} onChange={e => setDiscountAmount(Number(e.target.value))} className="h-9 text-sm" />
+                                </div>
+                                <div className="space-y-1.5">
+                                  <Label className="text-xs font-bold text-foreground/80">السبب</Label>
+                                  <Input value={discountReason} onChange={e => setDiscountReason(e.target.value)} className="h-9 text-sm" placeholder="اختياري" />
+                                </div>
+                              </div>
+                              <Button size="sm" className="w-full h-10 text-xs font-black mt-1 cursor-pointer" onClick={() => handleSaveDiscount(group.tasks)} disabled={discountSaving}>
+                                {discountSaving ? <Loader2 className="h-4 w-4 animate-spin ml-2" /> : null}
+                                حفظ الخصم
+                              </Button>
                             </div>
-                            <Button size="sm" className="w-full h-11 text-sm font-extrabold mt-1" onClick={() => handleSaveDiscount(group.tasks)} disabled={discountSaving}>
-                              {discountSaving ? <Loader2 className="h-4 w-4 animate-spin ml-2" /> : null}
-                              حفظ الخصم
-                            </Button>
-                          </div>
-                        </PopoverContent>
-                      </Popover>
-                      
-                      {/* Unified invoice button */}
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            onClick={() => {
-                              const fullGroup = grouped.find(g => g.key === group.key);
-                              setGroupInvoiceTasks(fullGroup?.tasks || group.tasks);
-                              setGroupInvoiceOpen(true);
-                            }}
-                            className="h-8.5 w-8.5 rounded-xl flex items-center justify-center bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all hover:scale-105"
+                          </PopoverContent>
+                        </Popover>
+
+                        {/* Unified Invoice Button */}
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={() => {
+                                const fullGroup = grouped.find(g => g.key === group.key);
+                                setGroupInvoiceTasks(fullGroup?.tasks || group.tasks);
+                                setGroupInvoiceOpen(true);
+                              }}
+                              className="h-8.5 w-8.5 rounded-xl flex items-center justify-center bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20 transition-all cursor-pointer"
+                              aria-label="فاتورة موحدة"
+                            >
+                              <FileOutput className="h-4 w-4" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">فاتورة موحدة للزبون</TooltipContent>
+                        </Tooltip>
+
+                        {!isSingleTask && (
+                          <button 
+                            onClick={() => toggleGroupCollapse(group.key)} 
+                            className="h-8.5 w-8.5 rounded-xl flex items-center justify-center hover:bg-muted/40 transition-colors text-muted-foreground cursor-pointer"
+                            aria-label="طي أو توسيع المجموعة"
                           >
-                            <FileOutput className="h-4.5 w-4.5" />
+                            {isCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
                           </button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="text-xs">فاتورة موحدة للزبون</TooltipContent>
-                      </Tooltip>
-
-                      {/* Dynamic printer invoice buttons */}
-                      {(() => {
-                        const uniquePrinters = new Map();
-                        group.tasks.forEach((t) => {
-                          if (t.print_task_id) {
-                            uniquePrinters.set(t.print_task_id, { taskId: t.print_task_id, name: t.printerName || 'المطبعة', task: t });
-                          }
-                        });
-                        const printers = Array.from(uniquePrinters.values());
-                        if (printers.length === 0) return null;
-                        if (printers.length === 1) {
-                          return (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <button
-                                  onClick={() => { setInvoiceTask(printers[0].task); setInvoiceType('print_vendor'); setInvoiceOpen(true); }}
-                                  className="h-8.5 rounded-xl flex items-center gap-1.5 px-3 bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/20 transition-all hover:scale-105 text-xs font-bold"
-                                >
-                                  <Printer className="h-3.5 w-3.5" />
-                                  <span className="hidden sm:inline">المطبعة</span>
-                                </button>
-                              </TooltipTrigger>
-                              <TooltipContent side="top" className="text-xs">فاتورة المطبعة: {printers[0].name}</TooltipContent>
-                            </Tooltip>
-                          );
-                        }
-                        return printers.map(p => (
-                          <Tooltip key={p.taskId}>
-                            <TooltipTrigger asChild>
-                              <button
-                                onClick={() => { setInvoiceTask(p.task); setInvoiceType('print_vendor'); setInvoiceOpen(true); }}
-                                className="h-8.5 rounded-xl flex items-center gap-1.5 px-3 bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/20 transition-all hover:scale-105 text-xs font-bold"
-                              >
-                                <Printer className="h-3.5 w-3.5" />
-                                <span className="hidden sm:inline">{p.name}</span>
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="text-xs">فاتورة المطبعة: {p.name}</TooltipContent>
-                          </Tooltip>
-                        ));
-                      })()}
-
-                      {/* Dynamic team invoice buttons */}
-                      {(() => {
-                        const uniqueTeams = new Map();
-                        group.tasks.forEach((t) => {
-                          if (t.installation_task_id) {
-                            uniqueTeams.set(t.installation_task_id, { id: t.installation_task_id, name: t.teamName || 'الفرقة', task: t });
-                          }
-                        });
-                        const teams = Array.from(uniqueTeams.values());
-                        if (teams.length === 0) return null;
-                        if (teams.length === 1) {
-                          return (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <button
-                                  onClick={() => { setInvoiceTask(teams[0].task); setInvoiceType('installation_team'); setInvoiceOpen(true); }}
-                                  className="h-8.5 rounded-xl flex items-center gap-1.5 px-3 bg-teal-500/10 text-teal-400 border border-teal-500/20 hover:bg-teal-500/20 transition-all hover:scale-105 text-xs font-bold"
-                                >
-                                  <Users className="h-3.5 w-3.5" />
-                                  <span className="hidden sm:inline">{teams[0].name || 'الفرقة'}</span>
-                                </button>
-                              </TooltipTrigger>
-                              <TooltipContent side="top" className="text-xs">فاتورة الفرقة: {teams[0].name}</TooltipContent>
-                            </Tooltip>
-                          );
-                        }
-                        return teams.map(t => (
-                          <Tooltip key={t.id}>
-                            <TooltipTrigger asChild>
-                              <button
-                                onClick={() => { setInvoiceTask(t.task); setInvoiceType('installation_team'); setInvoiceOpen(true); }}
-                                className="h-8.5 rounded-xl flex items-center gap-1.5 px-3 bg-teal-500/10 text-teal-400 border border-teal-500/20 hover:bg-teal-500/20 transition-all hover:scale-105 text-xs font-bold"
-                              >
-                                <Users className="h-3.5 w-3.5" />
-                                <span className="hidden sm:inline">{t.name}</span>
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="text-xs">فاتورة الفرقة: {t.name}</TooltipContent>
-                          </Tooltip>
-                        ));
-                      })()}
-
-                      {!isSingleTask && (
-                        <button onClick={() => toggleGroupCollapse(group.key)} className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-muted/40 transition-colors">
-                          {isCollapsed ? <ChevronDown className="h-4.5 w-4.5 text-muted-foreground" /> : <ChevronUp className="h-4.5 w-4.5 text-muted-foreground" />}
-                        </button>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Group tasks */}
+                  {/* Group Tasks Cards Container */}
                   <AnimatePresence initial={false}>
                     {(!isCollapsed || isSingleTask) && (
                       <motion.div
                         initial={isSingleTask ? false : { height: 0, opacity: 0 }}
                         animate={{ height: 'auto', opacity: 1 }}
                         exit={{ height: 0, opacity: 0 }}
-                        transition={{ duration: 0.2 }}
+                        transition={{ duration: 0.18 }}
                         className="overflow-hidden"
                       >
-                        <div className={`flex flex-col ${isSingleTask ? '' : 'gap-0 divide-y divide-border/20'}`}>
+                        <div className={`flex flex-col p-3 gap-3 ${isSingleTask ? '' : 'bg-muted/5'}`}>
                           {group.tasks.map((task, idx) => (
                             <TaskCardRow
                               key={task.id}
@@ -2072,7 +2051,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         />
       )}
 
-      {/* Group Invoice Dialog - unified invoice for all tasks in a group */}
+      {/* Group Invoice Dialog */}
       {groupInvoiceTasks && groupInvoiceTasks.length > 0 && (
         <UnifiedTaskInvoice
           open={groupInvoiceOpen}
@@ -2085,24 +2064,24 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
 
       {/* Delete Confirmation */}
       <AlertDialog open={deleteTask !== null} onOpenChange={() => setDeleteTask(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent className="font-tajawal text-right" dir="rtl">
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="h-5 w-5" />
-              تأكيد حذف المهمة
+              تأكيد حذف المهمة المجمعة
             </AlertDialogTitle>
-            <AlertDialogDescription>
-              سيتم حذف المهمة المجمعة والفواتير المرتبطة. هذا الإجراء لا يمكن التراجع عنه.
+            <AlertDialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              سيتم حذف هذه المهمة المجمعة وجميع الفواتير المرتبطة بها نهائياً. هذا الإجراء لا يمكن التراجع عنه.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+          <AlertDialogFooter className="flex-row gap-2 justify-end">
+            <AlertDialogCancel className="cursor-pointer">إلغاء</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer"
               onClick={() => deleteTask && deleteMutation.mutate(deleteTask)}
             >
               {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin ml-2" /> : null}
-              حذف المهمة
+              تأكيد الحذف
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -2115,7 +2094,6 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           onOpenChange={(open) => {
             setCreatePrintDialogOpen(open);
             if (!open) {
-              // If there are more in the queue, process them after a short delay
               if (printQueue.length > 0) {
                 setTimeout(() => processNextInPrintQueue(printQueue), 500);
               } else {
@@ -2130,7 +2108,6 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
             queryClient.invalidateQueries({ queryKey: ['composite-tasks'] });
             queryClient.invalidateQueries({ queryKey: ['composite-task-extras'] });
             queryClient.invalidateQueries({ queryKey: ['composite-task-payments'] });
-            // Process next item in queue if any
             if (printQueue.length > 0) {
               setTimeout(() => processNextInPrintQueue(printQueue), 500);
             }

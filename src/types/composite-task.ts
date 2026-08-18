@@ -67,6 +67,13 @@ export interface CompositeTaskWithDetails extends CompositeTask {
   cutout_task?: any;
   contract?: any;
   customer?: any;
+  adType?: string;
+  adTypes?: string[];
+  teamName?: string;
+  printerName?: string;
+  designUrls?: string[];
+  reinstallationNumber?: number | null;
+  contractIds?: number[];
 }
 
 export interface CreateCompositeTaskInput {

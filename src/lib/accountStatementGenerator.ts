@@ -1,43 +1,20 @@
 /**
- * Unified Account Statement HTML Generator (كشف الحساب)
- * يستخدم القاعدة الموحدة (unifiedInvoiceBase) + fetchPrintSettingsForInvoice
+ * ═══════════════════════════════════════════════════════════════════════════
+ * 📄 Unified Account Statement HTML Generator (Simple & Detailed Statements)
+ * ═══════════════════════════════════════════════════════════════════════════
+ * يولد كشف الحساب بنوعيه (المبسط والتفصيلي) باستخدام المحرك المالي المركزي الموحد:
+ * (buildCanonicalCustomerLedger) لضمان تطابق الأرقام 100% مع شاشات النظام.
  */
 
 import { resolveInvoiceStyles, formatNum, formatDateForPrint, wrapInDocument, generateCustomerHTML, type ResolvedPrintStyles } from './unifiedInvoiceBase';
 import { numberToArabicWords } from '@/lib/printUtils';
-import { hexToRgba } from '@/hooks/useInvoiceSettingsSync';
+import {
+  CanonicalLedgerEntry,
+  CanonicalCustomerTotals,
+  CanonicalCustomerLedgerResult,
+} from '@/lib/canonicalCustomerLedger';
 
-// =====================================================
-// Types
-// =====================================================
-
-interface Transaction {
-  date: string;
-  description: string;
-  reference: string;
-  debit: number;
-  credit: number;
-  balance: number;
-  notes: string;
-  type: string;
-  itemTotal?: number | null;
-  itemRemaining?: number | null;
-  sourceInvoice?: string | null;
-  adType?: string | null;
-  distributedPaymentId?: string | null;
-  distributedPaymentTotal?: number | null;
-}
-
-interface Statistics {
-  totalContracts: number;
-  activeContracts: number;
-  totalDebits: number;
-  totalCredits: number;
-  balance: number;
-  totalPayments: number;
-}
-
-interface CustomerData {
+export interface CustomerData {
   id: string;
   name: string;
   company?: string;
@@ -45,7 +22,7 @@ interface CustomerData {
   email?: string;
 }
 
-interface Currency {
+export interface Currency {
   code: string;
   symbol: string;
   writtenName: string;
@@ -53,112 +30,20 @@ interface Currency {
 
 export interface AccountStatementData {
   customerData: CustomerData;
-  transactions: Transaction[];
-  statistics: Statistics;
+  ledgerResult?: CanonicalCustomerLedgerResult;
+  transactions?: any[];
+  statistics?: any;
+  mode?: 'simple' | 'detailed';
   currency: Currency;
   startDate?: string;
   endDate?: string;
   hidePaymentDistribution?: boolean;
+  hideStopAdjustments?: boolean;
   autoPrint?: boolean;
 }
 
-// =====================================================
-// Date Filtering Logic
-// =====================================================
-
-interface FilterResult {
-  filteredTransactions: Transaction[];
-  openingBalance: number;
-  previousTransactions: Transaction[];
-  referencedContracts: Transaction[];
-}
-
-export function filterTransactionsByDateRange(
-  transactions: Transaction[],
-  startDate?: string,
-  endDate?: string
-): FilterResult {
-  if (!startDate && !endDate) {
-    return { filteredTransactions: transactions, openingBalance: 0, previousTransactions: [], referencedContracts: [] };
-  }
-
-  const start = startDate ? new Date(startDate) : null;
-  const end = endDate ? new Date(endDate) : null;
-
-  if (start) start.setHours(0, 0, 0, 0);
-  if (end) end.setHours(23, 59, 59, 999);
-
-  let openingBalance = 0;
-  const filteredTransactions: Transaction[] = [];
-  const allPreviousTransactions: Transaction[] = [];
-  const contractsBeforeRange: Map<string, Transaction> = new Map();
-  const paymentsInRange: Transaction[] = [];
-
-  for (const transaction of transactions) {
-    const transactionDate = new Date(transaction.date);
-    transactionDate.setHours(12, 0, 0, 0);
-
-    if (start && transactionDate < start) {
-      openingBalance += transaction.debit - transaction.credit;
-      allPreviousTransactions.push(transaction);
-      if (transaction.type === 'contract') {
-        contractsBeforeRange.set(transaction.reference, transaction);
-      }
-    } else if (
-      (!start || transactionDate >= start) &&
-      (!end || transactionDate <= end)
-    ) {
-      filteredTransactions.push(transaction);
-      if (transaction.type === 'payment' || transaction.type === 'receipt' || 
-          transaction.type === 'credit' || transaction.credit > 0) {
-        paymentsInRange.push(transaction);
-      }
-    }
-  }
-
-  const referencedContracts: Transaction[] = [];
-  const addedContractRefs = new Set<string>();
-  
-  for (const payment of paymentsInRange) {
-    const contractRef = payment.reference;
-    if (contractRef && contractRef.startsWith('عقد-') && !addedContractRefs.has(contractRef)) {
-      const contract = contractsBeforeRange.get(contractRef);
-      if (contract) {
-        referencedContracts.push(contract);
-        addedContractRefs.add(contractRef);
-      }
-    }
-  }
-
-  const previousTransactions = allPreviousTransactions.slice(-5);
-
-  return { filteredTransactions, openingBalance, previousTransactions, referencedContracts };
-}
-
-function recalculateStatistics(transactions: Transaction[], openingBalance: number): Statistics {
-  let totalDebits = 0;
-  let totalCredits = 0;
-
-  for (const t of transactions) {
-    totalDebits += t.debit;
-    totalCredits += t.credit;
-  }
-
-  return {
-    totalContracts: 0,
-    activeContracts: 0,
-    totalDebits,
-    totalCredits,
-    balance: openingBalance + totalDebits - totalCredits,
-    totalPayments: transactions.filter(t => t.credit > 0).length,
-  };
-}
-
-// =====================================================
-// Format helpers
-// =====================================================
-
 function formatDate(dateStr: string): string {
+  if (!dateStr) return '—';
   try {
     return new Date(dateStr).toLocaleDateString('ar-LY-u-nu-latn');
   } catch {
@@ -168,332 +53,384 @@ function formatDate(dateStr: string): string {
 
 function fmtNum(num: number): string {
   if (isNaN(num) || num === null || num === undefined) return '0';
-  return num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+  return num.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-// =====================================================
-// Table generation
-// =====================================================
-
-function generateStatementRows(
+/**
+ * توليد أسطر الكشف المبسط (Simple Statement Rows)
+ * 5 أعمدة واضحة بدون مصطلحات محاسبية معقدة
+ */
+function generateSimpleStatementRows(
   t: ResolvedPrintStyles,
-  transactions: Transaction[],
-  currency: Currency,
-  openingBalance: number,
-  previousTransactions: Transaction[],
-  referencedContracts: Transaction[],
-  hidePaymentDistribution?: boolean
+  entries: CanonicalLedgerEntry[],
+  currency: Currency
 ): string {
   let html = '';
 
-  // Referenced contracts
-  if (referencedContracts.length > 0) {
-    html += `<tr class="subtotal-row"><td colspan="11" style="text-align:center;font-size:10px;">═══ عقود مرجعية (خارج النطاق لكن لها دفعات في الفترة) ═══</td></tr>`;
-    referencedContracts.forEach(contract => {
-      html += `
-        <tr class="even-row" style="opacity:0.7;">
-          <td>⟵</td>
-          <td style="font-size:9px;">${formatDate(contract.date)}</td>
-          <td style="text-align:right;font-size:9px;">[مرجع] ${contract.description}</td>
-          <td style="font-size:9px;">${contract.adType || '—'}</td>
-          <td style="font-size:9px;">${contract.reference}</td>
-          <td>${contract.debit > 0 ? `${currency.symbol} ${fmtNum(contract.debit)}` : '—'}</td>
-          <td>${contract.credit > 0 ? `${currency.symbol} ${fmtNum(contract.credit)}` : '—'}</td>
-          <td style="font-size:9px;">(ضمن الرصيد السابق)</td>
-          <td>—</td>
-          <td>—</td>
-          <td style="font-size:9px;">عقد قديم</td>
-        </tr>`;
-    });
-    html += `<tr class="subtotal-row"><td colspan="11" style="text-align:center;font-size:10px;">═══════════════════════</td></tr>`;
-  }
+  entries.forEach((entry, index) => {
+    const isEven = index % 2 === 0;
+    const rowClass = isEven ? 'even-row' : 'odd-row';
 
-  // Previous transactions
-  if (previousTransactions.length > 0 && openingBalance !== 0) {
-    let prevRunningBalance = openingBalance;
-    for (let i = previousTransactions.length - 1; i >= 0; i--) {
-      prevRunningBalance -= (previousTransactions[i].debit - previousTransactions[i].credit);
+    let displayTitle = entry.description;
+    let subtitleHtml = '';
+
+    if (entry.subtitle) {
+      subtitleHtml = `<div style="font-size:8.5px;color:#666;margin-top:2px;">${entry.subtitle}</div>`;
     }
 
-    previousTransactions.forEach((transaction, index) => {
-      prevRunningBalance += transaction.debit - transaction.credit;
+    if (entry.type === 'opening_balance') {
       html += `
-        <tr class="even-row" style="opacity:0.7;">
-          <td>◄</td>
-          <td style="font-size:9px;">${formatDate(transaction.date)}</td>
-          <td style="text-align:right;font-size:9px;">[سابق] ${transaction.description}</td>
-          <td style="font-size:9px;">${transaction.adType || '—'}</td>
-          <td style="font-size:9px;">${transaction.reference}</td>
-          <td>${transaction.debit > 0 ? `${currency.symbol} ${fmtNum(transaction.debit)}` : '—'}</td>
-          <td>${transaction.credit > 0 ? `${currency.symbol} ${fmtNum(transaction.credit)}` : '—'}</td>
-          <td>${index === previousTransactions.length - 1 ? `${currency.symbol} ${fmtNum(openingBalance)}` : `${currency.symbol} ${fmtNum(prevRunningBalance)}`}</td>
-          <td>—</td>
-          <td>—</td>
-          <td style="font-size:9px;">(خارج النطاق)</td>
-        </tr>`;
-    });
-
-    html += `
-      <tr class="subtotal-row">
-        <td colspan="7" style="text-align:center;font-size:10px;">══ نهاية الحركات السابقة ══</td>
-        <td colspan="4" style="font-weight:bold;">رصيد مُرحّل: ${currency.symbol} ${fmtNum(openingBalance)}</td>
-      </tr>`;
-  } else if (openingBalance !== 0) {
-    html += `
-      <tr class="subtotal-row">
-        <td>—</td>
-        <td>—</td>
-        <td style="text-align:right;">رصيد سابق (مُرحّل)</td>
-        <td>—</td>
-        <td>—</td>
-        <td>${openingBalance > 0 ? `${currency.symbol} ${fmtNum(openingBalance)}` : '—'}</td>
-        <td>${openingBalance < 0 ? `${currency.symbol} ${fmtNum(Math.abs(openingBalance))}` : '—'}</td>
-        <td>${currency.symbol} ${fmtNum(openingBalance)}</td>
-        <td>—</td>
-        <td>—</td>
-        <td></td>
-      </tr>`;
-  }
-
-  // Distributed payment groups
-  const distributedGroups: Map<string, Transaction[]> = new Map();
-  const processedDistributedIds = new Set<string>();
-  
-  transactions.forEach(transaction => {
-    if (transaction.distributedPaymentId) {
-      const existing = distributedGroups.get(transaction.distributedPaymentId) || [];
-      existing.push(transaction);
-      distributedGroups.set(transaction.distributedPaymentId, existing);
+        <tr class="subtotal-row" style="background:${t.primaryColor}15 !important;font-weight:bold;">
+          <td style="text-align:center;">—</td>
+          <td style="text-align:center;font-size:9px;"><span class="num">${formatDate(entry.date)}</span></td>
+          <td style="text-align:right;"><strong>${entry.description}</strong></td>
+          <td style="text-align:center;">${entry.displayCharge > 0 ? `<span class="num">${currency.symbol} ${fmtNum(entry.displayCharge)}</span>` : '—'}</td>
+          <td style="text-align:center;">${entry.displayReduction > 0 ? `<span class="num">${currency.symbol} ${fmtNum(entry.displayReduction)}</span>` : '—'}</td>
+          <td style="text-align:center;font-weight:bold;"><span class="num">${currency.symbol} ${fmtNum(entry.runningBalance)}</span></td>
+        </tr>
+      `;
+      return;
     }
+
+    const chargeText = entry.displayCharge > 0 ? `${currency.symbol} ${fmtNum(entry.displayCharge)}` : '—';
+    const reductionText = entry.displayReduction > 0 ? `${currency.symbol} ${fmtNum(entry.displayReduction)}` : '—';
+
+    html += `
+      <tr class="${rowClass}">
+        <td style="text-align:center;">${index + 1}</td>
+        <td style="text-align:center;font-size:9px;"><span class="num">${formatDate(entry.date)}</span></td>
+        <td style="text-align:right;">
+          <div style="font-weight:600;">${displayTitle}</div>
+          ${subtitleHtml}
+        </td>
+        <td style="text-align:center;color:${entry.displayCharge > 0 ? '#b91c1c' : '#333'};font-weight:${entry.displayCharge > 0 ? '600' : 'normal'};">
+          ${chargeText !== '—' ? `<span class="num">${chargeText}</span>` : '—'}
+        </td>
+        <td style="text-align:center;color:${entry.displayReduction > 0 ? '#15803d' : '#333'};font-weight:${entry.displayReduction > 0 ? '600' : 'normal'};">
+          ${reductionText !== '—' ? `<span class="num">${reductionText}</span>` : '—'}
+        </td>
+        <td style="text-align:center;font-weight:bold;color:${entry.runningBalance < 0 ? '#15803d' : '#1e293b'};">
+          <span class="num">${entry.runningBalance < 0 ? `${fmtNum(Math.abs(entry.runningBalance))} ${currency.symbol} (دائن)` : `${currency.symbol} ${fmtNum(entry.runningBalance)}`}</span>
+        </td>
+      </tr>
+    `;
   });
-
-  // Transaction rows
-  let runningBalance = openingBalance;
-  let rowIndex = 1;
-  
-  for (let i = 0; i < transactions.length; i++) {
-    const transaction = transactions[i];
-    runningBalance += transaction.debit - transaction.credit;
-    
-    // Distributed payment group
-    if (transaction.distributedPaymentId && !processedDistributedIds.has(transaction.distributedPaymentId)) {
-      const groupedTransactions = distributedGroups.get(transaction.distributedPaymentId) || [];
-      const totalDistributed = transaction.distributedPaymentTotal || groupedTransactions.reduce((sum, t) => sum + t.credit, 0);
-      
-      let groupEndBalance = runningBalance;
-      for (let j = i + 1; j < transactions.length; j++) {
-        if (transactions[j].distributedPaymentId === transaction.distributedPaymentId) {
-          groupEndBalance += transactions[j].debit - transactions[j].credit;
-        } else break;
-      }
-      
-      if (hidePaymentDistribution) {
-        const displayNotes = transaction.notes !== '—' ? transaction.notes : '';
-        html += `
-          <tr class="${rowIndex % 2 === 0 ? 'even-row' : 'odd-row'}">
-            <td>${rowIndex}</td>
-            <td style="font-size:9px;"><span class="num">${formatDate(transaction.date)}</span></td>
-            <td style="text-align:right;">دفعة من العميل</td>
-            <td style="font-size:9px;">—</td>
-            <td>${transaction.reference || '—'}</td>
-            <td>—</td>
-            <td style="font-weight:bold;">${currency.symbol} ${fmtNum(totalDistributed)}</td>
-            <td style="font-weight:bold;">${currency.symbol} ${fmtNum(groupEndBalance)}</td>
-            <td>—</td>
-            <td>—</td>
-            <td style="font-size:9px; white-space: pre-line;">${displayNotes}</td>
-          </tr>`;
-      } else {
-        html += `
-          <tr class="subtotal-row" style="background:${t.primaryColor}10 !important;">
-            <td>●</td>
-            <td style="font-size:9px;">${formatDate(transaction.date)}</td>
-            <td colspan="3" style="text-align:right;">دفعة موزعة - إجمالي: ${currency.symbol} ${fmtNum(totalDistributed)}</td>
-            <td>—</td>
-            <td style="color:${t.primaryColor};font-weight:bold;">${currency.symbol} ${fmtNum(totalDistributed)}</td>
-            <td></td>
-            <td></td>
-            <td></td>
-            <td style="font-size:9px;">عدد: ${groupedTransactions.length}</td>
-          </tr>`;
-        
-        groupedTransactions.forEach((distTrans, distIndex) => {
-          let displayDescription = distTrans.description;
-          if (distTrans.sourceInvoice && displayDescription.includes('SALE-')) {
-            displayDescription = displayDescription.replace(/SALE-\d+/g, distTrans.sourceInvoice);
-          }
-          
-          const itemRemaining = distTrans.itemRemaining != null ? `${currency.symbol} ${fmtNum(distTrans.itemRemaining)}` : '—';
-          const itemTotal = distTrans.itemTotal != null ? `${currency.symbol} ${fmtNum(distTrans.itemTotal)}` : '—';
-          
-          const displayNotes = distTrans.notes !== '—' ? distTrans.notes : '';
-          
-          html += `
-            <tr class="${distIndex % 2 === 0 ? 'even-row' : 'odd-row'}" style="font-size:10px;">
-              <td>  ↳ ${distIndex + 1}</td>
-              <td></td>
-              <td style="text-align:right;padding-right:20px;">└─ ${displayDescription}</td>
-              <td style="font-size:9px;">${distTrans.adType || '—'}</td>
-              <td>${distTrans.reference}</td>
-              <td>${distTrans.debit > 0 ? `${currency.symbol} ${fmtNum(distTrans.debit)}` : '—'}</td>
-              <td>${distTrans.credit > 0 ? `${currency.symbol} ${fmtNum(distTrans.credit)}` : '—'}</td>
-              <td>${distIndex === groupedTransactions.length - 1 ? `${currency.symbol} ${fmtNum(groupEndBalance)}` : ''}</td>
-              <td>${itemTotal}</td>
-              <td>${itemRemaining}</td>
-              <td style="font-size:9px; white-space: pre-line;">${displayNotes}</td>
-            </tr>`;
-        });
-      }
-      
-      processedDistributedIds.add(transaction.distributedPaymentId);
-      rowIndex++;
-      continue;
-    }
-    
-    if (transaction.distributedPaymentId && processedDistributedIds.has(transaction.distributedPaymentId)) {
-      continue;
-    }
-    
-    let displayDescription = transaction.description;
-    if (transaction.sourceInvoice && displayDescription.includes('SALE-')) {
-      displayDescription = displayDescription.replace(/SALE-\d+/g, transaction.sourceInvoice);
-    }
-    
-    const itemRemaining = transaction.itemRemaining != null ? `${currency.symbol} ${fmtNum(transaction.itemRemaining)}` : '—';
-    const itemTotal = transaction.itemTotal != null ? `${currency.symbol} ${fmtNum(transaction.itemTotal)}` : '—';
-    
-    const displayNotes = transaction.notes !== '—' ? transaction.notes : '';
-    
-    html += `
-      <tr class="${rowIndex % 2 === 0 ? 'even-row' : 'odd-row'}">
-        <td>${rowIndex}</td>
-        <td style="font-size:9px;"><span class="num">${formatDate(transaction.date)}</span></td>
-        <td style="text-align:right;">${displayDescription}</td>
-        <td style="font-size:9px;">${transaction.adType || '—'}</td>
-        <td style="font-size:9px;">${transaction.reference}</td>
-        <td>${transaction.debit > 0 ? `${currency.symbol} ${fmtNum(transaction.debit)}` : '—'}</td>
-        <td>${transaction.credit > 0 ? `${currency.symbol} ${fmtNum(transaction.credit)}` : '—'}</td>
-        <td style="font-weight:bold;"><span class="num">${currency.symbol} ${fmtNum(runningBalance)}</span></td>
-        <td>${itemTotal}</td>
-        <td>${itemRemaining}</td>
-        <td style="font-size:9px; white-space: pre-line;">${displayNotes}</td>
-      </tr>`;
-    rowIndex++;
-  }
 
   return html;
 }
 
-// =====================================================
-// Main Generator
-// =====================================================
+/**
+ * توليد أسطر الكشف التفصيلي (Detailed Statement Rows)
+ * 6 أعمدة محاسبية أنيقة مع إفصاحات كاملة
+ */
+function generateDetailedStatementRows(
+  t: ResolvedPrintStyles,
+  entries: CanonicalLedgerEntry[],
+  currency: Currency
+): string {
+  let html = '';
 
-export async function generateAccountStatementHTML(data: AccountStatementData): Promise<string> {
-  const t = await resolveInvoiceStyles('account_statement', {
-    titleAr: 'كشف حساب',
-    titleEn: 'ACCOUNT STATEMENT',
+  entries.forEach((entry, index) => {
+    const isEven = index % 2 === 0;
+    const rowClass = isEven ? 'even-row' : 'odd-row';
+
+    let typeBadgeLabel = 'حركة';
+    let typeBadgeColor = '#6b7280';
+
+    if (entry.type === 'contract') {
+      typeBadgeLabel = 'عقد إيجار لوحات طرقية';
+      typeBadgeColor = '#2563eb';
+    } else if (entry.type === 'composite_task') {
+      typeBadgeLabel = entry.metadata?.badgeTitle || 'فاتورة طباعة';
+      typeBadgeColor = '#7c3aed';
+    } else if (entry.type === 'cash_payment') {
+      typeBadgeLabel = 'سند قبض';
+      typeBadgeColor = '#16a34a';
+    } else if (entry.type === 'general_discount') {
+      typeBadgeLabel = 'خصم عام';
+      typeBadgeColor = '#d97706';
+    } else if (entry.type === 'purchase_offset') {
+      typeBadgeLabel = 'مقاصة مشتريات';
+      typeBadgeColor = '#0891b2';
+    } else if (entry.type === 'friend_company_offset') {
+      typeBadgeLabel = 'مقاصة شركة صديقة';
+      typeBadgeColor = '#059669';
+    } else if (entry.type === 'sales_invoice') {
+      typeBadgeLabel = 'فاتورة مبيعات';
+      typeBadgeColor = '#4f46e5';
+    } else if (entry.type === 'printed_invoice') {
+      typeBadgeLabel = 'فاتورة طباعة';
+      typeBadgeColor = '#9333ea';
+    } else if (entry.type === 'opening_balance') {
+      typeBadgeLabel = 'رصيد سابق';
+      typeBadgeColor = '#475569';
+    }
+
+    let subtitleHtml = '';
+    if (entry.subtitle) {
+      subtitleHtml = `<div style="font-size:8.5px;color:#666;margin-top:2px;">${entry.subtitle}</div>`;
+    }
+
+    if (entry.type === 'opening_balance') {
+      html += `
+        <tr class="subtotal-row" style="background:${t.primaryColor}15 !important;font-weight:bold;">
+          <td style="text-align:center;">—</td>
+          <td style="text-align:center;font-size:9px;"><span class="num">${formatDate(entry.date)}</span></td>
+          <td style="text-align:center;"><span style="font-size:8px;padding:2px 6px;border-radius:4px;background:#e2e8f0;color:#334155;font-weight:bold;">رصيد سابق</span></td>
+          <td style="text-align:right;"><strong>${entry.description}</strong></td>
+          <td style="text-align:center;">${entry.displayCharge > 0 ? `<span class="num">${currency.symbol} ${fmtNum(entry.displayCharge)}</span>` : '—'}</td>
+          <td style="text-align:center;">${entry.displayReduction > 0 ? `<span class="num">${currency.symbol} ${fmtNum(entry.displayReduction)}</span>` : '—'}</td>
+          <td style="text-align:center;font-weight:bold;"><span class="num">${currency.symbol} ${fmtNum(entry.runningBalance)}</span></td>
+        </tr>
+      `;
+      return;
+    }
+
+    const chargeText = entry.displayCharge > 0 ? `${currency.symbol} ${fmtNum(entry.displayCharge)}` : '—';
+    const reductionText = entry.displayReduction > 0 ? `${currency.symbol} ${fmtNum(entry.displayReduction)}` : '—';
+
+    html += `
+      <tr class="${rowClass}">
+        <td style="text-align:center;">${index + 1}</td>
+        <td style="text-align:center;font-size:9px;"><span class="num">${formatDate(entry.date)}</span></td>
+        <td style="text-align:center;">
+          <span style="font-size:8px;padding:2px 5px;border-radius:4px;border:1px solid ${typeBadgeColor}40;color:${typeBadgeColor};font-weight:600;white-space:nowrap;">
+            ${typeBadgeLabel}
+          </span>
+        </td>
+        <td style="text-align:right;">
+          <div style="font-weight:600;">${entry.description}</div>
+          <div style="font-size:8.5px;color:#555;">المرجع: ${entry.reference}${entry.notes && entry.notes !== '—' ? ` | ملاحظات: ${entry.notes}` : ''}</div>
+          ${subtitleHtml}
+        </td>
+        <td style="text-align:center;color:${entry.displayCharge > 0 ? '#b91c1c' : '#333'};font-weight:${entry.displayCharge > 0 ? '600' : 'normal'};">
+          ${chargeText !== '—' ? `<span class="num">${chargeText}</span>` : '—'}
+        </td>
+        <td style="text-align:center;color:${entry.displayReduction > 0 ? '#15803d' : '#333'};font-weight:${entry.displayReduction > 0 ? '600' : 'normal'};">
+          ${reductionText !== '—' ? `<span class="num">${reductionText}</span>` : '—'}
+        </td>
+        <td style="text-align:center;font-weight:bold;color:${entry.runningBalance < 0 ? '#15803d' : '#1e293b'};">
+          <span class="num">${entry.runningBalance < 0 ? `${fmtNum(Math.abs(entry.runningBalance))} ${currency.symbol} (دائن)` : `${currency.symbol} ${fmtNum(entry.runningBalance)}`}</span>
+        </td>
+      </tr>
+    `;
   });
 
-  const { filteredTransactions, openingBalance, previousTransactions, referencedContracts } = 
-    filterTransactionsByDateRange(data.transactions, data.startDate, data.endDate);
+  return html;
+}
 
-  const stats = recalculateStatistics(filteredTransactions, openingBalance);
+/**
+ * المولد الموحد لطباعة كشف الحساب
+ */
+export async function generateAccountStatementHTML(data: AccountStatementData): Promise<string> {
+  const mode = data.mode || 'simple';
+  const isSimple = mode === 'simple';
 
-  const periodStart = data.startDate ? new Date(data.startDate).toLocaleDateString('ar-LY-u-nu-latn') : 'بداية السجل';
-  const periodEnd = data.endDate ? new Date(data.endDate).toLocaleDateString('ar-LY-u-nu-latn') : 'حتى الآن';
+  const t = await resolveInvoiceStyles('account_statement', {
+    titleAr: isSimple ? 'كشف حساب' : 'كشف حساب تفصيلي',
+    titleEn: isSimple ? 'CUSTOMER STATEMENT' : 'DETAILED CUSTOMER STATEMENT',
+  });
 
-  const tableRows = generateStatementRows(t, filteredTransactions, data.currency, openingBalance, previousTransactions, referencedContracts, data.hidePaymentDistribution);
+  const ledgerResult: CanonicalCustomerLedgerResult = data.ledgerResult || {
+    allEntries: (data.transactions || []).map((t, idx) => ({
+      id: `t-${idx}`,
+      date: t.date,
+      type: (t.type as any) || (t.debit > 0 ? 'contract' : 'cash_payment'),
+      category: t.debit > 0 ? 'charge' : 'cash_payment',
+      sourceTable: 'legacy',
+      sourceId: String(idx),
+      reference: t.reference || '—',
+      description: t.description || '—',
+      notes: t.notes || '—',
+      debitEffect: t.debit || 0,
+      cashPaymentEffect: t.credit || 0,
+      nonCashAdjustmentEffect: 0,
+      balanceEffect: (t.debit || 0) - (t.credit || 0),
+      runningBalance: t.balance || 0,
+      displayCharge: t.debit || 0,
+      displayReduction: t.credit || 0,
+      isInformationalOnly: false,
+    })),
+    displayedEntries: (data.transactions || []).map((t, idx) => ({
+      id: `t-${idx}`,
+      date: t.date,
+      type: (t.type as any) || (t.debit > 0 ? 'contract' : 'cash_payment'),
+      category: t.debit > 0 ? 'charge' : 'cash_payment',
+      sourceTable: 'legacy',
+      sourceId: String(idx),
+      reference: t.reference || '—',
+      description: t.description || '—',
+      notes: t.notes || '—',
+      debitEffect: t.debit || 0,
+      cashPaymentEffect: t.credit || 0,
+      nonCashAdjustmentEffect: 0,
+      balanceEffect: (t.debit || 0) - (t.credit || 0),
+      runningBalance: t.balance || 0,
+      displayCharge: t.debit || 0,
+      displayReduction: t.credit || 0,
+      isInformationalOnly: false,
+    })),
+    totals: {
+      totalCustomerCharges: data.statistics?.totalDebits || 0,
+      cashPayments: data.statistics?.totalCredits || 0,
+      generalDiscounts: 0,
+      purchaseOffsets: 0,
+      friendCompanyOffsets: 0,
+      otherNonCashCredits: 0,
+      totalNonCashAdjustments: 0,
+      finalBalance: data.statistics?.balance || 0,
+      repaymentPercentage: 100,
+      informationalContractDiscounts: 0,
+      informationalStopAdjustments: 0,
+      debtBreakdown: {
+        contracts: data.statistics?.totalDebits || 0,
+        salesInvoices: 0,
+        printedInvoices: 0,
+        compositeTasks: 0,
+        otherDebts: 0,
+      },
+    },
+    openingBalance: 0,
+    endingBalance: data.statistics?.balance || 0,
+  };
 
-  // Summary section
-  const balanceLabel = stats.balance > 0 
-    ? 'الرصيد النهائي (مستحق على العميل)' 
-    : stats.balance < 0 
-      ? 'الرصيد النهائي (رصيد دائن للعميل)' 
-      : 'الرصيد النهائي (مسدد بالكامل)';
+  const entries = ledgerResult.displayedEntries || [];
+  const totals = ledgerResult.totals;
+  const finalBalance = ledgerResult.endingBalance;
 
-  const bodyContent = `
-    <!-- Table -->
-    <table class="items-table" style="font-size:${t.bodyFontSize - 1}px;">
-      <thead>
-        <tr>
-          <th style="width:3%">#</th>
-          <th style="width:8%">التاريخ</th>
-          <th style="width:15%">البيان</th>
-          <th style="width:10%">نوع الإعلان</th>
-          <th style="width:10%">المرجع</th>
-          <th style="width:8%">مدين</th>
-          <th style="width:8%">دائن</th>
-          <th style="width:8%">الرصيد</th>
-          <th style="width:8%">قيمة العنصر</th>
-          <th style="width:8%">متبقي العنصر</th>
-          <th style="width:14%">ملاحظات</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${tableRows}
-      </tbody>
-    </table>
+  const periodStart = data.startDate ? formatDate(data.startDate) : 'بداية التعامل';
+  const periodEnd = data.endDate ? formatDate(data.endDate) : 'حتى الآن';
 
-    <!-- Summary -->
-    <div style="margin-top:20px;border:2px solid ${t.primaryColor};border-radius:8px;overflow:hidden;">
-      <div style="background:${t.primaryColor};color:${t.totalText};padding:10px 16px;font-weight:bold;font-size:${t.headerFontSize}px;">
-        ملخص الرصيد
+  let tableHeaderHtml = '';
+  let tableRowsHtml = '';
+
+  if (isSimple) {
+    tableHeaderHtml = `
+      <tr>
+        <th style="width:5%">#</th>
+        <th style="width:12%">التاريخ</th>
+        <th style="width:41%">البيان والتفاصيل</th>
+        <th style="width:14%">المستحق (+)</th>
+        <th style="width:14%">المدفوع / التسوية (-)</th>
+        <th style="width:14%">الرصيد المتبقي</th>
+      </tr>
+    `;
+    tableRowsHtml = generateSimpleStatementRows(t, entries, data.currency);
+  } else {
+    tableHeaderHtml = `
+      <tr>
+        <th style="width:4%">#</th>
+        <th style="width:11%">التاريخ</th>
+        <th style="width:14%">نوع الحركة</th>
+        <th style="width:31%">البيان والمرجع</th>
+        <th style="width:13%">مستحق (+)</th>
+        <th style="width:13%">سداد / تسوية (-)</th>
+        <th style="width:14%">الرصيد التراكمي</th>
+      </tr>
+    `;
+    tableRowsHtml = generateDetailedStatementRows(t, entries, data.currency);
+  }
+
+  // بطاقات الملخص النهائي
+  const balanceStateText = finalBalance > 0
+    ? 'المبلغ المتبقي المطلوب من العميل'
+    : finalBalance < 0
+    ? 'رصيد دائن لصالح العميل'
+    : 'الحساب مسدد بالكامل (الرصيد: 0)';
+
+  const summaryBoxesHtml = `
+    <div class="statement-summary-box" style="margin-top:16px;border:2px solid ${t.primaryColor};border-radius:8px;overflow:hidden;page-break-inside:avoid;break-inside:avoid;">
+      <div style="background:${t.primaryColor};color:${t.totalText};padding:9px 16px;font-weight:bold;font-size:${t.headerFontSize}px;">
+        <span>ملخص الحساب المالي</span>
       </div>
-      <div style="padding:12px 16px;">
-        ${openingBalance !== 0 ? `
-        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid ${t.tableBorder};">
-          <span style="font-weight:bold;">الرصيد السابق (مُرحّل)</span>
-          <span class="num" style="font-weight:bold;">${data.currency.symbol} ${fmtNum(Math.abs(openingBalance))} ${openingBalance < 0 ? '(دائن)' : '(مدين)'}</span>
+      <div style="padding:12px 16px;background:#fff;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(170px, 1fr));gap:10px;margin-bottom:12px;">
+          
+          <div style="background:#f8fafc;padding:9px 12px;border-radius:6px;border:1px solid #e2e8f0;">
+            <div style="font-size:10px;color:#64748b;font-weight:600;">إجمالي المستحقات</div>
+            <div style="font-size:15px;font-weight:bold;color:#b91c1c;margin-top:3px;">
+              <span class="num">${data.currency.symbol} ${fmtNum(totals.totalCustomerCharges)}</span>
+            </div>
+          </div>
+
+          <div style="background:#f8fafc;padding:9px 12px;border-radius:6px;border:1px solid #e2e8f0;">
+            <div style="font-size:10px;color:#64748b;font-weight:600;">إجمالي المدفوع نقداً</div>
+            <div style="font-size:15px;font-weight:bold;color:#15803d;margin-top:3px;">
+              <span class="num">${data.currency.symbol} ${fmtNum(totals.cashPayments)}</span>
+            </div>
+          </div>
+
+          ${totals.totalNonCashAdjustments > 0 ? `
+          <div style="background:#f8fafc;padding:9px 12px;border-radius:6px;border:1px solid #e2e8f0;">
+            <div style="font-size:10px;color:#64748b;font-weight:600;">التسويات والمقاصة</div>
+            <div style="font-size:15px;font-weight:bold;color:#0891b2;margin-top:3px;">
+              <span class="num">${data.currency.symbol} ${fmtNum(totals.totalNonCashAdjustments)}</span>
+            </div>
+          </div>
+          ` : ''}
+
+          <div style="background:${finalBalance > 0 ? '#fef2f2' : '#f0fdf4'};padding:9px 12px;border-radius:6px;border:1.5px solid ${finalBalance > 0 ? '#ef4444' : '#22c55e'};">
+            <div style="font-size:10px;color:${finalBalance > 0 ? '#991b1b' : '#166534'};font-weight:bold;">${balanceStateText}</div>
+            <div style="font-size:16px;font-weight:900;color:${finalBalance > 0 ? '#b91c1c' : '#15803d'};margin-top:3px;">
+              <span class="num">${data.currency.symbol} ${fmtNum(Math.abs(finalBalance))}</span>
+            </div>
+          </div>
+
         </div>
-        ` : ''}
-        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid ${t.tableBorder};">
-          <span style="font-weight:bold;">إجمالي المدين</span>
-          <span class="num" style="font-weight:bold;">${data.currency.symbol} ${fmtNum(stats.totalDebits)}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid ${t.tableBorder};margin-bottom:12px;">
-          <span style="font-weight:bold;">إجمالي الدائن</span>
-          <span class="num" style="font-weight:bold;">${data.currency.symbol} ${fmtNum(stats.totalCredits)}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;padding:12px 0;background:${t.totalBg};color:${t.totalText};margin:-12px -16px -12px -16px;padding:12px 16px;font-size:${t.headerFontSize}px;">
-          <span style="font-weight:bold;">${balanceLabel}</span>
-          <span class="num" style="font-weight:bold;font-size:${t.headerFontSize + 2}px;">${data.currency.symbol} ${fmtNum(Math.abs(stats.balance))}</span>
+
+        <div style="margin-top:8px;text-align:center;font-size:11px;color:#475569;font-weight:600;border-top:1px solid #e2e8f0;padding-top:6px;">
+          المبلغ كتابةً: ${numberToArabicWords(Math.abs(finalBalance))} ${data.currency.writtenName} ${finalBalance < 0 ? '(رصيد دائن لصالح العميل)' : finalBalance === 0 ? '(خالص المسدد)' : '(مستحق السداد)'}
         </div>
       </div>
-    </div>
-
-    <div class="notes-section" style="margin-top:15px;">
-      الرصيد بالكلمات: ${numberToArabicWords(Math.abs(stats.balance))} ${data.currency.writtenName} ${stats.balance < 0 ? '(رصيد دائن)' : stats.balance === 0 ? '(مسدد بالكامل)' : ''}
     </div>
   `;
 
+  const bodyContent = `
+    <!-- Table -->
+    <table class="items-table" style="font-size:${t.bodyFontSize - 1}px;width:100%;border-collapse:collapse;">
+      <thead>
+        ${tableHeaderHtml}
+      </thead>
+      <tbody>
+        ${tableRowsHtml}
+      </tbody>
+    </table>
+
+    ${summaryBoxesHtml}
+  `;
+
   const customerHtml = generateCustomerHTML(t, {
-    label: 'العميل',
+    label: 'بيانات العميل',
     name: data.customerData.name,
     company: data.customerData.company,
     phone: data.customerData.phone,
     statsCards: `
       <div class="stat-card">
-        <div class="stat-value">${filteredTransactions.length}</div>
-        <div class="stat-label">حركة</div>
+        <div class="stat-value">${entries.length}</div>
+        <div class="stat-label">حركة مالية</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value">${stats.totalPayments}</div>
-        <div class="stat-label">دفعة</div>
+        <div class="stat-value">${totals.repaymentPercentage}%</div>
+        <div class="stat-label">نسبة تسوية الحساب</div>
       </div>
     `,
   });
 
   const extraCSS = `
-    .items-table td { font-size: ${t.bodyFontSize - 1}px; padding: 6px 4px; }
-    .items-table th { font-size: ${t.bodyFontSize - 1}px; padding: 8px 4px; }
+    .items-table td { font-size: ${t.bodyFontSize - 1}px; padding: 6px 4px; border: 1px solid #cbd5e1; }
+    .items-table th { font-size: ${t.bodyFontSize - 1}px; padding: 8px 4px; background: ${t.primaryColor}; color: ${t.totalText}; }
+    .statement-summary-box { page-break-inside: avoid !important; break-inside: avoid !important; }
+    .items-table tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+    .items-table tr:last-child { page-break-after: avoid !important; break-after: avoid !important; }
+    .items-table tr:nth-last-child(-n+2) { page-break-after: avoid !important; break-after: avoid !important; }
   `;
 
   return wrapInDocument(t, {
-    title: `كشف حساب - ${data.customerData.name}`,
+    title: `${isSimple ? 'كشف حساب' : 'كشف حساب تفصيلي'} - ${data.customerData.name}`,
     headerMetaHtml: `
-      الفترة من: <span class="num">${periodStart}</span><br/>
-      إلى: <span class="num">${periodEnd}</span><br/>
-      تاريخ الإصدار: <span class="num">${formatDateForPrint(new Date().toISOString(), t.showHijriDate)}</span>
+      ${!isSimple ? 'نوع الكشف: <strong>كشف حساب تفصيلي</strong><br/>' : ''}
+      الفترة: <span class="num">${periodStart}</span> إلى <span class="num">${periodEnd}</span><br/>
+      تاريخ الطباعة: <span class="num">${formatDateForPrint(new Date().toISOString(), t.showHijriDate)}</span>
     `,
     customerHtml,
     bodyContent,

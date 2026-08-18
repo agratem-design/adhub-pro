@@ -200,16 +200,16 @@ export function SendAccountStatementDialog({
               paymentsData = payments || [];
             }
 
-            const totalDebits = contractsData.reduce((sum, c) => sum + (Number(c.Total) || 0), 0);
-            const totalCredits = paymentsData
-              .filter(p => p.entry_type === 'receipt')
+            const totalCharges = contractsData.reduce((sum, c) => sum + (Number(c.Total) || 0), 0);
+            const totalPaid = paymentsData
+              .filter(p => p.entry_type === 'receipt' || p.entry_type === 'payment' || !p.entry_type)
               .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-            const balance = totalDebits - totalCredits;
+            const balance = totalCharges - totalPaid;
 
- finalMessage += `\n\n ملخص الحساب:\n`;
-            finalMessage += `• إجمالي المدين: ${totalDebits.toLocaleString()} د.ل\n`;
-            finalMessage += `• إجمالي الدائن: ${totalCredits.toLocaleString()} د.ل\n`;
-            finalMessage += `• الرصيد النهائي: ${balance.toLocaleString()} د.ل`;
+            finalMessage += `\n\n📊 ملخص الحساب:\n`;
+            finalMessage += `• إجمالي المستحقات: ${totalCharges.toLocaleString()} د.ل\n`;
+            finalMessage += `• إجمالي المدفوع نقداً: ${totalPaid.toLocaleString()} د.ل\n`;
+            finalMessage += `• الرصيد المتبقي: ${balance.toLocaleString()} د.ل`;
           } catch (error) {
             console.warn('فشل في حساب الملخص:', error);
           }

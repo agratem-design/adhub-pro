@@ -15,6 +15,16 @@ import { CutoutTaskInvoice } from './CutoutTaskInvoice';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import {
+  resolveItemDesign,
+  resolveAndValidatePrintItems,
+  calculatePrintTaskTotals,
+  BillboardLookup,
+  TaskDesignLookup,
+  ContractDesignItem,
+  ContractLookup
+} from '@/services/printTaskResolutionService';
+import { executeCreatePrintTask } from '@/services/printTaskCreationService';
 
 interface DesignGroup {
   design: string;
@@ -70,6 +80,7 @@ export function CreatePrintTaskFromInstallation({
 }: CreatePrintTaskFromInstallationProps) {
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
+  const isSubmittingRef = useRef(false);
   const [designGroups, setDesignGroups] = useState<DesignGroup[]>([]);
   const [billboardsMap, setBillboardsMap] = useState<Record<number, BillboardInfo>>({});
   const [enrichedTaskItems, setEnrichedTaskItems] = useState<TaskItem[]>([]);
@@ -109,6 +120,7 @@ export function CreatePrintTaskFromInstallation({
       setBulkPrinterCostPerMeter(10);
       setBulkCustomerCostPerMeter(20);
       hasFetchedRef.current = false;
+      isSubmittingRef.current = false;
       setSelectedBillboardIds([]);
       setActiveStep(1);
     }
@@ -116,33 +128,33 @@ export function CreatePrintTaskFromInstallation({
 
   useEffect(() => {
     const fetchData = async () => {
-      console.log('Fetching data for print task...');
+      console.log('Fetching data for print task with exact design mapping...');
       
       const billboardIds = taskItems.map(item => item.billboard_id);
       const designIds = taskItems
         .map(item => item.selected_design_id)
-        .filter(id => id != null);
+        .filter((id): id is string => Boolean(id));
 
-      const [pricingResult, billboardsResult, designsResult, printersResult, sizesResult, facesResult] = await Promise.all([
+      const [pricingResult, billboardsResult, designsResult, printersResult, sizesResult, facesResult, installTaskResult] = await Promise.all([
         supabase.from('installation_print_pricing').select('print_price').limit(1).single(),
-        billboardIds.length > 0 ? supabase.from('billboards').select('ID, Size, has_cutout, Faces_Count').in('ID', billboardIds) : null,
+        billboardIds.length > 0 ? supabase.from('billboards').select('ID, Size, has_cutout, Faces_Count, Contract_Number, design_face_a, design_face_b, Image_URL').in('ID', billboardIds) : null,
         designIds.length > 0 ? supabase.from('task_designs').select('id, design_face_a_url, design_face_b_url, cutout_image_url').in('id', designIds) : null,
         supabase.from('printers').select('id, name').eq('is_active', true),
         supabase.from('sizes').select('id, name, width, height'),
-        // جلب faces_to_install من بنود مهمة التركيب
-        billboardIds.length > 0 ? supabase.from('installation_task_items').select('billboard_id, faces_to_install').eq('task_id', installationTaskId) : null
+        billboardIds.length > 0 ? supabase.from('installation_task_items').select('billboard_id, faces_to_install').eq('task_id', installationTaskId) : null,
+        supabase.from('installation_tasks').select('contract_id, contract_ids').eq('id', installationTaskId).maybeSingle()
       ]);
 
       // تخزين بيانات الأحجام
+      const parsedSizesMap: Record<string, { width: number; height: number }> = {};
       if (sizesResult.data && !sizesResult.error) {
-        const map: Record<string, { width: number; height: number }> = {};
         sizesResult.data.forEach((s: any) => {
           if (s.width && s.height) {
-            map[s.name] = { width: s.width, height: s.height };
-            map[s.name.toLowerCase()] = { width: s.width, height: s.height };
+            parsedSizesMap[s.name] = { width: s.width, height: s.height };
+            parsedSizesMap[s.name.toLowerCase()] = { width: s.width, height: s.height };
           }
         });
-        setSizesMap(map);
+        setSizesMap(parsedSizesMap);
       }
 
       // خريطة faces_to_install من بنود التركيب
@@ -153,50 +165,105 @@ export function CreatePrintTaskFromInstallation({
         });
       }
 
-      if (billboardsResult && !billboardsResult.error) {
-        const map: Record<number, BillboardInfo> = {};
-        billboardsResult.data?.forEach((b: any) => {
+      // خريطة اللوحات
+      const bMap: Record<number, BillboardInfo> = {};
+      const billboardsLookupMap: Record<number, BillboardLookup> = {};
+      const contractIdsSet = new Set<number>();
+
+      if (installTaskResult.data?.contract_id) {
+        const c = Number(installTaskResult.data.contract_id);
+        if (Number.isFinite(c) && c > 0) contractIdsSet.add(c);
+      }
+      if (Array.isArray(installTaskResult.data?.contract_ids)) {
+        installTaskResult.data.contract_ids.forEach((c: any) => {
+          const n = Number(c);
+          if (Number.isFinite(n) && n > 0) contractIdsSet.add(n);
+        });
+      }
+
+      if (billboardsResult && !billboardsResult.error && billboardsResult.data) {
+        billboardsResult.data.forEach((b: any) => {
           const facesFromItem = facesToInstallMap[b.ID];
-          map[b.ID] = {
+          const cNo = b.Contract_Number ? Number(b.Contract_Number) : null;
+          if (cNo && Number.isFinite(cNo) && cNo > 0) {
+            contractIdsSet.add(cNo);
+          }
+
+          bMap[b.ID] = {
             ID: b.ID,
             Size: b.Size || '3x4',
             has_cutout: b.has_cutout || false,
             Faces_Count: facesFromItem || b.Faces_Count || 1
           };
+
+          billboardsLookupMap[b.ID] = {
+            id: b.ID,
+            size: b.Size || '3x4',
+            contractNumber: cNo,
+            facesCount: facesFromItem || b.Faces_Count || 1,
+            hasCutout: Boolean(b.has_cutout),
+            designFaceA: b.design_face_a,
+            designFaceB: b.design_face_b,
+            imageUrl: b.Image_URL
+          };
         });
-        setBillboardsMap(map);
+        setBillboardsMap(bMap);
       }
 
+      // خريطة تصاميم المهام
+      const taskDesignsMap: Record<string, TaskDesignLookup> = {};
       if (designsResult && !designsResult.error && designsResult.data) {
-        const updatedItems = taskItems.map(item => {
-          if (item.selected_design_id) {
-            const design = designsResult.data?.find(d => d.id === item.selected_design_id);
-            if (design) {
-              if (design.cutout_image_url && item.has_cutout) {
-                const key = `${design.design_face_a_url || design.design_face_b_url}-${item.billboard_id}`;
-                setCutoutImageUrls(prev => ({...prev, [key]: design.cutout_image_url || ''}));
+        designsResult.data.forEach((d: any) => {
+          taskDesignsMap[d.id] = {
+            id: d.id,
+            designFaceAUrl: d.design_face_a_url,
+            designFaceBUrl: d.design_face_b_url,
+            cutoutImageUrl: d.cutout_image_url
+          };
+        });
+      }
+
+      // جلب بيانات العقود والتصاميم الدقيقة لكل لوحة من جدول Contract
+      const contractDesignDataMap: Record<number, ContractDesignItem[]> = {};
+      if (contractIdsSet.size > 0) {
+        const { data: contractsData } = await supabase
+          .from('Contract')
+          .select('Contract_Number, customer_id, "Customer Name", design_data')
+          .in('Contract_Number', Array.from(contractIdsSet));
+
+        contractsData?.forEach((c: any) => {
+          if (c.design_data) {
+            try {
+              const parsed = typeof c.design_data === 'string' ? JSON.parse(c.design_data) : c.design_data;
+              if (Array.isArray(parsed)) {
+                contractDesignDataMap[Number(c.Contract_Number)] = parsed;
               }
-              return {
-                ...item,
-                design_face_a: design.design_face_a_url,
-                design_face_b: design.design_face_b_url
-              };
+            } catch (e) {
+              // ignore parse errors
             }
           }
-          return item;
         });
-        setEnrichedTaskItems(updatedItems);
-        const idsWithDesigns = updatedItems
-          .filter(item => item.design_face_a || item.design_face_b)
-          .map(item => item.billboard_id);
-        setSelectedBillboardIds(idsWithDesigns);
-      } else {
-        setEnrichedTaskItems(taskItems);
-        const idsWithDesigns = taskItems
-          .filter(item => item.design_face_a || item.design_face_b)
-          .map(item => item.billboard_id);
-        setSelectedBillboardIds(idsWithDesigns);
       }
+
+      // تعيين التصاميم الدقيقة لكل بند دون أي Cross-Contamination
+      const updatedItems = taskItems.map(item => {
+        const billboard = billboardsLookupMap[item.billboard_id];
+        const resolved = resolveItemDesign(item, billboard, taskDesignsMap, contractDesignDataMap);
+
+        if (resolved.cutoutImageUrl && item.has_cutout) {
+          const key = `${resolved.faceA || resolved.faceB || 'item'}-${item.billboard_id}`;
+          setCutoutImageUrls(prev => ({ ...prev, [key]: resolved.cutoutImageUrl || '' }));
+        }
+
+        return {
+          ...item,
+          design_face_a: resolved.faceA,
+          design_face_b: resolved.faceB
+        };
+      });
+
+      setEnrichedTaskItems(updatedItems);
+      setSelectedBillboardIds(taskItems.map(item => item.billboard_id));
 
       if (printersResult.data && printersResult.data.length > 0) {
         setPrinters(printersResult.data.map(p => ({ id: p.id, name: p.name })));
@@ -219,7 +286,6 @@ export function CreatePrintTaskFromInstallation({
     }
 
     const groups: Record<string, DesignGroup> = {};
-    let hasDesigns = false;
 
     enrichedTaskItems.forEach(item => {
       if (!selectedBillboardIds.includes(item.billboard_id)) return;
@@ -231,55 +297,52 @@ export function CreatePrintTaskFromInstallation({
       const hasCutout = item.has_cutout || billboard.has_cutout || false;
       const facesCount = item.faces_to_install || billboard.Faces_Count || 1;
       
-      if (item.design_face_a) {
-        hasDesigns = true;
-        const key = `${size}_${item.design_face_a}_a`;
-        if (!groups[key]) {
+      // Face A
+      const designA = item.design_face_a || '';
+      const key = `${size}_${designA || 'default'}_a`;
+      if (!groups[key]) {
         const { width, height } = parseSizeDimensions(size);
-          groups[key] = {
-            design: item.design_face_a,
-            face: 'a',
-            size,
-            quantity: 0,
-            area: width * height,
-            billboards: [],
-            width,
-            height,
-            facesCount,
-            hasCutout,
-            cutoutCount: 0,
-            cutoutBillboards: [],
-            printerCostPerMeter: 10,
-            printerCutoutCostPerUnit: 0,
-            customerCostPerMeter: 20,
-            customerCutoutCostPerUnit: 0
-          };
-        }
-        // كل لوحة = بند واحد لكل وجه (face_a / face_b منفصلين أصلاً)
-        groups[key].quantity += 1;
-        groups[key].billboards.push(item.billboard_id);
-        // تحديث أعلى عدد أوجه في المجموعة
-        if (facesCount > groups[key].facesCount) {
-          groups[key].facesCount = facesCount;
-        }
-        
-        if (hasCutout) {
-          groups[key].hasCutout = true;
-          groups[key].cutoutCount = (groups[key].cutoutCount || 0) + 1;
-          groups[key].cutoutBillboards = [...(groups[key].cutoutBillboards || []), item.billboard_id];
-          const cutoutKey = `${item.design_face_a}-${item.billboard_id}`;
-          groups[key].cutoutImageUrl = cutoutImageUrls[cutoutKey] || '';
-        }
+        groups[key] = {
+          design: designA,
+          face: 'a',
+          size,
+          quantity: 0,
+          area: width * height,
+          billboards: [],
+          width,
+          height,
+          facesCount,
+          hasCutout,
+          cutoutCount: 0,
+          cutoutBillboards: [],
+          printerCostPerMeter: 10,
+          printerCutoutCostPerUnit: 0,
+          customerCostPerMeter: 20,
+          customerCutoutCostPerUnit: 0
+        };
+      }
+      groups[key].quantity += 1;
+      groups[key].billboards.push(item.billboard_id);
+      if (facesCount > groups[key].facesCount) {
+        groups[key].facesCount = facesCount;
+      }
+      
+      if (hasCutout) {
+        groups[key].hasCutout = true;
+        groups[key].cutoutCount = (groups[key].cutoutCount || 0) + 1;
+        groups[key].cutoutBillboards = [...(groups[key].cutoutBillboards || []), item.billboard_id];
+        const cutoutKey = `${designA}-${item.billboard_id}`;
+        groups[key].cutoutImageUrl = cutoutImageUrls[cutoutKey] || '';
       }
 
-      // ✅ لا تضف الوجه B إذا كان faces_to_install = 1
-      if (item.design_face_b && facesCount >= 2) {
-        hasDesigns = true;
-        const key = `${size}_${item.design_face_b}_b`;
-        if (!groups[key]) {
-        const { width, height } = parseSizeDimensions(size);
-          groups[key] = {
-            design: item.design_face_b,
+      // Face B إذا كان عدد الأوجه >= 2
+      if (facesCount >= 2) {
+        const designB = item.design_face_b || designA || '';
+        const keyB = `${size}_${designB || 'default'}_b`;
+        if (!groups[keyB]) {
+          const { width, height } = parseSizeDimensions(size);
+          groups[keyB] = {
+            design: designB,
             face: 'b',
             size,
             quantity: 0,
@@ -297,29 +360,24 @@ export function CreatePrintTaskFromInstallation({
             customerCutoutCostPerUnit: 0
           };
         }
-        groups[key].quantity += 1;
-        groups[key].billboards.push(item.billboard_id);
-        if (facesCount > groups[key].facesCount) {
-          groups[key].facesCount = facesCount;
+        groups[keyB].quantity += 1;
+        groups[keyB].billboards.push(item.billboard_id);
+        if (facesCount > groups[keyB].facesCount) {
+          groups[keyB].facesCount = facesCount;
         }
         
         if (hasCutout) {
-          groups[key].hasCutout = true;
-          groups[key].cutoutCount = (groups[key].cutoutCount || 0) + 1;
-          groups[key].cutoutBillboards = [...(groups[key].cutoutBillboards || []), item.billboard_id];
-          const cutoutKey = `${item.design_face_b}-${item.billboard_id}`;
-          groups[key].cutoutImageUrl = cutoutImageUrls[cutoutKey] || '';
+          groups[keyB].hasCutout = true;
+          groups[keyB].cutoutCount = (groups[keyB].cutoutCount || 0) + 1;
+          groups[keyB].cutoutBillboards = [...(groups[keyB].cutoutBillboards || []), item.billboard_id];
+          const cutoutKey = `${designB}-${item.billboard_id}`;
+          groups[keyB].cutoutImageUrl = cutoutImageUrls[cutoutKey] || '';
         }
       }
     });
 
-    const itemsWithDesigns = enrichedTaskItems.filter(item => item.design_face_a || item.design_face_b);
-    if (itemsWithDesigns.length === 0) {
-      toast.error('لم يتم العثور على تصاميم! يرجى تعيين التصاميم للوحات أولاً.');
-    }
-
     setDesignGroups(Object.values(groups));
-  }, [enrichedTaskItems, billboardsMap, cutoutImageUrls, sizesMap]);
+  }, [enrichedTaskItems, billboardsMap, cutoutImageUrls, sizesMap, selectedBillboardIds]);
 
   // استخدام الأبعاد الفعلية من جدول sizes
   const parseSizeDimensions = (size: string): { width: number; height: number } => {
@@ -477,7 +535,10 @@ export function CreatePrintTaskFromInstallation({
   };
 
   const handleCreatePrintTask = async () => {
+    if (isSubmittingRef.current) return;
+
     try {
+      isSubmittingRef.current = true;
       setLoading(true);
 
       if (!printerId) {
@@ -485,427 +546,174 @@ export function CreatePrintTaskFromInstallation({
         return;
       }
 
-      const { data: installationTask, error: taskError } = await supabase
-        .from('installation_tasks')
-        .select('contract_id, contract_ids, task_type')
-        .eq('id', installationTaskId)
-        .single();
+      if (selectedBillboardIds.length === 0) {
+        toast.error('يرجى تحديد لوحة واحدة على الأقل');
+        return;
+      }
 
-      if (taskError) throw taskError;
+      // Fetch Source Installation Task & Composite Task
+      const [installTaskRes, compositeTaskRes] = await Promise.all([
+        supabase
+          .from('installation_tasks')
+          .select('id, contract_id, contract_ids, task_type')
+          .eq('id', installationTaskId)
+          .single(),
+        supabase
+          .from('composite_tasks')
+          .select('id, customer_id, customer_name, combined_invoice_id, discount_amount')
+          .eq('installation_task_id', installationTaskId)
+          .maybeSingle()
+      ]);
 
-      // تحديد نوع المهمة
+      if (installTaskRes.error) throw installTaskRes.error;
+      const installationTask = installTaskRes.data;
+      const existingComposite = compositeTaskRes.data;
       const isReinstallation = installationTask.task_type === 'reinstallation';
 
-      let contractIds = installationTask.contract_ids && installationTask.contract_ids.length > 0 
-        ? installationTask.contract_ids 
-        : [installationTask.contract_id];
+      // Batch Fetch Billboard & Contract Data for Resolution
+      const billboardIds = taskItems.map(item => item.billboard_id);
+      const designIds = taskItems
+        .map(item => item.selected_design_id)
+        .filter((id): id is string => Boolean(id));
 
-      if (!contractIds || contractIds.length === 0 || !contractIds[0]) {
-        throw new Error('لا يوجد رقم عقد مرتبط بمهمة التركيب');
+      const [billboardsRes, designsRes, taskItemsRes] = await Promise.all([
+        billboardIds.length > 0
+          ? supabase.from('billboards').select('ID, Size, has_cutout, Faces_Count, Contract_Number, design_face_a, design_face_b, Image_URL').in('ID', billboardIds)
+          : { data: [] },
+        designIds.length > 0
+          ? supabase.from('task_designs').select('id, design_face_a_url, design_face_b_url, cutout_image_url').in('id', designIds)
+          : { data: [] },
+        supabase.from('installation_task_items').select('id, billboard_id, faces_to_install, customer_installation_cost').eq('task_id', installationTaskId)
+      ]);
+
+      const facesToInstallMap: Record<number, number> = {};
+      const itemCostMap: Record<number, number> = {};
+      taskItemsRes.data?.forEach((it: any) => {
+        facesToInstallMap[it.billboard_id] = it.faces_to_install || 1;
+        itemCostMap[it.billboard_id] = it.customer_installation_cost || 0;
+      });
+
+      const billboardsLookupMap: Record<number, BillboardLookup> = {};
+      const contractIdsSet = new Set<number>();
+
+      if (installationTask.contract_id) {
+        const c = Number(installationTask.contract_id);
+        if (Number.isFinite(c) && c > 0) contractIdsSet.add(c);
+      }
+      if (Array.isArray(installationTask.contract_ids)) {
+        installationTask.contract_ids.forEach((c: any) => {
+          const n = Number(c);
+          if (Number.isFinite(n) && n > 0) contractIdsSet.add(n);
+        });
       }
 
-      const { data: contracts, error: contractError } = await supabase
-        .from('Contract')
-        .select('Contract_Number, customer_id, "Customer Name"')
-        .in('Contract_Number', contractIds);
+      billboardsRes.data?.forEach((b: any) => {
+        const cNo = b.Contract_Number ? Number(b.Contract_Number) : null;
+        if (cNo && Number.isFinite(cNo) && cNo > 0) contractIdsSet.add(cNo);
 
-      if (contractError || !contracts || contracts.length === 0) {
-        throw new Error('لم يتم العثور على بيانات العقد');
-      }
+        billboardsLookupMap[b.ID] = {
+          id: b.ID,
+          size: b.Size || '3x4',
+          contractNumber: cNo,
+          facesCount: facesToInstallMap[b.ID] || b.Faces_Count || 1,
+          hasCutout: Boolean(b.has_cutout),
+          designFaceA: b.design_face_a,
+          designFaceB: b.design_face_b,
+          imageUrl: b.Image_URL
+        };
+      });
 
-      const customerData = {
-        customer_id: contracts[0].customer_id,
-        customer_name: contracts[0]['Customer Name']
-      };
+      const taskDesignsMap: Record<string, TaskDesignLookup> = {};
+      designsRes.data?.forEach((d: any) => {
+        taskDesignsMap[d.id] = {
+          id: d.id,
+          designFaceAUrl: d.design_face_a_url,
+          designFaceBUrl: d.design_face_b_url,
+          cutoutImageUrl: d.cutout_image_url
+        };
+      });
 
-      if (!customerData.customer_id || !customerData.customer_name) {
-        throw new Error('بيانات العميل غير مكتملة');
-      }
+      const contractLookupMap: Record<number, ContractLookup> = {};
+      const contractDesignDataMap: Record<number, ContractDesignItem[]> = {};
 
-      // 1. تنظيف أي مهام طباعة وقص سابقة لهذه المهمة التركيبية لتجنب تكرار الفواتير
-      const { data: oldPrintTasks } = await supabase
-        .from('print_tasks')
-        .select('id, invoice_id')
-        .eq('installation_task_id', installationTaskId);
+      if (contractIdsSet.size > 0) {
+        const { data: contractsData } = await supabase
+          .from('Contract')
+          .select('Contract_Number, customer_id, "Customer Name", "Ad Type", design_data')
+          .in('Contract_Number', Array.from(contractIdsSet));
 
-      if (oldPrintTasks && oldPrintTasks.length > 0) {
-        const oldPrintTaskIds = oldPrintTasks.map(t => t.id);
-        const oldPrintInvoiceIds = oldPrintTasks.map(t => t.invoice_id).filter(Boolean);
-
-        // حذف بنود مهام الطباعة القديمة
-        await supabase
-          .from('print_task_items')
-          .delete()
-          .in('task_id', oldPrintTaskIds);
-
-        // حذف مهام الطباعة القديمة
-        await supabase
-          .from('print_tasks')
-          .delete()
-          .in('id', oldPrintTaskIds);
-
-        // حذف فواتير الطباعة القديمة
-        if (oldPrintInvoiceIds.length > 0) {
-          await supabase
-            .from('customer_payments')
-            .delete()
-            .in('printed_invoice_id', oldPrintInvoiceIds);
-
-          await supabase
-            .from('printed_invoices')
-            .delete()
-            .in('id', oldPrintInvoiceIds);
-        }
-      }
-
-      const { data: oldCutoutTasks } = await supabase
-        .from('cutout_tasks')
-        .select('id, invoice_id')
-        .eq('installation_task_id', installationTaskId);
-
-      if (oldCutoutTasks && oldCutoutTasks.length > 0) {
-        const oldCutoutTaskIds = oldCutoutTasks.map(t => t.id);
-        const oldCutoutInvoiceIds = oldCutoutTasks.map(t => t.invoice_id).filter(Boolean);
-
-        // حذف بنود مهام القص القديمة
-        await supabase
-          .from('cutout_task_items')
-          .delete()
-          .in('task_id', oldCutoutTaskIds);
-
-        // حذف مهام القص القديمة
-        await supabase
-          .from('cutout_tasks')
-          .delete()
-          .in('id', oldCutoutTaskIds);
-
-        // حذف فواتير القص القديمة
-        if (oldCutoutInvoiceIds.length > 0) {
-          await supabase
-            .from('customer_payments')
-            .delete()
-            .in('printed_invoice_id', oldCutoutInvoiceIds);
-
-          await supabase
-            .from('printed_invoices')
-            .delete()
-            .in('id', oldCutoutInvoiceIds);
-        }
-      }
-
-      const totals = calculateTotals();
-      const totalArea = printGroups.reduce((sum, g) => sum + (g.area * g.quantity), 0);
-
-      // إنشاء فاتورة الطباعة
-      const printInvoiceNumber = `PT-${Date.now()}`;
-      const { data: printInvoice, error: printInvoiceError } = await supabase
-        .from('printed_invoices')
-        .insert({
-          contract_number: installationTask.contract_id,
-          invoice_number: printInvoiceNumber,
-          customer_id: customerData.customer_id,
-          customer_name: customerData.customer_name,
-          printer_id: printerId,
-          printer_name: printers.find(p => p.id === printerId)?.name || 'غير محدد',
-          invoice_date: new Date().toISOString().split('T')[0],
-          total_amount: totals.customerPrintTotal,
-          printer_cost: totals.printerPrintTotal,
-          invoice_type: 'print',
-          notes: `مهمة طباعة من التركيب ${installationTaskId}`
-        })
-        .select()
-        .single();
-
-      if (printInvoiceError) throw printInvoiceError;
-
-      // إنشاء مهمة الطباعة
-      const { data: printTask, error: printTaskError } = await supabase
-        .from('print_tasks')
-        .insert({
-          invoice_id: printInvoice.id,
-          contract_id: installationTask.contract_id,
-          customer_id: customerData.customer_id,
-          customer_name: customerData.customer_name,
-          customer_total_amount: totals.customerPrintTotal,
-          printer_id: printerId,
-          status: 'pending',
-          total_area: totalArea,
-          total_cost: totals.printerPrintTotal,
-          printer_total_cost: totals.printerPrintTotal,
-          price_per_meter: totalArea > 0 ? totals.printerPrintTotal / totalArea : 0,
-          priority: 'normal',
-          installation_task_id: installationTaskId,
-          is_composite: true,
-          notes: `مهمة طباعة من التركيب - الربح: ${totals.printProfit.toFixed(2)} د.ل`
-        })
-        .select()
-        .single();
-
-      if (printTaskError) throw printTaskError;
-
-      // تحديث مهمة التركيب لربطها بمهمة الطباعة
-      await supabase
-        .from('installation_tasks')
-        .update({ print_task_id: printTask.id })
-        .eq('id', installationTaskId);
-
-      // إنشاء بنود مهمة الطباعة - بند منفصل لكل لوحة مع مراعاة عدد الأوجه
-      const printTaskItems = printGroups.flatMap(group => 
-        group.billboards.map(billboardId => {
-          const billboard = billboardsMap[billboardId];
-          const _facesCount = billboard?.Faces_Count || 1;
-          return {
-            task_id: printTask.id,
-            billboard_id: billboardId,
-            description: `${group.size} - ${group.face === 'a' ? 'وجه أمامي' : 'وجه خلفي'}`,
-            width: group.width,
-            height: group.height,
-            area: group.area,
-            quantity: 1,
-            faces_count: 1,
-            unit_cost: group.printerCostPerMeter * group.area,
-            printer_unit_cost: group.printerCostPerMeter * group.area,
-            customer_unit_cost: group.customerCostPerMeter * group.area,
-            total_cost: group.printerCostPerMeter * group.area,
-            design_face_a: group.face === 'a' ? group.design : null,
-            design_face_b: group.face === 'b' ? group.design : null,
-            has_cutout: group.cutoutBillboards?.includes(billboardId) || false,
-            cutout_quantity: group.cutoutBillboards?.includes(billboardId) ? 1 : 0,
-            cutout_image_url: (group.cutoutBillboards?.includes(billboardId) && group.cutoutImageUrl) || null,
-            model_link: (group.cutoutBillboards?.includes(billboardId) && group.cutoutImageUrl) || null,
-            status: 'pending'
+        contractsData?.forEach((c: any) => {
+          const cNum = Number(c.Contract_Number);
+          contractLookupMap[cNum] = {
+            contractNumber: cNum,
+            customerId: c.customer_id,
+            customerName: c['Customer Name'],
+            adType: c['Ad Type'],
+            designData: c.design_data
           };
-        })
-      );
 
-      const { error: printItemsError } = await supabase
-        .from('print_task_items')
-        .insert(printTaskItems);
-
-      if (printItemsError) throw printItemsError;
-
-      let cutoutInvoiceId: string | null = null;
-
-      // إنشاء مهمة القص إذا كانت هناك مجسمات
-      if (cutoutGroups.length > 0 && totals.printerCutoutTotal > 0) {
-        const cutoutInvoiceNumber = `CT-${Date.now()}`;
-        const { data: cutoutInvoice, error: cutoutInvoiceError } = await supabase
-          .from('printed_invoices')
-          .insert({
-            contract_number: installationTask.contract_id,
-            invoice_number: cutoutInvoiceNumber,
-            customer_id: customerData.customer_id,
-            customer_name: customerData.customer_name,
-            printer_id: printerId,
-            printer_name: printers.find(p => p.id === printerId)?.name || 'غير محدد',
-            invoice_date: new Date().toISOString().split('T')[0],
-            total_amount: totals.customerCutoutTotal,
-            printer_cost: totals.printerCutoutTotal,
-            invoice_type: 'cutout',
-            notes: `مهمة قص من التركيب ${installationTaskId}`
-          })
-          .select()
-          .single();
-
-        if (cutoutInvoiceError) throw cutoutInvoiceError;
-
-        if (cutoutInvoice) {
-          cutoutInvoiceId = cutoutInvoice.id;
-        }
-
-        const totalCutoutQuantity = cutoutGroups.reduce((sum, g) => sum + (g.cutoutCount || 0), 0);
-
-        const { data: createdCutoutTask, error: cutoutTaskError } = await supabase
-          .from('cutout_tasks')
-          .insert({
-            invoice_id: cutoutInvoice.id,
-            contract_id: installationTask.contract_id,
-            customer_id: customerData.customer_id,
-            customer_name: customerData.customer_name,
-            customer_total_amount: totals.customerCutoutTotal,
-            printer_id: cutoutPrinterId || printerId,
-            status: 'pending',
-            total_cost: totals.printerCutoutTotal,
-            total_quantity: totalCutoutQuantity,
-            unit_cost: totalCutoutQuantity > 0 ? totals.printerCutoutTotal / totalCutoutQuantity : 0,
-            priority: 'normal',
-            installation_task_id: installationTaskId,
-            notes: `مهمة قص من التركيب - الربح: ${totals.cutoutProfit.toFixed(2)} د.ل`,
-            is_composite: true
-          })
-          .select()
-          .single();
-
-        if (cutoutTaskError) throw cutoutTaskError;
-
-        // تحديث مهمة التركيب لربطها بمهمة القص/المجسمات
-        await supabase
-          .from('installation_tasks')
-          .update({ cutout_task_id: createdCutoutTask.id })
-          .eq('id', installationTaskId);
-
-        // إنشاء بنود مهمة القص لكل لوحة بها مجسم مع مراعاة عدد الأوجه
-        const cutoutTaskItems = cutoutGroups.flatMap(group => 
-          (group.cutoutBillboards || []).map(billboardId => {
-            const billboard = billboardsMap[billboardId];
-            const facesCount = billboard?.Faces_Count || 1;
-            return {
-              task_id: createdCutoutTask.id,
-              billboard_id: billboardId,
-              description: `مجسم ${group.size} - ${group.face === 'a' ? 'وجه أمامي' : 'وجه خلفي'} (${facesCount} ${facesCount === 1 ? 'وجه' : 'أوجه'})`,
-              quantity: facesCount,
-              faces_count: facesCount,
-              unit_cost: group.printerCutoutCostPerUnit,
-              total_cost: group.printerCutoutCostPerUnit * facesCount,
-              cutout_image_url: group.cutoutImageUrl || null,
-              status: 'pending'
-            };
-          })
-        );
-
-        const { error: cutoutItemsError } = await supabase
-          .from('cutout_task_items')
-          .insert(cutoutTaskItems);
-
-        if (cutoutItemsError) throw cutoutItemsError;
-
-        // ملاحظة: لا نسجل في حساب الزبون هنا لأن الفاتورة الموحدة للمهمة المجمعة ستتكفل بذلك
-        // هذا يمنع تكرار الديون في قائمة الفواتير
+          if (c.design_data) {
+            try {
+              const parsed = typeof c.design_data === 'string' ? JSON.parse(c.design_data) : c.design_data;
+              if (Array.isArray(parsed)) {
+                contractDesignDataMap[cNum] = parsed;
+              }
+            } catch (e) {
+              // ignore
+            }
+          }
+        });
       }
 
-      // === إنشاء أو تحديث المهمة المجمعة ===
-      // Note: cutoutTask variable already exists from line 541-559 if cutout groups exist
+      const primaryGroup = printGroups[0];
+      const printerPricePerM = primaryGroup?.printerCostPerMeter ?? 10;
+      const customerPricePerM = primaryGroup?.customerCostPerMeter ?? 20;
 
-      // جلب تكلفة التركيب للزبون من بنود مهمة التركيب
-      const { data: taskItemsCostData } = await supabase
-        .from('installation_task_items')
-        .select('customer_installation_cost')
-        .eq('task_id', installationTaskId);
-      
-      const customerInstallationCostFromItems = taskItemsCostData?.reduce(
-        (sum, item) => sum + (item.customer_installation_cost || 0), 
-        0
-      ) || 0;
-
-      // جلب تكلفة التركيب الفعلية للشركة من حساب فريق التركيب
-      const { data: taskItemIds } = await supabase
-        .from('installation_task_items')
-        .select('id')
-        .eq('task_id', installationTaskId);
-      
+      // Fetch company installation team accounts cost
+      const itemIds = taskItemsRes.data?.map(item => item.id) || [];
       let companyInstallationCost = 0;
-      if (taskItemIds && taskItemIds.length > 0) {
-        const itemIds = taskItemIds.map(item => item.id);
+      if (itemIds.length > 0) {
         const { data: teamAccountData } = await supabase
           .from('installation_team_accounts')
           .select('amount')
           .in('task_item_id', itemIds);
-        
         companyInstallationCost = teamAccountData?.reduce((sum, item) => sum + (item.amount || 0), 0) || 0;
       }
 
-      // البحث عن مهمة مجمعة موجودة أو إنشاء جديدة
-      const { data: existingComposite } = await supabase
-        .from('composite_tasks')
-        .select('id, combined_invoice_id, discount_amount')
-        .eq('installation_task_id', installationTaskId)
-        .maybeSingle();
+      // Execute Creation Orchestration via Production Service
+      const result = await executeCreatePrintTask({
+        installationTaskId,
+        selectedBillboardIds,
+        taskItems,
+        billboardsMap: billboardsLookupMap,
+        taskDesignsMap,
+        contractDesignDataMap,
+        contractLookupMap,
+        defaultContractId: Number(installationTask.contract_id),
+        compositeCustomer: existingComposite ? { customerId: existingComposite.customer_id, customerName: existingComposite.customer_name } : undefined,
+        sizesMap,
+        printerId,
+        printerName: printers.find(p => p.id === printerId)?.name || 'غير محدد',
+        cutoutPrinterId,
+        cutoutPrinterName: printers.find(p => p.id === (cutoutPrinterId || printerId))?.name || 'غير محدد',
+        printerPricePerMeter: printerPricePerM,
+        customerPricePerMeter: customerPricePerM,
+        cutoutGroups,
+        isReinstallation,
+        itemCostMap,
+        companyInstallationCost,
+        existingComposite,
+        allowDraftWithoutDesign: false
+      }, supabase as any);
 
-      // استخدام المتغير الصحيح للـ cutout task إذا تم إنشاؤه
-      let cutoutTaskId = null;
-      if (cutoutGroups.length > 0 && totals.printerCutoutTotal > 0) {
-        const { data: foundCutoutTask } = await supabase
-          .from('cutout_tasks')
-          .select('id')
-          .eq('installation_task_id', installationTaskId)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        cutoutTaskId = foundCutoutTask?.id || null;
-      }
-
-      // تكلفة التركيب للزبون: في حالة إعادة التركيب تحسب، في التركيب الجديد = 0
-      const customerInstallationCost = isReinstallation ? customerInstallationCostFromItems : 0;
-      
-      const compositeData = {
-        contract_id: installationTask.contract_id,
-        customer_id: customerData.customer_id,
-        customer_name: customerData.customer_name,
-        task_type: isReinstallation ? 'reinstallation' : 'new_installation',
-        installation_task_id: installationTaskId,
-        print_task_id: printTask.id,
-        cutout_task_id: cutoutTaskId,
-        // تكاليف الزبون
-        customer_installation_cost: customerInstallationCost, // التركيب شامل من العقد في التركيب الجديد فقط
-        customer_print_cost: totals.customerPrintTotal,
-        customer_cutout_cost: totals.customerCutoutTotal,
-        // تكاليف الشركة
-        company_installation_cost: companyInstallationCost,
-        company_print_cost: totals.printerPrintTotal,
-        company_cutout_cost: totals.printerCutoutTotal,
-        // الإجماليات
-        customer_total: customerInstallationCost + totals.customerPrintTotal + totals.customerCutoutTotal,
-        company_total: companyInstallationCost + totals.printerPrintTotal + totals.printerCutoutTotal,
-        net_profit: (customerInstallationCost + totals.customerPrintTotal + totals.customerCutoutTotal) - (companyInstallationCost + totals.printerPrintTotal + totals.printerCutoutTotal),
-        profit_percentage: (customerInstallationCost + totals.customerPrintTotal + totals.customerCutoutTotal) > 0 
-          ? (((customerInstallationCost + totals.customerPrintTotal + totals.customerCutoutTotal) - (companyInstallationCost + totals.printerPrintTotal + totals.printerCutoutTotal)) / (customerInstallationCost + totals.customerPrintTotal + totals.customerCutoutTotal)) * 100 
-          : 0,
-        status: 'pending',
-        notes: `مهمة ${isReinstallation ? 'إعادة تركيب' : 'تركيب جديد'} - طباعة: ${totals.customerPrintTotal} د.ل${cutoutGroups.length > 0 ? ` - قص: ${totals.customerCutoutTotal} د.ل` : ''}`
-      };
-
-      if (existingComposite) {
-        await supabase
-          .from('composite_tasks')
-          .update(compositeData)
-          .eq('id', existingComposite.id);
-
-        // إذا كانت هناك فاتورة موحدة منشأة بالفعل للمهمة المجمعة، يجب تحديثها وتنظيف الفواتير الفردية الجديدة
-        if (existingComposite.combined_invoice_id) {
-          // حذف الفاتورة الفردية التي أنشئت للتو لأن الفاتورة الموحدة موجودة بالفعل وتغني عنها
-          await supabase.from('printed_invoices').delete().eq('id', printInvoice.id);
-          await supabase.from('print_tasks').update({ invoice_id: null }).eq('id', printTask.id);
-          
-          if (cutoutTaskId && cutoutInvoiceId) {
-            await supabase.from('printed_invoices').delete().eq('id', cutoutInvoiceId);
-            await supabase.from('cutout_tasks').update({ invoice_id: null }).eq('id', cutoutTaskId);
-          }
-
-          // تحديث الفاتورة الموحدة بالتكاليف الجديدة
-          const discountAmount = existingComposite.discount_amount || 0;
-          const newCustomerTotal = customerInstallationCost + totals.customerPrintTotal + totals.customerCutoutTotal - discountAmount;
-          const newCompanyPrint = totals.printerPrintTotal;
-          const newCompanyCutout = totals.printerCutoutTotal;
-          
-          await supabase.from('printed_invoices').update({
-            print_cost: newCompanyPrint + newCompanyCutout,
-            total_amount: newCustomerTotal,
-            notes: `فاتورة موحدة للمهمة المجمعة (معاد حسابها بعد تحديث مهام الطباعة/القص)\n` +
-                   `تركيب: ${customerInstallationCost.toLocaleString()} د.ل\n` +
-                   (totals.customerPrintTotal > 0 ? `طباعة: ${totals.customerPrintTotal.toLocaleString()} د.ل\n` : '') +
-                   (totals.customerCutoutTotal > 0 ? `قص: ${totals.customerCutoutTotal.toLocaleString()} د.ل\n` : '') +
-                   (discountAmount > 0 ? `خصم: ${discountAmount.toLocaleString()} د.ل\n` : ''),
-            updated_at: new Date().toISOString()
-          } as any).eq('id', existingComposite.combined_invoice_id);
-
-          // تحديث سجل الدين في حساب الزبون المرتبط بالفاتورة الموحدة
-          await supabase.from('customer_payments')
-            .update({
-              amount: -newCustomerTotal,
-              notes: `مهمة مجمعة - عقد #${installationTask.contract_id} (معاد حسابها بعد تحديث مهام الطباعة/القص)`
-            })
-            .eq('printed_invoice_id', existingComposite.combined_invoice_id)
-            .eq('entry_type', 'invoice');
-        }
-      } else {
-        await supabase
-          .from('composite_tasks')
-          .insert([compositeData]);
+      if (!result.success) {
+        toast.error(result.error || 'فشل في إنشاء مهمة الطباعة');
+        return;
       }
 
       const successMessage = cutoutGroups.length > 0 
-        ? `تم إنشاء مهمة الطباعة والقص والمهمة المجمعة بنجاح - الربح الإجمالي: ${totals.totalProfit.toFixed(2)} د.ل`
-        : `تم إنشاء مهمة الطباعة والمهمة المجمعة بنجاح - الربح: ${totals.printProfit.toFixed(2)} د.ل`;
+        ? `تم إنشاء مهمة الطباعة والقص والمهمة المجمعة بنجاح`
+        : `تم إنشاء مهمة الطباعة والمهمة المجمعة بنجاح`;
 
       toast.success(successMessage);
       queryClient.invalidateQueries({ queryKey: ['print-tasks'] });
@@ -915,9 +723,10 @@ export function CreatePrintTaskFromInstallation({
       onOpenChange(false);
       onSuccess?.();
     } catch (error: any) {
-      console.error('Error:', error);
+      console.error('Error in handleCreatePrintTask:', error);
       toast.error(error.message || 'فشل في إنشاء المهام');
     } finally {
+      isSubmittingRef.current = false;
       setLoading(false);
     }
   };

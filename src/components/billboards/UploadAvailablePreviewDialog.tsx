@@ -5,19 +5,41 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Globe, Search, Eye, Clock, Building2, Calendar, CheckCircle2, Loader2, FileSpreadsheet, AlertCircle } from 'lucide-react';
+import { Globe, Search, Eye, Clock, Building2, Calendar, CheckCircle2, Loader2, ShieldAlert } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { smartArabicMatch } from '@/lib/arabicSearch';
+import { 
+  resolveBillboardAvailability, 
+  resolveContractMarketingVisibility,
+  normalizeDateOnly,
+  addCalendarMonths,
+  ContractMarketingVisibilityState
+} from '@/services/billboardAvailabilityService';
 
-interface ActiveContractItem {
+export interface ContractPreviewGroup {
   contractNumber: number | string;
   customerName: string;
   adType: string;
+  startDate?: string | null;
   endDate: string;
-  billboardCount: number;
-  isForcedVisible: boolean; // moxharah fi al-muta7 yadawiyan
-  isExpiringSoon: boolean;  // stota7 qareeban
+  isExpired: boolean;
+  marketingState: ContractMarketingVisibilityState;
+  requestedForceShowCount: number;
+  blockedByOtherContractsCount: number;
+  effectiveForceShowCount: number;
+  forceShowCount: number; // Alias for effectiveForceShowCount
+  totalBillboards: number;
+  eligibleBillboardsCount: number;
+  isExplicitlyShown: boolean; // Non-expired active contract with >= 1 effective FORCE_SHOW billboard
+  isUpcomingContract: boolean; // Non-expired active contract ending within upcoming window
   daysRemaining?: number;
+}
+
+export interface BillboardSummaryStats {
+  totalBillboards: number;
+  availableWithoutContractBillboards: number;
+  marketingVisibleBillboards: number;
+  upcomingBillboards: number;
 }
 
 interface UploadAvailablePreviewDialogProps {
@@ -42,14 +64,14 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
   const [loadingData, setLoadingData] = useState(false);
   const [contractTab, setContractTab] = useState<'forced' | 'expiring' | 'all'>('forced');
 
-  const [stats, setStats] = useState({
-    totalExportCount: 0,
-    availableWithoutContractCount: 0,
-    forcedVisibleCount: 0,
-    expiringSoonCount: 0,
+  const [stats, setStats] = useState<BillboardSummaryStats>({
+    totalBillboards: 0,
+    availableWithoutContractBillboards: 0,
+    marketingVisibleBillboards: 0,
+    upcomingBillboards: 0,
   });
 
-  const [activeContractsList, setActiveContractsList] = useState<ActiveContractItem[]>([]);
+  const [contractGroupsList, setContractGroupsList] = useState<ContractPreviewGroup[]>([]);
 
   // Load contracts and analyze billboards when dialog opens
   useEffect(() => {
@@ -61,234 +83,169 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
       try {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+        const todayStr = normalizeDateOnly(today)!;
 
         const months = Math.max(1, Math.floor(Number(monthsAhead) || 4));
-        const futureLimit = new Date();
-        futureLimit.setMonth(futureLimit.getMonth() + months);
+        const futureLimitStr = addCalendarMonths(todayStr, months);
 
-        // Fetch active contracts from Supabase
-        const { data: contractsData, error } = await supabase
+        // 1. Fetch valid contracts from Supabase (excluding deleted/released)
+        const { data: contractsData, error: contractsErr } = await supabase
           .from('Contract')
-          .select('Contract_Number, "Contract Date", "End Date", "Customer Name", "Ad Type", billboard_ids, billboard_prices');
+          .select('Contract_Number, "Contract Date", "End Date", "Customer Name", "Ad Type", billboard_ids, billboard_prices, billboards_released, is_visible_in_available')
+          .order('Contract_Number', { ascending: false });
 
-        if (error) console.warn('Error fetching contracts for preview:', error);
+        if (contractsErr) {
+          console.error('Error fetching contracts for preview:', contractsErr);
+        }
+        const validContracts = (contractsData || []).filter(
+          (c: any) => c.billboards_released !== true
+        );
 
-        // جمع IDs جميع لوحات العقود النشطة
-        const allContractBillboardIds: number[] = [];
-        (contractsData || []).forEach((c: any) => {
-          const ids = String(c.billboard_ids || '')
-            .split(',')
-            .map((s) => Number(s.trim()))
-            .filter((n) => Number.isFinite(n) && n > 0);
-          allContractBillboardIds.push(...ids);
-        });
+        // 2. Fetch latest visibility flags for all billboards from DB
+        const { data: bbRows, error: bbErr } = await supabase
+          .from('billboards')
+          .select('ID, Billboard_Name, Status, Contract_Number, Rent_Start_Date, Rent_End_Date, is_visible_in_available, maintenance_status, friend_company_id');
 
-        // جلب is_visible_in_available مباشرةً من DB لجميع لوحات العقود
-        const forcedVisibleSet = new Set<string>(); // IDs اللوحات المُفعَّل فيها الإظهار
-        const hiddenSet = new Set<string>();         // IDs اللوحات المخفية يدوياً
-
-        if (allContractBillboardIds.length > 0) {
-          const { data: bbVisibility } = await supabase
-            .from('billboards')
-            .select('ID, is_visible_in_available')
-            .in('ID', allContractBillboardIds);
-
-          (bbVisibility || []).forEach((b: any) => {
-            if (b.is_visible_in_available === true) forcedVisibleSet.add(String(b.ID));
-            if (b.is_visible_in_available === false) hiddenSet.add(String(b.ID));
-          });
+        if (bbErr) {
+          console.error('Error fetching billboards for preview:', bbErr);
         }
 
-        // بناء خريطة per-contract: العقد مُفعَّل الإظهار فقط إذا كانت جميع لوحاته الخاصة به true
-        // هذا يمنع اللوحات المشتركة بين عقود متعددة من تعليم عقود أخرى كـ "مُفعَّل الإظهار" خطأً
-        const contractForcedMap = new Map<string, boolean>();
-        (contractsData || []).forEach((c: any) => {
-          const contractNum = String(c.Contract_Number);
+        const bbMap = new Map<string, any>();
+        (bbRows || []).forEach((b: any) => {
+          bbMap.set(String(b.ID), b);
+        });
+
+        // Merge latest DB fields into billboards array
+        const mergedBillboards = (billboards || []).map((b: any) => {
+          const id = String(b.ID ?? b.id ?? '');
+          const dbData = bbMap.get(id);
+          return dbData ? { ...b, ...dbData } : b;
+        });
+
+        // 3. Resolve all billboard rows individually through unified engine
+        let totalCount = 0;
+        let availNoContractCount = 0;
+        let forcedCount = 0;
+        let expiringCount = 0;
+
+        const eligibleBillboardIds = new Set<string>();
+
+        mergedBillboards.forEach((b: any) => {
+          const res = resolveBillboardAvailability(b, validContracts, {
+            referenceDate: todayStr,
+            upcomingMonthsWindow: months,
+          });
+
+          if (res.isMarketingVisible) {
+            totalCount++;
+            eligibleBillboardIds.add(res.billboardId);
+
+            if (res.marketingVisibility === 'FORCE_SHOW') {
+              forcedCount++;
+            } else if (res.operationalStatus === 'AVAILABLE') {
+              availNoContractCount++;
+            } else if (res.isUpcomingWithinWindow) {
+              expiringCount++;
+            }
+          }
+        });
+
+        // 4. Build contract groups from active/non-expired contracts only
+        const activeGroups: ContractPreviewGroup[] = [];
+
+        validContracts.forEach((c: any) => {
+          const contractNum = c.Contract_Number;
           const cIds = String(c.billboard_ids || '')
             .split(',')
             .map((s) => s.trim())
             .filter(Boolean);
-          if (cIds.length === 0) {
-            contractForcedMap.set(contractNum, false);
-            return;
-          }
-          // العقد مُفعَّل فقط إذا كانت جميع لوحاته true في DB
-          const allForced = cIds.length > 0 && cIds.every((id) => forcedVisibleSet.has(id));
-          contractForcedMap.set(contractNum, allForced);
-        });
 
-        // Map billboardId -> Array of active contracts
-        const billboardActiveContractsMap = new Map<string, Array<{
-          contractNumber: number | string;
-          customerName: string;
-          adType: string;
-          endDate: string;
-          isUpcoming: boolean;
-          isContractForced: boolean;
-        }>>();
+          if (cIds.length === 0) return;
 
-        (contractsData || []).forEach((c: any) => {
-          const cEndDate = c['End Date'] || '';
-          const isExpired = cEndDate ? isContractExpired(cEndDate) : false;
-          if (isExpired) return;
+          const endDateStr = c['End Date'] || '';
+          const normEnd = normalizeDateOnly(endDateStr);
+          const isExpired = normEnd ? normEnd < todayStr : false;
 
-          const contractNumber = c.Contract_Number;
-          const isContractForced = contractForcedMap.get(String(contractNumber)) === true;
-
-          const ids = String(c.billboard_ids || '')
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean);
-
-          let billboardPricesParsed: any[] = [];
-          if (c.billboard_prices) {
-            try {
-              billboardPricesParsed = typeof c.billboard_prices === 'string'
-                ? JSON.parse(c.billboard_prices)
-                : c.billboard_prices;
-            } catch {}
-          }
-
-          ids.forEach((id) => {
-            let customEnd = '';
-            if (Array.isArray(billboardPricesParsed)) {
-              const match = billboardPricesParsed.find((p: any) => String(p.billboardId || p.billboard_id || '') === String(id));
-              if (match && match.endDate) customEnd = match.endDate;
-            }
-
-            const effectiveEnd = customEnd || cEndDate;
-            if (effectiveEnd && isContractExpired(effectiveEnd)) return;
-
-            let isUpcoming = false;
-            if (effectiveEnd) {
-              try {
-                const ed = new Date(effectiveEnd);
-                if (ed <= futureLimit) {
-                  isUpcoming = true;
-                }
-              } catch {}
-            }
-
-            const existingList = billboardActiveContractsMap.get(String(id)) || [];
-            existingList.push({
-              contractNumber,
-              customerName: c['Customer Name'] || 'غير محدد',
-              adType: c['Ad Type'] || '',
-              endDate: effectiveEnd,
-              isUpcoming,
-              isContractForced,
-            });
-            billboardActiveContractsMap.set(String(id), existingList);
+          // Build billboard rows for this contract to resolve marketing visibility
+          const contractBbRows = cIds.map((id) => {
+            const bb = bbMap.get(id);
+            return {
+              ID: id,
+              Billboard_Name: bb?.Billboard_Name,
+              Status: bb?.Status,
+              Contract_Number: bb?.Contract_Number,
+              Rent_End_Date: bb?.Rent_End_Date,
+              is_visible_in_available: bb ? bb.is_visible_in_available : null,
+              friend_company_id: bb ? bb.friend_company_id : null,
+            };
           });
-        });
 
-        let total = 0;
-        let availNoContract = 0;
-        let forcedCount = 0;
-        let expiringCount = 0;
+          // Resolve contract marketing visibility with Shared Billboard Blocking Policy
+          const visInfo = resolveContractMarketingVisibility(contractBbRows, validContracts, { referenceDate: todayStr });
 
-        const contractsAggMap = new Map<string | number, ActiveContractItem>();
+          // Count how many billboards of this contract are included in export
+          const eligibleCount = cIds.filter((id) => eligibleBillboardIds.has(id)).length;
 
-        (billboards || []).forEach((b: any) => {
-          const bId = String(b.ID ?? b.id ?? '').trim();
-          const status = String(b.Status || b.status || '').trim();
-          const maint = String(b.maintenance_status || '').trim();
+          // Check if contract is expiring soon within window
+          let isExpiringSoon = false;
+          let daysRemaining: number | undefined = undefined;
 
-          // استخدام قيم DB المُحدَّثة مباشرةً بدلاً من props
-          const isHiddenByUser = hiddenSet.has(bId) || b.is_visible === false || status === 'مخفي' || maint === 'hidden' || maint === 'مخفي';
-          if (isHiddenByUser) return;
-
-          const activeContracts = billboardActiveContractsMap.get(bId) || [];
-          const hasActive = activeContracts.length > 0 || Boolean(b.Contract_Number && String(b.Contract_Number) !== '0' && !isContractExpired(b.Rent_End_Date || b.rent_end_date));
-
-          // ✅ قاعدة اللوحات المشتركة: الإخفاء يغلب الإظهار!
-          // إذا كانت اللوحة مرتبطة بأي عقد نشط (ساري المفعول، غير قادم الانتهاء، وغير مُفعَّل الإظهار)،
-          // تُعتبر اللوحة مخفية وتُستثنى من التصدير للمتاح
-          const isHiddenByActiveContract = activeContracts.some(
-            (ac) => !ac.isUpcoming && !ac.isContractForced
-          );
-
-          if (isHiddenByActiveContract) return;
-
-          const firstActive = activeContracts[0];
-          const contractNumber = firstActive?.contractNumber || b.Contract_Number;
-          const endDateStr = firstActive?.endDate || b.Rent_End_Date || b.rent_end_date || '';
-          const customerName = firstActive?.customerName || b.Customer_Name || b.customer_name || 'غير محدد';
-          const adType = firstActive?.adType || b.Ad_Type || b.ad_type || '';
-
-          const isBillboardForced = forcedVisibleSet.has(bId);
-          const isContractForced = contractNumber ? contractForcedMap.get(String(contractNumber)) === true : false;
-          const isForced = isContractForced;
-
-          let isUpcoming = activeContracts.some((ac) => ac.isUpcoming);
-          if (!isUpcoming && hasActive && endDateStr) {
+          if (normEnd && !isExpired) {
             try {
               const ed = new Date(endDateStr);
-              if (ed <= futureLimit) {
-                isUpcoming = true;
+              daysRemaining = Math.ceil((ed.getTime() - new Date(todayStr).getTime()) / (1000 * 60 * 60 * 24));
+              if (normEnd >= todayStr && normEnd <= futureLimitStr) {
+                isExpiringSoon = true;
               }
             } catch {}
           }
 
-          // تضمين اللوحة: مُعلَّمة بشكل فردي true OR ليس لها عقد نشط OR عقدها قادم الانتهاء
-          const isIncluded = isBillboardForced || !hasActive || isUpcoming;
-          if (!isIncluded) return;
+          // STRICT CRITERIA (Scope C Contract-Level Explicit Activation):
+          // 1. Explicitly Shown: Contract MUST be active (!isExpired) AND have explicit contract-level activation (c.is_visible_in_available === true)
+          const hasExplicitContractActivation = !isExpired && c.is_visible_in_available === true;
+          const isExplicitlyShown = hasExplicitContractActivation && (visInfo.effectiveForceShowCount > 0 || visInfo.requestedForceShowCount > 0);
 
-          total++;
+          // 2. Upcoming Contract: Contract MUST be active (!isExpired) AND end within upcoming window AND have eligible boards
+          const isUpcomingContract = !isExpired && isExpiringSoon && eligibleCount > 0;
 
-          if (isBillboardForced) {
-            forcedCount++;
-          } else if (!hasActive) {
-            availNoContract++;
-          } else if (isUpcoming) {
-            expiringCount++;
-          }
-
-          // Group active contracts
-          if (hasActive && contractNumber) {
-            const key = String(contractNumber);
-            let daysRemaining: number | undefined = undefined;
-            if (endDateStr) {
-              try {
-                const ed = new Date(endDateStr);
-                daysRemaining = Math.ceil((ed.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-              } catch {}
-            }
-
-            const existing = contractsAggMap.get(key);
-            if (existing) {
-              existing.billboardCount++;
-              if (isForced) existing.isForcedVisible = true;
-              if (isUpcoming) existing.isExpiringSoon = true;
-            } else {
-              contractsAggMap.set(key, {
-                contractNumber,
-                customerName,
-                adType,
-                endDate: endDateStr,
-                billboardCount: 1,
-                isForcedVisible: isForced,
-                isExpiringSoon: isUpcoming,
-                daysRemaining,
-              });
-            }
+          // Only active contracts that are either explicitly shown or upcoming qualify for preview
+          if (isExplicitlyShown || isUpcomingContract) {
+            activeGroups.push({
+              contractNumber: contractNum,
+              customerName: c['Customer Name'] || 'غير محدد',
+              adType: c['Ad Type'] || '',
+              startDate: normalizeDateOnly(c['Contract Date']),
+              endDate: normEnd ? new Date(normEnd).toLocaleDateString('ar-LY') : '',
+              isExpired,
+              marketingState: isExplicitlyShown ? visInfo.state : 'OFF',
+              requestedForceShowCount: isExplicitlyShown ? visInfo.requestedForceShowCount : 0,
+              blockedByOtherContractsCount: isExplicitlyShown ? visInfo.blockedByOtherContractsCount : 0,
+              effectiveForceShowCount: isExplicitlyShown ? visInfo.effectiveForceShowCount : 0,
+              forceShowCount: isExplicitlyShown ? visInfo.effectiveForceShowCount : 0,
+              totalBillboards: cIds.length,
+              eligibleBillboardsCount: eligibleCount,
+              isExplicitlyShown,
+              isUpcomingContract,
+              daysRemaining: daysRemaining && daysRemaining > 0 ? daysRemaining : undefined,
+            });
           }
         });
 
-        const activeList = Array.from(contractsAggMap.values()).sort((a, b) => {
-          if (a.isForcedVisible && !b.isForcedVisible) return -1;
-          if (!a.isForcedVisible && b.isForcedVisible) return 1;
-          return b.billboardCount - a.billboardCount;
+        // Sort: Explicitly shown first, then by eligible billboards count descending
+        activeGroups.sort((a, b) => {
+          if (a.isExplicitlyShown && !b.isExplicitlyShown) return -1;
+          if (!a.isExplicitlyShown && b.isExplicitlyShown) return 1;
+          return b.eligibleBillboardsCount - a.eligibleBillboardsCount;
         });
 
         if (isMounted) {
           setStats({
-            totalExportCount: total,
-            availableWithoutContractCount: availNoContract,
-            forcedVisibleCount: forcedCount,
-            expiringSoonCount: expiringCount,
+            totalBillboards: totalCount,
+            availableWithoutContractBillboards: availNoContractCount,
+            marketingVisibleBillboards: forcedCount,
+            upcomingBillboards: expiringCount,
           });
-          setActiveContractsList(activeList);
+          setContractGroupsList(activeGroups);
         }
       } catch (e) {
         console.error('Error analyzing preview data:', e);
@@ -304,22 +261,26 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
     };
   }, [open, billboards, monthsAhead, isContractExpired]);
 
-  // Derived lists by category
-  const forcedContracts = useMemo(() => {
-    return activeContractsList.filter((c) => c.isForcedVisible);
-  }, [activeContractsList]);
+  // Derived contract lists by tab category
+  const explicitlyShownContracts = useMemo(() => {
+    return contractGroupsList.filter((c) => c.isExplicitlyShown);
+  }, [contractGroupsList]);
 
-  const expiringContracts = useMemo(() => {
-    return activeContractsList.filter((c) => c.isExpiringSoon && !c.isForcedVisible);
-  }, [activeContractsList]);
+  const upcomingContracts = useMemo(() => {
+    return contractGroupsList.filter((c) => c.isUpcomingContract && !c.isExplicitlyShown);
+  }, [contractGroupsList]);
+
+  const allPreviewContracts = useMemo(() => {
+    return contractGroupsList;
+  }, [contractGroupsList]);
 
   // Filtered contracts by tab and search query
   const filteredContracts = useMemo(() => {
-    let source = activeContractsList;
+    let source = allPreviewContracts;
     if (contractTab === 'forced') {
-      source = forcedContracts;
+      source = explicitlyShownContracts;
     } else if (contractTab === 'expiring') {
-      source = expiringContracts;
+      source = upcomingContracts;
     }
 
     if (!searchQuery.trim()) return source;
@@ -329,7 +290,7 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
         searchQuery
       )
     );
-  }, [activeContractsList, forcedContracts, expiringContracts, contractTab, searchQuery]);
+  }, [allPreviewContracts, explicitlyShownContracts, upcomingContracts, contractTab, searchQuery]);
 
   const handleConfirm = async () => {
     setIsUploading(true);
@@ -355,7 +316,7 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
             معاينة العقود واللوحات قبل الرفع إلى الموقع
           </DialogTitle>
           <p className="text-xs text-muted-foreground mt-1">
-            عرض العقود المفعل فيها خيار "إظهار اللوحات في المتاح" والعقود الفعالة القادمة ({monthsAhead} أشهر)
+            عرض العقود الفعالة المفعل فيها خيار "إظهار اللوحات في المتاح" والعقود الفعالة القادمة ({monthsAhead} أشهر)
           </p>
         </DialogHeader>
 
@@ -364,23 +325,23 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
           {loadingData ? (
             <div className="p-12 flex flex-col items-center justify-center gap-3 text-muted-foreground">
               <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
-              <p className="text-xs font-medium">جاري تحليل بيانات العقود واللوحات...</p>
+              <p className="text-xs font-medium">جاري تحليل بيانات العقود واللوحات بالمحرك الموحد...</p>
             </div>
           ) : (
             <>
-              {/* Stats Summary Cards */}
+              {/* Stats Summary Cards (Billboard Counts) */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 <div className="bg-slate-50 dark:bg-slate-900/60 p-3 rounded-xl border border-slate-200 dark:border-slate-800 flex flex-col">
                   <span className="text-xs text-muted-foreground font-medium">إجمالي المرفوع</span>
                   <span className="text-xl font-bold text-slate-800 dark:text-slate-100 mt-1">
-                    {stats.totalExportCount} <span className="text-xs font-normal text-slate-500">لوحة</span>
+                    {stats.totalBillboards} <span className="text-xs font-normal text-slate-500">لوحة</span>
                   </span>
                 </div>
 
                 <div className="bg-emerald-50/60 dark:bg-emerald-950/30 p-3 rounded-xl border border-emerald-200/60 dark:border-emerald-900/50 flex flex-col">
                   <span className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">متاحة بدون عقد</span>
                   <span className="text-xl font-bold text-emerald-800 dark:text-emerald-300 mt-1">
-                    {stats.availableWithoutContractCount} <span className="text-xs font-normal text-emerald-600">لوحة</span>
+                    {stats.availableWithoutContractBillboards} <span className="text-xs font-normal text-emerald-600">لوحة</span>
                   </span>
                 </div>
 
@@ -389,7 +350,7 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
                     <Eye className="h-3 w-3" /> مظهرة يدوياً
                   </span>
                   <span className="text-xl font-bold text-purple-800 dark:text-purple-300 mt-1">
-                    {stats.forcedVisibleCount} <span className="text-xs font-normal text-purple-600">لوحة</span>
+                    {stats.marketingVisibleBillboards} <span className="text-xs font-normal text-purple-600">لوحة</span>
                   </span>
                 </div>
 
@@ -398,12 +359,12 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
                     <Clock className="h-3 w-3" /> تنتهي قريباً
                   </span>
                   <span className="text-xl font-bold text-amber-800 dark:text-amber-300 mt-1">
-                    {stats.expiringSoonCount} <span className="text-xs font-normal text-amber-600">لوحة</span>
+                    {stats.upcomingBillboards} <span className="text-xs font-normal text-amber-600">لوحة</span>
                   </span>
                 </div>
               </div>
 
-              {/* Tabs & Search Filter */}
+              {/* Tabs & Search Filter (Contract Counts) */}
               <div className="space-y-2.5">
                 <Tabs value={contractTab} onValueChange={(val) => setContractTab(val as any)} className="w-full">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -413,20 +374,20 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
                         className="text-xs gap-1.5 font-bold data-[state=active]:bg-purple-600 data-[state=active]:text-white rounded-lg transition-all"
                       >
                         <Eye className="h-3.5 w-3.5" />
-                        مظهرة في المتاح ({forcedContracts.length})
+                        مظهرة في المتاح ({explicitlyShownContracts.length})
                       </TabsTrigger>
                       <TabsTrigger
                         value="expiring"
                         className="text-xs gap-1.5 font-bold data-[state=active]:bg-amber-600 data-[state=active]:text-white rounded-lg transition-all"
                       >
                         <Clock className="h-3.5 w-3.5" />
-                        ستتاح قريباً ({expiringContracts.length})
+                        ستتاح قريباً ({upcomingContracts.length})
                       </TabsTrigger>
                       <TabsTrigger
                         value="all"
                         className="text-xs gap-1.5 font-bold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground rounded-lg transition-all"
                       >
-                        الكل ({activeContractsList.length})
+                        الكل ({allPreviewContracts.length})
                       </TabsTrigger>
                     </TabsList>
 
@@ -448,19 +409,19 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
                   {contractTab === 'forced' && (
                     <>
                       <Eye className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
-                      <span>عرض العقود المفعل فيها خيار "إظهار اللوحات في المتاح" من صفحة العقود ({forcedContracts.length} عقد)</span>
+                      <span>عرض العقود الفعالة المفعل فيها خيار "إظهار اللوحات في المتاح" ({explicitlyShownContracts.length} عقد)</span>
                     </>
                   )}
                   {contractTab === 'expiring' && (
                     <>
                       <Clock className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
-                      <span>عرض العقود الفعالة التي تنتهي خلال نافذة التصدير ({expiringContracts.length} عقد)</span>
+                      <span>عرض العقود الفعالة التي تنتهي خلال نافذة التصدير ({upcomingContracts.length} عقد)</span>
                     </>
                   )}
                   {contractTab === 'all' && (
                     <>
                       <Building2 className="h-3.5 w-3.5 text-primary" />
-                      <span>عرض جميع العقود الفعالة المشمولة ({activeContractsList.length} عقد)</span>
+                      <span>عرض جميع العقود الفعالة المشمولة ({allPreviewContracts.length} عقد)</span>
                     </>
                   )}
                 </div>
@@ -511,19 +472,29 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
 
                           {/* Right info: Billboard count & Badges */}
                           <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-                            {c.isForcedVisible && (
+                            {c.isExplicitlyShown && c.marketingState === 'ON' && (
                               <Badge className="bg-purple-500/15 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800 text-[11px] font-medium gap-1">
-                                <Eye className="h-3 w-3" /> مظهرة في المتاح
+                                <Eye className="h-3 w-3" /> مظهر بالكامل ({c.effectiveForceShowCount}/{c.totalBillboards})
                               </Badge>
                             )}
-                            {c.isExpiringSoon && !c.isForcedVisible && (
+                            {c.isExplicitlyShown && c.marketingState === 'PARTIAL' && (
+                              <Badge className="bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-800/60 text-[11px] font-medium gap-1">
+                                <Eye className="h-3 w-3" /> مظهر جزئياً ({c.effectiveForceShowCount}/{c.totalBillboards})
+                              </Badge>
+                            )}
+                            {c.blockedByOtherContractsCount > 0 && (
+                              <Badge variant="outline" className="bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-900 text-[11px] font-medium gap-1">
+                                <ShieldAlert className="h-3 w-3" /> محجوبة بعقد آخر ({c.blockedByOtherContractsCount})
+                              </Badge>
+                            )}
+                            {c.isUpcomingContract && !c.isExplicitlyShown && (
                               <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 text-[11px] font-medium gap-1">
                                 <Clock className="h-3 w-3" /> ستتاح قريباً
                               </Badge>
                             )}
 
                             <Badge variant="secondary" className="font-bold text-xs bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
-                              {c.billboardCount} لوحة
+                              {c.eligibleBillboardsCount || c.effectiveForceShowCount} لوحة
                             </Badge>
                           </div>
                         </div>

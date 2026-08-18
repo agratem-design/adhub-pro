@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { generateAccountStatementHTML } from '@/lib/accountStatementGenerator';
 import type { AccountStatementData } from '@/lib/accountStatementGenerator';
+import type { CanonicalCustomerLedgerResult } from '@/lib/canonicalCustomerLedger';
 
 export interface PrintAccountStatementOptions {
   customerData: {
@@ -16,30 +17,8 @@ export interface PrintAccountStatementOptions {
     phone?: string;
     email?: string;
   };
-  transactions: Array<{
-    date: string;
-    description: string;
-    reference: string;
-    debit: number;
-    credit: number;
-    balance: number;
-    notes: string;
-    type: string;
-    itemTotal?: number | null;
-    itemRemaining?: number | null;
-    sourceInvoice?: string | null;
-    adType?: string | null;
-    distributedPaymentId?: string | null;
-    distributedPaymentTotal?: number | null;
-  }>;
-  statistics: {
-    totalContracts: number;
-    activeContracts: number;
-    totalDebits: number;
-    totalCredits: number;
-    balance: number;
-    totalPayments: number;
-  };
+  ledgerResult: CanonicalCustomerLedgerResult;
+  mode?: 'simple' | 'detailed';
   currency: {
     code: string;
     symbol: string;
@@ -48,6 +27,7 @@ export interface PrintAccountStatementOptions {
   startDate?: string;
   endDate?: string;
   hidePaymentDistribution?: boolean;
+  hideStopAdjustments?: boolean;
 }
 
 export async function printAccountStatement(
@@ -56,18 +36,24 @@ export async function printAccountStatement(
 ): Promise<void> {
   const data: AccountStatementData = {
     customerData: options.customerData,
-    transactions: options.transactions,
-    statistics: options.statistics,
+    ledgerResult: options.ledgerResult,
+    mode: options.mode || 'simple',
     currency: options.currency,
     startDate: options.startDate,
     endDate: options.endDate,
     hidePaymentDistribution: options.hidePaymentDistribution,
+    hideStopAdjustments: options.hideStopAdjustments,
   };
 
   const html = await generateAccountStatementHTML(data);
   const { showPrintPreview } = await import('@/components/print/PrintPreviewDialog');
-  showPrintPreview(html, `كشف حساب ${options.customerData.name}${options.startDate && options.endDate ? ` - ${options.startDate} إلى ${options.endDate}` : ''}`, 'billing-statements');
-  toast.success(`تم فتح كشف الحساب للطباعة بنجاح بعملة ${options.currency.code}!`);
+  const modeLabel = options.mode === 'detailed' ? ' تفصيلي' : '';
+  showPrintPreview(
+    html,
+    `كشف حساب${modeLabel} - ${options.customerData.name}${options.startDate && options.endDate ? ` (${options.startDate} إلى ${options.endDate})` : ''}`,
+    'billing-statements'
+  );
+  toast.success(`تم فتح كشف الحساب${modeLabel} للطباعة بنجاح بعملة ${options.currency.code}!`);
 }
 
 export function useAccountStatementPrint() {
