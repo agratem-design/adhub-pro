@@ -12,7 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from '@/hooks/use-toast';
 import { BRAND_NAME } from '@/lib/branding';
 import { useBranding } from '@/hooks/useBranding';
-import { isOfflineMode, getOfflineSettings } from '@/integrations/supabase/client';
+import { isOfflineMode, getOfflineSettings, isLocalOrDesktopEnv } from '@/integrations/supabase/client';
 import { DatabaseModeModal } from '@/components/database/DatabaseModeModal';
 import { cn } from '@/lib/utils';
 
@@ -26,6 +26,7 @@ const Index = () => {
   const [loginData, setLoginData] = useState<LoginCredentials>({ email: '', password: '' });
   const [dbModalOpen, setDbModalOpen] = useState(false);
 
+  const isLocalOrDesktop = isLocalOrDesktopEnv();
   const offlineSettings = getOfflineSettings();
 
   if (user) {
@@ -60,55 +61,57 @@ const Index = () => {
           <p className="text-xs text-muted-foreground mt-0.5">منظومة إدارة وحسابات اللوحات الإعلانية</p>
         </div>
 
-        {/* Database Connection Status Pill */}
-        <div
-          onClick={() => setDbModalOpen(true)}
-          className="p-3 rounded-xl border border-border/80 bg-card/90 shadow-sm flex items-center justify-between gap-2 cursor-pointer hover:border-primary/60 transition-all hover:bg-card"
-        >
-          <div className="flex items-center gap-2 min-w-0">
-            <div className={cn(
-              'p-2 rounded-lg shrink-0',
-              isOfflineMode ? 'bg-blue-500/10 text-blue-500' : 'bg-emerald-500/10 text-emerald-500'
-            )}>
-              {isOfflineMode ? <WifiOff className="w-4 h-4" /> : <Wifi className="w-4 h-4" />}
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold text-foreground">
-                  {isOfflineMode ? 'قاعدة بيانات محلية (Offline)' : 'قاعدة بيانات سحابية (Online)'}
-                </span>
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    'text-[9px] px-1.5 py-0 font-semibold',
-                    isOfflineMode
-                      ? 'border-blue-500/30 text-blue-500 bg-blue-500/5'
-                      : 'border-emerald-500/30 text-emerald-500 bg-emerald-500/5'
-                  )}
-                >
-                  {isOfflineMode ? 'محلي' : 'سحابي'}
-                </Badge>
-              </div>
-              <p className="text-[10px] text-muted-foreground truncate font-sans mt-0.5">
-                {isOfflineMode ? (offlineSettings.localUrl || 'http://127.0.0.1:54321') : '🔒 اتصال سحابي مشفر ومحمي'}
-              </p>
-            </div>
-          </div>
-
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={(e) => {
-              e.stopPropagation();
-              setDbModalOpen(true);
-            }}
-            className="h-8 text-xs px-3 shrink-0 gap-1.5 font-bold border-primary/40 text-primary hover:bg-primary hover:text-primary-foreground transition-all"
+        {/* Database Connection Status Pill - Only visible in Local/Desktop environment (hidden on Web Hosting) */}
+        {isLocalOrDesktop && (
+          <div
+            onClick={() => setDbModalOpen(true)}
+            className="p-3 rounded-xl border border-border/80 bg-card/90 shadow-sm flex items-center justify-between gap-2 cursor-pointer hover:border-primary/60 transition-all hover:bg-card"
           >
-            <Database className="w-3.5 h-3.5" />
-            <span>إدارة النسخ / التبديل</span>
-          </Button>
-        </div>
+            <div className="flex items-center gap-2 min-w-0">
+              <div className={cn(
+                'p-2 rounded-lg shrink-0',
+                isOfflineMode ? 'bg-blue-500/10 text-blue-500' : 'bg-emerald-500/10 text-emerald-500'
+              )}>
+                {isOfflineMode ? <WifiOff className="w-4 h-4" /> : <Wifi className="w-4 h-4" />}
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-foreground">
+                    {isOfflineMode ? 'قاعدة بيانات محلية (Offline)' : 'قاعدة بيانات سحابية (Online)'}
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      'text-[9px] px-1.5 py-0 font-semibold',
+                      isOfflineMode
+                        ? 'border-blue-500/30 text-blue-500 bg-blue-500/5'
+                        : 'border-emerald-500/30 text-emerald-500 bg-emerald-500/5'
+                    )}
+                  >
+                    {isOfflineMode ? 'محلي' : 'سحابي'}
+                  </Badge>
+                </div>
+                <p className="text-[10px] text-muted-foreground truncate font-sans mt-0.5">
+                  {isOfflineMode ? (offlineSettings.localUrl || 'http://127.0.0.1:54321') : 'اتصال سحابي مشفر ومحمي'}
+                </p>
+              </div>
+            </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation();
+                setDbModalOpen(true);
+              }}
+              className="h-8 text-xs px-3 shrink-0 gap-1.5 font-bold border-primary/40 text-primary hover:bg-primary hover:text-primary-foreground transition-all cursor-pointer"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>إدارة النسخ / التبديل</span>
+            </Button>
+          </div>
+        )}
 
         {/* Login Card */}
         <Card className="border-border/80 shadow-md">
@@ -170,7 +173,7 @@ const Index = () => {
                 </Alert>
               )}
 
-              <Button type="submit" className="w-full h-9 font-bold text-sm bg-primary hover:bg-primary/90" disabled={isLoading}>
+              <Button type="submit" className="w-full h-9 font-bold text-sm bg-primary hover:bg-primary/90 cursor-pointer" disabled={isLoading}>
                 {isLoading ? 'جاري تسجيل الدخول...' : 'تسجيل الدخول'}
               </Button>
             </form>
@@ -178,8 +181,10 @@ const Index = () => {
         </Card>
       </div>
 
-      {/* Database Mode Switcher & Backup Restore Modal */}
-      <DatabaseModeModal open={dbModalOpen} onOpenChange={setDbModalOpen} />
+      {/* Database Mode Switcher & Backup Restore Modal - Only in Local/Desktop */}
+      {isLocalOrDesktop && (
+        <DatabaseModeModal open={dbModalOpen} onOpenChange={setDbModalOpen} />
+      )}
     </div>
   );
 };

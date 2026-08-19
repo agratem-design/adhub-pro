@@ -13,7 +13,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { isOfflineMode } from '@/integrations/supabase/client';
+import { isOfflineMode, isLocalOrDesktopEnv } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import Breadcrumbs from './Breadcrumbs';
 import CommandMenu from './CommandMenu';
@@ -72,24 +72,26 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onToggleSidebar }) => {
             <Search className="h-4 w-4" />
             <span className="hidden md:inline flex-1 text-right">ابحث في كل شيء...</span>
             <kbd className="hidden md:inline-flex items-center gap-1 rounded border border-border/60 bg-background/60 px-1.5 py-0.5 text-[10px] font-mono">
- K
+              K
             </kbd>
           </button>
 
-          {/* Connection Mode Toggle */}
-          <button
-            onClick={() => setDbModalOpen(true)}
-            className={cn(
-              'hidden sm:flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[11px] font-semibold border transition-all cursor-pointer hover:scale-105',
-              isOfflineMode
-                ? 'bg-blue-500/10 text-blue-600 border-blue-500/30 dark:text-blue-300 hover:bg-blue-500/20'
-                : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-300 hover:bg-emerald-500/20'
-            )}
-            title="إدارة قاعدة البيانات والتبديل بين الوضع السحابي والمحلي"
-          >
-            {isOfflineMode ? <WifiOff className="h-3 w-3" /> : <Wifi className="h-3 w-3" />}
-            <span>{isOfflineMode ? 'أوفلاين (محلي)' : 'سحابي (Online)'}</span>
-          </button>
+          {/* Connection Mode Toggle - Only shown in Local/Desktop */}
+          {isLocalOrDesktopEnv() && (
+            <button
+              onClick={() => setDbModalOpen(true)}
+              className={cn(
+                'hidden sm:flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[11px] font-semibold border transition-all cursor-pointer hover:scale-105',
+                isOfflineMode
+                  ? 'bg-blue-500/10 text-blue-600 border-blue-500/30 dark:text-blue-300 hover:bg-blue-500/20'
+                  : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-300 hover:bg-emerald-500/20'
+              )}
+              title="إدارة قاعدة البيانات والتبديل بين الوضع السحابي والمحلي"
+            >
+              {isOfflineMode ? <WifiOff className="h-3 w-3" /> : <Wifi className="h-3 w-3" />}
+              <span>{isOfflineMode ? 'أوفلاين (محلي)' : 'سحابي (Online)'}</span>
+            </button>
+          )}
 
           {/* Notifications */}
           <Popover open={notifOpen} onOpenChange={setNotifOpen}>
@@ -144,7 +146,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onToggleSidebar }) => {
                   <span className="text-[11px] text-muted-foreground truncate font-normal">{user?.email}</span>
                 </div>
               </DropdownMenuLabel>
-              {(isAdmin || hasPermission('database_backup') || hasPermission('system_settings')) && (
+              {(isAdmin || hasPermission('database_backup') || hasPermission('system_settings')) && isLocalOrDesktopEnv() && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={() => setDbModalOpen(true)} className="gap-2">
@@ -179,7 +181,9 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onToggleSidebar }) => {
       </header>
 
       <CommandMenu open={cmdOpen} onOpenChange={setCmdOpen} />
-      <DatabaseModeModal open={dbModalOpen} onOpenChange={setDbModalOpen} />
+      {isLocalOrDesktopEnv() && (
+        <DatabaseModeModal open={dbModalOpen} onOpenChange={setDbModalOpen} />
+      )}
     </>
   );
 };

@@ -9,10 +9,28 @@ export const DEFAULT_CLOUD_KEY = DATABASE_CONFIG.cloud.anonKey;
 export const DEFAULT_LOCAL_URL = DATABASE_CONFIG.local.url;
 export const DEFAULT_LOCAL_KEY = DATABASE_CONFIG.local.anonKey;
 
-const storedOfflineMode = typeof window !== 'undefined' && localStorage.getItem('adhub_offline_mode') === 'true';
+export const isLocalOrDesktopEnv = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  // 1. Electron / Desktop App
+  if (!!(window as any).desktopAPI || window.location.protocol === 'file:') {
+    return true;
+  }
+  // 2. Local development / Local host
+  const hostname = window.location.hostname;
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0' ||
+    hostname === '::1' ||
+    hostname.endsWith('.local')
+  );
+};
+
+const isEnvLocalOrDesktop = isLocalOrDesktopEnv();
+const storedOfflineMode = isEnvLocalOrDesktop && typeof window !== 'undefined' && localStorage.getItem('adhub_offline_mode') === 'true';
 
 // Auto-heal old stored cloud key in local settings
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && isEnvLocalOrDesktop) {
   const storedLocalKey = localStorage.getItem('adhub_local_supabase_key');
   if (storedLocalKey && storedLocalKey.startsWith('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF0cWphaWViaXh1em9tcmZ3aWx1')) {
     localStorage.setItem('adhub_local_supabase_key', DEFAULT_LOCAL_KEY);
