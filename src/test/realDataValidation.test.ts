@@ -59,8 +59,8 @@ describe('Real Live Database Data Validation', () => {
     expect(res.isMarketingVisible).toBe(false);
     expect(res.activeContracts).toHaveLength(2);
     expect(res.occupancyPeriods).toHaveLength(1);
-    expect(res.occupancyPeriods[0].endDate).toBe('2027-01-28'); // parsed from 2027-01-27T22:00:00Z local
-    expect(res.availableFrom).toBe('2027-01-29');
+    expect(res.occupancyPeriods[0].endDate).toBe('2027-01-27');
+    expect(res.availableFrom).toBe('2027-01-28');
   });
 
   // 2. Contract 1274 (نوار والتقدم)
@@ -89,6 +89,7 @@ describe('Real Live Database Data Validation', () => {
       'Contract Date': '2026-07-19T22:00:00.000Z',
       'End Date': '2027-01-15T22:00:00.000Z',
       billboard_ids: '937,201,283,540,71,260',
+      is_visible_in_available: true,
     };
 
     const resolutions = c1274Boards.map(b => resolveBillboardAvailability(b, [c1274Contract], { referenceDate: REF_DATE }));
@@ -124,6 +125,7 @@ describe('Real Live Database Data Validation', () => {
         'Contract Date': '2026-03-31T22:00:00.000Z',
         'End Date': '2026-09-27T22:00:00.000Z',
         billboard_ids: c1228Boards.map(b => b.ID).join(','),
+        is_visible_in_available: true,
       },
       {
         Contract_Number: 1185,

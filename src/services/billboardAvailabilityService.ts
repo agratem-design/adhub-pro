@@ -20,6 +20,12 @@ export type MarketingVisibility =
   | 'FORCE_SHOW'   // إظهار تسويقي قسري (is_visible_in_available === true)
   | 'FORCE_HIDE';  // إخفاء تسويقي وإداري قسري (is_visible_in_available === false)
 
+export type BillboardAvailabilityClassification =
+  | 'AVAILABLE_WITHOUT_CONTRACT' // متاح شاغر تشغيلياً بدون عقد فعال
+  | 'EXPLICIT_CONTRACT_SHOW'     // متاح تسويقياً بسبب عقد فعال مفعل يدوياً وبلا موانع
+  | 'UPCOMING'                   // سينتهي عقده قريباً ضمن نافذة التصدير
+  | 'EXCLUDED';                  // مستبعد (محجوز بعقد نشط غير مفعل، محجوب، صيانة، إزالة)
+
 export type ContractMarketingVisibilityState =
   | 'OFF'          // لم يتم تفعيل أي لوحة (effectiveForceShowCount === 0)
   | 'PARTIAL'      // تفعيل جزئي (بعض اللوحات مفعلة وبعضها AUTO أو مخفية/محجوبة)
@@ -79,6 +85,7 @@ export interface BillboardAvailabilityResolution {
 
   // 1. Operational Truth
   operationalStatus: OperationalStatus;
+  classification: BillboardAvailabilityClassification;
   isAvailableNow: boolean; // Operational: free right now on referenceDate
 
   // 2. Marketing Visibility Truth (Requested vs Effective)
@@ -132,20 +139,18 @@ export function normalizeDateOnly(dateInput: string | Date | null | undefined): 
     const trimmed = dateInput.trim();
     if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return null;
 
-    // Direct YYYY-MM-DD regex extraction
+    // Direct YYYY-MM-DD regex extraction - Calendar Date is preserved as written without timezone shift
     const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (match) {
-      if (trimmed.includes('T') || trimmed.includes('Z')) {
-        const d = new Date(trimmed);
-        if (!isNaN(d.getTime())) {
-          const year = d.getFullYear();
-          const month = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          return `${year}-${month}-${day}`;
-        }
-      }
       return `${match[1]}-${match[2]}-${match[3]}`;
     }
+  }
+
+  if (dateInput instanceof Date && !isNaN(dateInput.getTime())) {
+    const year = dateInput.getFullYear();
+    const month = String(dateInput.getMonth() + 1).padStart(2, '0');
+    const day = String(dateInput.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   const d = new Date(dateInput);
@@ -336,15 +341,20 @@ export function extractBillboardContracts(
       const isExpired = endDate < refDate;
       const isFuture = startDate > refDate;
 
+      const matchingContract = Array.isArray(allContracts)
+        ? allContracts.find((c) => String(c.Contract_Number ?? c.id).trim() === String(cachedCNum).trim())
+        : undefined;
+
       occupancies.push({
         contractNumber: cachedCNum,
-        customerName: billboard.Customer_Name || billboard.customer_name || 'غير محدد',
-        adType: billboard.Ad_Type || billboard.ad_type || '',
+        customerName: matchingContract?.['Customer Name'] || billboard.Customer_Name || billboard.customer_name || 'غير محدد',
+        adType: matchingContract?.['Ad Type'] || billboard.Ad_Type || billboard.ad_type || '',
         startDate,
         endDate,
         isUpcoming: false,
         isExpired,
         isFuture,
+        rawContract: matchingContract,
       });
     }
   }
@@ -411,7 +421,11 @@ export function buildOccupancyTimeline(contracts: ContractOccupancy[]): Occupanc
 
 /**
  * Single Unified Source of Truth for Billboard Availability and Visibility.
- * Enforces the Shared Billboard Blocking Policy ("المنع يغلب الإظهار").
+ * Enforces the deterministic 4-state Classification:
+ * - AVAILABLE_WITHOUT_CONTRACT (Available Now)
+ * - EXPLICIT_CONTRACT_SHOW (Available Now via active marketing contract)
+ * - UPCOMING (Ends within window)
+ * - EXCLUDED (Blocked, unactivated, removed, maintenance)
  */
 export function resolveBillboardAvailability(
   billboard: any,
@@ -450,7 +464,7 @@ export function resolveBillboardAvailability(
   const nextOccupancyPeriod =
     occupancyPeriods.find((p) => p.startDate > refDate) || null;
 
-  // 4. Determine Operational Status
+  // 4. Determine Initial Operational Status
   let operationalStatus: OperationalStatus = 'AVAILABLE';
   let isAvailableNow = true;
   let availableFrom: string | null = refDate;
@@ -471,7 +485,6 @@ export function resolveBillboardAvailability(
     operationalStatus = 'RENTED';
     isAvailableNow = false;
     currentRentEndDate = currentOccupancyPeriod.endDate;
-    // Available from the day after occupancy ends
     availableFrom = addCalendarDays(currentOccupancyPeriod.endDate, 1);
     statusLabelArabic = 'محجوز';
   } else if (nextOccupancyPeriod) {
@@ -481,24 +494,21 @@ export function resolveBillboardAvailability(
     statusLabelArabic = 'متاح حالياً (محجوز مستقبلاً)';
   }
 
-  // 5. Determine Requested Marketing Visibility
-  let requestedMarketingVisibility: MarketingVisibility = 'AUTO';
-  if (billboard.is_visible_in_available === false) {
-    requestedMarketingVisibility = 'FORCE_HIDE';
-  } else if (billboard.is_visible_in_available === true) {
-    requestedMarketingVisibility = 'FORCE_SHOW';
-  }
-
-  // 6. Calculate isUpcomingWithinWindow
-  const isUpcomingWithinWindow =
-    operationalStatus === 'RENTED' &&
-    currentRentEndDate !== null &&
-    currentRentEndDate <= upcomingWindowEnd;
-
-  // 7. Shared Billboard Blocking Policy ("المنع يغلب الإظهار")
-  // If the billboard is linked to multiple active contracts:
-  // Check if any active contract makes the billboard blocked/unavailable
+  // 5. Active Contract Marketing Sources & Overrides
   const isFriendBillboard = Boolean(billboard.friend_company_id);
+  const isIndividuallyHidden = billboard.is_visible_in_available === false;
+  const isRequestedShowOnBillboard = billboard.is_visible_in_available === true;
+
+  // Exact active contracts that are explicitly marketing-activated:
+  const activeExplicitContracts = activeContracts.filter(
+    (ac) => ac.rawContract && ac.rawContract.is_visible_in_available === true && ac.rawContract.billboards_released !== true
+  );
+
+  // Active contracts that are NOT marketing-activated:
+  const activeUnactivatedContracts = activeContracts.filter(
+    (ac) => !ac.rawContract || ac.rawContract.is_visible_in_available !== true || ac.rawContract.billboards_released === true
+  );
+
   const blockingContractsList: Array<{
     contractNumber: number | string;
     customerName: string;
@@ -506,76 +516,121 @@ export function resolveBillboardAvailability(
     endDate: string;
   }> = [];
 
-  if (activeContracts.length > 1) {
-    // If multiple active contracts exist during this period:
-    // A contract is blocking if it is currently occupying the board AND extends beyond the upcoming window
-    // or makes the board unavailable without authorized marketing show
-    activeContracts.forEach((ac) => {
-      const rawC = ac.rawContract;
-      if (requestedMarketingVisibility === 'FORCE_SHOW') {
-        if (!ac.isExpired && (!rawC || rawC.billboards_released !== true)) {
-          // If this active contract occupies the board beyond upcoming marketing window
-          if (ac.endDate > upcomingWindowEnd) {
-            blockingContractsList.push({
-              contractNumber: ac.contractNumber,
-              customerName: ac.customerName,
-              adType: ac.adType,
-              endDate: ac.endDate,
-            });
-          }
-        }
-      }
-    });
-  }
-
-  const isBlockedByOtherContract = blockingContractsList.length > 0;
-
-  // 8. Determine Effective Marketing Visibility
-  let effectiveMarketingVisibility: MarketingVisibility = requestedMarketingVisibility;
-  if (isBlockedByOtherContract) {
-    effectiveMarketingVisibility = 'FORCE_HIDE';
-  }
-
-  // 9. Calculate isMarketingVisible (Eligibility for available exports/lists)
+  let classification: BillboardAvailabilityClassification = 'EXCLUDED';
+  let requestedMarketingVisibility: MarketingVisibility = isIndividuallyHidden ? 'FORCE_HIDE' : isRequestedShowOnBillboard ? 'FORCE_SHOW' : 'AUTO';
+  let effectiveMarketingVisibility: MarketingVisibility = 'AUTO';
   let isMarketingVisible = false;
   let reason = '';
 
-  if (operationalStatus === 'REMOVED') {
+  // 6. Calculate isUpcomingWithinWindow
+  const isUpcomingWithinWindow =
+    operationalStatus === 'RENTED' &&
+    currentRentEndDate !== null &&
+    currentRentEndDate <= upcomingWindowEnd;
+
+  // 7. Deterministic Classification
+  if (maintCheck.isRemoved || maintCheck.isMaintenance) {
+    classification = 'EXCLUDED';
+    effectiveMarketingVisibility = 'FORCE_HIDE';
     isMarketingVisible = false;
-    reason = 'اللوحة بحالة إزالة أو لم يتم التركيب';
-  } else if (isBlockedByOtherContract) {
+    isAvailableNow = false;
+    reason = maintCheck.label;
+  } else if (isIndividuallyHidden) {
+    classification = 'EXCLUDED';
+    effectiveMarketingVisibility = 'FORCE_HIDE';
     isMarketingVisible = false;
-    const blockNames = blockingContractsList.map((b) => `عقد ${b.contractNumber} (${b.customerName})`).join('، ');
-    reason = `محجوبة من المتاح بسبب ارتباطها بعقد نشط آخر غير متاح للتسويق (${blockNames})`;
-    statusLabelArabic = 'محجوز بعقد نشط آخر';
-  } else if (effectiveMarketingVisibility === 'FORCE_HIDE') {
-    isMarketingVisible = false;
-    reason = 'اللوحة مخفية يدوياً / إدارياً من المتاح (FORCE_HIDE)';
-  } else if (effectiveMarketingVisibility === 'FORCE_SHOW') {
+    isAvailableNow = false;
+    reason = 'اللوحة مخفية إدارياً على مستوى اللوحة (FORCE_HIDE)';
+    statusLabelArabic = 'مخفية إدارياً';
+  } else if (activeContracts.length === 0) {
+    // ═════════════════════════════════════════════════════════════════════════
+    // A. AVAILABLE WITHOUT ACTIVE OCCUPANCY (AVAILABLE NOW)
+    // ═════════════════════════════════════════════════════════════════════════
+    classification = 'AVAILABLE_WITHOUT_CONTRACT';
+    effectiveMarketingVisibility = isRequestedShowOnBillboard ? 'FORCE_SHOW' : 'AUTO';
     isMarketingVisible = true;
-    reason = 'اللوحة معروضة للتسويق بقرار إداري (FORCE_SHOW)';
-    if (operationalStatus === 'RENTED') {
+    isAvailableNow = true;
+    reason = 'اللوحة شاغرة تشغيلياً ولا يوجد أي عقد فعال عليها';
+    statusLabelArabic = 'متاح الآن';
+  } else if (activeExplicitContracts.length > 0) {
+    // ═════════════════════════════════════════════════════════════════════════
+    // B. EXACT CURRENT ACTIVE CONTRACT IS EXPLICITLY SHOWN
+    // ═════════════════════════════════════════════════════════════════════════
+    // Friendly billboards require explicit billboard-level show (isRequestedShowOnBillboard === true)
+    // Conflicting unactivated active contracts block the billboard.
+    const isFriendExcluded = isFriendBillboard && !isRequestedShowOnBillboard;
+
+    if (activeUnactivatedContracts.length > 0 || isFriendExcluded) {
+      activeUnactivatedContracts.forEach((ac) => {
+        blockingContractsList.push({
+          contractNumber: ac.contractNumber,
+          customerName: ac.customerName,
+          adType: ac.adType,
+          endDate: ac.endDate,
+        });
+      });
+      classification = 'EXCLUDED';
+      effectiveMarketingVisibility = 'FORCE_HIDE';
+      isMarketingVisible = false;
+      isAvailableNow = false;
+      const blockNames = blockingContractsList.map((b) => `عقد ${b.contractNumber} (${b.customerName})`).join('، ');
+      reason = isFriendExcluded
+        ? 'لوحة شركة صديقة مستبعدة من إظهار العقد العام حتى يتم تفعيلها من كرت اللوحة'
+        : `محجوبة من المتاح بسبب ارتباطها بعقد نشط آخر غير متاح للتسويق (${blockNames})`;
+      statusLabelArabic = isFriendExcluded ? 'لوحة صديقة' : 'محجوز بعقد نشط آخر';
+    } else {
+      classification = 'EXPLICIT_CONTRACT_SHOW';
+      effectiveMarketingVisibility = 'FORCE_SHOW';
+      isMarketingVisible = true;
+      isAvailableNow = false; // Operationally rented, but marketing visible
+      reason = 'اللوحة معروضة للتسويق بقرار إداري (FORCE_SHOW)';
       statusLabelArabic = 'محجوز (معروض للتسويق)';
     }
   } else {
-    // AUTO mode
-    if (operationalStatus === 'AVAILABLE') {
-      isMarketingVisible = true;
-      reason = 'اللوحة شاغرة تشغيلياً (AUTO)';
+    // ═════════════════════════════════════════════════════════════════════════
+    // C. NO ACTIVE CONTRACT IS EXPLICITLY SHOWN
+    // ═════════════════════════════════════════════════════════════════════════
+    // If billboard requested show on board level, but occupying contract is unactivated -> blocked
+    if (isRequestedShowOnBillboard && activeUnactivatedContracts.length > 0) {
+      activeUnactivatedContracts.forEach((ac) => {
+        blockingContractsList.push({
+          contractNumber: ac.contractNumber,
+          customerName: ac.customerName,
+          adType: ac.adType,
+          endDate: ac.endDate,
+        });
+      });
+      classification = 'EXCLUDED';
+      effectiveMarketingVisibility = 'FORCE_HIDE';
+      isMarketingVisible = false;
+      isAvailableNow = false;
+      const blockNames = blockingContractsList.map((b) => `عقد ${b.contractNumber} (${b.customerName})`).join('، ');
+      reason = `محجوبة من المتاح بسبب ارتباطها بعقد نشط آخر غير متاح للتسويق (${blockNames})`;
+      statusLabelArabic = 'محجوز بعقد نشط آخر';
     } else if (isUpcomingWithinWindow) {
+      classification = 'UPCOMING';
+      effectiveMarketingVisibility = 'AUTO';
       isMarketingVisible = true;
+      isAvailableNow = false;
       reason = `تنتهي خلال نافذة ${windowMonths} أشهر (${currentRentEndDate})`;
       statusLabelArabic = 'ستتاح قريباً';
     } else {
+      classification = 'EXCLUDED';
+      effectiveMarketingVisibility = isRequestedShowOnBillboard ? 'FORCE_HIDE' : 'AUTO';
       isMarketingVisible = false;
+      isAvailableNow = false;
       reason = `محجوزة حتى ${currentRentEndDate} (أبعد من نافذة ${windowMonths} أشهر)`;
+      statusLabelArabic = 'محجوز';
     }
   }
+
+  const isBlockedByOtherContract = blockingContractsList.length > 0;
 
   return {
     billboardId,
     billboardName,
     operationalStatus,
+    classification,
     isAvailableNow,
     requestedMarketingVisibility,
     effectiveMarketingVisibility,

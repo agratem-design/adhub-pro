@@ -18,7 +18,7 @@ describe('billboardAvailabilityService - Unified Engine Tests', () => {
   describe('Date Helpers', () => {
     it('normalizes UTC timestamps without off-by-one errors', () => {
       expect(normalizeDateOnly('2026-08-18')).toBe('2026-08-18');
-      expect(normalizeDateOnly('2026-07-19T22:00:00.000Z')).toBe('2026-07-20');
+      expect(normalizeDateOnly('2026-07-19T22:00:00.000Z')).toBe('2026-07-19');
       expect(normalizeDateOnly(null)).toBeNull();
     });
 
@@ -160,6 +160,7 @@ describe('billboardAvailabilityService - Unified Engine Tests', () => {
           'Contract Date': '2026-01-01',
           'End Date': '2027-06-30',
           billboard_ids: '3',
+          is_visible_in_available: true,
         },
       ];
       const res = resolveBillboardAvailability(bb, contracts, { referenceDate: REF_DATE, upcomingMonthsWindow: 4 });

@@ -24,7 +24,7 @@ async function loadActiveContractsByBillboard(): Promise<Map<string, ActiveContr
 
     const { data, error } = await supabase
       .from('Contract')
-      .select('Contract_Number, "Contract Date", "End Date", "Customer Name", "Ad Type", billboard_ids, billboard_prices, billboards_released')
+      .select('Contract_Number, "Contract Date", "End Date", "Customer Name", "Ad Type", billboard_ids, billboard_prices, billboards_released, is_visible_in_available')
       .order('Contract_Number', { ascending: false });
 
     if (error) throw error;
@@ -772,25 +772,37 @@ export const useBillboardExport = () => {
           const imageFileName = billboardName ? `${billboardName}.jpg` : (billboard.image_name || '');
           
           let endDateDisplay = '';
-          if (res.operationalStatus === 'RENTED' && res.currentRentEndDate) {
-            endDateDisplay = new Date(res.currentRentEndDate).toLocaleDateString('ar-LY');
+          let statusDisplay = 'متاح الآن';
+
+          if (res.classification === 'UPCOMING') {
+            endDateDisplay = res.currentRentEndDate || '';
+            statusDisplay = 'ستتاح قريباً';
+          } else if (res.classification === 'EXPLICIT_CONTRACT_SHOW') {
+            endDateDisplay = res.currentRentEndDate || '';
+            statusDisplay = 'متاح الآن';
+          } else if (res.classification === 'AVAILABLE_WITHOUT_CONTRACT') {
+            endDateDisplay = '';
+            statusDisplay = 'متاح الآن';
+          } else if (res.currentRentEndDate) {
+            endDateDisplay = res.currentRentEndDate;
+            statusDisplay = res.statusLabelArabic;
           }
           
           return {
             'ر.م': billboard.ID || billboard.id || '',
             'اسم لوحة': billboardName,
+            'الفئة': billboard.Level || billboard.level || billboard.Category_Level || '',
             'مدينة': billboard.City || billboard.city || '',
             'البلدية': billboard.Municipality || billboard.municipality || '',
             'منطقة': billboard.District || billboard.district || '',
             'اقرب نقطة دالة': billboard.Nearest_Landmark || billboard.location || '',
+            'ID الحجم': billboard.size_id || '',
             'حجم': billboard.Size || billboard.size || '',
-            'مستوى': billboard.Level || billboard.level || '',
             'احداثي - GPS': billboard.GPS_Coordinates || billboard.gps_coordinates || '',
             'نوع اللوحة': billboard.billboard_type || 'غير محدد',
             'عدد الاوجه': getFaceCountText(billboard.Faces_Count || billboard.faces_count || billboard.faces || billboard.Number_of_Faces || billboard.Faces),
             'تاريخ انتهاء الإيجار': endDateDisplay,
-            'متاح اعتباراً من': res.availableFrom ? new Date(res.availableFrom).toLocaleDateString('ar-LY') : 'متاح الآن',
-            'الحالة': res.statusLabelArabic,
+            'الحالة': statusDisplay,
             'الترتيب مقاس': index + 1,
             '@IMAGE': imageFileName,
             'image_url': normalizeGoogleImageUrl(billboard.Image_URL || billboard.image || '')
@@ -806,12 +818,13 @@ export const useBillboardExport = () => {
       const colWidths = [
         { wch: 8 },  // ر.م
         { wch: 15 }, // اسم لوحة
+        { wch: 8 },  // الفئة
         { wch: 12 }, // مدينة
         { wch: 15 }, // البلدية
         { wch: 12 }, // منطقة
         { wch: 20 }, // اقرب نقطة دالة
+        { wch: 10 }, // ID الحجم
         { wch: 10 }, // حجم
-        { wch: 8 },  // مستوى
         { wch: 20 }, // احداثي - GPS
         { wch: 15 }, // نوع اللوحة
         { wch: 15 }, // عدد الاوجه
@@ -942,7 +955,7 @@ export const useBillboardExport = () => {
           if (contractNumber && !hideEndDateContractIds.includes(contractNumber)) {
             const endDate = contractEndDates[billboardId];
             if (endDate) {
-              endDateDisplay = new Date(endDate).toLocaleDateString('ar-LY');
+              endDateDisplay = endDate;
             }
           }
         }
@@ -1096,7 +1109,7 @@ export const useBillboardExport = () => {
             if (contractNumber && !hideEndDateContractIds.includes(contractNumber)) {
               const endDate = contractEndDates[billboardId];
               if (endDate) {
-                endDateDisplay = new Date(endDate).toLocaleDateString('ar-LY');
+                endDateDisplay = endDate;
               }
             }
           } else if (!isForcedVisible) {
@@ -1185,8 +1198,7 @@ export const useBillboardExport = () => {
   }
 
   function isAvailableForAvailableExports(billboard: any): boolean {
-    const res = resolveBillboardAvailability(billboard, allContractsCache);
-    return res.isMarketingVisible && (res.operationalStatus === 'AVAILABLE' || res.marketingVisibility === 'FORCE_SHOW');
+    return checkIsAvailableForAvailableExports(billboard, allContractsCache);
   }
 
   function filterAvailableBillboards(
@@ -1210,8 +1222,7 @@ export const useBillboardExport = () => {
     _isContractExpired?: (endDate: string | null) => boolean,
     monthsAhead: number = 4
   ): boolean {
-    const res = resolveBillboardAvailability(billboard, allContractsCache, { upcomingMonthsWindow: monthsAhead });
-    return res.isMarketingVisible;
+    return checkIsAvailableOrUpcomingForExport(billboard, _fourMonthsFromNow, _isContractExpired, monthsAhead, allContractsCache);
   }
 
 
@@ -1479,12 +1490,25 @@ export const useBillboardExport = () => {
 
       const exportData = await Promise.all(
         sortedBillboards.map(async (billboard: any, index: number) => {
-          const contractDates = await getContractDates(billboard);
+          const res = resolveBillboardAvailability(billboard, allContractsCache, { upcomingMonthsWindow: months });
           const billboardName = billboard.Billboard_Name || billboard.name || '';
           const imageFileName = billboardName ? `${billboardName}.jpg` : (billboard.image_name || '');
-          const hasActive = hasActiveContractForExport(billboard, isContractExpired);
-          const isForcedVisible = (billboard.is_visible_in_available === true);
-          const endDateDisplay = isForcedVisible ? '' : (hasActive ? (contractDates.endDate || '') : '');
+          
+          let endDateDisplay = '';
+          let statusDisplay = 'متاح الآن';
+
+          if (res.classification === 'AVAILABLE_WITHOUT_CONTRACT' || res.classification === 'EXPLICIT_CONTRACT_SHOW') {
+            // Case A & B: AVAILABLE NOW -> blank end date, status "متاح الآن"
+            endDateDisplay = '';
+            statusDisplay = 'متاح الآن';
+          } else if (res.classification === 'UPCOMING' && res.currentRentEndDate) {
+            // Case C: UPCOMING -> actual date displayed, status "ستتاح قريباً"
+            endDateDisplay = res.currentRentEndDate;
+            statusDisplay = 'ستتاح قريباً';
+          } else if (res.currentRentEndDate) {
+            endDateDisplay = res.currentRentEndDate;
+            statusDisplay = res.statusLabelArabic;
+          }
           
           return {
             'ر.م': billboard.ID || billboard.id || '',
@@ -1499,7 +1523,7 @@ export const useBillboardExport = () => {
             'نوع اللوحة': billboard.billboard_type || 'غير محدد',
             'عدد الاوجه': getFaceCountText(billboard.Faces_Count || billboard.faces_count),
             'تاريخ الانتهاء': endDateDisplay,
-            'الحالة': isForcedVisible ? 'متاح الآن' : (hasActive ? 'ستتاح قريباً' : 'متاح الآن'),
+            'الحالة': statusDisplay,
             'الترتيب مقاس': index + 1,
             '@IMAGE': imageFileName,
             'image_url': normalizeGoogleImageUrl(billboard.Image_URL || billboard.image || '')
@@ -1782,3 +1806,27 @@ export const useBillboardExport = () => {
     getContractDates
   };
 };
+
+export function checkIsAvailableForAvailableExports(billboard: any, contracts: any[] = [], referenceDate?: string | Date): boolean {
+  const res = resolveBillboardAvailability(billboard, contracts, { referenceDate });
+  return res.classification === 'AVAILABLE_WITHOUT_CONTRACT' || res.classification === 'EXPLICIT_CONTRACT_SHOW';
+}
+
+export function checkIsAvailableOrUpcomingForExport(
+  billboard: any,
+  _fourMonthsFromNow?: Date,
+  _isContractExpired?: (endDate: string | null) => boolean,
+  monthsAhead: number = 4,
+  contracts: any[] = [],
+  referenceDate?: string | Date
+): boolean {
+  const res = resolveBillboardAvailability(billboard, contracts, { upcomingMonthsWindow: monthsAhead, referenceDate });
+  return (
+    res.classification === 'AVAILABLE_WITHOUT_CONTRACT' ||
+    res.classification === 'EXPLICIT_CONTRACT_SHOW' ||
+    res.classification === 'UPCOMING'
+  );
+}
+
+export const isAvailableForAvailableExports = checkIsAvailableForAvailableExports;
+export const isAvailableOrUpcomingForExport = checkIsAvailableOrUpcomingForExport;

@@ -28,6 +28,7 @@ describe('Shared Billboard Blocking Policy ("المنع يغلب الإظهار"
         'Contract Date': '2026-04-01',
         'End Date': '2026-09-28', // Active
         billboard_ids: '374,101,102',
+        is_visible_in_available: true,
       },
       {
         Contract_Number: 1185,
@@ -88,6 +89,7 @@ describe('Shared Billboard Blocking Policy ("المنع يغلب الإظهار"
         'Contract Date': '2026-01-01',
         'End Date': '2027-01-01',
         billboard_ids: '10',
+        is_visible_in_available: true,
       },
     ];
 
@@ -113,6 +115,7 @@ describe('Shared Billboard Blocking Policy ("المنع يغلب الإظهار"
         'Contract Date': '2026-01-01',
         'End Date': '2027-01-01', // Active
         billboard_ids: '20',
+        is_visible_in_available: true,
       },
       {
         Contract_Number: 602,
@@ -145,6 +148,7 @@ describe('Shared Billboard Blocking Policy ("المنع يغلب الإظهار"
         'Contract Date': '2026-06-01',
         'End Date': '2026-12-01',
         billboard_ids: '30',
+        is_visible_in_available: true,
       },
       {
         Contract_Number: 702,

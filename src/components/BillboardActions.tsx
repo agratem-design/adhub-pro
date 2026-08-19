@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Download, Printer, Plus, FileSpreadsheet, Cloud, Camera, Share2, Settings2, Zap, Upload, Shuffle, Copy, MoreHorizontal, Globe, Calendar } from 'lucide-react';
+import { Download, Printer, Plus, FileSpreadsheet, Cloud, Camera, Share2, Settings2, Zap, Upload, Shuffle, Copy, MoreHorizontal, Globe, Calendar, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
   DropdownMenu,
@@ -89,6 +89,7 @@ export const BillboardActions: React.FC<BillboardActionsProps> = ({
   const [municipalityDialogOpen, setMunicipalityDialogOpen] = useState(false);
   const [uploadPreviewOpen, setUploadPreviewOpen] = useState(false);
   const [monthsAhead, setMonthsAhead] = useState<number>(4);
+  const [isQuickUploading, setIsQuickUploading] = useState(false);
 
   const handleSync = async () => {
     setIsSyncing(true);
@@ -99,8 +100,37 @@ export const BillboardActions: React.FC<BillboardActionsProps> = ({
     }
   };
 
+  const handleQuickUpload = async () => {
+    if (!uploadAvailableAndUpcomingToSite) return;
+    setIsQuickUploading(true);
+    try {
+      await uploadAvailableAndUpcomingToSite(4);
+    } catch (e) {
+      console.error('Error during quick upload:', e);
+    } finally {
+      setIsQuickUploading(false);
+    }
+  };
+
   return (
     <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+      {/* 1-Click Instant Export & Upload to Website (4 Months) */}
+      <Button
+        variant="default"
+        size="sm"
+        disabled={isQuickUploading}
+        onClick={handleQuickUpload}
+        className="h-8 sm:h-9 px-2.5 sm:px-3.5 text-xs sm:text-sm font-bold gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-sm transition-all active:scale-95 disabled:opacity-70"
+        title="تصدير ورفع المتاحة والقادمة (4 أشهر) فوراً إلى الموقع الإلكتروني بضغطة واحدة"
+      >
+        {isQuickUploading ? (
+          <Loader2 className="h-4 w-4 animate-spin text-white" />
+        ) : (
+          <Zap className="h-4 w-4 fill-current text-amber-300 animate-pulse" />
+        )}
+        <span>{isQuickUploading ? 'جاري الرفع...' : 'تصدير سريع'}</span>
+      </Button>
+
       {/* Main Export Dropdown */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

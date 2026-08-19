@@ -140,11 +140,11 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
             totalCount++;
             eligibleBillboardIds.add(res.billboardId);
 
-            if (res.marketingVisibility === 'FORCE_SHOW') {
+            if (res.classification === 'EXPLICIT_CONTRACT_SHOW') {
               forcedCount++;
-            } else if (res.operationalStatus === 'AVAILABLE') {
+            } else if (res.classification === 'AVAILABLE_WITHOUT_CONTRACT') {
               availNoContractCount++;
-            } else if (res.isUpcomingWithinWindow) {
+            } else if (res.classification === 'UPCOMING') {
               expiringCount++;
             }
           }
@@ -203,7 +203,7 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
           // STRICT CRITERIA (Scope C Contract-Level Explicit Activation):
           // 1. Explicitly Shown: Contract MUST be active (!isExpired) AND have explicit contract-level activation (c.is_visible_in_available === true)
           const hasExplicitContractActivation = !isExpired && c.is_visible_in_available === true;
-          const isExplicitlyShown = hasExplicitContractActivation && (visInfo.effectiveForceShowCount > 0 || visInfo.requestedForceShowCount > 0);
+          const isExplicitlyShown = hasExplicitContractActivation;
 
           // 2. Upcoming Contract: Contract MUST be active (!isExpired) AND end within upcoming window AND have eligible boards
           const isUpcomingContract = !isExpired && isExpiringSoon && eligibleCount > 0;

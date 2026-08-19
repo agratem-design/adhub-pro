@@ -89,7 +89,7 @@ describe('Preview Dialog Contract Grouping Pipeline Tests with Scope C Contract 
 
       // STRICT CRITERIA:
       const hasExplicitContractActivation = !isExpired && c.is_visible_in_available === true;
-      const isExplicitlyShown = hasExplicitContractActivation && (visInfo.effectiveForceShowCount > 0 || visInfo.requestedForceShowCount > 0);
+      const isExplicitlyShown = hasExplicitContractActivation;
       const isUpcomingContract = !isExpired && isExpiringSoon && eligibleCount > 0;
 
       if (isExplicitlyShown || isUpcomingContract) {

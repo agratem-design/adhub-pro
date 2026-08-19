@@ -147,13 +147,22 @@ export const ContractCard: React.FC<ContractCardProps> = ({
   const [forceHiddenCount, setForceHiddenCount] = useState<number>(0);
   const [totalContractBoards, setTotalContractBoards] = useState<number>(0);
 
-  // فحص حالة إظهار لوحات العقد في المتاح باستخدام المحرك الموحد
+  // فحص حالة إظهار لوحات العقد في المتاح باستخدام المحرك الموحد ومصدر الحقيقة على مستوى العقد
   useEffect(() => {
     if (!isVisible) return;
+    const isContractActivated = (contract as any).is_visible_in_available === true;
     const billboardIdsStr = (contract as any).billboard_ids;
-    if (!billboardIdsStr) return;
+    if (!billboardIdsStr) {
+      setVisibilityState('ALL_OFF');
+      setShowInAvailable(false);
+      return;
+    }
     const ids = billboardIdsStr.split(',').map((s: string) => Number(s.trim())).filter((n: number) => Number.isFinite(n) && n > 0);
-    if (ids.length === 0) return;
+    if (ids.length === 0) {
+      setVisibilityState('ALL_OFF');
+      setShowInAvailable(false);
+      return;
+    }
     supabase.from('billboards').select('ID, is_visible_in_available').in('ID', ids)
       .then(({ data }) => {
         if (data && data.length > 0) {
@@ -163,15 +172,16 @@ export const ContractCard: React.FC<ContractCardProps> = ({
           setForceVisibleCount(visInfo.forceShowCount);
           setForceHiddenCount(visInfo.forceHideCount);
 
-          if (visInfo.state === 'ON') {
-            setVisibilityState('ALL_ON');
-            setShowInAvailable(true);
-          } else if (visInfo.state === 'OFF') {
+          if (!isContractActivated) {
             setVisibilityState('ALL_OFF');
             setShowInAvailable(false);
+          } else if (visInfo.state === 'ON') {
+            setVisibilityState('ALL_ON');
+            setShowInAvailable(true);
           } else {
+            // Contract is explicitly activated, but some or all boards might be blocked/hidden
             setVisibilityState('MIXED');
-            setShowInAvailable(false);
+            setShowInAvailable(true);
           }
         }
       });
