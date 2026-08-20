@@ -140,7 +140,7 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
             totalCount++;
             eligibleBillboardIds.add(res.billboardId);
 
-            if (res.classification === 'EXPLICIT_CONTRACT_SHOW') {
+            if (res.classification === 'EXPLICIT_CONTRACT_SHOW' || res.classification === 'EXPLICIT_BILLBOARD_SHOW') {
               forcedCount++;
             } else if (res.classification === 'AVAILABLE_WITHOUT_CONTRACT') {
               availNoContractCount++;

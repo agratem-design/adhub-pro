@@ -365,9 +365,6 @@ export const EnhancedCompositeTaskCard: React.FC<EnhancedCompositeTaskCardProps>
             images.push({ url: u, face: idx % 2 === 0 ? 'a' : 'b' });
           });
         }
-            }
-          }
-        }
         
         // ثالثاً: فولباك من العقد مباشرة إذا لم توجد صور
         if (images.length === 0 && contractIds.length > 0) {

@@ -23,6 +23,7 @@ import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchContractDesignUrls } from '@/lib/contractDesignUtils';
+import { getOperationalWeekKey, getOperationalWeekRange } from '@/utils/operationalWeek';
 import {
   Search, ArrowUpDown, ArrowUp, ArrowDown,
   CheckCircle2, Clock, Package, Users,
@@ -1304,7 +1305,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     return sortDir === 'asc' ? cmp : -cmp;
   }), [filtered, sortField, sortDir]);
 
-  // Group tasks by contract and reinstallation status
+  // Group tasks: reinstallation tasks by issuance week (Saturday to Friday), other tasks by contract
   const grouped = useMemo(() => {
     const groups: { 
       key: string; 
@@ -1323,26 +1324,43 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     const groupMap = new Map<string, typeof sorted>();
     
     sorted.forEach(task => {
-      const reinstallNum = task.reinstallationNumber;
-      const groupKey = `${task.contract_id}-${task.task_type}-${reinstallNum ?? 'new'}`;
+      let groupKey: string;
+      if (task.task_type === 'reinstallation') {
+        groupKey = getOperationalWeekKey(task.created_at);
+      } else {
+        const reinstallNum = task.reinstallationNumber;
+        groupKey = `${task.contract_id}-${task.task_type}-${reinstallNum ?? 'new'}`;
+      }
+
       if (!groupMap.has(groupKey)) groupMap.set(groupKey, []);
       groupMap.get(groupKey)!.push(task);
     });
 
     groupMap.forEach((tasks, key) => {
       const first = tasks[0];
-      const reinstallNum = first.reinstallationNumber;
+      const isReinstallWeek = key.startsWith('reinstall-week-');
       
       // Deduplicate contracts
       const allGroupContractIds = [...new Set(
         tasks.flatMap((t: any) => t.contractIds || [t.contract_id]).map(normalizeContractId).filter((id): id is number => id !== null)
       )];
 
-      const label = reinstallNum != null
-        ? `إعادة تركيب re${reinstallNum}-${first.contract_id}`
-        : allGroupContractIds.length > 1
-          ? `عقود #${allGroupContractIds.join(', #')}`
-          : `عقد #${first.contract_id}`;
+      let label: string;
+      let customerName: string;
+
+      if (isReinstallWeek) {
+        const weekInfo = getOperationalWeekRange(first.created_at);
+        label = weekInfo.label;
+        customerName = `${tasks.length} ${tasks.length === 1 ? 'مهمة إعادة تركيب' : 'مهام إعادة تركيب'}`;
+      } else {
+        const reinstallNum = first.reinstallationNumber;
+        label = reinstallNum != null
+          ? `إعادة تركيب re${reinstallNum}-${first.contract_id}`
+          : allGroupContractIds.length > 1
+            ? `عقود #${allGroupContractIds.join(', #')}`
+            : `عقد #${first.contract_id}`;
+        customerName = first.customer_name || 'غير محدد';
+      }
 
       // Deduplicate teams & printers
       const uniqueTeams = [...new Set(tasks.map((t: any) => t.teamName).filter(Boolean))] as string[];
@@ -1358,12 +1376,12 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         label,
         contractId: first.contract_id,
         contractIds: allGroupContractIds.length > 0 ? allGroupContractIds : [first.contract_id],
-        customerName: first.customer_name || 'غير محدد',
+        customerName,
         adTypes: uniqueAdTypes,
         adType: uniqueAdTypes.join(' / ') || '',
         teamNames: uniqueTeams,
         printerNames: uniquePrinters,
-        reinstallationNumber: reinstallNum,
+        reinstallationNumber: isReinstallWeek ? null : first.reinstallationNumber,
         tasks,
       });
     });

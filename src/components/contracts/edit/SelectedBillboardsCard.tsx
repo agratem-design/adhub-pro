@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { cn } from '@/lib/utils';
 import { formatAmount } from '@/lib/formatUtils';
 import { calculateAllBillboardPrices } from '@/utils/contractBillboardPricing';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,6 +23,7 @@ import { PauseBillboardDialog } from './PauseBillboardDialog';
 import { AddPausedBillboardDialog } from './AddPausedBillboardDialog';
 import { BulkRegisterPausedDialog } from './BulkRegisterPausedDialog';
 import { PausedBillboardsList } from './PausedBillboardsList';
+import { BillboardReplacementHistoryCard } from './BillboardReplacementHistoryCard';
 import { InstantBillboardSwapDialog } from './InstantBillboardSwapDialog';
 import { QuickPauseBillboardDialog } from './QuickPauseBillboardDialog';
 import { toast } from 'sonner';
@@ -139,6 +141,8 @@ interface SelectedBillboardsCardProps {
   onUpdateIndividualDiscount?: (billboardId: string, value: number, type: 'amount' | 'percent') => void;
   billboardCustomDates?: Record<string, { startDate: string; endDate: string; startDateReason: string }>;
   onUpdateBillboardCustomDates?: (billboardId: string, startDate: string, startDateReason: string) => void;
+  customerName?: string;
+  adType?: string;
 }
 
 export function SelectedBillboardsCard({
@@ -188,6 +192,8 @@ export function SelectedBillboardsCard({
   onUpdateIndividualDiscount,
   billboardCustomDates = {},
   onUpdateBillboardCustomDates,
+  customerName = '',
+  adType = '',
 }: SelectedBillboardsCardProps) {
   const { map: activeLoansByBillboard } = useActiveLoansByBillboard();
 
@@ -343,14 +349,23 @@ export function SelectedBillboardsCard({
   const [sizeFilter, setSizeFilter] = useState<string>('all');
   const [cityFilter, setCityFilter] = useState<string>('all');
 
-  // Replacement billboards map: replacement_billboard_id -> { pausedName, startDate, endDate, allocated }
-  // pausedName comes from paused_billboards.billboard_name (the ORIGINAL board the replacement substitutes).
+  // Replacement billboards map: replacement_billboard_id -> { pausedName, startDate, endDate, allocated, isInstantSwap, originalId }
+  // Supports both Pause Replacements and Instant 1:1 Swaps
   const { data: replacementsList = [] } = useQuery({
     queryKey: ['paused-replacements-by-contract', contractNumber, pausedRefreshKey],
     queryFn: async () => {
       if (!contractNumber) return [];
       try {
-        const repls = await listReplacementsByContract(Number(contractNumber));
+        const [repls, swapLogsRes] = await Promise.all([
+          listReplacementsByContract(Number(contractNumber)),
+          supabase
+            .from('activity_log')
+            .select('*')
+            .eq('action', 'instant_billboard_swap')
+            .or(`contract_number.eq.${contractNumber},entity_id.eq.${contractNumber}`)
+            .order('created_at', { ascending: false }),
+        ]);
+
         const pausedIds = Array.from(new Set((repls || []).map((r: any) => r.paused_billboard_id).filter(Boolean)));
         let pausedNameById = new Map<string, string>();
         if (pausedIds.length > 0) {
@@ -360,22 +375,60 @@ export function SelectedBillboardsCard({
             .in('id', pausedIds as any);
           pausedNameById = new Map((paused || []).map((p: any) => [String(p.id), String(p.billboard_name || '')]));
         }
-        return (repls || []).map((r: any) => ({
+
+        const items: any[] = (repls || []).map((r: any) => ({
           ...r,
+          isInstantSwap: false,
           _paused_billboard_name: pausedNameById.get(String(r.paused_billboard_id)) || '',
         }));
+
+        // Add Instant Swaps from activity_log
+        const swapLogs = swapLogsRes.data || [];
+        swapLogs.forEach((log: any) => {
+          let details: any = {};
+          try {
+            details = typeof log.details === 'string' ? JSON.parse(log.details) : log.details || {};
+          } catch {
+            details = {};
+          }
+          const replId = details?.replacement_billboard_id;
+          if (replId) {
+            items.push({
+              id: log.id,
+              isInstantSwap: true,
+              replacement_billboard_id: String(replId),
+              original_billboard_id: details.original_billboard_id,
+              _paused_billboard_name: details.original_billboard_name || `لوحة #${details.original_billboard_id}`,
+              allocated_amount: details.preserved_contract_price || 0,
+              created_at: log.created_at,
+            });
+          }
+        });
+
+        return items;
       } catch { return []; }
     },
     enabled: !!contractNumber,
   });
+
   const replacementsMap = useMemo(() => {
-    const m = new Map<string, { pausedName: string; startDate: string; endDate: string; allocated: number }>();
+    const m = new Map<string, { 
+      pausedName: string; 
+      startDate?: string; 
+      endDate?: string; 
+      allocated: number;
+      isInstantSwap?: boolean;
+      originalId?: number;
+    }>();
+
     (replacementsList as any[]).forEach((r: any) => {
       m.set(String(r.replacement_billboard_id), {
         pausedName: String(r._paused_billboard_name || r.replacement_billboard_name || ''),
         startDate: String(r.start_date || ''),
         endDate: String(r.end_date || ''),
         allocated: Number(r.allocated_amount) || 0,
+        isInstantSwap: !!r.isInstantSwap,
+        originalId: r.original_billboard_id ? Number(r.original_billboard_id) : undefined,
       });
     });
     return m;
@@ -1190,7 +1243,7 @@ export function SelectedBillboardsCard({
                       bulkSelectMode && bulkSelectedIds.has(billboardId) 
                         ? 'border-destructive ring-2 ring-destructive/30' 
                         : replacementsMap.has(billboardId)
-                          ? 'border-blue-500 ring-2 ring-blue-500/50 bg-gradient-to-br from-blue-500/5 to-transparent'
+                          ? 'border-primary ring-2 ring-primary/40 bg-gradient-to-br from-primary/5 to-transparent'
                           : isRenewed
                             ? 'border-emerald-500/40 shadow-emerald-500/5 bg-gradient-to-br from-emerald-500/[0.02] to-transparent'
                             : 'border-border'
@@ -1241,7 +1294,7 @@ export function SelectedBillboardsCard({
                           </div>
                         )}
 
-                        {/* Instant Swap button */}
+                        {/* Quick Swap button — Single Unified Swap Action */}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1252,9 +1305,9 @@ export function SelectedBillboardsCard({
                             setSwappingBillboard(b);
                             setSwapDialogOpen(true);
                           }}
-                          title="تبديل سريع للوحة (استبدال فوري)"
+                          title="تبديل اللوحة"
                         >
-                          <Repeat2 className="h-4 w-4" />
+                          <ArrowLeftRight className="h-4 w-4" />
                         </Button>
 
                         {/* Quick Pause button */}
@@ -1268,7 +1321,7 @@ export function SelectedBillboardsCard({
                             setQuickPausingBillboard(b);
                             setQuickPauseOpen(true);
                           }}
-                          title="إيقاف مؤقت للوحة (بدون بديل)"
+                          title="إيقاف مؤقت للوحة"
                         >
                           <PauseCircle className="h-4 w-4" />
                         </Button>
@@ -1312,19 +1365,6 @@ export function SelectedBillboardsCard({
                               <span>تعديل السعر والمستوى</span>
                             </DropdownMenuItem>
 
-                            {onSwapBillboard && (
-                              <DropdownMenuItem 
-                                onClick={(e) => { 
-                                  e.stopPropagation(); 
-                                  onSwapBillboard(billboardId, (b as any).Billboard_Name || (b as any).name || `لوحة ${billboardId}`); 
-                                }}
-                                className="cursor-pointer gap-2 text-blue-600 focus:text-blue-600 focus:bg-blue-50/10"
-                              >
-                                <ArrowLeftRight className="h-4 w-4" />
-                                <span>تبديل مع لوحة أخرى</span>
-                              </DropdownMenuItem>
-                            )}
-
                             {onMoveBillboard && (
                               <DropdownMenuItem 
                                 onClick={(e) => { 
@@ -1342,22 +1382,16 @@ export function SelectedBillboardsCard({
                       </div>
                     </div>
 
- {/* Strong replacement banner across the top of the card */}
+                    {/* Unified clean replacement banner across the top of the card */}
                     {replacementsMap.has(billboardId) && (() => {
                       const info = replacementsMap.get(billboardId)!;
                       return (
-                        <div className="relative z-10 bg-gradient-to-r from-blue-600 to-blue-500 text-white px-3 py-2 border-b border-blue-700 shadow-inner">
-                          <div className="flex items-center gap-2 text-[11px] font-bold">
+                        <div className="relative z-10 bg-primary/95 text-primary-foreground px-3 py-1.5 border-b border-primary/30 shadow-sm">
+                          <div className="flex items-center gap-1.5 text-[11px] font-bold truncate">
                             <ArrowLeftRight className="h-3.5 w-3.5 shrink-0" />
-                            <span>بديلة عن:</span>
-                            <span className="bg-white/20 px-1.5 py-0.5 rounded font-extrabold truncate">
-                              {info.pausedName || '—'}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between mt-1 text-[10px] opacity-95">
-                            <span>{info.startDate || '—'} → {info.endDate || '—'}</span>
-                            <span className="font-bold">
-                              المخصص: {Number(info.allocated || 0).toLocaleString('ar-LY')} د.ل
+                            <span>لوحة بديلة عن:</span>
+                            <span className="bg-black/25 px-1.5 py-0.5 rounded font-extrabold truncate">
+                              {info.pausedName || (info.originalId ? `#${info.originalId}` : '—')}
                             </span>
                           </div>
                         </div>
@@ -1398,7 +1432,7 @@ export function SelectedBillboardsCard({
                           <BillboardLoanBadge loan={activeLoansByBillboard.get(billboardId)!} />
                         )}
                         {replacementsMap.has(billboardId) && (
-                          <Badge className="bg-blue-600/90 text-white text-[10px] font-bold px-2 py-0.5 shadow-md flex items-center gap-1 border border-blue-500/20 backdrop-blur-sm">
+                          <Badge className="bg-primary/90 text-primary-foreground border border-primary/20 text-[10px] font-bold px-2 py-0.5 shadow-md flex items-center gap-1 backdrop-blur-sm">
                             <ArrowLeftRight className="h-3 w-3" />
                             لوحة بديلة
                           </Badge>
@@ -1855,6 +1889,14 @@ export function SelectedBillboardsCard({
         </Card>
       )}
       
+      {/* Billboard Replacement History (سجل تبديل اللوحات) */}
+      {contractNumber && (
+        <BillboardReplacementHistoryCard
+          contractNumber={contractNumber}
+          refreshKey={pausedRefreshKey}
+        />
+      )}
+
       {/* Paused Billboards List */}
       {contractNumber && (
         <PausedBillboardsList
@@ -1898,7 +1940,8 @@ export function SelectedBillboardsCard({
           adType={adType || undefined}
           contractedPrice={pricingByBillboardId.get(String(swappingBillboard.ID))?.totalForBoard}
           onSwapped={() => {
-            setPausedRefreshKey((k) => k + 1);
+            setSwappingBillboard(null);
+            setPausedRefreshKey(k => k + 1);
             onRefresh?.();
           }}
         />

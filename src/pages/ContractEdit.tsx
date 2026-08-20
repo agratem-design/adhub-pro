@@ -836,26 +836,25 @@ export default function ContractEdit() {
           }
         }
         
-        // ✅ FIXED: Load base_rent FIRST (the original rental price before deductions)
+        // ✅ FIXED: Accurately isolate pure contractual rental base from saved customer total without double counting
         const baseRentFromDB = Number(c.base_rent || 0);
-        // ✅ CRITICAL FIX: "الإجمالي السابق" should be the CUSTOMER'S TOTAL (Total column), NOT Total Rent
         const savedCustomerTotal = Number(c.Total || 0);
+        const disc = Number(c.Discount ?? 0);
+        const extraInstallFromDB = (c.installation_enabled && !c.include_installation_in_price) ? Number(c.installation_cost || 0) : 0;
+        const extraPrintFromDB = (String(c.print_cost_enabled) === 'true' && !c.include_print_in_billboard_price) ? Number(c.print_cost || 0) : 0;
         
-        // ✅ ALWAYS use stored prices when editing an existing contract
-        // The user must explicitly click "تحديث الأسعار" to use fresh prices
-        if (baseRentFromDB > 0) {
-          setSavedBaseRent(baseRentFromDB);
-          setRentCost(baseRentFromDB);
-          setOriginalTotal(savedCustomerTotal);
-        } else {
-          const savedTotal = savedCustomerTotal || Number(c['Total Rent'] || 0);
-          setRentCost(savedTotal);
-          setOriginalTotal(savedTotal || 0);
-        }
+        // Pure contractual rental base = Customer Total - Extra Services (not included) + Discount
+        const contractualRentalBase = savedCustomerTotal > 0 
+          ? Math.max(0, savedCustomerTotal - extraInstallFromDB - extraPrintFromDB + (disc > 0 ? disc : 0))
+          : (baseRentFromDB > 0 ? baseRentFromDB : Number(c['Total Rent'] || 0));
+
+        setRentCost(contractualRentalBase);
+        setSavedBaseRent(baseRentFromDB > 0 ? baseRentFromDB : contractualRentalBase);
+        setOriginalTotal(savedCustomerTotal || contractualRentalBase);
+        
         // دائماً نستخدم الأسعار المحفوظة عند تعديل عقد موجود
         setUseStoredPrices(true);
         
-        const disc = Number(c.Discount ?? 0);
         if (!isNaN(disc) && disc > 0) {
           setDiscountType('amount');
           setDiscountValue(disc);
@@ -1513,6 +1512,27 @@ export default function ContractEdit() {
     }
   };
 
+  // ✅ Refresh canonical contract & billboards data after in-place swaps/operations without page reload
+  const refreshContractData = async () => {
+    if (!contractNumber) return;
+    try {
+      const c = await getContractWithBillboards(contractNumber);
+      if (c) {
+        setCurrentContract(c);
+        if (c.billboard_ids) {
+          const ids = String(c.billboard_ids).split(',').map((s: string) => s.trim()).filter(Boolean);
+          setSelected(ids);
+        }
+        const { data: bbs } = await supabase.from('billboards').select('*').limit(3000);
+        if (bbs) {
+          setBillboards(bbs);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to refresh contract data:', err);
+    }
+  };
+
 
   const calculateDueDate = (paymentType: string, index: number, startDateOverride?: string): string => {
     const baseDate = startDateOverride || startDate;
@@ -1721,11 +1741,11 @@ export default function ContractEdit() {
   const baseTotal = useMemo(() => (rentCost && rentCost > 0 ? rentCost : estimatedTotal), [rentCost, estimatedTotal]);
 
   useEffect(() => {
-    // ✅ لا تدوس على rentCost المحمّل من DB إذا كان estimatedTotal = 0 (قبل اكتمال حساب الأسعار)
-    if (!userEditedRentCost && estimatedTotal > 0) {
+    // ✅ لا تدوس على rentCost المحمّل من DB إذا كان useStoredPrices = true أو إذا لم يطلب المستخدم تحديث الأسعار
+    if (!userEditedRentCost && estimatedTotal > 0 && !useStoredPrices) {
       setRentCost(estimatedTotal);
     }
-  }, [estimatedTotal, userEditedRentCost]);
+  }, [estimatedTotal, userEditedRentCost, useStoredPrices]);
 
   // ✅ توحيد قاعدة الخصم: المختارة + الموقوفة (قبل الخصم) - طرح المخصص للبديلة لتفادي تضخيم قاعدة الخصم
   const pausedBaseRentalSumForDiscount = Number(pausedPricingFirst?.totals?.baseRentalSum || 0);
@@ -1822,14 +1842,32 @@ export default function ContractEdit() {
     let cancelled = false;
     const fetchReplacements = async () => {
       try {
-        const { data } = await supabase
-          .from('paused_billboard_replacements' as any)
-          .select('replacement_billboard_id, allocated_amount')
-          .eq('contract_number', Number(contractNumber));
+        const [pauseRepls, swapLogsRes] = await Promise.all([
+          supabase
+            .from('paused_billboard_replacements' as any)
+            .select('replacement_billboard_id, allocated_amount')
+            .eq('contract_number', Number(contractNumber)),
+          supabase
+            .from('activity_log')
+            .select('*')
+            .eq('action', 'instant_billboard_swap')
+            .or(`contract_number.eq.${contractNumber},entity_id.eq.${contractNumber}`),
+        ]);
         if (cancelled) return;
         const m = new Map<string, number>();
-        (data || []).forEach((r: any) => {
+        (pauseRepls.data || []).forEach((r: any) => {
           m.set(String(r.replacement_billboard_id), Number(r.allocated_amount) || 0);
+        });
+        (swapLogsRes.data || []).forEach((log: any) => {
+          let details: any = {};
+          try {
+            details = typeof log.details === 'string' ? JSON.parse(log.details) : log.details || {};
+          } catch {
+            details = {};
+          }
+          if (details?.replacement_billboard_id) {
+            m.set(String(details.replacement_billboard_id), Number(details.preserved_contract_price) || 0);
+          }
         });
         setReplacementAllocationsMap(m);
       } catch (e) {
@@ -3628,6 +3666,9 @@ export default function ContractEdit() {
               billboardCustomDates={billboardCustomDates}
               onUpdateBillboardCustomDates={handleUpdateBillboardCustomDates}
               use30DayMonth={use30DayMonth}
+              customerName={customerName}
+              adType={adType}
+              onRefresh={refreshContractData}
             />
 
  {/* NEW: إيجارات اللوحات الصديقة بالجملة */}

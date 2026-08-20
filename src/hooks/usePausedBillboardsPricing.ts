@@ -205,6 +205,12 @@ export function usePausedBillboardsPricing(
       if (!baseRental) {
         baseRental = Number((r as any).price_before_discount ?? r.net_rent ?? r.original_price ?? r.full_price ?? 0);
       }
+      if (!baseRental) {
+        const sumConsumedRefund = Number((r as any).consumed_amount || 0) + Number((r as any).refund_amount || 0);
+        if (sumConsumedRefund > 0) {
+          baseRental = sumConsumedRefund;
+        }
+      }
 
       const rawPrint = printMap.get(bbId) || 0;
       const rawInstall = installMap.get(bbId) || 0;

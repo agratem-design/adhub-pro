@@ -152,9 +152,9 @@ describe('TR-SJ0192 & Contract 1185 Regression & Invariant Tests', () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
-  // 5. Future contract does not block current availability
+  // 5. Future contract reserves the billboard
   // ───────────────────────────────────────────────────────────────────────────
-  it('5. Billboard with future contract -> available now, next occupancy recorded', () => {
+  it('5. Billboard with unactivated future contract -> reserved, classification=EXCLUDED', () => {
     const bb = {
       ID: '70',
       Billboard_Name: 'TR-FUT70',
@@ -166,19 +166,17 @@ describe('TR-SJ0192 & Contract 1185 Regression & Invariant Tests', () => {
         Contract_Number: 4001,
         'Customer Name': 'Future Customer',
         'Contract Date': '2026-11-01',
-        'End Date': '2027-05-01', // Future
+        'End Date': '2027-05-01', // Future (beyond 4 months)
         billboard_ids: '70',
       },
     ];
 
     const res = resolveBillboardAvailability(bb, contracts, { referenceDate: REF_DATE });
 
-    expect(res.operationalStatus).toBe('AVAILABLE');
-    expect(res.isAvailableNow).toBe(true);
-    expect(res.isBlockedByOtherContract).toBe(false);
-    expect(res.nextOccupancyPeriod).not.toBeNull();
-    expect(res.nextOccupancyPeriod?.startDate).toBe('2026-11-01');
-    expect(res.isMarketingVisible).toBe(true);
+    expect(res.operationalStatus).toBe('RENTED');
+    expect(res.isAvailableNow).toBe(false);
+    expect(res.classification).toBe('FUTURE_RESERVED');
+    expect(res.isMarketingVisible).toBe(false);
   });
 
   // ───────────────────────────────────────────────────────────────────────────

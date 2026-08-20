@@ -1582,6 +1582,8 @@ export default function OfferEdit() {
               includeInstallationInPrice={includeInstallationInPrice}
               startDate={startDate}
               endDate={endDate}
+              customerName={customerName}
+              adType={adType}
             />
 
             {/* خريطة اللوحات المرتبطة - مطوية افتراضياً */}

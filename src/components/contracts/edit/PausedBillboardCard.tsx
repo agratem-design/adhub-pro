@@ -166,9 +166,9 @@ function PausedBillboardCardImpl({
     (manualRefund !== null && Number(manualRefund) !== Number(raw.manual_refund || 0));
 
   const getOriginalFacesCount = (b: any): number => {
-    const raw = b?.Faces_Count ?? b?.faces_count ?? b?.faces ?? b?.Number_of_Faces ?? (item as any)?.Faces_Count ?? (raw as any)?.Faces_Count;
-    if (raw !== undefined && raw !== null && raw !== '') {
-      const n = Number(raw);
+    const rawFaces = b?.Faces_Count ?? b?.faces_count ?? b?.faces ?? b?.Number_of_Faces ?? (b as any)?.Faces ?? (b as any)?.face_count ?? (b as any)?.FacesCount ?? (item as any)?.Faces_Count ?? (raw as any)?.Faces_Count ?? (raw as any)?.faces_count;
+    if (rawFaces !== undefined && rawFaces !== null && rawFaces !== '') {
+      const n = Number(rawFaces);
       if (Number.isFinite(n) && n > 0) return n;
     }
     return 2;

@@ -1,21 +1,44 @@
 /**
  * contractBillboardSwapService.ts
- * الخدمة المركزية الموحدة لعمليات التبديل الفوري والإيقاف الذري للوحات
+ * الخدمة المركزية الموحدة لعمليات التبديل الفوري 1:1 والإيقاف الذري للوحات
  */
 
 import { supabase } from '@/integrations/supabase/client';
 import {
   calculateRemainingBillboardValue,
-  calculateSwapFinancialDifference,
-  calculateDaysBetween,
 } from '@/utils/contractBillboardCalculations';
 import { ContractFinancialAdjustment } from '@/types/contractBillboardStatus';
+
+export interface InstantBillboardSwapParams {
+  contractNumber: number;
+  originalBillboardId: number;
+  replacementBillboardId: number;
+  userId?: string;
+  swapRequestId?: string;
+}
+
+export interface InstantBillboardSwapResult {
+  success: boolean;
+  error?: string;
+  code?: string;
+  contractNumber: number;
+  originalBillboardId: number;
+  replacementBillboardId: number;
+  preservedContractPrice: number;
+  contractTotalBefore: number;
+  contractTotalAfter: number;
+  newBillboardIds: string[];
+  updatedBillboardPrices?: any[];
+  swapRequestId?: string;
+  alreadyProcessed?: boolean;
+  reinstallationTaskId?: string;
+}
 
 export interface SwapBillboardParams {
   contractNumber: number;
   originalBillboardId: number;
   replacementBillboardId: number;
-  effectiveDate: string;
+  effectiveDate?: string;
   operationId?: string;
   customerName?: string;
   adType?: string;
@@ -37,8 +60,40 @@ export interface SwapBillboardResult {
   adjustment?: ContractFinancialAdjustment;
 }
 
-// ذاكرة مؤقتة لمنع تكرار الطلبات (Idempotency Cache)
-const processedOperations = new Map<string, { result: SwapBillboardResult; timestamp: number }>();
+/**
+ * خريطة أخطاء قاعدة البيانات وتحويلها لرسائل واضحة ومفهومة للمستخدم
+ */
+function mapRpcErrorToUserMessage(code: string, rawMessage?: string): string {
+  switch (code) {
+    case 'CANDIDATE_NOT_AVAILABLE':
+      return 'اللوحة البديلة تم حجزها أو لم تعد متاحة حالياً، يرجى اختيار لوحة أخرى.';
+    case 'OLD_BILLBOARD_NOT_IN_CONTRACT':
+      return 'اللوحة الحالية غير مدرجة في هذا العقد.';
+    case 'NEW_BILLBOARD_ALREADY_IN_CONTRACT':
+      return 'اللوحة البديلة موجودة بالفعل داخل هذا العقد.';
+    case 'CONTRACT_NOT_FOUND':
+      return 'لم يتم العثور على بيانات العقد في قاعدة البيانات.';
+    case 'OLD_BILLBOARD_NOT_FOUND':
+      return 'لم يتم العثور على بيانات اللوحة الحالية.';
+    case 'NEW_BILLBOARD_NOT_FOUND':
+      return 'لم يتم العثور على بيانات اللوحة البديلة.';
+    case 'CONTRACT_DATA_INCONSISTENT':
+      return 'تعذر تنفيذ التبديل بسبب عدم تطابق بيانات العقد. لم يتم تطبيق أي تغيير.';
+    case 'CONTRACT_EMPTY':
+      return 'العقد لا يحتوي على أي لوحات مسجلة.';
+    case 'SAME_BILLBOARD':
+      return 'لا يمكن استبدال اللوحة بنفسها.';
+    case 'PERMISSION_DENIED':
+      return 'ليس لديك صلاحية لتعديل هذا العقد.';
+    case 'INVALID_INPUT':
+      return 'بيانات التبديل غير مكتملة أو غير صالحة.';
+    default:
+      if (rawMessage && !rawMessage.includes('P0001') && !rawMessage.includes('violates')) {
+        return rawMessage;
+      }
+      return 'تعذر إتمام عملية التبديل الفوري، ولم يتم تطبيق أي تغيير على العقد.';
+  }
+}
 
 /**
  * التحقق من توفر اللوحة البديلة للفترة المحددة
@@ -64,6 +119,14 @@ export async function checkBillboardAvailabilityForPeriod(
     // إذا كانت محجوزة لنفس العقد
     if (bb.Contract_Number && Number(bb.Contract_Number) === Number(excludeContractNumber)) {
       return { isAvailable: true };
+    }
+
+    // إذا كانت محجوزة لعقد آخر
+    if (bb.Contract_Number && Number(bb.Contract_Number) !== Number(excludeContractNumber)) {
+      return {
+        isAvailable: false,
+        conflictReason: `اللوحة محجوزة حالياً في العقد #${bb.Contract_Number}`,
+      };
     }
 
     // 2. فحص العقود النشطة المتداخلة مع هذه الفترة
@@ -100,317 +163,159 @@ export async function checkBillboardAvailabilityForPeriod(
 }
 
 /**
- * تنفيذ عملية التبديل الفوري الذرية (Atomic Swap Operation)
- * Replacement ≠ Pause
+ * ═══════════════════════════════════════════════════════════════════════════
+ * تنفيذ عملية التبديل الفوري 1:1 الذرية (Instant 1:1 Equivalent Swap)
+ * ═══════════════════════════════════════════════════════════════════════════
+ * 
+ * القواعد الصارمة:
+ * 1. INSTANT_SWAP !== PAUSE (صفر سجلات في paused_billboards و paused_billboard_replacements)
+ * 2. الحفاظ المالي التام: سعر اللوحة القديمة ينتقل للجديدة، إجمالي العقد ثابت (فرق 0.00 د.ل)
+ * 3. المعاملة ذرية حصراً عبر PostgreSQL RPC (execute_instant_billboard_swap) مع قفل الصفوف FOR UPDATE
+ * 4. FAIL CLOSED: لا يوجد أي تعديل يدوي متتابع من العميل في حال تعذر RPC
  */
-export async function executeBillboardSwap(params: SwapBillboardParams): Promise<SwapBillboardResult> {
-  const {
-    contractNumber,
-    originalBillboardId,
-    replacementBillboardId,
-    effectiveDate,
-    operationId = crypto.randomUUID(),
-    customerName,
-    adType,
-    notes,
-    userId,
-  } = params;
+export async function executeInstantBillboardSwap(
+  params: InstantBillboardSwapParams
+): Promise<InstantBillboardSwapResult> {
+  const { contractNumber, originalBillboardId, replacementBillboardId, userId } = params;
 
-  // 1. حماية Idempotency من النقر المزدوج
-  if (operationId && processedOperations.has(operationId)) {
-    const cached = processedOperations.get(operationId)!;
-    if (Date.now() - cached.timestamp < 30000) {
-      return cached.result;
-    }
-  }
-
-  try {
-    // 2. جلب بيانات العقد الحالية
-    const { data: contract, error: contractErr } = await supabase
-      .from('Contract')
-      .select('*')
-      .eq('Contract_Number', contractNumber)
-      .single();
-
-    if (contractErr || !contract) {
-      throw new Error(`العقد #${contractNumber} غير موجود`);
-    }
-
-    const contractStartDate = contract['Contract Date'] || contract.start_date || effectiveDate;
-    const contractEndDate = contract['End Date'] || contract.end_date || effectiveDate;
-
-    // 3. التحقق من وجود اللوحة الأصلية في العقد
-    const currentIdsStr = contract.billboard_ids || '';
-    const currentIds = currentIdsStr.split(',').map((s: string) => s.trim()).filter(Boolean);
-    
-    if (!currentIds.includes(String(originalBillboardId))) {
-      throw new Error(`اللوحة الأصلية #${originalBillboardId} غير مدرجة حالياً في العقد`);
-    }
-
-    // 4. التحقق من توفر اللوحة البديلة طوال الفترة المتبقية
-    const availability = await checkBillboardAvailabilityForPeriod(
-      replacementBillboardId,
-      effectiveDate,
-      contractEndDate,
-      contractNumber
-    );
-
-    if (!availability.isAvailable) {
-      throw new Error(availability.conflictReason || 'اللوحة البديلة غير متاحة للفترة المطلوبة');
-    }
-
-    // 5. جلب بيانات اللوحتين
-    const [origBbRes, replBbRes] = await Promise.all([
-      supabase.from('billboards').select('*').eq('ID', originalBillboardId).single(),
-      supabase.from('billboards').select('*').eq('ID', replacementBillboardId).single(),
-    ]);
-
-    if (origBbRes.error || !origBbRes.data) throw new Error('بيانات اللوحة الأصلية غير متوفرة');
-    if (replBbRes.error || !replBbRes.data) throw new Error('بيانات اللوحة البديلة غير متوفرة');
-
-    const originalBillboard = origBbRes.data;
-    const replacementBillboard = replBbRes.data;
-
-    // 6. استخراج سعر اللوحة الأصلية المتفق عليه (Snapshot from Contract)
-    let contractedPrice = Number(originalBillboard.Price) || 0;
-    let pricesArray: any[] = [];
-    try {
-      const rawPrices = contract.billboard_prices;
-      if (rawPrices) {
-        pricesArray = typeof rawPrices === 'string' ? JSON.parse(rawPrices) : rawPrices;
-        if (Array.isArray(pricesArray)) {
-          const snapshot = pricesArray.find(
-            (p: any) => String(p.billboardId ?? p.billboard_id ?? p.ID ?? p.id) === String(originalBillboardId)
-          );
-          if (snapshot) {
-            contractedPrice = Number(snapshot.contractPrice ?? snapshot.finalPrice ?? snapshot.priceAfterDiscount ?? contractedPrice);
-          }
-        }
-      }
-    } catch {}
-
-    // 7. حساب القيمة المتبقية للأصلية وقيمة البديلة للفترة المتبقية
-    const origRemaining = calculateRemainingBillboardValue({
-      startDate: contractStartDate,
-      endDate: contractEndDate,
-      effectiveDate,
-      contractedPrice,
-    });
-
-    const swapDiff = calculateSwapFinancialDifference({
-      originalRemainingValue: origRemaining.remainingValue,
-      replacementMonthlyPrice: Number(replacementBillboard.Price) || 0,
-      remainingDays: origRemaining.remainingDays,
-    });
-
-    // 8. تحديث قائمة اللوحات والأسعار بالعقد
-    const updatedIds = currentIds
-      .filter((id: string) => String(id) !== String(originalBillboardId))
-      .concat(String(replacementBillboardId));
-
-    // تحديث مصفوفة الأسعار Snapshot
-    const updatedPricesArray = pricesArray.filter(
-      (p: any) => String(p.billboardId ?? p.billboard_id ?? p.ID ?? p.id) !== String(originalBillboardId)
-    );
-
-    const replacementPriceEntry = {
-      billboardId: String(replacementBillboardId),
-      basePriceBeforeDiscount: swapDiff.replacementValueForPeriod,
-      priceBeforeDiscount: swapDiff.replacementValueForPeriod,
-      discountPerBillboard: 0,
-      priceAfterDiscount: swapDiff.replacementValueForPeriod,
-      contractPrice: swapDiff.replacementValueForPeriod,
-      finalPrice: swapDiff.replacementValueForPeriod,
-      printCost: 0,
-      installationCost: 0,
-      totalBillboardPrice: swapDiff.replacementValueForPeriod,
-      status: 'active',
-      _replacement_of: String(originalBillboardId),
-    };
-    updatedPricesArray.push(replacementPriceEntry);
-
-    // 9. تنفيذ التحديثات في قاعدة البيانات
-    // أ. تسجيل اللوحة الموقوفة كـ replaced
-    const { data: pausedRow, error: pausedInsertErr } = await supabase
-      .from('paused_billboards')
-      .insert({
-        contract_number: contractNumber,
-        billboard_id: originalBillboardId,
-        billboard_name: originalBillboard.Billboard_Name || `لوحة #${originalBillboardId}`,
-        pause_date: effectiveDate,
-        original_price: contractedPrice,
-        consumed_amount: origRemaining.consumedValue,
-        refund_amount: 0, // لا مسترجع لأنها استُبدلت بالكامل
-        deducted_from_contract: false,
-        net_rent: contractedPrice,
-        full_price: contractedPrice,
-        original_start_date: contractStartDate,
-        original_end_date: contractEndDate,
-        notes: `تم الاستبدال باللوحة #${replacementBillboardId} (${replacementBillboard.Billboard_Name || ''}) ابتداءً من ${effectiveDate}${notes ? ' - ' + notes : ''}`,
-      } as any)
-      .select()
-      .single();
-
-    if (pausedInsertErr) throw pausedInsertErr;
-
-    // ب. تسجيل علاقة الاستبدال
-    if (pausedRow) {
-      await supabase.from('paused_billboard_replacements').insert({
-        paused_billboard_id: (pausedRow as any).id,
-        contract_number: contractNumber,
-        replacement_billboard_id: replacementBillboardId,
-        replacement_billboard_name: replacementBillboard.Billboard_Name || null,
-        start_date: effectiveDate,
-        end_date: contractEndDate,
-        allocated_amount: swapDiff.replacementValueForPeriod,
-        notes: notes || `استبدال مباشر من #${originalBillboardId}`,
-      } as any);
-    }
-
-    // ج. تنفيذ الاستبدال عبر PostgreSQL Atomic RPC (Server-side single transaction with Mandatory Version Check)
-    const effectiveCustomerName = customerName || contract['Customer Name'] || null;
-    const effectiveAdType = adType || contract['Ad Type'] || null;
-    const expectedContractVersion = Number(contract.version || 1);
-
-    try {
-      const { data: swapRpcRes, error: swapRpcErr } = await supabase.rpc('execute_billboard_swap_atomic', {
-        p_contract_number: Number(contractNumber),
-        p_original_billboard_id: Number(originalBillboardId),
-        p_replacement_billboard_id: Number(replacementBillboardId),
-        p_expected_version: expectedContractVersion,
-        p_updated_billboard_ids: updatedIds.join(','),
-        p_updated_prices_json: JSON.stringify(updatedPricesArray),
-        p_effective_date: effectiveDate || null,
-        p_contract_end_date: contractEndDate || null,
-        p_customer_name: effectiveCustomerName,
-        p_ad_type: effectiveAdType,
-      });
-
-      if (swapRpcErr) {
-        if (swapRpcErr.message?.includes('CONTRACT_VERSION_CONFLICT')) {
-          throw new Error('تم تعديل هذا العقد بواسطة مستخدم آخر. يرجى إعادة تحميل الصفحة والمحاولة مرة أخرى.');
-        }
-        console.warn('RPC execute_billboard_swap_atomic failed, falling back to direct updates:', swapRpcErr);
-
-        // Fallback: Client-side updates with false preservation
-        const { data: swapBbs } = await supabase
-          .from('billboards')
-          .select('ID, is_visible_in_available')
-          .in('ID', [originalBillboardId, replacementBillboardId]);
-
-        const origFlag = swapBbs?.find(b => b.ID === originalBillboardId)?.is_visible_in_available;
-        const replFlag = swapBbs?.find(b => b.ID === replacementBillboardId)?.is_visible_in_available;
-
-        const origPreserved = origFlag === false ? false : null;
-        const replPreserved = replFlag === false ? false : null;
-
-        const [origRes, replRes] = await Promise.all([
-          supabase.from('billboards').update({
-            Contract_Number: null,
-            Customer_Name: null,
-            Ad_Type: null,
-            Rent_Start_Date: null,
-            Rent_End_Date: null,
-            Status: 'متاح',
-            is_visible_in_available: origPreserved,
-          } as any).eq('ID', originalBillboardId),
-
-          supabase.from('billboards').update({
-            Contract_Number: contractNumber,
-            Customer_Name: effectiveCustomerName,
-            Ad_Type: effectiveAdType,
-            Rent_Start_Date: effectiveDate,
-            Rent_End_Date: contractEndDate,
-            Status: 'محجوز',
-            is_visible_in_available: replPreserved,
-          } as any).eq('ID', replacementBillboardId),
-        ]);
-
-        if (origRes.error) throw new Error('فشل في تحرير اللوحة المستبدلة: ' + origRes.error.message);
-        if (replRes.error) throw new Error('فشل في حجز اللوحة البديلة: ' + replRes.error.message);
-
-        const { error: contractUpdateErr } = await supabase.from('Contract').update({
-          billboard_ids: updatedIds.join(','),
-          billboard_prices: JSON.stringify(updatedPricesArray),
-          billboards_count: updatedIds.length,
-        } as any).eq('Contract_Number', contractNumber);
-
-        if (contractUpdateErr) throw new Error('فشل في تحديث بيانات العقد: ' + contractUpdateErr.message);
-      } else {
-        console.log('✅ Executed atomic billboard swap RPC successfully:', swapRpcRes);
-      }
-    } catch (swapErr) {
-      console.error('Swap execution error:', swapErr);
-      throw swapErr;
-    }
-
-    // هـ. تسجيل سجل النشاط (Audit Log)
-    try {
-      await supabase.from('activity_log').insert({
-        action: 'billboard_swapped',
-        entity_type: 'contract',
-        entity_id: String(contractNumber),
-        contract_number: contractNumber,
-        customer_name: customerName || contract['Customer Name'] || '',
-        description: `استبدال فوري للوحة #${originalBillboardId} باللوحة #${replacementBillboardId} ابتداءً من ${effectiveDate} (فرق السعر: ${swapDiff.difference} د.ل)`,
-        details: {
-          originalBillboardId,
-          replacementBillboardId,
-          effectiveDate,
-          originalRemainingValue: origRemaining.remainingValue,
-          replacementValue: swapDiff.replacementValueForPeriod,
-          difference: swapDiff.difference,
-          isEquivalent: swapDiff.isEquivalent,
-        },
-        user_id: userId || null,
-      } as any);
-    } catch (logErr) {
-      console.warn('Audit log insert failed:', logErr);
-    }
-
-    const adjustment: ContractFinancialAdjustment = {
-      contractNumber,
-      type: 'replacement_difference',
-      originalBillboardId,
-      replacementBillboardId,
-      amount: swapDiff.difference,
-      effectiveDate,
-      reason: swapDiff.statusText,
-    };
-
-    const finalResult: SwapBillboardResult = {
-      success: true,
-      originalBillboardId,
-      replacementBillboardId,
-      effectiveDate,
-      difference: swapDiff.difference,
-      isEquivalent: swapDiff.isEquivalent,
-      originalRemainingValue: origRemaining.remainingValue,
-      replacementValue: swapDiff.replacementValueForPeriod,
-      newBillboardIds: updatedIds,
-      adjustment,
-    };
-
-    if (operationId) {
-      processedOperations.set(operationId, { result: finalResult, timestamp: Date.now() });
-    }
-
-    return finalResult;
-  } catch (err: any) {
-    console.error('executeBillboardSwap failed:', err);
+  if (!contractNumber || !originalBillboardId || !replacementBillboardId) {
     return {
       success: false,
-      error: err.message || 'فشلت عملية استبدال اللوحة',
-      originalBillboardId,
-      replacementBillboardId,
-      effectiveDate,
-      difference: 0,
-      isEquivalent: true,
-      originalRemainingValue: 0,
-      replacementValue: 0,
+      code: 'INVALID_INPUT',
+      error: 'بيانات التبديل غير مكتملة',
+      contractNumber: contractNumber || 0,
+      originalBillboardId: originalBillboardId || 0,
+      replacementBillboardId: replacementBillboardId || 0,
+      preservedContractPrice: 0,
+      contractTotalBefore: 0,
+      contractTotalAfter: 0,
       newBillboardIds: [],
     };
   }
+
+  if (Number(originalBillboardId) === Number(replacementBillboardId)) {
+    return {
+      success: false,
+      code: 'SAME_BILLBOARD',
+      error: 'لا يمكن استبدال اللوحة بنفسها',
+      contractNumber,
+      originalBillboardId,
+      replacementBillboardId,
+      preservedContractPrice: 0,
+      contractTotalBefore: 0,
+      contractTotalAfter: 0,
+      newBillboardIds: [],
+    };
+  }
+
+  const stableSwapRequestId = params.swapRequestId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined);
+
+  try {
+    const { data: rpcRes, error: rpcErr } = await supabase.rpc('execute_instant_billboard_swap', {
+      p_contract_number: Number(contractNumber),
+      p_original_billboard_id: Number(originalBillboardId),
+      p_replacement_billboard_id: Number(replacementBillboardId),
+      p_user_id: userId || null,
+      p_swap_event_id: stableSwapRequestId || null,
+    });
+
+    if (rpcErr) {
+      console.error('RPC execute_instant_billboard_swap failed:', rpcErr);
+      const code = (rpcErr as any).code || 'RPC_ERROR';
+      const msg = mapRpcErrorToUserMessage(code, rpcErr.message);
+      return {
+        success: false,
+        code,
+        error: msg,
+        contractNumber,
+        originalBillboardId,
+        replacementBillboardId,
+        preservedContractPrice: 0,
+        contractTotalBefore: 0,
+        contractTotalAfter: 0,
+        newBillboardIds: [],
+        swapRequestId: stableSwapRequestId,
+      };
+    }
+
+    if (!rpcRes || !rpcRes.success) {
+      const code = rpcRes?.code || 'SWAP_FAILED';
+      const msg = rpcRes?.message || mapRpcErrorToUserMessage(code);
+      return {
+        success: false,
+        code,
+        error: msg,
+        contractNumber,
+        originalBillboardId,
+        replacementBillboardId,
+        preservedContractPrice: 0,
+        contractTotalBefore: 0,
+        contractTotalAfter: 0,
+        newBillboardIds: [],
+        swapRequestId: stableSwapRequestId,
+      };
+    }
+
+    const newIds = Array.isArray(rpcRes.new_billboard_ids)
+      ? rpcRes.new_billboard_ids.map(String)
+      : [];
+
+    return {
+      success: true,
+      swapRequestId: stableSwapRequestId,
+      alreadyProcessed: Boolean(rpcRes.already_processed),
+      reinstallationTaskId: rpcRes.reinstallation_task_id,
+      contractNumber: Number(rpcRes.contract_number),
+      originalBillboardId: Number(rpcRes.original_billboard_id),
+      replacementBillboardId: Number(rpcRes.replacement_billboard_id),
+      preservedContractPrice: Number(rpcRes.preserved_contract_price || 0),
+      contractTotalBefore: Number(rpcRes.contract_total_before || 0),
+      contractTotalAfter: Number(rpcRes.contract_total_after || 0),
+      newBillboardIds: newIds,
+      updatedBillboardPrices: rpcRes.updated_billboard_prices,
+    };
+  } catch (err: any) {
+    console.error('executeInstantBillboardSwap exception:', err);
+    return {
+      success: false,
+      code: 'EXCEPTION',
+      error: err.message || 'حدث خطأ غير متوقع أثناء تنفيذ عملية التبديل الفوري',
+      contractNumber,
+      originalBillboardId,
+      replacementBillboardId,
+      preservedContractPrice: 0,
+      contractTotalBefore: 0,
+      contractTotalAfter: 0,
+      newBillboardIds: [],
+    };
+  }
+}
+
+/**
+ * دالة التبديل السابقة - مفصولة وموجهة للتبديل الفوري الذري المباشر
+ */
+export async function executeBillboardSwap(params: SwapBillboardParams): Promise<SwapBillboardResult> {
+  const result = await executeInstantBillboardSwap({
+    contractNumber: params.contractNumber,
+    originalBillboardId: params.originalBillboardId,
+    replacementBillboardId: params.replacementBillboardId,
+    userId: params.userId,
+  });
+
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  return {
+    success: result.success,
+    error: result.error,
+    originalBillboardId: result.originalBillboardId,
+    replacementBillboardId: result.replacementBillboardId,
+    effectiveDate: params.effectiveDate || todayStr,
+    difference: 0,
+    isEquivalent: true,
+    originalRemainingValue: result.preservedContractPrice,
+    replacementValue: result.preservedContractPrice,
+    newBillboardIds: result.newBillboardIds,
+  };
 }
 
 /**

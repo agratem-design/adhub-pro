@@ -777,7 +777,7 @@ export const useBillboardExport = () => {
           if (res.classification === 'UPCOMING') {
             endDateDisplay = res.currentRentEndDate || '';
             statusDisplay = 'ستتاح قريباً';
-          } else if (res.classification === 'EXPLICIT_CONTRACT_SHOW') {
+          } else if (res.classification === 'EXPLICIT_CONTRACT_SHOW' || res.classification === 'EXPLICIT_BILLBOARD_SHOW') {
             endDateDisplay = res.currentRentEndDate || '';
             statusDisplay = 'متاح الآن';
           } else if (res.classification === 'AVAILABLE_WITHOUT_CONTRACT') {
@@ -1497,7 +1497,7 @@ export const useBillboardExport = () => {
           let endDateDisplay = '';
           let statusDisplay = 'متاح الآن';
 
-          if (res.classification === 'AVAILABLE_WITHOUT_CONTRACT' || res.classification === 'EXPLICIT_CONTRACT_SHOW') {
+          if (res.classification === 'AVAILABLE_WITHOUT_CONTRACT' || res.classification === 'EXPLICIT_CONTRACT_SHOW' || res.classification === 'EXPLICIT_BILLBOARD_SHOW') {
             // Case A & B: AVAILABLE NOW -> blank end date, status "متاح الآن"
             endDateDisplay = '';
             statusDisplay = 'متاح الآن';
@@ -1809,7 +1809,11 @@ export const useBillboardExport = () => {
 
 export function checkIsAvailableForAvailableExports(billboard: any, contracts: any[] = [], referenceDate?: string | Date): boolean {
   const res = resolveBillboardAvailability(billboard, contracts, { referenceDate });
-  return res.classification === 'AVAILABLE_WITHOUT_CONTRACT' || res.classification === 'EXPLICIT_CONTRACT_SHOW';
+  return (
+    res.classification === 'AVAILABLE_WITHOUT_CONTRACT' ||
+    res.classification === 'EXPLICIT_CONTRACT_SHOW' ||
+    res.classification === 'EXPLICIT_BILLBOARD_SHOW'
+  );
 }
 
 export function checkIsAvailableOrUpcomingForExport(
@@ -1824,6 +1828,7 @@ export function checkIsAvailableOrUpcomingForExport(
   return (
     res.classification === 'AVAILABLE_WITHOUT_CONTRACT' ||
     res.classification === 'EXPLICIT_CONTRACT_SHOW' ||
+    res.classification === 'EXPLICIT_BILLBOARD_SHOW' ||
     res.classification === 'UPCOMING'
   );
 }

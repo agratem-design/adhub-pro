@@ -21,10 +21,12 @@ export type MarketingVisibility =
   | 'FORCE_HIDE';  // إخفاء تسويقي وإداري قسري (is_visible_in_available === false)
 
 export type BillboardAvailabilityClassification =
-  | 'AVAILABLE_WITHOUT_CONTRACT' // متاح شاغر تشغيلياً بدون عقد فعال
-  | 'EXPLICIT_CONTRACT_SHOW'     // متاح تسويقياً بسبب عقد فعال مفعل يدوياً وبلا موانع
-  | 'UPCOMING'                   // سينتهي عقده قريباً ضمن نافذة التصدير
-  | 'EXCLUDED';                  // مستبعد (محجوز بعقد نشط غير مفعل، محجوب، صيانة، إزالة)
+  | 'AVAILABLE_WITHOUT_CONTRACT' // متاح تشغيلياً وتسويقياً بلا أي عقد فعال أو حجز مستقبلي
+  | 'EXPLICIT_CONTRACT_SHOW'     // متاح تسويقياً بقرار إظهار من كرت العقد
+  | 'EXPLICIT_BILLBOARD_SHOW'    // متاح تسويقياً بقرار إظهار يدوي من كرت اللوحة (مثل اللوحات الصديقة)
+  | 'UPCOMING'                   // مشغولة حالياً اليوم وستتاح قريباً ضمن نافذة الشهور المحددة
+  | 'FUTURE_RESERVED'            // غير مشغولة اليوم ولكنها محجوزة بعقد مستقبلي مؤكد
+  | 'EXCLUDED';                  // محجوب أو محجوز خارج النافذة أو ملغي أو تحت الصيانة
 
 export type ContractMarketingVisibilityState =
   | 'OFF'          // لم يتم تفعيل أي لوحة (effectiveForceShowCount === 0)
@@ -107,7 +109,10 @@ export interface BillboardAvailabilityResolution {
   referenceDate: string;
   availableFrom: string | null; // Earliest available calendar day (day after occupancy ends)
   currentRentEndDate: string | null; // End date of current active occupancy period
+  nextReservationStart?: string | null; // Earliest start date of future reservations
   isUpcomingWithinWindow: boolean;
+  hasCurrentOccupancy: boolean;
+  hasFutureReservation: boolean;
 
   // 5. Contracts & Timeline
   activeContracts: ContractOccupancy[];
@@ -450,25 +455,52 @@ export function resolveBillboardAvailability(
   });
 
   const activeContracts = rawContracts.filter((c) => !c.isExpired && !c.isFuture);
-  const futureContracts = rawContracts.filter((c) => c.isFuture);
+  const futureContracts = rawContracts.filter((c) => c.isFuture && !c.isExpired);
   const expiredContracts = rawContracts.filter((c) => c.isExpired);
+  const unexpiredContracts = rawContracts.filter((c) => !c.isExpired);
 
-  // 3. Build Occupancy Timeline
+  const hasCurrentOccupancy = activeContracts.length > 0;
+  const hasFutureReservation = futureContracts.length > 0;
+
+  // 3. Determine Effective Rent End Date and Chained Reservations
+  let effectiveRentEndDate: string | null = null;
+  let nextReservationStart: string | null = null;
+
+  if (hasCurrentOccupancy) {
+    let currentMaxEnd = activeContracts.reduce((max, c) => (c.endDate > max ? c.endDate : max), '');
+    // Extend through any chained / continuous future contracts starting within 35 days of currentMaxEnd
+    let extended = true;
+    while (extended) {
+      extended = false;
+      const chained = futureContracts.filter(
+        (fc) => fc.startDate <= addCalendarDays(currentMaxEnd, 35) && fc.endDate > currentMaxEnd
+      );
+      if (chained.length > 0) {
+        const newMax = chained.reduce((max, c) => (c.endDate > max ? c.endDate : max), currentMaxEnd);
+        if (newMax > currentMaxEnd) {
+          currentMaxEnd = newMax;
+          extended = true;
+        }
+      }
+    }
+    effectiveRentEndDate = currentMaxEnd;
+  } else if (hasFutureReservation) {
+    nextReservationStart = futureContracts.reduce((min, c) => (c.startDate < min ? c.startDate : min), '9999-99-99');
+    effectiveRentEndDate = futureContracts.reduce((max, c) => (c.endDate > max ? c.endDate : max), '');
+  }
+
+  // 4. Build Occupancy Timeline
   const occupancyPeriods = buildOccupancyTimeline(rawContracts);
-
-  // Find active period containing referenceDate
   const currentOccupancyPeriod =
     occupancyPeriods.find((p) => p.startDate <= refDate && refDate <= p.endDate) || null;
-
-  // Find next future occupancy period
   const nextOccupancyPeriod =
     occupancyPeriods.find((p) => p.startDate > refDate) || null;
 
-  // 4. Determine Initial Operational Status
+  // 5. Determine Initial Operational Status
   let operationalStatus: OperationalStatus = 'AVAILABLE';
   let isAvailableNow = true;
   let availableFrom: string | null = refDate;
-  let currentRentEndDate: string | null = null;
+  let currentRentEndDate: string | null = effectiveRentEndDate;
   let statusLabelArabic = 'متاح الآن';
 
   if (maintCheck.isRemoved) {
@@ -481,32 +513,31 @@ export function resolveBillboardAvailability(
     isAvailableNow = false;
     availableFrom = null;
     statusLabelArabic = maintCheck.label;
-  } else if (currentOccupancyPeriod) {
+  } else if (hasCurrentOccupancy) {
     operationalStatus = 'RENTED';
     isAvailableNow = false;
-    currentRentEndDate = currentOccupancyPeriod.endDate;
-    availableFrom = addCalendarDays(currentOccupancyPeriod.endDate, 1);
+    availableFrom = effectiveRentEndDate ? addCalendarDays(effectiveRentEndDate, 1) : null;
     statusLabelArabic = 'محجوز';
-  } else if (nextOccupancyPeriod) {
-    operationalStatus = 'AVAILABLE'; // Available right now, but reserved in future
-    isAvailableNow = true;
-    availableFrom = refDate;
-    statusLabelArabic = 'متاح حالياً (محجوز مستقبلاً)';
+  } else if (hasFutureReservation) {
+    operationalStatus = 'RENTED';
+    isAvailableNow = false;
+    availableFrom = effectiveRentEndDate ? addCalendarDays(effectiveRentEndDate, 1) : null;
+    statusLabelArabic = 'محجوزة مستقبلاً';
   }
 
-  // 5. Active Contract Marketing Sources & Overrides
+  // 6. Active & Future Contract Marketing Sources & Overrides
   const isFriendBillboard = Boolean(billboard.friend_company_id);
   const isIndividuallyHidden = billboard.is_visible_in_available === false;
   const isRequestedShowOnBillboard = billboard.is_visible_in_available === true;
 
-  // Exact active contracts that are explicitly marketing-activated:
-  const activeExplicitContracts = activeContracts.filter(
-    (ac) => ac.rawContract && ac.rawContract.is_visible_in_available === true && ac.rawContract.billboards_released !== true
+  // Exact unexpired contracts that are explicitly marketing-activated:
+  const unexpiredExplicitContracts = unexpiredContracts.filter(
+    (c) => c.rawContract && c.rawContract.is_visible_in_available === true && c.rawContract.billboards_released !== true
   );
 
-  // Active contracts that are NOT marketing-activated:
-  const activeUnactivatedContracts = activeContracts.filter(
-    (ac) => !ac.rawContract || ac.rawContract.is_visible_in_available !== true || ac.rawContract.billboards_released === true
+  // Unexpired contracts that are NOT marketing-activated:
+  const unexpiredUnactivatedContracts = unexpiredContracts.filter(
+    (c) => !c.rawContract || c.rawContract.is_visible_in_available !== true || c.rawContract.billboards_released === true
   );
 
   const blockingContractsList: Array<{
@@ -522,13 +553,13 @@ export function resolveBillboardAvailability(
   let isMarketingVisible = false;
   let reason = '';
 
-  // 6. Calculate isUpcomingWithinWindow
+  // 7. Calculate isUpcomingWithinWindow (Strictly requires Current Occupancy)
   const isUpcomingWithinWindow =
-    operationalStatus === 'RENTED' &&
-    currentRentEndDate !== null &&
-    currentRentEndDate <= upcomingWindowEnd;
+    hasCurrentOccupancy &&
+    effectiveRentEndDate !== null &&
+    effectiveRentEndDate <= upcomingWindowEnd;
 
-  // 7. Deterministic Classification
+  // 8. Deterministic Classification
   if (maintCheck.isRemoved || maintCheck.isMaintenance) {
     classification = 'EXCLUDED';
     effectiveMarketingVisibility = 'FORCE_HIDE';
@@ -542,9 +573,9 @@ export function resolveBillboardAvailability(
     isAvailableNow = false;
     reason = 'اللوحة مخفية إدارياً على مستوى اللوحة (FORCE_HIDE)';
     statusLabelArabic = 'مخفية إدارياً';
-  } else if (activeContracts.length === 0) {
+  } else if (unexpiredContracts.length === 0) {
     // ═════════════════════════════════════════════════════════════════════════
-    // A. AVAILABLE WITHOUT ACTIVE OCCUPANCY (AVAILABLE NOW)
+    // A. AVAILABLE WITHOUT ACTIVE/FUTURE OCCUPANCY (AVAILABLE NOW)
     // ═════════════════════════════════════════════════════════════════════════
     classification = 'AVAILABLE_WITHOUT_CONTRACT';
     effectiveMarketingVisibility = isRequestedShowOnBillboard ? 'FORCE_SHOW' : 'AUTO';
@@ -552,16 +583,14 @@ export function resolveBillboardAvailability(
     isAvailableNow = true;
     reason = 'اللوحة شاغرة تشغيلياً ولا يوجد أي عقد فعال عليها';
     statusLabelArabic = 'متاح الآن';
-  } else if (activeExplicitContracts.length > 0) {
+  } else if (unexpiredExplicitContracts.length > 0) {
     // ═════════════════════════════════════════════════════════════════════════
-    // B. EXACT CURRENT ACTIVE CONTRACT IS EXPLICITLY SHOWN
+    // B. EXACT UNEXPIRED CONTRACT IS EXPLICITLY SHOWN
     // ═════════════════════════════════════════════════════════════════════════
-    // Friendly billboards require explicit billboard-level show (isRequestedShowOnBillboard === true)
-    // Conflicting unactivated active contracts block the billboard.
     const isFriendExcluded = isFriendBillboard && !isRequestedShowOnBillboard;
 
-    if (activeUnactivatedContracts.length > 0 || isFriendExcluded) {
-      activeUnactivatedContracts.forEach((ac) => {
+    if (unexpiredUnactivatedContracts.length > 0 || isFriendExcluded) {
+      unexpiredUnactivatedContracts.forEach((ac) => {
         blockingContractsList.push({
           contractNumber: ac.contractNumber,
           customerName: ac.customerName,
@@ -578,21 +607,27 @@ export function resolveBillboardAvailability(
         ? 'لوحة شركة صديقة مستبعدة من إظهار العقد العام حتى يتم تفعيلها من كرت اللوحة'
         : `محجوبة من المتاح بسبب ارتباطها بعقد نشط آخر غير متاح للتسويق (${blockNames})`;
       statusLabelArabic = isFriendExcluded ? 'لوحة صديقة' : 'محجوز بعقد نشط آخر';
+    } else if (isFriendBillboard) {
+      classification = 'EXPLICIT_BILLBOARD_SHOW';
+      effectiveMarketingVisibility = 'FORCE_SHOW';
+      isMarketingVisible = true;
+      isAvailableNow = false; // Operationally rented, but marketing visible
+      reason = 'اللوحة معروضة للتسويق بقرار إداري من كرت اللوحة (EXPLICIT_BILLBOARD_SHOW)';
+      statusLabelArabic = 'محجوز (معروض من كرت اللوحة)';
     } else {
       classification = 'EXPLICIT_CONTRACT_SHOW';
       effectiveMarketingVisibility = 'FORCE_SHOW';
       isMarketingVisible = true;
       isAvailableNow = false; // Operationally rented, but marketing visible
-      reason = 'اللوحة معروضة للتسويق بقرار إداري (FORCE_SHOW)';
+      reason = 'اللوحة معروضة للتسويق بقرار إداري من العقد (EXPLICIT_CONTRACT_SHOW)';
       statusLabelArabic = 'محجوز (معروض للتسويق)';
     }
   } else {
     // ═════════════════════════════════════════════════════════════════════════
-    // C. NO ACTIVE CONTRACT IS EXPLICITLY SHOWN
+    // C. NO UNEXPIRED CONTRACT IS EXPLICITLY SHOWN
     // ═════════════════════════════════════════════════════════════════════════
-    // If billboard requested show on board level, but occupying contract is unactivated -> blocked
-    if (isRequestedShowOnBillboard && activeUnactivatedContracts.length > 0) {
-      activeUnactivatedContracts.forEach((ac) => {
+    if (isRequestedShowOnBillboard && unexpiredUnactivatedContracts.length > 0) {
+      unexpiredUnactivatedContracts.forEach((ac) => {
         blockingContractsList.push({
           contractNumber: ac.contractNumber,
           customerName: ac.customerName,
@@ -612,14 +647,21 @@ export function resolveBillboardAvailability(
       effectiveMarketingVisibility = 'AUTO';
       isMarketingVisible = true;
       isAvailableNow = false;
-      reason = `تنتهي خلال نافذة ${windowMonths} أشهر (${currentRentEndDate})`;
+      reason = `تنتهي خلال نافذة ${windowMonths} أشهر (${effectiveRentEndDate})`;
       statusLabelArabic = 'ستتاح قريباً';
+    } else if (hasFutureReservation && !hasCurrentOccupancy) {
+      classification = 'FUTURE_RESERVED';
+      effectiveMarketingVisibility = 'AUTO';
+      isMarketingVisible = false;
+      isAvailableNow = false;
+      reason = `محجوزة بحجز مستقبلي يبدأ في ${nextReservationStart} وينتهي في ${effectiveRentEndDate}`;
+      statusLabelArabic = 'محجوزة مستقبلاً';
     } else {
       classification = 'EXCLUDED';
       effectiveMarketingVisibility = isRequestedShowOnBillboard ? 'FORCE_HIDE' : 'AUTO';
       isMarketingVisible = false;
       isAvailableNow = false;
-      reason = `محجوزة حتى ${currentRentEndDate} (أبعد من نافذة ${windowMonths} أشهر)`;
+      reason = `محجوزة حتى ${effectiveRentEndDate} (أبعد من نافذة ${windowMonths} أشهر)`;
       statusLabelArabic = 'محجوز';
     }
   }
@@ -640,8 +682,11 @@ export function resolveBillboardAvailability(
     blockingContracts: blockingContractsList,
     referenceDate: refDate,
     availableFrom,
-    currentRentEndDate,
+    currentRentEndDate: effectiveRentEndDate,
+    nextReservationStart,
     isUpcomingWithinWindow,
+    hasCurrentOccupancy,
+    hasFutureReservation,
     activeContracts,
     futureContracts,
     expiredContracts,

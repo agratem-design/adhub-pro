@@ -37,6 +37,7 @@ import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useResolvedImage } from '@/utils/imageResolver';
+import { getOperationalWeekKey, getOperationalWeekRange } from '@/utils/operationalWeek';
 
 interface InstallationTask {
   id: string;
@@ -1067,12 +1068,17 @@ export const InstallationTasksTable: React.FC<Props> = ({
     return sortDir === 'asc' ? cmp : -cmp;
   }), [filtered, sortField, sortDir]);
 
-  // ── عند تفعيل التجميع: نبني المجموعات أولاً ثم نرقّم على مستوى المجموعة ──
+  // ── عند تفعيل التجميع: نبني المجموعات (مهام إعادة التركيب حسب أسبوع الإصدار، والمهام العادية حسب العقد) ──
   const contractGroups = useMemo(() => {
     if (!groupByContract) return null;
     const groups: Record<string, typeof sorted> = {};
     sorted.forEach(task => {
-      const groupKey = `${task.contract_id}-${task.task_type || 'installation'}-${(task as any).reinstallation_number ?? 'new'}`;
+      let groupKey: string;
+      if (task.task_type === 'reinstallation') {
+        groupKey = getOperationalWeekKey(task.created_at);
+      } else {
+        groupKey = `${task.contract_id}-${task.task_type || 'installation'}-${(task as any).reinstallation_number ?? 'new'}`;
+      }
       if (!groups[groupKey]) groups[groupKey] = [];
       groups[groupKey].push(task);
     });
@@ -1599,7 +1605,13 @@ export const InstallationTasksTable: React.FC<Props> = ({
                         </div>
                         <div className="flex flex-col gap-0.5">
                           <div className="flex items-center gap-2">
-                            <span className="font-extrabold text-foreground text-base tracking-tight">عقد #{cid}</span>
+                            {groupKey.startsWith('reinstall-week-') ? (
+                              <span className="font-extrabold text-foreground text-base tracking-tight">
+                                {getOperationalWeekRange(firstTask.created_at).label}
+                              </span>
+                            ) : (
+                              <span className="font-extrabold text-foreground text-base tracking-tight">عقد #{cid}</span>
+                            )}
                             {firstTask.designName && firstTask.designName !== '—' && (
                               <span 
                                 className="text-[10px] border rounded-xl px-2.5 py-0.5 font-bold shrink-0 transition-colors"
@@ -1613,10 +1625,14 @@ export const InstallationTasksTable: React.FC<Props> = ({
                               </span>
                             )}
                           </div>
-                          <span className="text-xs font-bold text-muted-foreground truncate max-w-[200px]" title={customerName}>{customerName}</span>
+                          <span className="text-xs font-bold text-muted-foreground truncate max-w-[300px]" title={customerName}>
+                            {groupKey.startsWith('reinstall-week-') 
+                              ? `${groupTasks.length} ${groupTasks.length === 1 ? 'مهمة إعادة تركيب' : 'مهام إعادة تركيب'}`
+                              : customerName}
+                          </span>
                         </div>
                         
-                        {isReinstallation && (
+                        {isReinstallation && !groupKey.startsWith('reinstall-week-') && (
                           <span className="text-[10px] bg-blue-500/15 text-blue-400 border border-blue-500/25 rounded-full px-2.5 py-0.5 font-semibold shrink-0">
                             إعادة تركيب {(firstTask as any).reinstallation_number || 1}
                           </span>

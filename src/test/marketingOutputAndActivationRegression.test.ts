@@ -252,7 +252,7 @@ describe('Comprehensive Availability & Marketing Activation Test Suite', () => {
       expect(isAvailableOrUpcomingForExport(bb, undefined, undefined, 4, contractsFixture, REF_DATE)).toBe(true);
     });
 
-    it('MS01124 -> Friendly billboard with explicit board show=true & activated contract 1228 -> AVAILABLE NOW', () => {
+    it('MS01124 -> Friendly billboard with explicit board show=true & activated contract 1228 -> AVAILABLE NOW (EXPLICIT_BILLBOARD_SHOW)', () => {
       const bb = { ID: '1124', Billboard_Name: 'MS01124', Status: 'محجوز', Contract_Number: '1228', friend_company_id: 'friend-1', is_visible_in_available: true };
       const contracts = [{
         Contract_Number: 1228,
@@ -262,11 +262,11 @@ describe('Comprehensive Availability & Marketing Activation Test Suite', () => {
         is_visible_in_available: true,
       }];
       const res = resolveBillboardAvailability(bb, contracts, { referenceDate: REF_DATE });
-      expect(res.classification).toBe('EXPLICIT_CONTRACT_SHOW');
+      expect(res.classification).toBe('EXPLICIT_BILLBOARD_SHOW');
       expect(isAvailableForAvailableExports(bb, contracts, REF_DATE)).toBe(true);
     });
 
-    it('SBH01137 -> Friendly billboard with explicit board show=true & activated contract 1228 -> AVAILABLE NOW', () => {
+    it('SBH01137 -> Friendly billboard with explicit board show=true & activated contract 1228 -> AVAILABLE NOW (EXPLICIT_BILLBOARD_SHOW)', () => {
       const bb = { ID: '1137', Billboard_Name: 'SBH01137', Status: 'محجوز', Contract_Number: '1228', friend_company_id: 'friend-2', is_visible_in_available: true };
       const contracts = [{
         Contract_Number: 1228,
@@ -276,7 +276,7 @@ describe('Comprehensive Availability & Marketing Activation Test Suite', () => {
         is_visible_in_available: true,
       }];
       const res = resolveBillboardAvailability(bb, contracts, { referenceDate: REF_DATE });
-      expect(res.classification).toBe('EXPLICIT_CONTRACT_SHOW');
+      expect(res.classification).toBe('EXPLICIT_BILLBOARD_SHOW');
       expect(isAvailableForAvailableExports(bb, contracts, REF_DATE)).toBe(true);
     });
 
@@ -292,6 +292,100 @@ describe('Comprehensive Availability & Marketing Activation Test Suite', () => {
       const res = resolveBillboardAvailability(bb, contracts, { referenceDate: REF_DATE });
       expect(res.classification).toBe('EXCLUDED');
       expect(isAvailableForAvailableExports(bb, contracts, REF_DATE)).toBe(false);
+    });
+
+    it('Contract 1296 (Future unactivated contract, starts 2026-08-23, ends 2027-02-19) -> FUTURE_RESERVED from Available Now and Available+Upcoming', () => {
+      const bb = { ID: '26', Billboard_Name: 'TR-TC0026', Status: 'محجوز', Contract_Number: '1296', is_visible_in_available: null };
+      const contracts = [{
+        Contract_Number: 1296,
+        'Customer Name': 'محمد البحباح',
+        'Ad Type': 'مركز أسنان',
+        'Contract Date': '2026-08-23',
+        'End Date': '2027-02-19',
+        billboard_ids: '26',
+        is_visible_in_available: null,
+      }];
+      const res = resolveBillboardAvailability(bb, contracts, { referenceDate: '2026-08-20', upcomingMonthsWindow: 4 });
+      expect(res.classification).toBe('FUTURE_RESERVED');
+      expect(res.isMarketingVisible).toBe(false);
+      expect(res.isAvailableNow).toBe(false);
+      expect(isAvailableForAvailableExports(bb, contracts, '2026-08-20')).toBe(false);
+      expect(isAvailableOrUpcomingForExport(bb, undefined, undefined, 4, contracts, '2026-08-20')).toBe(false);
+    });
+
+    it('TR-HA0077 -> Current contract 1118 ending soon (2026-08-30) + chained future contract 1297 (2026-09-01 to 2027-08-27) -> EXCLUDED (NOT UPCOMING)', () => {
+      const bb = { ID: '77', Billboard_Name: 'TR-HA0077', Status: 'محجوز', Contract_Number: '1297', is_visible_in_available: null };
+      const contracts = [
+        {
+          Contract_Number: 1118,
+          'Customer Name': 'محمد عبدالله بن نصر',
+          'Contract Date': '2025-09-04',
+          'End Date': '2026-08-30',
+          billboard_ids: '77',
+          is_visible_in_available: null,
+        },
+        {
+          Contract_Number: 1297,
+          'Customer Name': 'محمد عبدالله بن نصر',
+          'Contract Date': '2026-09-01',
+          'End Date': '2027-08-27',
+          billboard_ids: '77',
+          is_visible_in_available: null,
+        },
+      ];
+      const res = resolveBillboardAvailability(bb, contracts, { referenceDate: '2026-08-20', upcomingMonthsWindow: 4 });
+      expect(res.classification).toBe('EXCLUDED');
+      expect(res.isMarketingVisible).toBe(false);
+      expect(res.isAvailableNow).toBe(false);
+      expect(res.currentRentEndDate).toBe('2027-08-27');
+      expect(isAvailableForAvailableExports(bb, contracts, '2026-08-20')).toBe(false);
+      expect(isAvailableOrUpcomingForExport(bb, undefined, undefined, 4, contracts, '2026-08-20')).toBe(false);
+    });
+
+    it('Pure Future contract starting in 1 year -> FUTURE_RESERVED (NOT UPCOMING, NOT AVAILABLE_WITHOUT_CONTRACT)', () => {
+      const bb = { ID: '888', Billboard_Name: 'TR-FUT01', Status: 'محجوز', is_visible_in_available: null };
+      const contracts = [{
+        Contract_Number: 2000,
+        'Contract Date': '2027-08-20',
+        'End Date': '2028-08-20',
+        billboard_ids: '888',
+        is_visible_in_available: null,
+      }];
+      const res = resolveBillboardAvailability(bb, contracts, { referenceDate: '2026-08-20', upcomingMonthsWindow: 4 });
+      expect(res.classification).toBe('FUTURE_RESERVED');
+      expect(res.isMarketingVisible).toBe(false);
+      expect(res.isAvailableNow).toBe(false);
+    });
+
+    it('Pure Future contract starting tomorrow -> FUTURE_RESERVED (NOT UPCOMING)', () => {
+      const bb = { ID: '889', Billboard_Name: 'TR-FUT02', Status: 'محجوز', is_visible_in_available: null };
+      const contracts = [{
+        Contract_Number: 2001,
+        'Contract Date': '2026-08-21',
+        'End Date': '2026-10-21',
+        billboard_ids: '889',
+        is_visible_in_available: null,
+      }];
+      const res = resolveBillboardAvailability(bb, contracts, { referenceDate: '2026-08-20', upcomingMonthsWindow: 4 });
+      expect(res.classification).toBe('FUTURE_RESERVED');
+      expect(res.isMarketingVisible).toBe(false);
+      expect(res.isAvailableNow).toBe(false);
+    });
+
+    it('Current contract ending within 4 months with no future blocker -> UPCOMING (isMarketingVisible = true)', () => {
+      const bb = { ID: '890', Billboard_Name: 'TR-UP01', Status: 'محجوز', is_visible_in_available: null };
+      const contracts = [{
+        Contract_Number: 2002,
+        'Contract Date': '2026-01-01',
+        'End Date': '2026-10-15',
+        billboard_ids: '890',
+        is_visible_in_available: null,
+      }];
+      const res = resolveBillboardAvailability(bb, contracts, { referenceDate: '2026-08-20', upcomingMonthsWindow: 4 });
+      expect(res.classification).toBe('UPCOMING');
+      expect(res.isMarketingVisible).toBe(true);
+      expect(res.isAvailableNow).toBe(false);
+      expect(isAvailableOrUpcomingForExport(bb, undefined, undefined, 4, contracts, '2026-08-20')).toBe(true);
     });
   });
 });
