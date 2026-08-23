@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { BillboardImage } from '@/components/BillboardImage';
-import { ZoomIn } from 'lucide-react';
+import { ZoomIn, X } from 'lucide-react';
 
 interface Props {
   billboard: any;
