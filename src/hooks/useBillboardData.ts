@@ -1,8 +1,79 @@
 import { useState, useEffect, useCallback, useRef, startTransition } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { fetchWithRetry } from '@/lib/fetchWithRetry';
 import { setSizeColorsFromData } from '@/hooks/useMapMarkers';
+
+const BILLBOARD_DATA_STALE_TIME = 5 * 60 * 1000;
+const BILLBOARD_DATA_QUERY_KEY = ['billboard-page-data'] as const;
+const billboardDataKeys = {
+  billboards: [...BILLBOARD_DATA_QUERY_KEY, 'billboards'] as const,
+  contracts: [...BILLBOARD_DATA_QUERY_KEY, 'contracts'] as const,
+  installationTasks: [...BILLBOARD_DATA_QUERY_KEY, 'installation-tasks'] as const,
+  municipalities: [...BILLBOARD_DATA_QUERY_KEY, 'municipalities'] as const,
+  sizes: [...BILLBOARD_DATA_QUERY_KEY, 'sizes'] as const,
+  levels: [...BILLBOARD_DATA_QUERY_KEY, 'levels'] as const,
+  faces: [...BILLBOARD_DATA_QUERY_KEY, 'faces'] as const,
+  types: [...BILLBOARD_DATA_QUERY_KEY, 'types'] as const,
+  cities: [...BILLBOARD_DATA_QUERY_KEY, 'cities'] as const,
+};
+
+const fetchMunicipalities = async () => {
+  const { data, error } = await supabase
+    .from('municipalities')
+    .select('*')
+    .order('sort_order', { ascending: true })
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return data || [];
+};
+
+const fetchSizes = async () => {
+  const { data, error } = await supabase
+    .from('sizes')
+    .select('*')
+    .order('sort_order', { ascending: true })
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return data || [];
+};
+
+const fetchLevels = async () => {
+  const { data, error } = await supabase
+    .from('billboard_levels')
+    .select('*')
+    .order('level_code', { ascending: true });
+  if (error) throw error;
+  return data || [];
+};
+
+const fetchFaces = async () => {
+  const { data, error } = await supabase
+    .from('billboard_faces')
+    .select('*')
+    .order('count', { ascending: true });
+  if (error) throw error;
+  return data || [];
+};
+
+const fetchBillboardTypes = async () => {
+  const { data, error } = await supabase
+    .from('billboard_types')
+    .select('*')
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return data || [];
+};
+
+const fetchCities = async (): Promise<Array<{ name: string }>> => {
+  const { data, error } = await (supabase as any)
+    .from('cities')
+    .select('name')
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return (data || []) as Array<{ name: string }>;
+};
 
 export const normalizeMuniName = (name: string | null | undefined): string => {
   if (!name) return '';
@@ -24,8 +95,8 @@ export const normalizeMuniName = (name: string | null | undefined): string => {
 };
 
 export const useBillboardData = () => {
-  const retryCountRef = useRef(0);
-  const maxAutoRetries = 3;
+  const queryClient = useQueryClient();
+  const hasLoadedBillboardsRef = useRef(false);
   const [billboards, setBillboards] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [municipalities, setMunicipalities] = useState<any[]>([]);
@@ -45,12 +116,11 @@ export const useBillboardData = () => {
   // ✅ FIXED: Memoize getSizeOrderFromDB to prevent recreation
   const getSizeOrderFromDB = useCallback(async (): Promise<{ [key: string]: number }> => {
     try {
-      const { data, error } = await supabase
-        .from('sizes')
-        .select('name, sort_order')
-        .order('sort_order', { ascending: true });
-
-      if (error) throw error;
+      const data = await queryClient.fetchQuery({
+        queryKey: billboardDataKeys.sizes,
+        queryFn: fetchSizes,
+        staleTime: BILLBOARD_DATA_STALE_TIME,
+      });
 
       const sizeOrderMap: { [key: string]: number } = {};
       data?.forEach((size) => {
@@ -72,17 +142,16 @@ export const useBillboardData = () => {
         '5*3': 7, '5x3': 7, '5×3': 7, '3*5': 7, '3x5': 7, '3×5': 7
       };
     }
-  }, []);
+  }, [queryClient]);
 
   // ✅ NEW: Memoize getMunicipalityOrderFromDB to prevent recreation
   const getMunicipalityOrderFromDB = useCallback(async (): Promise<{ [key: string]: number }> => {
     try {
-      const { data, error } = await supabase
-        .from('municipalities')
-        .select('name, sort_order')
-        .order('sort_order', { ascending: true });
-
-      if (error) throw error;
+      const data = await queryClient.fetchQuery({
+        queryKey: billboardDataKeys.municipalities,
+        queryFn: fetchMunicipalities,
+        staleTime: BILLBOARD_DATA_STALE_TIME,
+      });
 
       const municipalityOrderMap: { [key: string]: number } = {};
       data?.forEach((m) => {
@@ -95,7 +164,7 @@ export const useBillboardData = () => {
       console.error('Error loading municipality order from database:', error);
       return {};
     }
-  }, []);
+  }, [queryClient]);
 
   const sortBillboardsBySize = useCallback(async (billboards: any[]): Promise<any[]> => {
     const [sizeOrderMap, municipalityOrderMap] = await Promise.all([
@@ -131,170 +200,121 @@ export const useBillboardData = () => {
     });
   }, [getSizeOrderFromDB, getMunicipalityOrderFromDB]);
 
-  // ✅ ENHANCED: Load contracts data with better field mapping
-  const loadContractsData = useCallback(async () => {
-    try {
-
-
-      const result = await fetchWithRetry<any[]>(async () => {
-        const res = await supabase
-          .from('Contract')
-          .select('id, Contract_Number, customer_name, ad_type, customer_id')
-          .order('id', { ascending: false });
-        return res;
-      }, { maxRetries: 3, timeout: 45000 });
-
-      if (result.error) {
-
-        return { customers: [], adTypes: [], contractNumbers: [] };
-      }
-
-      const contractsData = result.data as any[];
-
-
-
-      if (!contractsData || contractsData.length === 0) {
-        return { customers: [], adTypes: [], contractNumbers: [] };
-      }
-
-      // Extract unique values with enhanced field mapping
-      const customerNames = new Set<string>();
-      const adTypes = new Set<string>();
-      const contractNumbers = new Set<string>();
-
-      contractsData.forEach((contract: any) => {
-        // ✅ ENHANCED: Customer names with more field variations
-        const customerFields = [
-          'customer_name', 'Customer Name', 'customerName', 'client_name',
-          'Client Name', 'clientName', 'Customer_Name', 'CLIENT_NAME'
-        ];
-
-        for (const field of customerFields) {
-          const customerName = contract[field];
-          if (customerName && String(customerName).trim()) {
-            customerNames.add(String(customerName).trim());
-            break;
-          }
-        }
-
-        // ✅ ENHANCED: Ad types with comprehensive field mapping
-        const adTypeFields = [
-          'Ad Type', 'ad_type', 'adType', 'advertisement_type', 'type',
-          'Ad_Type', 'AD_TYPE', 'advertisementType', 'advType', 'category'
-        ];
-
-        for (const field of adTypeFields) {
-          const adType = contract[field];
-          if (adType && String(adType).trim() && String(adType).trim() !== 'null') {
-            adTypes.add(String(adType).trim());
-            break;
-          }
-        }
-
-        // ✅ ENHANCED: Contract numbers with more variations
-        const contractNumberFields = [
-          'Contract_Number', 'contract_number', 'contractNumber', 'number',
-          'id', 'CONTRACT_NUMBER', 'contract_id', 'contractId'
-        ];
-
-        for (const field of contractNumberFields) {
-          const contractNumber = contract[field];
-          if (contractNumber && String(contractNumber).trim() && String(contractNumber).trim() !== '0') {
-            contractNumbers.add(String(contractNumber).trim());
-            break;
-          }
-        }
-      });
-
-
-
-      return {
-        customers: Array.from(customerNames).sort(),
-        adTypes: Array.from(adTypes).sort(),
-        contractNumbers: Array.from(contractNumbers).sort((a, b) => {
-          const numA = parseInt(a) || 0;
-          const numB = parseInt(b) || 0;
-          return numB - numA; // Descending order
-        })
-      };
-    } catch (error) {
-      console.error('Error loading contracts data:', error);
-      toast.error('حدث خطأ أثناء تحميل بيانات العقود للفلترة');
-      return { customers: [], adTypes: [], contractNumbers: [] };
-    }
-  }, []);
-
   // Load cities from cities table
   const loadCities = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('cities')
-        .select('*')
-        .order('name', { ascending: true });
-
-      if (error) throw error;
+      await queryClient.invalidateQueries({ queryKey: billboardDataKeys.cities, exact: true });
+      const data = await queryClient.fetchQuery({
+        queryKey: billboardDataKeys.cities,
+        queryFn: fetchCities,
+        staleTime: BILLBOARD_DATA_STALE_TIME,
+      });
       const names = data?.map(city => city.name).filter(Boolean) || [];
       setCitiesList(names);
 
     } catch (error: any) {
       console.error('Error loading cities:', error);
     }
-  }, []);
+  }, [queryClient]);
 
   // ✅ ENHANCED: Load billboards with proper contract matching
   const loadBillboards = useCallback(async (options?: { silent?: boolean }) => {
     try {
       if (!options?.silent) setLoading(true);
+      const isManualRefresh = hasLoadedBillboardsRef.current;
+      hasLoadedBillboardsRef.current = true;
 
-
-      // Load billboards data with retry
-      const billboardsResult = await fetchWithRetry<any[]>(async () => {
-        const res = await supabase
-          .from('billboards')
-          .select(`
-            *,
-            friend_companies:friend_company_id(*),
-            own_company:own_company_id(*)
-          `)
-          .order('ID', { ascending: true });
-        return res;
-      }, { maxRetries: 3, timeout: 45000 });
-
-      if (billboardsResult.error) {
-        console.error('❌ Error loading billboards:', billboardsResult.error);
-
-        // Auto retry on network errors
-        if (retryCountRef.current < maxAutoRetries) {
-          retryCountRef.current++;
-
-          toast.info(`جاري إعادة المحاولة... (${retryCountRef.current}/${maxAutoRetries})`);
-          setTimeout(() => loadBillboards(), 2000);
-          return;
-        }
-
-        throw billboardsResult.error;
+      if (isManualRefresh) {
+        await queryClient.invalidateQueries({ queryKey: BILLBOARD_DATA_QUERY_KEY });
       }
 
-      retryCountRef.current = 0; // Reset on success
-      const billboardsData = billboardsResult.data as any[];
+      // Start every independent request together. React Query de-duplicates these
+      // requests and reuses them when the user returns during the stale window.
+      const [
+        cachedBillboardsData,
+        cachedContractsData,
+        cachedInstallationTasksData,
+        municipalitiesData,
+        sizesData,
+        levelsData,
+        facesData,
+        typesData,
+        citiesData,
+      ] = await Promise.all([
+        queryClient.fetchQuery<any[]>({
+          queryKey: billboardDataKeys.billboards,
+          staleTime: BILLBOARD_DATA_STALE_TIME,
+          queryFn: async () => {
+            const result = await fetchWithRetry<any[]>(async () => supabase
+              .from('billboards')
+              .select(`
+                *,
+                friend_companies:friend_company_id(*),
+                own_company:own_company_id(*)
+              `)
+              .order('ID', { ascending: true }), { maxRetries: 3, timeout: 45000 });
+            if (result.error) throw result.error;
+            return result.data || [];
+          },
+        }),
+        queryClient.fetchQuery<any[]>({
+          queryKey: billboardDataKeys.contracts,
+          staleTime: BILLBOARD_DATA_STALE_TIME,
+          queryFn: async () => {
+            const result = await fetchWithRetry<any[]>(async () => supabase
+              .from('Contract')
+              .select('id, Contract_Number, customer_id, "Customer Name", "Ad Type", "Contract Date", "End Date", billboard_ids, billboard_id, billboard_prices')
+              .order('id', { ascending: false }), { maxRetries: 1, timeout: 15000 });
+            if (result.error) throw result.error;
+            return result.data || [];
+          },
+        }),
+        queryClient.fetchQuery<any[]>({
+          queryKey: billboardDataKeys.installationTasks,
+          staleTime: BILLBOARD_DATA_STALE_TIME,
+          queryFn: async () => {
+            const result = await fetchWithRetry<any[]>(async () => supabase
+              .from('installation_task_items')
+              .select(`
+                billboard_id,
+                design_face_a,
+                design_face_b,
+                installed_image_face_a_url,
+                installed_image_face_b_url,
+                selected_design_id,
+                task_designs:selected_design_id(
+                  design_face_a_url,
+                  design_face_b_url
+                )
+              `)
+              .order('created_at', { ascending: false }), { maxRetries: 2, timeout: 30000 });
+            if (result.error) throw result.error;
+            return result.data || [];
+          },
+        }),
+        queryClient.fetchQuery({ queryKey: billboardDataKeys.municipalities, queryFn: fetchMunicipalities, staleTime: BILLBOARD_DATA_STALE_TIME }),
+        queryClient.fetchQuery({ queryKey: billboardDataKeys.sizes, queryFn: fetchSizes, staleTime: BILLBOARD_DATA_STALE_TIME }),
+        queryClient.fetchQuery({ queryKey: billboardDataKeys.levels, queryFn: fetchLevels, staleTime: BILLBOARD_DATA_STALE_TIME }),
+        queryClient.fetchQuery({ queryKey: billboardDataKeys.faces, queryFn: fetchFaces, staleTime: BILLBOARD_DATA_STALE_TIME }),
+        queryClient.fetchQuery({ queryKey: billboardDataKeys.types, queryFn: fetchBillboardTypes, staleTime: BILLBOARD_DATA_STALE_TIME }),
+        queryClient.fetchQuery({ queryKey: billboardDataKeys.cities, queryFn: fetchCities, staleTime: BILLBOARD_DATA_STALE_TIME }),
+      ]);
 
+      setMunicipalities(municipalitiesData);
+      setSizes(sizesData);
+      setLevels(levelsData.map(level => level.level_code).filter(Boolean));
+      setFaces(facesData.map(face => ({ id: face.id, name: face.name, count: face.count })));
+      setBillboardTypes(typesData.map(type => type.name).filter(Boolean));
+      setCitiesList(citiesData.map(city => city.name).filter(Boolean));
 
+      const billboardsData = cachedBillboardsData;
+      const contractsData = cachedContractsData;
+      const installationTasksData = cachedInstallationTasksData;
 
       if (!billboardsData) {
         setBillboards([]);
         return;
       }
-
-      // ✅ NEW: Load contracts to match with billboards (optimizing columns selected)
-      const contractsResult = await fetchWithRetry<any[]>(async () => {
-        return await supabase
-          .from('Contract')
-          .select('*')
-          .order('id', { ascending: false });
-      }, { maxRetries: 1, timeout: 15000 });
-
-      const contractsData = contractsResult.data as any[] || [];
-
 
       // ✅ Pre-build fast O(1) maps for contract matching
       const billboardToContractsMap = new Map<string, any[]>();
@@ -333,29 +353,6 @@ export const useBillboardData = () => {
           }
         }
       });
-
-      // ✅ NEW: Load latest installation task items for design images
-      const installationTasksResult = await fetchWithRetry<any[]>(async () => {
-        const res = await supabase
-          .from('installation_task_items')
-          .select(`
-            billboard_id,
-            design_face_a,
-            design_face_b,
-            installed_image_face_a_url,
-            installed_image_face_b_url,
-            selected_design_id,
-            task_designs:selected_design_id(
-              design_face_a_url,
-              design_face_b_url
-            )
-          `)
-          .order('created_at', { ascending: false });
-        return res;
-      }, { maxRetries: 2, timeout: 30000 });
-
-      const installationTasksData = installationTasksResult.data as any[] || [];
-
 
       // Create a map of billboard_id to latest installation task
       const latestTaskByBillboard = new Map<number, any>();
@@ -443,26 +440,10 @@ export const useBillboardData = () => {
 
         // ✅ NEW: Get design images from installation task
         const latestTask = latestTaskByBillboard.get(billboard.ID);
-        let designFaceA = latestTask?.design_face_a || latestTask?.task_designs?.design_face_a_url || '';
-        let designFaceB = latestTask?.design_face_b || latestTask?.task_designs?.design_face_b_url || '';
+        const designFaceA = latestTask?.design_face_a || latestTask?.task_designs?.design_face_a_url || '';
+        const designFaceB = latestTask?.design_face_b || latestTask?.task_designs?.design_face_b_url || '';
         const installedImageA = latestTask?.installed_image_face_a_url || '';
         const installedImageB = latestTask?.installed_image_face_b_url || '';
-
-        // ✅ NEW: Fallback — جلب التصاميم من design_data في العقد
-        if (!designFaceA && activeContract?.design_data) {
-          try {
-            const dd = typeof activeContract.design_data === 'string'
-              ? JSON.parse(activeContract.design_data) : activeContract.design_data;
-            const arr = typeof dd === 'string' ? JSON.parse(dd) : dd;
-            if (Array.isArray(arr)) {
-              const match = arr.find((d: any) => String(d.billboardId) === billboardId);
-              if (match) {
-                designFaceA = match.designFaceA || match.design_face_a_url || '';
-                designFaceB = match.designFaceB || match.design_face_b_url || '';
-              }
-            }
-          } catch {}
-        }
 
         const matchedCustomerName = activeContract?.customer_name || activeContract?.['Customer Name'] || billboard.Customer_Name || '';
         const matchedAdType = activeContract?.ad_type || activeContract?.['Ad Type'] || billboard.Ad_Type || '';
@@ -565,7 +546,6 @@ export const useBillboardData = () => {
         .filter(Boolean)
       )].sort((a, b) => a.localeCompare(b, 'ar'));
 
-      loadCities();
       setDbMunicipalities(municipalities);
 
       // ✅ Sort sizes by database order AND sync pin colors
@@ -590,7 +570,7 @@ export const useBillboardData = () => {
     } finally {
       setLoading(false);
     }
-  }, [sortBillboardsBySize, loadContractsData, getSizeOrderFromDB]);
+  }, [queryClient, sortBillboardsBySize, getSizeOrderFromDB]);
 
   // ✅ Optimistic local visibility update for instant UI feedback
   const updateBillboardVisibilityLocal = useCallback((billboardId: string | number, isVisibleInAvailable: boolean) => {
@@ -615,36 +595,34 @@ export const useBillboardData = () => {
   // Load municipalities
   const loadMunicipalities = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('municipalities')
-        .select('*')
-        .order('sort_order', { ascending: true })
-        .order('name', { ascending: true });
-
-      if (error) throw error;
-      setMunicipalities(data || []);
+      await queryClient.invalidateQueries({ queryKey: billboardDataKeys.municipalities, exact: true });
+      const data = await queryClient.fetchQuery({
+        queryKey: billboardDataKeys.municipalities,
+        queryFn: fetchMunicipalities,
+        staleTime: BILLBOARD_DATA_STALE_TIME,
+      });
+      setMunicipalities(data);
 
     } catch (error: any) {
       console.error('Error loading municipalities:', error);
       toast.error('حدث خطأ أثناء تحميل قائمة البلديات');
     }
-  }, []);
+  }, [queryClient]);
 
   // ✅ Load sizes with sort_order from database
   const loadSizes = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('sizes')
-        .select('*')
-        .order('sort_order', { ascending: true })
-        .order('name', { ascending: true });
+      await queryClient.invalidateQueries({ queryKey: billboardDataKeys.sizes, exact: true });
+      const data = await queryClient.fetchQuery({
+        queryKey: billboardDataKeys.sizes,
+        queryFn: fetchSizes,
+        staleTime: BILLBOARD_DATA_STALE_TIME,
+      });
 
-      if (error) throw error;
-
-      setSizes(data || []);
+      setSizes(data);
 
       // ✅ Update dbSizes with sorted order from database
-      const sortedSizeNames = data?.map(s => s.name) || [];
+      const sortedSizeNames = data.map(s => s.name);
       setDbSizes(sortedSizeNames);
 
 
@@ -652,19 +630,19 @@ export const useBillboardData = () => {
       console.error('Error loading sizes:', error);
       toast.error('حدث خطأ أثناء تحميل قائمة المقاسات');
     }
-  }, []);
+  }, [queryClient]);
 
   // Load levels - من جدول billboard_levels
   const loadLevels = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('billboard_levels')
-        .select('*')
-        .order('level_code', { ascending: true });
+      await queryClient.invalidateQueries({ queryKey: billboardDataKeys.levels, exact: true });
+      const data = await queryClient.fetchQuery({
+        queryKey: billboardDataKeys.levels,
+        queryFn: fetchLevels,
+        staleTime: BILLBOARD_DATA_STALE_TIME,
+      });
 
-      if (error) throw error;
-
-      const levelCodes = data?.map(level => level.level_code).filter(Boolean) || [];
+      const levelCodes = data.map(level => level.level_code).filter(Boolean);
       setLevels(levelCodes);
 
     } catch (error: any) {
@@ -672,23 +650,23 @@ export const useBillboardData = () => {
       toast.error('حدث خطأ أثناء تحميل مستويات اللوحات');
       setLevels(['A', 'B', 'S']); // القيم الافتراضية
     }
-  }, []);
+  }, [queryClient]);
 
   // Load faces - من جدول billboard_faces
   const loadFaces = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('billboard_faces')
-        .select('*')
-        .order('count', { ascending: true });
+      await queryClient.invalidateQueries({ queryKey: billboardDataKeys.faces, exact: true });
+      const data = await queryClient.fetchQuery({
+        queryKey: billboardDataKeys.faces,
+        queryFn: fetchFaces,
+        staleTime: BILLBOARD_DATA_STALE_TIME,
+      });
 
-      if (error) throw error;
-
-      const facesData = data?.map(face => ({
+      const facesData = data.map(face => ({
         id: face.id,
         name: face.name,
         count: face.count
-      })) || [];
+      }));
 
       setFaces(facesData);
 
@@ -701,19 +679,19 @@ export const useBillboardData = () => {
         { id: 4, name: 'أربعة أوجه', count: 4 }
       ]);
     }
-  }, []);
+  }, [queryClient]);
 
   // Load billboard types - من جدول billboard_types
   const loadBillboardTypes = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('billboard_types')
-        .select('*')
-        .order('name', { ascending: true });
+      await queryClient.invalidateQueries({ queryKey: billboardDataKeys.types, exact: true });
+      const data = await queryClient.fetchQuery({
+        queryKey: billboardDataKeys.types,
+        queryFn: fetchBillboardTypes,
+        staleTime: BILLBOARD_DATA_STALE_TIME,
+      });
 
-      if (error) throw error;
-
-      const typeNames = data?.map(type => type.name).filter(Boolean) || [];
+      const typeNames = data.map(type => type.name).filter(Boolean);
       setBillboardTypes(typeNames);
 
     } catch (error: any) {
@@ -721,23 +699,15 @@ export const useBillboardData = () => {
       toast.error('حدث خطأ أثناء تحميل أنواع اللوحات');
       setBillboardTypes(['تيبول', 'برجية', 'عادية']);
     }
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     const initializeData = async () => {
-      await Promise.all([
-        loadMunicipalities(),
-        loadSizes(),
-        loadLevels(),
-        loadFaces(),
-        loadBillboardTypes(),
-        loadCities(),
-        loadBillboards()
-      ]);
+      await loadBillboards();
     };
 
     initializeData();
-  }, [loadMunicipalities, loadSizes, loadLevels, loadFaces, loadBillboardTypes, loadCities, loadBillboards]); // Added dependencies
+  }, [loadBillboards]);
 
   return {
     billboards,

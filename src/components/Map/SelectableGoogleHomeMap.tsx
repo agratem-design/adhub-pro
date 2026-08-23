@@ -1834,9 +1834,10 @@ export default function SelectableGoogleHomeMap({
         >
           <button
             onClick={() => setLightboxImage(null)}
-            className="absolute top-4 right-4 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white transition-colors"
+            className="absolute top-4 right-4 z-50 h-11 w-11 bg-red-600 hover:bg-red-700 active:bg-red-800 rounded-full flex items-center justify-center text-white shadow-2xl border-2 border-white/30 transition-all hover:scale-110 cursor-pointer"
+            aria-label="إغلاق"
           >
-            <X className="w-6 h-6" />
+            <X className="w-6 h-6" strokeWidth={2.5} />
           </button>
           <img 
             src={lightboxImage} 

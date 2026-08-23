@@ -25,6 +25,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { fetchContractDesignUrls } from '@/lib/contractDesignUtils';
 import { getOperationalWeekKey, getOperationalWeekRange } from '@/utils/operationalWeek';
 import {
+  filterTaskContractIdsByCustomer,
+  normalizeContractId,
+  resolveTaskContractAdTypes,
+} from '@/lib/compositeTaskContractIdentity';
+import {
   Search, ArrowUpDown, ArrowUp, ArrowDown,
   CheckCircle2, Clock, Package, Users,
   RefreshCw, XCircle, Printer, Scissors,
@@ -59,15 +64,6 @@ interface CompositeTasksListEnhancedProps {
 
 type SortField = 'client' | 'contract' | 'revenue' | 'cost' | 'profit' | 'date' | 'status';
 type SortDir = 'asc' | 'desc';
-
-/** Helper to strictly normalize contract IDs as positive numbers */
-export const normalizeContractId = (value: unknown): number | null => {
-  if (value === null || value === undefined) return null;
-  const str = String(value).trim();
-  if (!str) return null;
-  const num = Number(str);
-  return Number.isFinite(num) && num > 0 ? num : null;
-};
 
 const STATUS_CONFIG = {
   completed: {
@@ -180,9 +176,10 @@ const DesignPanel = ({
         <div className="fixed inset-0 z-[99999] bg-black/90 backdrop-blur-md flex items-center justify-center p-4" onClick={() => setLightboxOpen(false)}>
           <button 
             onClick={() => setLightboxOpen(false)} 
-            className="absolute top-4 right-4 z-10 p-2.5 bg-white/10 hover:bg-white/20 rounded-full transition-all border border-white/20 text-white cursor-pointer"
+            className="absolute top-4 right-4 z-50 h-10 w-10 bg-red-600 hover:bg-red-700 active:bg-red-800 rounded-full flex items-center justify-center text-white shadow-2xl border-2 border-white/30 transition-all hover:scale-110 cursor-pointer"
+            aria-label="إغلاق"
           >
-            <X className="w-5 h-5" />
+            <X className="w-5 h-5" strokeWidth={2.5} />
           </button>
           <img src={url} alt="معاينة التصميم" className="max-w-[90vw] max-h-[85vh] object-contain rounded-xl shadow-2xl" onClick={e => e.stopPropagation()} />
         </div>, document.body
@@ -979,6 +976,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     queryFn: async () => {
       const extras: Record<string, { 
         designUrls: string[]; 
+        contractIds: number[];
         adTypes: string[];
         adType: string; 
         teamName: string; 
@@ -1056,21 +1054,17 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       if (finalUniqueContractIds.length > 0) {
         const { data: contractsData } = await supabase
           .from('Contract')
-          .select('"Contract_Number", "Ad Type", "Customer Name"')
+          .select('"Contract_Number", "Ad Type", "Customer Name", customer_id')
           .in('Contract_Number', finalUniqueContractIds);
         contracts = contractsData || [];
       }
 
-      // Map contracts and ad types
-      const adTypeMap = new Map<number, string>();
-      contracts.forEach((c: any) => {
-        const cNum = normalizeContractId(c.Contract_Number);
-        const rawType = c['Ad Type'] || c.ad_type || '';
-        const cleanType = String(rawType).trim();
-        if (cNum && cleanType && cleanType !== 'غير محدد' && cleanType !== 'null') {
-          adTypeMap.set(cNum, cleanType);
-        }
-      });
+      const contractCandidates: ContractAdTypeCandidate[] = contracts.map((contract: any) => ({
+        contractNumber: contract.Contract_Number,
+        adType: contract['Ad Type'] || contract.ad_type || '',
+        customerId: contract.customer_id,
+        customerName: contract['Customer Name'],
+      }));
 
       const teamNameMap = new Map<string, string>();
       const reinstallMap = new Map<string, number | null>();
@@ -1123,19 +1117,27 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         const urls: string[] = [];
 
         // Resolve candidate contract IDs for this task
-        const candidateContractIds: number[] = [];
+        const rawCandidateContractIds: number[] = [];
         const directC = normalizeContractId(task.contract_id);
-        if (directC) candidateContractIds.push(directC);
+        if (directC) rawCandidateContractIds.push(directC);
         if (Array.isArray((task as any)._contractIds)) {
           (task as any)._contractIds.forEach((cid: unknown) => {
             const c = normalizeContractId(cid);
-            if (c && !candidateContractIds.includes(c)) candidateContractIds.push(c);
+            if (c && !rawCandidateContractIds.includes(c)) rawCandidateContractIds.push(c);
           });
         }
         if (task.installation_task_id) {
           const c = contractByInstallTaskId.get(task.installation_task_id);
-          if (c && !candidateContractIds.includes(c)) candidateContractIds.push(c);
+          if (c && !rawCandidateContractIds.includes(c)) rawCandidateContractIds.push(c);
         }
+
+        const candidateContractIds = filterTaskContractIdsByCustomer({
+          candidateContractIds: rawCandidateContractIds,
+          directContractId: task.contract_id,
+          taskCustomerId: task.customer_id,
+          taskCustomerName: task.customer_name,
+          contracts: contractCandidates,
+        });
 
         // Gather design images
         candidateContractIds.forEach(cId => {
@@ -1164,17 +1166,18 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           });
         }
 
-        // Resolve Ad Types strictly from Contract table
-        const taskAdTypes: string[] = [];
-        candidateContractIds.forEach(cid => {
-          const found = adTypeMap.get(cid);
-          if (found && !taskAdTypes.includes(found)) {
-            taskAdTypes.push(found);
-          }
+        // Resolve ad types only from contracts owned by this task's customer.
+        const taskAdTypes = resolveTaskContractAdTypes({
+          candidateContractIds,
+          directContractId: task.contract_id,
+          taskCustomerId: task.customer_id,
+          taskCustomerName: task.customer_name,
+          contracts: contractCandidates,
         });
 
         extras[task.id] = {
           designUrls: urls.slice(0, 4),
+          contractIds: candidateContractIds,
           adTypes: taskAdTypes,
           adType: taskAdTypes.length > 0 ? taskAdTypes.join(' / ') : '',
           teamName: task.installation_task_id ? teamNameMap.get(task.installation_task_id) || '' : '',
@@ -1214,7 +1217,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
 
   // 4. Enrich tasks with full relational properties
   const enriched = useMemo(() => compositeTasks.map((task: any) => {
-    const extra = taskExtras[task.id] || { designUrls: [], adTypes: [], adType: '', teamName: '', reinstallationNumber: null, printerName: '', realInstallCost: 0 };
+    const extra = taskExtras[task.id] || { designUrls: [], contractIds: [], adTypes: [], adType: '', teamName: '', reinstallationNumber: null, printerName: '', realInstallCost: 0 };
     const payments = taskPayments[task.id] || [];
     const totalPaid = payments.length > 0 
       ? payments.reduce((s: number, p: any) => s + p.amount, 0) 
@@ -1230,9 +1233,9 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     for (let i = 0; i < task.id.length; i++) h = task.id.charCodeAt(i) + ((h << 5) - h);
     const accent = `hsl(${Math.abs(h) % 360}, 55%, 58%)`;
 
-    const contractIds = task._contractIds && task._contractIds.length > 0 
-      ? task._contractIds 
-      : [task.contract_id].filter(Boolean);
+    const contractIds = extra.contractIds.length > 0
+      ? extra.contractIds
+      : [normalizeContractId(task.contract_id)].filter((id): id is number => id !== null);
 
     return {
       ...task,

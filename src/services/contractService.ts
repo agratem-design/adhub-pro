@@ -513,6 +513,69 @@ export async function createContract(contractData: ContractData) {
   return contract;
 }
 
+const CONTRACT_LIST_COLUMNS = `
+  Contract_Number,
+  id,
+  "Customer Name",
+  customer_id,
+  customer_category,
+  "Contract Date",
+  "End Date",
+  "Ad Type",
+  "Total Rent",
+  Total,
+  Discount,
+  "Total Paid",
+  Remaining,
+  installation_cost,
+  print_cost,
+  print_cost_enabled,
+  print_price_per_meter,
+  fee,
+  operating_fee_rate,
+  payment_status,
+  "Renewal Status",
+  "Print Status",
+  billboard_ids,
+  billboards_count,
+  design_data,
+  contract_currency,
+  exchange_rate,
+  billboard_id,
+  base_rent,
+  Duration,
+  Phone,
+  Company,
+  single_face_billboards,
+  billboards_released,
+  installation_enabled,
+  include_installation_in_price,
+  include_print_in_billboard_price,
+  include_operating_in_installation,
+  include_operating_in_print,
+  partnership_operating_data,
+  partnership_operating_fee_rate,
+  friend_rental_data,
+  friend_rental_includes_installation,
+  friend_rental_operating_fee_enabled,
+  friend_rental_operating_fee_rate,
+  installment_count,
+  installment_interval,
+  installment_auto_calculate,
+  installment_distribution_type,
+  installment_first_at_signing,
+  installment_first_payment_amount,
+  installment_first_payment_type
+`;
+
+const CONTRACT_SUMMARY_LIST_COLUMNS = `
+  ${CONTRACT_LIST_COLUMNS},
+  customer_phone,
+  customer_company,
+  actual_paid,
+  total_expenses
+`;
+
 // جلب جميع العقود مع معالجة محسنة - يستخدم contract_summary view للأداء
 // linkedCustomerId: إذا كان المستخدم مربوطاً بعميل معين، يتم فلترة العقود لهذا العميل فقط
 export async function getContracts(linkedCustomerId?: string | null) {
@@ -522,7 +585,7 @@ export async function getContracts(linkedCustomerId?: string | null) {
   try {
     let query = supabase
       .from('contract_summary' as any)
-      .select('*')
+      .select(CONTRACT_SUMMARY_LIST_COLUMNS)
       .order('Contract_Number', { ascending: false });
 
     // فلترة حسب العميل المربوط
@@ -539,7 +602,7 @@ export async function getContracts(linkedCustomerId?: string | null) {
       // Fallback to Contract table
       let fallbackQuery = supabase
         .from('Contract')
-        .select('*')
+        .select(CONTRACT_LIST_COLUMNS)
         .order('Contract_Number', { ascending: false });
 
       if (linkedCustomerId) {

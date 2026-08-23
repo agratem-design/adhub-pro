@@ -1094,13 +1094,14 @@ export default function InteractiveMap({ billboards, onImageView, selectedBillbo
         >
           {/* Close button */}
           <button
-            className="absolute top-6 right-6 z-10 h-14 w-14 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition-all duration-200 border border-white/20"
+            className="absolute top-6 right-6 z-10 h-14 w-14 rounded-full bg-red-600 hover:bg-red-700 active:bg-red-800 text-white flex items-center justify-center transition-all duration-200 shadow-2xl border-2 border-white/30 hover:scale-110 cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
               setZoomedImage(null);
             }}
+            aria-label="إغلاق"
           >
-            <X className="h-7 w-7" />
+            <X className="h-7 w-7" strokeWidth={2.5} />
           </button>
           
           {/* Hint text */}

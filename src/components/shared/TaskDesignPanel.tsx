@@ -111,9 +111,10 @@ export const TaskDesignPanel: React.FC<TaskDesignPanelProps> = ({ urls, accent, 
         >
           <button
             onClick={() => setLightboxOpen(false)}
-            className="absolute top-4 right-4 z-10 p-3 bg-white/10 hover:bg-white/20 rounded-full transition-all border border-white/20"
+            className="absolute top-4 right-4 z-50 h-11 w-11 bg-red-600 hover:bg-red-700 active:bg-red-800 rounded-full flex items-center justify-center text-white shadow-2xl border-2 border-white/30 transition-all hover:scale-110 cursor-pointer"
+            aria-label="إغلاق"
           >
-            <X className="w-6 h-6 text-white" />
+            <X className="w-6 h-6" strokeWidth={2.5} />
           </button>
           {urls.length > 1 && (
             <>

@@ -1,5 +1,6 @@
 // @ts-nocheck
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -13,7 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/sonner';
-import { Plus, Eye, Edit, Trash2, Calendar, User, DollarSign, Search, Filter, Building, AlertCircle, Clock, CheckCircle, Printer, RefreshCcw, Hammer, Wrench, Percent, PaintBucket, FileText, Send, FileSpreadsheet, LayoutGrid, List, SlidersHorizontal, Hash, SplitSquareVertical, Download, X, Loader2, CheckSquare, Square, Ruler, ChevronLeft, ChevronRight, AlertTriangle, Shield, ShieldCheck } from 'lucide-react';
+import { Plus, Eye, Edit, Trash2, Calendar, User, DollarSign, Search, Filter, Building, AlertCircle, Clock, CheckCircle, Printer, RefreshCcw, Hammer, Wrench, Percent, PaintBucket, FileText, Send, FileSpreadsheet, LayoutGrid, List, SlidersHorizontal, Hash, SplitSquareVertical, Download, X, Loader2, CheckSquare, Square, Ruler, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Shield, ShieldCheck } from 'lucide-react';
 import { SendContractDialog } from '@/components/contracts/SendContractDialog';
 import { AddPaymentDialog } from '@/components/contracts/AddPaymentDialog';
 import { BillboardBulkPrintDialog } from '@/components/billboards/BillboardBulkPrintDialog';
@@ -66,9 +67,39 @@ export default function Contracts() {
   const linkedCustomerId = user?.linkedCustomerId || null;
   // المستخدم المربوط بعميل لا يمكنه إنشاء أو حذف العقود
   const canCreateOrDelete = canEditContracts && !linkedCustomerId;
-  const [contracts, setContracts] = useState<Contract[]>([]);
-  const [availableBillboards, setAvailableBillboards] = useState<Billboard[]>([]);
-  const [loading, setLoading] = useState(true);
+  const contractsQueryKey = useMemo(
+    () => ['contracts-page', linkedCustomerId || 'all'] as const,
+    [linkedCustomerId]
+  );
+  const {
+    data: contractsPageData,
+    isLoading: loading,
+    error: contractsLoadError,
+    refetch: refetchContractsPage,
+  } = useQuery({
+    queryKey: contractsQueryKey,
+    queryFn: async () => {
+      const [contractsData, billboardsData] = await Promise.all([
+        getContracts(linkedCustomerId),
+        getAvailableBillboards(),
+      ]);
+      return {
+        contracts: contractsData as Contract[],
+        availableBillboards: (billboardsData || []) as Billboard[],
+      };
+    },
+  });
+  const contracts = useMemo(
+    () => contractsPageData?.contracts || [],
+    [contractsPageData?.contracts]
+  );
+  const availableBillboards = useMemo(
+    () => contractsPageData?.availableBillboards || [],
+    [contractsPageData?.availableBillboards]
+  );
+  const loadData = useCallback(async () => {
+    await refetchContractsPage();
+  }, [refetchContractsPage]);
   const [createOpen, setCreateOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
   const [pdfOpen, setPdfOpen] = useState(false);
@@ -84,6 +115,7 @@ export default function Contracts() {
   const [showUnpaid, setShowUnpaid] = usePersistedState<boolean>('contracts.showUnpaid', false);
   const [viewMode, setViewMode] = usePersistedState<'cards' | 'table'>('contracts.viewMode', 'cards');
   const [statsOpen, setStatsOpen] = useState(true);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [showYearlyCode, setShowYearlyCode] = useState(true);
   const [separateExpired, setSeparateExpired] = useState(true);
 
@@ -148,24 +180,13 @@ export default function Contracts() {
   const [bbSearch, setBbSearch] = useState('');
   const [editBbSearch, setEditBbSearch] = useState('');
 
-  const loadData = async () => {
-    try {
-      const [contractsData, billboardsData] = await Promise.all([
-        getContracts(linkedCustomerId),
-        getAvailableBillboards()
-      ]);
-      setContracts(contractsData as Contract[]);
-      setAvailableBillboards(billboardsData || []);
-    } catch (error) {
-      console.error('خطأ في تحميل البيانات:', error);
-      toast.error('فشل في تحميل البيانات');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    if (!contractsLoadError) return;
+    console.error('خطأ في تحميل البيانات:', contractsLoadError);
+    toast.error('فشل في تحميل البيانات');
+  }, [contractsLoadError]);
 
   useEffect(() => {
-    loadData();
     // جلب العقود المتأخرة في الخلفية دون تعطيل ظهور العقود الرئيسي
     const timer = setTimeout(async () => {
       try {
@@ -1259,17 +1280,27 @@ export default function Contracts() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted">جاري تحميل العقود...</p>
+      <div className="min-h-full space-y-6 p-3 sm:p-4 md:p-6" dir="rtl">
+        <div className="h-32 rounded-2xl border border-border/60 bg-card/70 motion-safe:animate-pulse" />
+        <div className="h-24 rounded-2xl border border-border/60 bg-card/70 motion-safe:animate-pulse" />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={index} className="overflow-hidden rounded-2xl border border-border/60 bg-card/70">
+              <div className="h-40 bg-muted/60 motion-safe:animate-pulse" />
+              <div className="space-y-3 p-4">
+                <div className="h-5 w-2/3 rounded bg-muted motion-safe:animate-pulse" />
+                <div className="h-10 rounded-xl bg-muted/70 motion-safe:animate-pulse" />
+                <div className="h-24 rounded-xl bg-muted/60 motion-safe:animate-pulse" />
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6 p-2.5 sm:p-4 md:p-6" dir="rtl">
+    <div className="min-h-full space-y-4 bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.08),transparent_32rem)] p-3 sm:space-y-6 sm:p-4 md:p-6" dir="rtl">
       <PageHero
         icon={<FileText className="h-5 w-5 sm:h-6 sm:w-6" />}
         title="إدارة العقود"

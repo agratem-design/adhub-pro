@@ -382,8 +382,12 @@ export default function FieldPhotoGallery() {
       {/* Lightbox with navigation */}
       {lightboxUrl && lightboxIndex !== null && (
         <div className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center" onClick={() => setLightboxIndex(null)}>
-          <button onClick={() => setLightboxIndex(null)} className="absolute top-4 right-4 z-10 text-white/80 hover:text-white p-2">
-            <X className="w-6 h-6" />
+          <button 
+            onClick={() => setLightboxIndex(null)} 
+            className="absolute top-4 right-4 z-50 h-11 w-11 rounded-full bg-red-600 hover:bg-red-700 active:bg-red-800 text-white flex items-center justify-center shadow-2xl border-2 border-white/30 transition-all hover:scale-110 cursor-pointer"
+            aria-label="إغلاق"
+          >
+            <X className="w-6 h-6" strokeWidth={2.5} />
           </button>
           
           {/* Navigation arrows */}

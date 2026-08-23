@@ -1,14 +1,13 @@
 import { useState, useEffect } from 'react';
 import { formatAmount } from '@/lib/formatUtils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
-import { FileText, CreditCard, Calendar, Clock, CheckCircle2, AlertCircle, ImageIcon, ZoomIn, Receipt, DollarSign, Coins, Wallet } from 'lucide-react';
+import { FileText, CreditCard, Calendar, Clock, CheckCircle2, AlertCircle, ImageIcon, ZoomIn, Receipt, DollarSign, Coins, Wallet, Megaphone, LayoutGrid, Plus, Pencil } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
+import { useNavigate } from 'react-router-dom';
 
 interface ContractSectionProps {
   contracts: ContractRow[];
@@ -108,6 +107,7 @@ export function ContractSection({
   onDistributePayment,
   onScrollToPayment
 }: ContractSectionProps) {
+  const navigate = useNavigate();
   const [internalSelectedContracts, setInternalSelectedContracts] = useState<Set<number>>(new Set());
   const [contractDesigns, setContractDesigns] = useState<Record<number, string>>({});
   const [contractColors, setContractColors] = useState<Record<number, { rgb: string; hsl: string }>>({});
@@ -368,15 +368,26 @@ export function ContractSection({
             </div>
 
             {selectedContracts.size > 0 && (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                {onBulkPayment && (
+                  <Button
+                    onClick={handleBulkPayment}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90 shadow-md cursor-pointer transition-all duration-200 active:scale-95"
+                    size="sm"
+                  >
+                    <Receipt className="h-4 w-4 ml-2" />
+                    تحصيل المحدد ({selectedContracts.size})
+                  </Button>
+                )}
                 {onDistributePayment && (
                   <Button 
                     onClick={onDistributePayment}
-                    className="bg-blue-500 hover:bg-blue-600 text-white shadow-md cursor-pointer"
+                    variant="outline"
+                    className="border-blue-500/40 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 hover:text-blue-200 shadow-md cursor-pointer transition-all duration-200 active:scale-95"
                     size="sm"
                   >
                     <CreditCard className="h-4 w-4 ml-2" />
-                    دفعة موزعة ({selectedContracts.size} عقد)
+                    توزيع دفعة
                   </Button>
                 )}
               </div>
@@ -427,255 +438,214 @@ export function ContractSection({
             </div>
           )}
           {contracts.length ? (
-            <div className="overflow-x-auto border border-white/10 rounded-xl bg-slate-900/40">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50 hover:bg-muted/50">
-                    <TableHead className="text-right font-bold w-12">
-                      <Checkbox 
-                        checked={selectedContracts.size === contracts.length && contracts.length > 0}
-                        onCheckedChange={toggleAll}
-                      />
-                    </TableHead>
-                    <TableHead className="text-right font-bold w-44">التصميم</TableHead>
-                    <TableHead className="text-right font-bold">رقم العقد</TableHead>
-                    <TableHead className="text-right font-bold">نوع الإعلان</TableHead>
-                    <TableHead className="text-right font-bold text-center">اللوحات</TableHead>
-                    <TableHead className="text-right font-bold">الفترة</TableHead>
-                    <TableHead className="text-right font-bold">الحالة</TableHead>
-                    <TableHead className="text-right font-bold">القيمة</TableHead>
-                    <TableHead className="text-right font-bold">المدفوع</TableHead>
-                    <TableHead className="text-right font-bold">الدفعات</TableHead>
-                    <TableHead className="text-right font-bold">المتبقي</TableHead>
-                    <TableHead className="text-right font-bold">نسبة السداد</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {contracts.map(contract => {
-                    // جلب الدفعات المرتبطة بهذا العقد
-                    const contractPaymentsList = payments.filter(p => {
-                      const paymentContractNum = String(p.contract_number || '');
-                      const contractNum = String(contract.Contract_Number || '');
-                      const isMatch = paymentContractNum === contractNum;
-                      const isValidPaymentType = p.entry_type === 'receipt' || p.entry_type === 'account_payment' || p.entry_type === 'payment';
-                      return isMatch && isValidPaymentType;
-                    });
-                    
-                    const contractPaymentsTotal = contractPaymentsList.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-                    
-                    const contractTotal = Number((contract as any)['Total'] ?? contract['Total Rent'] ?? 0) || 0;
-                    const contractRemaining = contractTotal - contractPaymentsTotal;
-                    const hasSurplusContract = contractRemaining < 0;
-                    const isPaid = contractRemaining <= 0 && contractTotal > 0;
-                    const paymentPercentage = contractTotal > 0 ? Math.round((contractPaymentsTotal / contractTotal) * 100) : 0;
-                    
-                    const today = new Date();
-                    const endDate = contract['End Date'] ? new Date(contract['End Date']) : null;
-                    const startDate = contract['Contract Date'] ? new Date(contract['Contract Date']) : null;
-                    const isActive = endDate && today <= endDate;
-                    
-                    const contractNumber = Number(contract.Contract_Number);
-                    const designImage = contractDesigns[contractNumber];
-                    const colorData = contractColors[contractNumber];
-                    const hasColor = !!colorData;
-                    
-                    // ستايل الصف مثل كروت العقود - خلفية داكنة قوية
-                    const rowStyle = hasColor ? {
-                      backgroundColor: `hsl(${colorData.hsl})`,
-                    } : {};
-                    
-                    return (
-                      <TableRow 
-                        key={String(contract.Contract_Number)} 
-                        className={`group transition-all duration-300 ${
-                          hasColor ? 'text-white' : ''
-                        } ${
-                          selectedContracts.has(contractNumber) && !hasColor
-                            ? 'bg-primary/5' 
-                            : !hasColor ? 'hover:bg-accent/50' : 'hover:opacity-90'
-                        }`}
-                        style={rowStyle}
-                      >
-                        <TableCell className="py-4">
-                          <Checkbox 
-                            checked={selectedContracts.has(contractNumber)}
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-950/35 px-4 py-3">
+                <label htmlFor="select-all-contracts" className="flex min-h-10 cursor-pointer items-center gap-3 text-sm font-bold text-white/85">
+                  <Checkbox
+                    id="select-all-contracts"
+                    checked={selectedContracts.size === contracts.length && contracts.length > 0}
+                    onCheckedChange={toggleAll}
+                    className="cursor-pointer"
+                  />
+                  تحديد كل العقود
+                </label>
+                <span className="text-xs text-white/55">اختر عقداً أو أكثر للتحصيل أو لتوزيع دفعة</span>
+              </div>
+              {contracts.map(contract => {
+                const contractPaymentsList = payments.filter(payment => {
+                  const paymentContractNum = String(payment.contract_number || '');
+                  const contractNum = String(contract.Contract_Number || '');
+                  const validType = payment.entry_type === 'receipt'
+                    || payment.entry_type === 'account_payment'
+                    || payment.entry_type === 'payment';
+                  return paymentContractNum === contractNum && validType;
+                });
+                const contractPaymentsTotal = contractPaymentsList.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+                const contractTotal = Number((contract as any)['Total'] ?? contract['Total Rent'] ?? 0) || 0;
+                const contractRemaining = contractTotal - contractPaymentsTotal;
+                const hasSurplusContract = contractRemaining < 0;
+                const isPaid = contractRemaining <= 0 && contractTotal > 0;
+                const paymentPercentage = contractTotal > 0
+                  ? Math.max(0, Math.min(100, Math.round((contractPaymentsTotal / contractTotal) * 100)))
+                  : 0;
+                const today = new Date();
+                const endDate = contract['End Date'] ? new Date(contract['End Date']) : null;
+                const startDate = contract['Contract Date'] ? new Date(contract['Contract Date']) : null;
+                const isActive = Boolean(endDate && today <= endDate);
+                const contractNumber = Number(contract.Contract_Number);
+                const designImage = contractDesigns[contractNumber];
+                const colorData = contractColors[contractNumber];
+                const isSelected = selectedContracts.has(contractNumber);
+                const cardStyle = colorData ? {
+                  background: `linear-gradient(105deg, rgba(${colorData.rgb}, 0.18) 0%, rgba(${colorData.rgb}, 0.05) 36%, hsl(var(--card)) 78%)`,
+                  borderColor: `rgba(${colorData.rgb}, 0.4)`,
+                } : undefined;
+
+                return (
+                  <article
+                    key={String(contract.Contract_Number)}
+                    className={`relative overflow-hidden rounded-2xl border bg-card/90 shadow-sm transition-all duration-200 motion-safe:hover:-translate-y-0.5 hover:shadow-lg ${
+                      isSelected ? 'border-primary/70 ring-2 ring-primary/25' : 'border-border/55 hover:border-primary/35'
+                    }`}
+                    style={cardStyle}
+                  >
+                    <div className="grid min-h-[188px] grid-cols-1 lg:grid-cols-[184px_minmax(230px,0.9fr)_minmax(390px,1.35fr)]">
+                      <div className="relative min-h-40 overflow-hidden border-b border-border/30 bg-slate-950/45 lg:min-h-full lg:border-b-0 lg:border-l">
+                        <div className="absolute right-3 top-3 z-20 rounded-lg border border-white/15 bg-black/65 p-2 shadow-lg backdrop-blur-md">
+                          <Checkbox
+                            checked={isSelected}
                             onCheckedChange={() => toggleContract(contractNumber)}
+                            className="cursor-pointer border-white/70 data-[state=checked]:border-primary"
+                            aria-label={`تحديد العقد رقم ${contractNumber}`}
                           />
-                        </TableCell>
-                        <TableCell className="py-3 pr-3">
-                          {designImage ? (
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <div 
-                                  className="relative cursor-pointer group/img"
-                                  style={hasColor ? { 
-                                    boxShadow: `0 4px 20px rgba(${colorData.rgb}, 0.5)`,
-                                  } : {}}
-                                >
-                                  <img 
-                                    src={designImage} 
-                                    alt="التصميم" 
-                                    className="w-40 h-28 object-cover rounded-xl border-2 shadow-xl transition-all duration-300 group-hover/img:scale-105 group-hover/img:shadow-2xl"
-                                    style={hasColor ? { borderColor: `rgba(${colorData.rgb}, 0.8)` } : { borderColor: 'hsl(var(--border))' }}
-                                    onLoad={() => {
-                                      if (!contractColors[contractNumber] && designImage) {
-                                        extractColorFromImage(designImage).then(color => {
-                                          if (color) {
-                                            setContractColors(prev => ({ ...prev, [contractNumber]: color }));
-                                          }
-                                        });
-                                      }
-                                    }}
-                                  />
-                                  <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/20 rounded-xl transition-all flex items-center justify-center opacity-0 group-hover/img:opacity-100">
-                                    <ZoomIn className="h-6 w-6 text-white drop-shadow-lg" />
-                                  </div>
-                                </div>
-                              </DialogTrigger>
-                              <DialogContent className="max-w-3xl p-2">
-                                <img 
-                                  src={designImage} 
-                                  alt="التصميم" 
-                                  className="w-full h-auto rounded-lg"
+                        </div>
+                        {designImage ? (
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <button
+                                type="button"
+                                className="group/design relative h-full min-h-40 w-full cursor-pointer overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset lg:min-h-[188px]"
+                                aria-label={`تكبير تصميم العقد رقم ${contractNumber}`}
+                              >
+                                <img
+                                  src={designImage}
+                                  alt={`تصميم العقد رقم ${contractNumber}`}
+                                  className="h-full min-h-40 w-full object-cover transition-transform duration-200 motion-safe:group-hover/design:scale-105 lg:min-h-[188px]"
+                                  onLoad={() => {
+                                    if (!contractColors[contractNumber]) {
+                                      extractColorFromImage(designImage).then(color => {
+                                        if (color) setContractColors(previous => ({ ...previous, [contractNumber]: color }));
+                                      });
+                                    }
+                                  }}
                                 />
-                              </DialogContent>
-                            </Dialog>
-                          ) : (
-                            <div className="w-40 h-28 rounded-xl bg-muted flex items-center justify-center border-2 border-dashed border-muted-foreground/30">
-                              <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
-                            </div>
-                          )}
-                        </TableCell>
-                        <TableCell className={`font-bold py-4 ${hasColor ? 'text-white' : 'text-primary'}`}>
-                          #{String(contract.Contract_Number || '')}
-                        </TableCell>
-                        <TableCell className="py-4">
-                          <Badge variant="outline" className={`font-medium ${hasColor ? 'bg-white/20 text-white border-white/30' : ''}`}>
-                            {contract['Ad Type'] || '—'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-center py-4">
-                          <div className={`inline-flex items-center justify-center w-8 h-8 rounded-lg font-bold text-sm ${hasColor ? 'bg-white/20 text-white' : 'bg-primary/10 text-primary'}`}>
-                            {contract.billboards_count || 0}
+                                <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition-all duration-200 group-hover/design:bg-black/35 group-hover/design:opacity-100">
+                                  <ZoomIn className="h-6 w-6" />
+                                </span>
+                              </button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-3xl p-2">
+                              <img src={designImage} alt={`تصميم العقد رقم ${contractNumber}`} className="h-auto w-full rounded-lg" />
+                            </DialogContent>
+                          </Dialog>
+                        ) : (
+                          <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 text-muted-foreground lg:min-h-[188px]">
+                            <ImageIcon className="h-8 w-8 opacity-45" />
+                            <span className="text-xs font-medium">لا يوجد تصميم</span>
                           </div>
-                        </TableCell>
-                        <TableCell className="py-4">
-                          <div className="flex flex-col gap-0.5 text-sm">
-                            <div className={`flex items-center gap-1.5 ${hasColor ? 'text-white/80' : 'text-muted-foreground'}`}>
-                              <Calendar className="h-3 w-3" />
-                              <span>{startDate ? startDate.toLocaleDateString('ar-LY') : '—'}</span>
-                            </div>
-                            <div className={`flex items-center gap-1.5 ${hasColor ? 'text-white/80' : 'text-muted-foreground'}`}>
-                              <Clock className="h-3 w-3" />
-                              <span>{endDate ? endDate.toLocaleDateString('ar-LY') : '—'}</span>
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell className="py-4">
-                          <Badge className={`text-xs ${
-                            hasColor 
-                              ? isActive 
-                                ? 'bg-white/20 text-white border-white/30' 
-                                : 'bg-white/10 text-white/70 border-white/20'
-                              : isActive 
-                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' 
-                                : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
-                          }`} variant="outline">
-                            {isActive ? (
-                              <><CheckCircle2 className="h-3 w-3 ml-1" />ساري</>
-                            ) : (
-                              <><AlertCircle className="h-3 w-3 ml-1" />منتهي</>
-                            )}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="py-4">
-                          <span className={`font-bold ${hasColor ? 'text-white' : 'text-foreground'}`}>{formatAmount(contractTotal)}</span>
-                          <span className={`text-xs mr-1 ${hasColor ? 'text-white/70' : 'text-muted-foreground'}`}>د.ل</span>
-                        </TableCell>
-                        <TableCell className="py-4">
-                          <span className={`font-semibold ${hasColor ? 'text-emerald-300' : 'text-emerald-600 dark:text-emerald-400'}`}>{formatAmount(contractPaymentsTotal)}</span>
-                          <span className={`text-xs mr-1 ${hasColor ? 'text-white/70' : 'text-muted-foreground'}`}>د.ل</span>
-                        </TableCell>
-                        <TableCell className="py-4">
-                          {contractPaymentsList.length > 0 ? (
-                            <div className="flex flex-wrap gap-1 max-w-[150px]">
-                              {contractPaymentsList.map((payment, idx) => {
-                                // حساب رقم الإيصال بناءً على ترتيبه في قائمة الدفعات الكاملة
-                                const paymentIndex = payments.findIndex(p => p.id === payment.id);
-                                const receiptNumber = paymentIndex + 1;
-                                const isDistributed = !!payment.distributed_payment_id;
-                                
-                                return (
-                                  <button
-                                    key={payment.id}
-                                    onClick={() => onScrollToPayment?.(payment.id)}
-                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-all hover:scale-105 cursor-pointer ${
-                                      hasColor
-                                        ? 'bg-white/20 text-white hover:bg-white/30'
-                                        : isDistributed
-                                          ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-900/50'
-                                          : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50'
-                                    }`}
-                                    title={`${isDistributed ? 'دفعة موزعة' : 'إيصال'} رقم ${receiptNumber} - ${formatAmount(Number(payment.amount))} د.ل`}
-                                  >
-                                    <Receipt className="h-3 w-3" />
-                                    <span>#{receiptNumber}</span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <span className={`text-xs ${hasColor ? 'text-white/50' : 'text-muted-foreground'}`}>-</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="py-4">
-                          <div className="flex flex-col">
-                            <span className={`font-bold ${
-                              hasColor 
-                                ? hasSurplusContract ? 'text-emerald-300' : contractRemaining > 0 ? 'text-rose-300' : 'text-emerald-300'
-                                : hasSurplusContract ? 'text-emerald-600 dark:text-emerald-400' : contractRemaining > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
-                            }`}>
-                              {hasSurplusContract ? formatAmount(Math.abs(contractRemaining)) : formatAmount(contractRemaining)}
-                              <span className={`text-xs mr-1 ${hasColor ? 'text-white/70' : 'text-muted-foreground'}`}>د.ل</span>
+                        )}
+                      </div>
+                      <div className="flex flex-col justify-between gap-4 border-b border-border/30 p-4 text-right lg:border-b-0 lg:border-l">
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-lg border border-primary/30 bg-primary/10 px-2.5 py-1 font-manrope text-sm font-black text-primary">
+                              عقد #{String(contract.Contract_Number || '')}
                             </span>
-                            {hasSurplusContract && (
-                              <span className={`text-xs ${hasColor ? 'text-emerald-300' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                                فائض
-                              </span>
+                            <Badge variant="outline" className={`gap-1.5 text-xs ${isActive ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : 'border-rose-500/30 bg-rose-500/10 text-rose-400'}`}>
+                              {isActive ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+                              {isActive ? 'ساري' : 'منتهي'}
+                            </Badge>
+                          </div>
+                          <div>
+                            <span className="mb-1 flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+                              <Megaphone className="h-3.5 w-3.5 text-primary" />
+                              نوع الإعلان
+                            </span>
+                            <p className="line-clamp-2 text-sm font-extrabold leading-6 text-foreground" title={contract['Ad Type'] || ''}>
+                              {contract['Ad Type'] || 'غير محدد'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="rounded-xl border border-border/40 bg-background/35 p-2.5">
+                            <span className="flex items-center gap-1.5 text-muted-foreground"><Calendar className="h-3.5 w-3.5 text-primary/80" />بداية العقد</span>
+                            <strong className="mt-1 block font-manrope text-foreground">{startDate ? startDate.toLocaleDateString('ar-LY') : '—'}</strong>
+                          </div>
+                          <div className="rounded-xl border border-border/40 bg-background/35 p-2.5">
+                            <span className="flex items-center gap-1.5 text-muted-foreground"><Clock className="h-3.5 w-3.5 text-primary/80" />نهاية العقد</span>
+                            <strong className="mt-1 block font-manrope text-foreground">{endDate ? endDate.toLocaleDateString('ar-LY') : '—'}</strong>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-col justify-between gap-4 p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-[11px] font-bold text-muted-foreground">الملخص المالي</p>
+                            <p className="mt-0.5 text-sm font-black text-foreground">{isPaid ? 'تم تحصيل قيمة العقد' : 'متابعة تحصيل العقد'}</p>
+                          </div>
+                          <span className="inline-flex items-center gap-1.5 rounded-lg border border-primary/25 bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary">
+                            <LayoutGrid className="h-3.5 w-3.5" />{contract.billboards_count || 0} لوحة
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                          <div className="rounded-xl border border-border/40 bg-background/35 p-3">
+                            <span className="text-[11px] font-bold text-muted-foreground">قيمة العقد</span>
+                            <p className="mt-1 font-manrope text-base font-black text-foreground">{formatAmount(contractTotal)} <small className="font-tajawal text-[10px] font-medium text-muted-foreground">د.ل</small></p>
+                          </div>
+                          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+                            <span className="text-[11px] font-bold text-muted-foreground">المدفوع</span>
+                            <p className="mt-1 font-manrope text-base font-black text-emerald-400">{formatAmount(contractPaymentsTotal)} <small className="font-tajawal text-[10px] font-medium">د.ل</small></p>
+                          </div>
+                          <div className={`rounded-xl border p-3 ${hasSurplusContract || isPaid ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-rose-500/20 bg-rose-500/5'}`}>
+                            <span className="text-[11px] font-bold text-muted-foreground">{hasSurplusContract ? 'فائض الدفع' : 'المتبقي'}</span>
+                            <p className={`mt-1 font-manrope text-base font-black ${hasSurplusContract || isPaid ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {formatAmount(hasSurplusContract ? Math.abs(contractRemaining) : contractRemaining)} <small className="font-tajawal text-[10px] font-medium">د.ل</small>
+                            </p>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between text-xs font-bold">
+                            <span className="text-muted-foreground">نسبة السداد</span>
+                            <span className={isPaid ? 'text-emerald-400' : paymentPercentage >= 50 ? 'text-amber-400' : 'text-rose-400'}>{paymentPercentage}%</span>
+                          </div>
+                          <div className="h-2 overflow-hidden rounded-full bg-muted/35">
+                            <div className={`h-full rounded-full transition-all duration-500 ${isPaid ? 'bg-emerald-500' : paymentPercentage >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{ width: `${paymentPercentage}%` }} />
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/30 pt-3">
+                          <div className="flex min-h-10 flex-wrap items-center gap-1.5">
+                            {contractPaymentsList.length > 0 ? contractPaymentsList.map(payment => {
+                              const receiptNumber = payments.findIndex(item => item.id === payment.id) + 1;
+                              const isDistributed = Boolean(payment.distributed_payment_id);
+                              return (
+                                <button
+                                  type="button"
+                                  key={payment.id}
+                                  onClick={() => onScrollToPayment?.(payment.id)}
+                                  disabled={!onScrollToPayment}
+                                  className={`inline-flex min-h-8 items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-bold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-default ${isDistributed ? 'border-blue-500/25 bg-blue-500/10 text-blue-300 enabled:cursor-pointer enabled:hover:bg-blue-500/20' : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300 enabled:cursor-pointer enabled:hover:bg-emerald-500/20'}`}
+                                  title={`${isDistributed ? 'دفعة موزعة' : 'إيصال'} رقم ${receiptNumber} - ${formatAmount(Number(payment.amount))} د.ل`}
+                                >
+                                  <Receipt className="h-3.5 w-3.5" />#{receiptNumber}
+                                </button>
+                              );
+                            }) : <span className="text-xs text-muted-foreground">لا توجد دفعات مرتبطة بالعقد</span>}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => navigate(`/admin/contracts/edit?contract=${encodeURIComponent(String(contractNumber))}`)}
+                              className="h-10 cursor-pointer gap-2 border-border/70 bg-background/45 text-foreground transition-all duration-200 hover:border-primary/45 hover:bg-primary/10 hover:text-primary active:scale-95 motion-reduce:transform-none motion-reduce:transition-none"
+                              aria-label={`تعديل العقد رقم ${contractNumber}`}
+                              title={`تعديل العقد رقم ${contractNumber}`}
+                            >
+                              <Pencil className="h-4 w-4" />
+                              تعديل العقد
+                            </Button>
+                            {onAddPayment && !isPaid && (
+                              <Button type="button" variant="outline" size="sm" onClick={() => onAddPayment(contractNumber)} className="h-10 cursor-pointer gap-2 border-primary/30 bg-primary/10 text-primary transition-all duration-200 hover:bg-primary/20 hover:text-primary active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
+                                <Plus className="h-4 w-4" />إضافة دفعة
+                              </Button>
                             )}
                           </div>
-                        </TableCell>
-                        <TableCell className="py-4 min-w-[120px]">
-                          <div className="flex flex-col gap-1.5">
-                            <div className="flex items-center justify-between">
-                              <span className={`text-xs font-bold ${
-                                hasColor 
-                                  ? isPaid ? 'text-emerald-300' : paymentPercentage >= 50 ? 'text-amber-300' : 'text-rose-300'
-                                  : isPaid ? 'text-emerald-600' : paymentPercentage >= 50 ? 'text-amber-600' : 'text-rose-600'
-                              }`}>
-                                {paymentPercentage}%
-                              </span>
-                              {isPaid && <CheckCircle2 className={`h-4 w-4 ${hasColor ? 'text-emerald-300' : 'text-emerald-500'}`} />}
-                            </div>
-                            <div className={`h-2 w-full rounded-full overflow-hidden ${hasColor ? 'bg-white/20' : 'bg-slate-200 dark:bg-slate-700'}`}>
-                              <div 
-                                className={`h-full rounded-full transition-all duration-500 ${
-                                  hasColor 
-                                    ? 'bg-white/80'
-                                    : isPaid ? 'bg-gradient-to-r from-emerald-500 to-emerald-400' :
-                                      paymentPercentage >= 50 ? 'bg-gradient-to-r from-amber-500 to-amber-400' :
-                                      'bg-gradient-to-r from-rose-500 to-rose-400'
-                                }`}
-                                style={{ width: `${Math.min(100, paymentPercentage)}%` }}
-                              />
-                            </div>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">

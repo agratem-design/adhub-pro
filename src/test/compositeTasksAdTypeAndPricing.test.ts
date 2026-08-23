@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeContractId } from '@/components/composite-tasks/CompositeTasksListEnhanced';
+import {
+  filterTaskContractIdsByCustomer,
+  normalizeContractId,
+  resolveTaskContractAdTypes,
+} from '@/lib/compositeTaskContractIdentity';
 
 describe('Composite Tasks - normalizeContractId and Ad Type Logic', () => {
   describe('normalizeContractId', () => {
@@ -26,7 +30,69 @@ describe('Composite Tasks - normalizeContractId and Ad Type Logic', () => {
     });
   });
 
+  describe('Contract ownership filtering', () => {
+    it('removes unrelated contract numbers while retaining legitimate contracts for the same customer', () => {
+      const contractIds = filterTaskContractIdsByCustomer({
+        candidateContractIds: [1254, 1255, 1279, 1115, 1296, 1261, 1100],
+        directContractId: 1254,
+        taskCustomerId: 'customer-ali',
+        taskCustomerName: 'علي عمار',
+        contracts: [
+          { contractNumber: 1254, customerId: 'customer-ali', customerName: 'علي عمار' },
+          { contractNumber: 1255, customerId: 'customer-ali', customerName: 'علي عمار' },
+          { contractNumber: 1279, customerId: 'customer-other-1', customerName: 'عميل آخر' },
+          { contractNumber: 1115, customerId: 'customer-other-2', customerName: 'عميل مختلف' },
+          { contractNumber: 1296, customerId: 'customer-other-3', customerName: 'شركة أخرى' },
+          { contractNumber: 1261, customerId: 'customer-other-4', customerName: 'زبون آخر' },
+          { contractNumber: 1100, customerId: 'customer-other-5', customerName: 'عميل خامس' },
+        ],
+      });
+
+      expect(contractIds).toEqual([1254, 1255]);
+    });
+  });
+
   describe('Ad Type Deduplication and Resolution', () => {
+    it('does not leak the ad type of another customer through a shared billboard', () => {
+      const adTypes = resolveTaskContractAdTypes({
+        candidateContractIds: [1228, 1185],
+        directContractId: 1228,
+        taskCustomerId: 'customer-ali',
+        taskCustomerName: 'علي عمار',
+        contracts: [
+          {
+            contractNumber: 1228,
+            adType: 'أسعد لإستيراد الشاحنات والمعدات الثقيلة',
+            customerId: 'customer-ali',
+            customerName: 'علي عمار',
+          },
+          {
+            contractNumber: 1185,
+            adType: 'جوتن',
+            customerId: 'customer-mohamed',
+            customerName: 'محمد علي الحولة',
+          },
+        ],
+      });
+
+      expect(adTypes).toEqual(['أسعد لإستيراد الشاحنات والمعدات الثقيلة']);
+      expect(adTypes).not.toContain('جوتن');
+    });
+
+    it('falls back to normalized customer names for legacy contracts without customer ids', () => {
+      const adTypes = resolveTaskContractAdTypes({
+        candidateContractIds: [1228, 1185],
+        directContractId: 1228,
+        taskCustomerName: 'علي  عمار',
+        contracts: [
+          { contractNumber: 1228, adType: 'أسعد', customerName: 'علي عمار' },
+          { contractNumber: 1185, adType: 'جوتن', customerName: 'محمد علي الحولة' },
+        ],
+      });
+
+      expect(adTypes).toEqual(['أسعد']);
+    });
+
     it('should deduplicate identical ad types across multiple contracts', () => {
       const contractAdTypes = ['إعلان تجاري', 'إعلان تجاري'];
       const unique = Array.from(new Set(contractAdTypes.filter(Boolean)));

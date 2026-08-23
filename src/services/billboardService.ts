@@ -11,6 +11,46 @@ const PLACEHOLDER_IMAGES = [
   'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><rect fill="%230ea5e9" width="400" height="300"/><text x="200" y="150" font-size="16" fill="white" text-anchor="middle" dominant-baseline="middle">Billboard Coastal</text></svg>'
 ];
 
+// Keep the normalized billboard-list payload compact. Large or unrelated
+// columns are intentionally excluded because this service uses only the fields
+// below.
+const BILLBOARD_LIST_COLUMNS = `
+  ID,
+  Billboard_Name,
+  City,
+  District,
+  Municipality,
+  Nearest_Landmark,
+  Size,
+  Order_Size,
+  size_id,
+  Status,
+  Price,
+  Level,
+  Category_Level,
+  Image_URL,
+  GPS_Coordinates,
+  GPS_Link,
+  Faces_Count,
+  Contract_Number,
+  Customer_Name,
+  Rent_Start_Date,
+  Rent_End_Date,
+  Days_Count,
+  Ad_Type,
+  friend_company_id,
+  own_company_id,
+  is_partnership,
+  partner_companies,
+  capital,
+  capital_remaining,
+  is_visible_in_available,
+  has_cutout,
+  billboard_type,
+  design_face_a,
+  design_face_b
+`;
+
 // تطبيع أحجام اللوحات لتكون متوافقة مع مفاتيح التسعير
 const normalizeBillboardSize = (size: string): string => {
   if (!size) return '4x12';
@@ -134,6 +174,7 @@ function processBillboardFromSupabase(row: any, index: number): Billboard {
   const installationPrice = Math.round(price * 0.2);
 
   return {
+    ...row,
     // Legacy fields required by Billboard interface
     ID: Number(id),
     Billboard_Name: String(name),
@@ -197,7 +238,7 @@ export async function loadBillboards(): Promise<Billboard[]> {
   try {
     const { data: rows, error: dbError } = await supabase
       .from('billboards')
-      .select('*')
+      .select(BILLBOARD_LIST_COLUMNS)
       .order('ID', { ascending: true });
 
     if (!dbError && Array.isArray(rows) && rows.length > 0) {

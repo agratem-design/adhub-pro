@@ -1,4 +1,5 @@
-import { ReactNode, useState } from 'react';
+import { ReactNode, useLayoutEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { MobileBottomNav } from './MobileBottomNav';
 import { FloatingAiChat } from '@/components/AiAssistant/FloatingAiChat';
@@ -17,6 +18,19 @@ interface AppShellProps {
  */
 export function AppShell({ children }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const location = useLocation();
+  const mainContentRef = useRef<HTMLElement>(null);
+  const scrollResetKey = location.pathname === '/admin/contracts/edit'
+    ? `${location.pathname}${location.search}`
+    : location.pathname;
+
+  useLayoutEffect(() => {
+    const mainContent = mainContentRef.current;
+    if (!mainContent) return;
+
+    mainContent.scrollTop = 0;
+    mainContent.scrollLeft = 0;
+  }, [scrollResetKey]);
 
   return (
     <div className="h-screen overflow-hidden bg-background flex flex-row relative" dir="rtl">
@@ -46,7 +60,7 @@ export function AppShell({ children }: AppShellProps) {
       <div className="flex-1 flex flex-col h-full min-w-0 relative z-10">
         <AppHeader onToggleSidebar={() => setSidebarOpen((v) => !v)} />
 
-        <main className="flex-1 overflow-y-auto pb-20 lg:pb-0">
+        <main ref={mainContentRef} className="flex-1 overflow-y-auto pb-20 lg:pb-0">
           {children}
         </main>
       </div>

@@ -511,9 +511,10 @@ export default function ImageGallery() {
               {/* Close */}
               <button
                 onClick={() => setLightbox(null)}
-                className="absolute top-4 left-4 h-8 w-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
+                className="absolute top-4 right-4 z-50 h-10 w-10 rounded-full bg-red-600 hover:bg-red-700 active:bg-red-800 text-white flex items-center justify-center shadow-2xl border-2 border-white/30 transition-all hover:scale-110 cursor-pointer"
+                aria-label="إغلاق"
               >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5" strokeWidth={2.5} />
               </button>
             </div>
           )}

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from '@/components/ui/sonner';
@@ -6,7 +6,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { loadBillboards } from '@/services/billboardService';
 import { smartArabicMatch } from '@/lib/arabicSearch';
 import { sortBillboardsStandardSync } from '@/lib/billboardSorter';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { normalizeSize } from '@/lib/utils';
 import { addBillboardsToContract, getContractWithBillboards, removeBillboardFromContract, updateContract } from '@/services/contractService';
 import { checkLinkedTasks, removeBillboardFromAllTasks, addBillboardToExistingTasks, type BillboardTaskLinks, type TaskTypeSelection } from '@/services/smartBillboardService';
@@ -61,10 +61,29 @@ const CURRENCIES = [
   { code: 'AED', name: 'درهم إماراتي', symbol: 'د.إ' },
 ];
 
+const CONTRACT_EDIT_BILLBOARDS_QUERY_KEY = ['contract-edit', 'billboards'] as const;
+const CONTRACT_EDIT_BILLBOARDS_STALE_TIME = 5 * 60 * 1000;
+
 export default function ContractEdit() {
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const { canEdit: canEditFn, isAdmin, user, isLoading: authLoading } = useAuth();
+
+  const getContractEditBillboards = useCallback(async (forceRefresh = false) => {
+    if (forceRefresh) {
+      await queryClient.invalidateQueries({
+        queryKey: CONTRACT_EDIT_BILLBOARDS_QUERY_KEY,
+        exact: true,
+      });
+    }
+
+    return queryClient.fetchQuery({
+      queryKey: CONTRACT_EDIT_BILLBOARDS_QUERY_KEY,
+      queryFn: loadBillboards,
+      staleTime: CONTRACT_EDIT_BILLBOARDS_STALE_TIME,
+    });
+  }, [queryClient]);
 
   // التحقق من تسجيل الدخول أولاً — إعادة توجيه لصفحة الدخول إذا لم يكن مُصادقاً
   useEffect(() => {
@@ -503,19 +522,27 @@ export default function ContractEdit() {
   // Load billboards - wait for auth to be ready
   useEffect(() => {
     if (authLoading || !user) return;
+    let cancelled = false;
+    setLoading(true);
+
     (async () => {
       try {
         const today = new Date().toISOString().split('T')[0];
         
-        // تحميل اللوحات والعقود النشطة بالتوازي
+        // تحميل اللوحات والعقود النشطة بالتوازي مع إعادة استخدام البيانات الحديثة
         const [data, activeContractsRes] = await Promise.all([
-          loadBillboards(),
-          supabase
-            .from('Contract')
-            .select('Contract_Number, billboard_ids, "End Date"')
-            .gte('End Date', today)
+          getContractEditBillboards(),
+          queryClient.fetchQuery({
+            queryKey: ['contract-edit', 'active-contracts', today],
+            staleTime: 60 * 1000,
+            queryFn: () => supabase
+              .from('Contract')
+              .select('Contract_Number, billboard_ids, "End Date"')
+              .gte('End Date', today),
+          }),
         ]);
 
+        if (cancelled) return;
         setBillboards(data);
 
         const occupied = new Map<number, string>();
@@ -543,13 +570,18 @@ export default function ContractEdit() {
         }
         setOccupiedBillboardIds(occupied);
       } catch (e: any) {
+        if (cancelled) return;
         console.error('[ContractEdit] ❌ خطأ في تحميل اللوحات:', e);
         toast.error(e?.message || 'فشل تحميل اللوحات');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [authLoading, user]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, getContractEditBillboards, location.search, queryClient, user]);
 
   // Load customers
   useEffect(() => {
@@ -1523,10 +1555,8 @@ export default function ContractEdit() {
           const ids = String(c.billboard_ids).split(',').map((s: string) => s.trim()).filter(Boolean);
           setSelected(ids);
         }
-        const { data: bbs } = await supabase.from('billboards').select('*').limit(3000);
-        if (bbs) {
-          setBillboards(bbs);
-        }
+        const bbs = await getContractEditBillboards(true);
+        setBillboards(bbs);
       }
     } catch (err) {
       console.error('Failed to refresh contract data:', err);
@@ -3541,7 +3571,7 @@ export default function ContractEdit() {
       if (result.cleaned > 0) {
         toast.success(`تم تنظيف ${result.cleaned} لوحة من أصل ${result.total} لوحة`);
         // إعادة تحميل اللوحات
-        const data = await loadBillboards();
+        const data = await getContractEditBillboards(true);
         setBillboards(data);
       } else {
         toast.info('لا توجد لوحات بحاجة للتنظيف');
@@ -4582,7 +4612,7 @@ export default function ContractEdit() {
           onDone={(bbId) => {
             setSelected(prev => prev.includes(bbId) ? prev : [...prev, bbId]);
             // refresh billboards
-            loadBillboards().then(setBillboards).catch(() => {});
+            getContractEditBillboards(true).then(setBillboards).catch(() => {});
           }}
         />
 
@@ -4598,7 +4628,7 @@ export default function ContractEdit() {
               : (baseTotal > 0 ? Math.max(0, Math.min(100, (discountAmount / baseTotal) * 100)) : 0)
           }
           onDone={() => {
-            loadBillboards().then(setBillboards).catch(() => {});
+            getContractEditBillboards(true).then(setBillboards).catch(() => {});
           }}
         />
 

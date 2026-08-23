@@ -53,9 +53,10 @@ export default function ImageLightbox({ imageUrl, onClose }: ImageLightboxProps)
       {/* Close button */}
       <button
         onClick={onClose}
-        className="absolute top-4 left-4 z-10 p-3 bg-white/10 hover:bg-white/20 rounded-full transition-all border border-white/20 hover:border-white/40 group"
+        className="absolute top-4 right-4 z-50 p-3 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-full transition-all shadow-2xl border-2 border-white/30 hover:scale-110 group cursor-pointer"
+        aria-label="إغلاق"
       >
-        <X className="w-6 h-6 text-white group-hover:rotate-90 transition-transform" />
+        <X className="w-6 h-6 text-white group-hover:rotate-90 transition-transform" strokeWidth={2.5} />
       </button>
 
       {/* Control buttons */}

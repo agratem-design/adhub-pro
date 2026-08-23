@@ -1,13 +1,14 @@
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { Button } from '@/components/ui/button';
-import { ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+import { ZoomIn, ZoomOut, RotateCcw, X } from 'lucide-react';
 
 interface DesignZoomViewerProps {
   src: string;
   alt?: string;
+  onClose?: () => void;
 }
 
-export function DesignZoomViewer({ src, alt }: DesignZoomViewerProps) {
+export function DesignZoomViewer({ src, alt, onClose }: DesignZoomViewerProps) {
   return (
     <div
       className="relative w-full h-full flex items-center justify-center"
@@ -42,6 +43,15 @@ export function DesignZoomViewer({ src, alt }: DesignZoomViewerProps) {
                 <RotateCcw className="h-4 w-4" />
               </Button>
             </div>
+            {onClose && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onClose(); }}
+                aria-label="إغلاق"
+                className="absolute top-4 right-4 z-50 h-11 w-11 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 active:bg-red-800 text-white shadow-2xl border-2 border-white/30 transition-all hover:scale-110 cursor-pointer"
+              >
+                <X className="h-6 w-6 text-white" strokeWidth={2.5} />
+              </button>
+            )}
             <TransformComponent
               wrapperStyle={{ width: '100%', height: '100%' }}
               contentStyle={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}

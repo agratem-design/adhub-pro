@@ -38,7 +38,14 @@ export const BillboardImageZoom: React.FC<Props> = ({
         </div>
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-5xl p-2 bg-background">
+        <DialogContent className="max-w-5xl p-2 bg-background relative">
+          <button
+            onClick={() => setOpen(false)}
+            className="absolute top-4 right-4 z-50 h-9 w-9 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-full flex items-center justify-center shadow-xl border border-white/30 transition-all hover:scale-110 cursor-pointer"
+            aria-label="إغلاق"
+          >
+            <X className="h-4 w-4" strokeWidth={2.5} />
+          </button>
           <div className="w-full max-h-[85vh] flex items-center justify-center overflow-hidden rounded-md bg-muted">
             <BillboardImage
               billboard={billboard}

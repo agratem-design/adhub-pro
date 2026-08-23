@@ -370,6 +370,13 @@ export default function BillboardPhotosGallery() {
                 </div>
               </div>
               <div className="flex-1 relative flex items-center justify-center overflow-hidden">
+                <button
+                  onClick={() => setLightboxIndex(null)}
+                  className="absolute top-3 right-3 z-50 h-10 w-10 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-full flex items-center justify-center shadow-2xl border-2 border-white/30 transition-all hover:scale-110 cursor-pointer"
+                  aria-label="إغلاق"
+                >
+                  <X className="h-5 w-5" strokeWidth={2.5} />
+                </button>
                 <img
                   src={lightboxPhoto.imageUrl}
                   alt={lightboxPhoto.name}
