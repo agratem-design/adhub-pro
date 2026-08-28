@@ -240,11 +240,11 @@ export function useContractEdit(contractId: string) {
     return friendBillboardCosts
       .filter(f => {
         const bb = billboards.find((b: any) => String(b.ID) === f.billboardId);
-        return bb && ((bb as any).friend_company_id || (bb as any).own_company_id) && selectedBillboards.includes(f.billboardId);
+        return bb && Boolean((bb as any).friend_company_id) && selectedBillboards.includes(f.billboardId);
       })
       .map(f => {
         const bb = billboards.find((b: any) => String(b.ID) === f.billboardId);
-        const currentFriendCompanyId = (bb as any)?.friend_company_id || (bb as any)?.own_company_id;
+        const currentFriendCompanyId = (bb as any)?.friend_company_id;
         const currentFriendCompanyName = (bb as any)?.friend_companies?.name || f.friendCompanyName;
         return {
           ...f,

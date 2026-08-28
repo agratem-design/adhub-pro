@@ -921,13 +921,13 @@ export const BillboardGridCard: React.FC<BillboardGridCardProps> = ({
           <button
             onClick={() => setImageDialogOpen(false)}
             aria-label="إغلاق"
-            className="absolute top-4 left-4 z-50 h-11 w-11 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/25 backdrop-blur-md border border-white/20 text-white shadow-lg transition-all hover:scale-110"
+            className="absolute top-4 right-4 z-50 h-11 w-11 flex items-center justify-center rounded-full bg-red-600 hover:bg-red-700 active:bg-red-800 text-white shadow-2xl border-2 border-white/30 transition-all hover:scale-110 cursor-pointer"
           >
             <X className="h-5 w-5" strokeWidth={2.5} />
           </button>
           
           {/* معلومات اللوحة */}
-          <div className="absolute top-4 right-4 z-50 bg-black/50 rounded-lg px-4 py-2">
+          <div className="absolute top-4 left-4 z-50 bg-black/50 rounded-lg px-4 py-2 backdrop-blur-sm">
             <h3 className="text-white font-bold text-lg">
               {billboard.Billboard_Name || `لوحة ${billboard.ID}`}
             </h3>

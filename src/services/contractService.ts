@@ -479,9 +479,9 @@ export async function createContract(contractData: ContractData) {
         }
 
         const friendRentalsToInsert = bbData
-          .filter((b: any) => (b.friend_company_id || b.own_company_id))
+          .filter((b: any) => Boolean(b.friend_company_id))
           .map((b: any) => {
-            const companyId = b.friend_company_id || b.own_company_id;
+            const companyId = b.friend_company_id;
             const matchingCost = Array.isArray(parsedFriendCosts)
               ? parsedFriendCosts.find((f: any) => String(f.billboardId) === String(b.ID))
               : null;
@@ -952,15 +952,25 @@ export async function updateContract(contractId: string, updates: any) {
   // حساب تكلفة التركيب والطباعة ورسوم التشغيل إذا كانت اللوحات موجودة
   if (billboardIdsArray && billboardIdsArray.length > 0) {
     try {
-      const installationResult = await calculateInstallationCostFromIds(billboardIdsArray);
-      const installationCost = installationResult.totalInstallationCost;
+      const installationEnabled = merged.installation_enabled !== false && merged.installation_enabled !== 'false' && merged.installation_enabled !== 0 && merged.installation_enabled !== '0';
+      let installationCost = 0;
+      if (installationEnabled) {
+        if (payload.installation_cost !== undefined) {
+          installationCost = Number(payload.installation_cost) || 0;
+        } else {
+          const installationResult = await calculateInstallationCostFromIds(billboardIdsArray);
+          installationCost = installationResult.totalInstallationCost;
+        }
+      }
 
       // ✅ NEW: حساب تكلفة الطباعة إذا كانت مفعلة
-      // ✅ FIX: Convert print_price_per_meter to number since it might be a string
       const printPricePerMeter = Number(merged.print_price_per_meter) || 0;
-      const printEnabled = merged.print_cost_enabled === true || merged.print_cost_enabled === 'true';
+      const printEnabled = merged.print_cost_enabled === true || merged.print_cost_enabled === 'true' || merged.print_cost_enabled === 1 || merged.print_cost_enabled === '1';
       let printCost = 0;
-      if (printEnabled && printPricePerMeter > 0) {
+      if (printEnabled) {
+        if (payload.print_cost !== undefined) {
+          printCost = Number(payload.print_cost) || 0;
+        } else if (printPricePerMeter > 0) {
         const { data: billboardsInfo } = await supabase
           .from('billboards')
           .select('*')
@@ -987,9 +997,10 @@ export async function updateContract(contractId: string, updates: any) {
           }, 0);
         }
       }
+    }
 
- payload['installation_cost'] = installationCost; // بأحرف صغيرة
- payload['print_cost'] = printCost; // NEW: حفظ تكلفة الطباعة
+    payload['installation_cost'] = installationCost; // بأحرف صغيرة
+    payload['print_cost'] = printCost; // NEW: حفظ تكلفة الطباعة
 
       // ✅ CORRECTED: حساب القيم الصحيحة
       const finalTotal = Number(merged['Total']) || Number(merged.rent_cost) || 0; // هذا هو الإجمالي النهائي
@@ -1731,13 +1742,13 @@ export async function renewContract(originalContractId: string, options?: { star
       if (bbData) {
         const newAutoRentals = bbData
           .filter((b: any) => {
-            const companyId = b.friend_company_id || b.own_company_id;
+            const companyId = b.friend_company_id;
             return companyId && !existingBillboardIds.has(String(b.ID));
           })
           .map((b: any) => ({
             contract_number: created.Contract_Number,
             billboard_id: b.ID,
-            friend_company_id: b.friend_company_id || b.own_company_id,
+            friend_company_id: b.friend_company_id,
             start_date: String(newStart),
             end_date: String(newEnd),
             customer_rental_price: 0,

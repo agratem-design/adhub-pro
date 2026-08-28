@@ -189,6 +189,8 @@ export interface BillboardPrintData {
   isReplacement?: boolean;
   replacementStartDate?: string;
   replacedBillboardName?: string;
+  isPaused?: boolean;
+  pauseDate?: string;
   isEndDateCustom?: boolean;
   customStartDate?: string;
   customEndDate?: string;
@@ -717,12 +719,17 @@ function buildTablePageHTML(
         case 'code': {
           const codeVal = row.code || row.id || '';
           if (row.isReplacement) {
-            const replacedName = row.replacedBillboardName || '';
             cellContent = `
-              <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
-                <span style="display:inline-block; background:#1d4ed8; color:#fff; font-size:9px; font-weight:bold; padding:1px 6px; border-radius:8px;">بديلة</span>
-                ${replacedName ? `<span style="font-size:9px; color:#1d4ed8; font-weight:bold;">بديلة عن: ${replacedName}</span>` : ''}
+              <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; line-height:1.2;">
+                <span style="display:inline-block; background:#1d4ed8; color:#ffffff; font-size:0.85em; font-weight:bold; padding:1px 5px; border-radius:3px;">بديلة</span>
                 <span>${codeVal}</span>
+              </div>
+            `;
+          } else if (row.isPaused) {
+            cellContent = `
+              <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; line-height:1.2;">
+                <span style="display:inline-block; background:#dc2626; color:#ffffff; font-size:0.85em; font-weight:bold; padding:1px 5px; border-radius:3px;">موقوفة</span>
+                <span style="text-decoration:line-through; opacity:0.85;">${codeVal}</span>
               </div>
             `;
           } else {
@@ -751,10 +758,19 @@ function buildTablePageHTML(
           if (row.isReplacement) {
             const replacedName = row.replacedBillboardName || '';
             cellContent = `
-              <div style="display:flex; flex-direction:column; align-items:center; gap:2px;">
-                <span style="display:inline-block; background:#1d4ed8; color:#fff; font-size:9px; font-weight:bold; padding:1px 6px; border-radius:8px;">بديلة</span>
-                ${replacedName ? `<span style="font-size:9px; color:#1d4ed8; font-weight:bold;">بديلة عن: ${replacedName}</span>` : ''}
+              <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; line-height:1.2;">
+                <div style="display:flex; align-items:center; justify-content:center; gap:4px; font-size:0.9em; font-weight:bold;">
+                  <span style="display:inline-block; background:#1d4ed8; color:#ffffff; font-size:0.85em; font-weight:bold; padding:1px 6px; border-radius:3px;">بديلة</span>
+                  ${replacedName ? `<span>عن: ${replacedName}</span>` : ''}
+                </div>
                 <span>${nameVal}</span>
+              </div>
+            `;
+          } else if (row.isPaused) {
+            cellContent = `
+              <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; line-height:1.2;">
+                <span style="display:inline-block; background:#dc2626; color:#ffffff; font-size:0.85em; font-weight:bold; padding:1px 6px; border-radius:3px;">موقوفة</span>
+                <span style="text-decoration:line-through; opacity:0.85;">${nameVal}</span>
               </div>
             `;
           } else {

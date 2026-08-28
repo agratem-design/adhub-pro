@@ -477,11 +477,11 @@ export default function ContractEdit() {
     return friendBillboardCosts
       .filter(f => {
         const bb = billboards.find((b: any) => String(b.ID) === f.billboardId);
-        return bb && ((bb as any).friend_company_id || (bb as any).own_company_id) && selected.includes(f.billboardId);
+        return bb && Boolean((bb as any).friend_company_id) && selected.includes(f.billboardId);
       })
       .map(f => {
         const bb = billboards.find((b: any) => String(b.ID) === f.billboardId);
-        const currentFriendCompanyId = (bb as any)?.friend_company_id || (bb as any)?.own_company_id;
+        const currentFriendCompanyId = (bb as any)?.friend_company_id;
         const currentFriendCompanyName = (bb as any)?.friend_companies?.name || f.friendCompanyName;
         return {
           ...f,
@@ -3485,7 +3485,7 @@ export default function ContractEdit() {
       for (const billboardId of selected) {
         const billboard = billboards.find(b => String((b as any).ID) === billboardId);
         if (!billboard) continue;
-        const currentFriendCompanyId = (billboard as any).friend_company_id || (billboard as any).own_company_id;
+        const currentFriendCompanyId = (billboard as any).friend_company_id;
         if (!currentFriendCompanyId) continue;
 
         validFriendBillboardNumericIds.push(Number(billboardId));

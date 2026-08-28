@@ -555,8 +555,10 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
   
   // حساب القيم
   const totalRent = Number(contract.rent_cost || (contract as any)['Total Rent'] || 0);
-  const installationCost = Number((contract as any).installation_cost || 0);
-  const printCost = Number((contract as any).print_cost || 0);
+  const isInstallationEnabled = (contract as any).installation_enabled !== false && (contract as any).installation_enabled !== 'false' && (contract as any).installation_enabled !== 0 && (contract as any).installation_enabled !== '0';
+  const installationCost = isInstallationEnabled ? Number((contract as any).installation_cost || 0) : 0;
+  const isPrintCostEnabled = (contract as any).print_cost_enabled === true || (contract as any).print_cost_enabled === 'true' || (contract as any).print_cost_enabled === 1 || (contract as any).print_cost_enabled === '1';
+  const printCost = isPrintCostEnabled ? Number((contract as any).print_cost || 0) : 0;
 
   // حساب إجمالي الأمتار من بيانات اللوحات مع جلب عدد الأوجه من قاعدة البيانات
   const [totalArea, setTotalArea] = useState(0);

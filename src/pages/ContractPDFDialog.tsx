@@ -1229,8 +1229,17 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
               (originalBeforeDiscount > 0 && contractDiscountPct > 0
                 ? originalBeforeDiscount * (1 - contractDiscountPct / 100)
                 : 0);
+            const repl = replByPausedId.get(String(p.id));
+            const replAlloc = Number(repl?.allocated_amount) || 0;
+            const fullTargetPrice = (netAfterContractDiscount > 0)
+              ? netAfterContractDiscount
+              : (originalBeforeDiscount > 0 ? originalBeforeDiscount : (fullPriceVal > 0 ? fullPriceVal : netRent));
+
             let pausedPrice = 0;
-            if (Number.isFinite(consumed) && consumed > 0) {
+            if (repl && replAlloc > 0 && fullTargetPrice > 0) {
+              // ✅ Complementary price: pausedPrice + replAlloc === fullTargetPrice
+              pausedPrice = Math.max(0, fullTargetPrice - replAlloc);
+            } else if (Number.isFinite(consumed) && consumed > 0) {
               pausedPrice = consumed;
             } else if (Number.isFinite(fullPriceVal) && fullPriceVal > 0 && Number.isFinite(refund) && refund > 0) {
               pausedPrice = Math.max(0, fullPriceVal - refund);
@@ -1268,7 +1277,6 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
             // replacement metadata so the renderer shows the "بديلة" badge
             // and start-date without duplicating. Otherwise (legacy rows)
             // push a fresh row right after the paused one.
-            const repl = replByPausedId.get(String(p.id));
             if (repl) {
               const replIdStr = String(repl.replacement_billboard_id);
               const existingIdx = billboardsToShow.findIndex(
@@ -1877,7 +1885,28 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         const _replacement = !!(b as any)._replacement;
         const _replacement_start_date = (b as any)._replacement_start_date || '';
         const _replacement_paused_name = (b as any)._replacement_paused_name || '';
-        return { id, billboardName, image, municipality, district, landmark, size, level, faces, price, rent_end_date, duration_days, mapLink, _replacement, _replacement_start_date, _replacement_paused_name };
+        const _paused = !!(b as any)._paused;
+        const _pause_date = (b as any)._pause_date || '';
+        return {
+          id,
+          billboardName,
+          image,
+          municipality,
+          district,
+          landmark,
+          size,
+          level,
+          faces,
+          price,
+          rent_end_date,
+          duration_days,
+          mapLink,
+          _replacement,
+          _replacement_start_date,
+          _replacement_paused_name,
+          _paused,
+          _pause_date,
+        };
       };
 
       // ربط كل لوحة ببيانات الترتيب (المقاس ثم البلدية ثم المستوى)
@@ -1916,9 +1945,11 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         rent_end_date: b.rent_end_date,
         duration_days: b.duration_days,
         mapLink: b.mapLink,
-        isReplacement: (b as any)._replacement,
-        replacementStartDate: (b as any)._replacement_start_date,
-        replacedBillboardName: (b as any)._replacement_paused_name,
+        isReplacement: b._replacement,
+        replacementStartDate: b._replacement_start_date,
+        replacedBillboardName: b._replacement_paused_name,
+        isPaused: b._paused,
+        pauseDate: b._pause_date,
       }));
 
       // ✅ Native Chrome Pagination: Let the table flow naturally across pages.

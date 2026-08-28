@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>رافع ملفات Google Drive</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            gold: '#d6ac40',
+            'gold-light': '#f4c25a',
+            'gold-dark': '#b8860b',
+            dark: '#0a0b12',
+            'dark-surface': '#111320',
+            'dark-card': '#16192a',
+            'dark-elevated': '#1e2238',
+            border: '#282d47',
+          },
+          fontFamily: {
+            tajawal: ['Tajawal', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="bg-[#0a0b12] text-slate-100 font-tajawal antialiased select-none overflow-hidden m-0 p-0 h-screen w-screen">
+
+  <!-- App Wrapper -->
+  <div class="flex flex-col h-screen w-screen overflow-hidden bg-[#0a0b12]">
+    
+    <!-- Custom Frameless Titlebar -->
+    <header class="titlebar flex items-center justify-between px-4 py-2 bg-[#111320] border-b border-[#282d47] z-50 flex-shrink-0">
+      <div class="flex items-center gap-3">
+        <!-- Google Drive Brand Icon -->
+        <div class="brand-icon flex-shrink-0 p-1 rounded-lg shadow-md bg-[#16192a] border border-[#282d47] flex items-center justify-center">
+          <svg width="20" height="20" viewBox="0 0 87.3 78" fill="none">
+            <path d="M6.6 66.85L10.45 73.5C11.25 74.9 12.4 76 13.75 76.8L27.5 53H0C0 54.55 0.4 56.1 1.2 57.5L6.6 66.85Z" fill="#0066DA"/>
+            <path d="M43.65 25L29.9 1.2C28.55 2 27.4 3.1 26.6 4.5L1.2 48.5C0.4 49.9 0 51.45 0 53H27.5L43.65 25Z" fill="#00AC47"/>
+            <path d="M73.55 76.8C74.9 76 76.05 74.9 76.85 73.5L86.1 57.5C86.9 56.1 87.3 54.55 87.3 53H59.8L73.55 76.8Z" fill="#EA4335"/>
+            <path d="M43.65 25L57.4 1.2C56.05 0.4 54.5 0 52.9 0H34.4C32.8 0 31.25 0.45 29.9 1.2L43.65 25Z" fill="#00832D"/>
+            <path d="M59.8 53H27.5L13.75 76.8C15.1 77.6 16.65 78 18.25 78H69.05C70.65 78 72.2 77.55 73.55 76.8L59.8 53Z" fill="#2684FC"/>
+            <path d="M73.4 26.5L60.7 4.5C59.9 3.1 58.75 2 57.4 1.2L43.65 25L59.8 53H87.25C87.25 51.45 86.85 49.9 86.05 48.5L73.4 26.5Z" fill="#FFBA00"/>
+          </svg>
+        </div>
+        <div>
+          <span class="font-bold text-sm text-slate-100 tracking-wide">رافع ملفات Google Drive</span>
+          <span class="text-xs text-[#d6ac40] mr-1.5 font-normal">| روابط مباشرة وسريعة</span>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <div class="no-drag flex items-center gap-1.5 bg-[#1e2238]/80 p-1 rounded-lg border border-[#282d47]">
+        <button id="tab-uploader-btn" class="nav-tab active px-3 py-1 text-xs rounded-md transition-all flex items-center gap-1.5 cursor-pointer">
+          <svg class="w-3.5 h-3.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <span>الرفع المباشر</span>
+        </button>
+        <button id="tab-history-btn" class="nav-tab px-3 py-1 text-xs rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-slate-400 hover:text-slate-200">
+          <svg class="w-3.5 h-3.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>السجل</span>
+          <span id="history-badge" class="bg-[#d6ac40]/20 text-[#d6ac40] text-[10px] px-1.5 py-0.2 rounded-full font-bold">0</span>
+        </button>
+        <button id="tab-settings-btn" class="nav-tab px-3 py-1 text-xs rounded-md transition-all flex items-center gap-1.5 cursor-pointer text-slate-400 hover:text-slate-200">
+          <svg class="w-3.5 h-3.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>الإعدادات والسكربت</span>
+        </button>
+      </div>
+
+      <!-- Window Control Buttons -->
+      <div class="no-drag flex items-center gap-1">
+        <button id="btn-pin" title="تثبيت النافذة في المقدمة (Always On Top)" class="window-btn p-1.5 rounded-md hover:bg-slate-800 text-slate-400 hover:text-[#d6ac40] transition-colors cursor-pointer">
+          <svg id="pin-icon" class="w-3.5 h-3.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg>
+        </button>
+        <button id="btn-minimize" title="تصغير" class="window-btn p-1.5 rounded-md hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer">
+          <svg class="w-3.5 h-3.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        </button>
+        <button id="btn-maximize" title="تكبير / استعادة" class="window-btn p-1.5 rounded-md hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer">
+          <svg class="w-3.5 h-3.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
+        </button>
+        <button id="btn-close" title="إغلاق" class="window-btn btn-close p-1.5 rounded-md hover:bg-red-500/20 text-slate-400 hover:text-red-400 transition-colors cursor-pointer">
+          <svg class="w-3.5 h-3.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Body Container -->
+    <main class="main-content flex-1 overflow-y-auto p-4 flex flex-col gap-4 bg-gradient-to-b from-[#0a0b12] to-[#111320] custom-scrollbar">
+
+      <!-- ================= VIEW 1: UPLOADER ================= -->
+      <section id="view-uploader" class="flex-1 flex flex-col gap-4">
+        
+        <!-- Controls Bar -->
+        <div class="controls-bar flex flex-wrap items-center justify-between gap-3 bg-[#16192a] p-3 rounded-xl border border-[#282d47] shadow-md">
+          <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2 text-xs text-slate-300 font-medium">
+              <svg class="w-4 h-4 text-[#d6ac40]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              <span>مجلد الوجهة:</span>
+            </div>
+            <select id="select-folder" class="bg-[#111320] border border-[#282d47] text-xs rounded-lg px-3 py-1.5 text-slate-200 focus:outline-none focus:border-[#d6ac40] cursor-pointer">
+              <option value="general">عام (general)</option>
+              <option value="images">صور (images)</option>
+              <option value="documents">مستندات (documents)</option>
+              <option value="designs">تصاميم (designs)</option>
+              <option value="files">ملفات متنوعة (files)</option>
+              <option value="custom">مجلد مخصص...</option>
+            </select>
+            <input id="input-custom-folder" type="text" placeholder="اكتب اسم المجلد..." class="hidden bg-[#111320] border border-[#282d47] text-xs rounded-lg px-3 py-1.5 text-slate-200 focus:outline-none focus:border-[#d6ac40] w-36">
+          </div>
+
+          <!-- Upload Actions (File Browse + Clipboard Paste) -->
+          <div class="flex items-center gap-2">
+            <button id="btn-paste-clipboard" class="btn-paste flex items-center gap-1.5 cursor-pointer" title="لصق الصورة أو الملف من الحافظة مباشرة (Ctrl+V)">
+              <svg class="w-4 h-4 text-[#f4c25a]" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+              <span>لصق من الحافظة (Ctrl+V)</span>
+            </button>
+            <button id="btn-select-files" class="btn-gold-outline flex items-center gap-1.5 cursor-pointer">
+              <svg class="w-4 h-4" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <span>اختيار ملفات</span>
+            </button>
+            <input type="file" id="file-input" multiple class="hidden">
+          </div>
+        </div>
+
+        <!-- Drag & Drop Zone -->
+        <div id="drop-zone" class="drop-zone group">
+          <div class="drop-icon-box group-hover:scale-110 transition-transform">
+            <svg class="w-7 h-7 text-[#d6ac40]" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>
+              <path d="M12 12v9"></path>
+              <path d="m16 16-4-4-4 4"></path>
+            </svg>
+          </div>
+          <div class="text-center">
+            <p class="text-sm font-bold text-slate-200 group-hover:text-[#d6ac40] transition-colors">
+              اسحب وأفلت الملفات أو الصور هنا، أو اضغط للاستعراض
+            </p>
+            <p class="text-xs text-slate-400 mt-1">
+              يدعم لصق لقطات الشاشة والصور بالضغط على <kbd class="bg-[#111320] border border-[#282d47] px-1.5 py-0.5 rounded text-[#d6ac40] font-mono">Ctrl+V</kbd> أو زر الحافظة
+            </p>
+          </div>
+          <div class="flex items-center gap-2 text-[11px] text-slate-400 font-mono mt-1">
+            <span class="bg-[#111320] px-2.5 py-1 rounded border border-[#282d47]">الصور: PNG, JPG, WebP</span>
+            <span class="bg-[#111320] px-2.5 py-1 rounded border border-[#282d47]">المستندات: PDF, Excel, ZIP</span>
+            <span class="bg-[#111320] px-2.5 py-1 rounded border border-[#282d47] text-[#d6ac40]">استبدال ذكي للملفات بنفس الرابط</span>
+          </div>
+        </div>
+
+        <!-- Overall Batch Progress Bar -->
+        <div id="batch-progress-container" class="hidden bg-[#16192a] p-3 rounded-xl border border-[#d6ac40]/40 shadow-lg">
+          <div class="flex items-center justify-between text-xs mb-1.5">
+            <div class="flex items-center gap-2">
+              <div class="w-2 h-2 rounded-full bg-[#d6ac40] animate-ping"></div>
+              <span id="batch-progress-status" class="font-bold text-[#d6ac40]">جاري الرفع...</span>
+            </div>
+            <span id="batch-progress-percent" class="font-mono text-[#f4c25a] font-bold">0%</span>
+          </div>
+          <div class="progress-track">
+            <div id="batch-progress-bar" class="progress-fill" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Action Header & Queue Summary -->
+        <div id="queue-header" class="hidden flex items-center justify-between bg-[#16192a] px-3 py-2 rounded-xl border border-[#282d47]">
+          <div class="flex items-center gap-2 text-xs text-slate-300">
+            <span class="font-bold">قائمة الملفات:</span>
+            <span id="queue-count" class="bg-[#111320] px-2 py-0.5 rounded-full text-slate-400 font-mono text-[11px] border border-[#282d47]">0</span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button id="btn-copy-all" class="btn-gold">
+              <svg class="w-3.5 h-3.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+              <span>نسخ جميع الروابط</span>
+            </button>
+            <button id="btn-clear-completed" class="btn-dark">
+              <svg class="w-3.5 h-3.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              <span>مسح المكتمل</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Files List Container -->
+        <div id="files-list" class="flex flex-col gap-2.5"></div>
+
+      </section>
+
+      <!-- ================= VIEW 2: HISTORY ================= -->
+      <section id="view-history" class="hidden flex-1 flex flex-col gap-3">
+        <div class="flex items-center justify-between bg-[#16192a] p-3 rounded-xl border border-[#282d47]">
+          <div class="flex items-center gap-2 flex-1 max-w-sm">
+            <svg class="w-4 h-4 text-slate-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input id="history-search" type="text" placeholder="بحث في السجل..." class="bg-transparent text-xs text-slate-200 focus:outline-none w-full">
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="btn-export-history" class="btn-dark">
+              <svg class="w-3.5 h-3.5 text-[#d6ac40]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span>تصدير الروابط</span>
+            </button>
+            <button id="btn-clear-history" class="btn-dark text-red-400 hover:text-red-300">
+              <svg class="w-3.5 h-3.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              <span>مسح السجل</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="history-list" class="flex flex-col gap-2"></div>
+      </section>
+
+      <!-- ================= VIEW 3: SETTINGS & SCRIPT ================= -->
+      <section id="view-settings" class="hidden flex-1 flex flex-col gap-5 max-w-3xl mx-auto w-full pb-6">
+        
+        <!-- Script Configuration Card -->
+        <div class="bg-[#16192a] p-5 rounded-2xl border border-[#282d47] shadow-lg space-y-4">
+          <div class="flex items-center gap-2 pb-3 border-b border-[#282d47]">
+            <svg class="w-5 h-5 text-[#d6ac40]" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <h2 class="text-sm font-bold text-slate-100">رابط خدمة Google Apps Script Web App</h2>
+          </div>
+
+          <div class="space-y-2">
+            <label class="text-xs font-bold text-slate-300 flex items-center justify-between">
+              <span>رابط Web App النشط:</span>
+              <span class="text-[10px] text-slate-400 font-mono">يمكنك تغييره إلى رابط السكربت الخاص بك</span>
+            </label>
+            <div class="flex gap-2">
+              <input id="setting-script-url" type="text" dir="ltr" class="flex-1 bg-[#111320] border border-[#282d47] text-xs rounded-xl px-3.5 py-2 text-slate-200 focus:outline-none focus:border-[#d6ac40] font-mono" placeholder="https://script.google.com/macros/s/.../exec">
+              <button id="btn-test-script" class="btn-gold-outline flex items-center gap-1.5 cursor-pointer">
+                <svg class="w-3.5 h-3.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                <span>فحص الاتصال</span>
+              </button>
+            </div>
+            <div id="test-script-result" class="text-xs hidden p-2.5 rounded-lg bg-[#111320] border border-[#282d47]"></div>
+          </div>
+
+          <div class="flex items-center justify-between p-3 rounded-xl bg-[#111320] border border-[#282d47]">
+            <div>
+              <p class="text-xs font-bold text-slate-200">النسخ التلقائي للرابط</p>
+              <p class="text-[11px] text-slate-400">نسخ الرابط المباشر إلى الحافظة فور اكتمال رفع الملف تلقائياً</p>
+            </div>
+            <input type="checkbox" id="setting-auto-copy" class="w-4 h-4 accent-[#d6ac40] cursor-pointer" checked>
+          </div>
+
+          <div class="flex items-center justify-between p-3 rounded-xl bg-[#111320] border border-[#282d47]">
+            <div>
+              <p class="text-xs font-bold text-slate-200">تزامن الرفع (Concurrency)</p>
+              <p class="text-[11px] text-slate-400">تحديد عدد الملفات المرفوعة بالتوازي في نفس الوقت</p>
+            </div>
+            <select id="setting-concurrency" class="bg-[#16192a] border border-[#282d47] text-xs rounded-lg px-3 py-1 text-slate-200 focus:outline-none focus:border-[#d6ac40] cursor-pointer">
+              <option value="1">1 (ملف تلو الآخر - الأكثر استقراراً)</option>
+              <option value="2" selected>2 (متوازي - توازن مثالي)</option>
+              <option value="3">3 (سريع)</option>
+              <option value="4">4 (أقصى سرعة)</option>
+            </select>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-2 border-t border-[#282d47]">
+            <button id="btn-reset-settings" class="btn-dark cursor-pointer">
+              استعادة الرابط الافتراضي
+            </button>
+            <button id="btn-save-settings" class="btn-gold cursor-pointer">
+              حفظ الإعدادات
+            </button>
+          </div>
+        </div>
+
+        <!-- Apps Script Code & Setup Instructions -->
+        <div class="bg-[#16192a] p-5 rounded-2xl border border-[#282d47] shadow-lg space-y-4">
+          <div class="flex items-center justify-between pb-3 border-b border-[#282d47]">
+            <div class="flex items-center gap-2">
+              <svg class="w-5 h-5 text-emerald-400" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+              <h2 class="text-sm font-bold text-slate-100">كود Google Apps Script المعتمد</h2>
+            </div>
+            <button id="btn-copy-script-code" class="btn-gold text-xs py-1.5 px-3">
+              <svg class="w-3.5 h-3.5" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+              <span>نسخ كود السكربت</span>
+            </button>
+          </div>
+
+          <!-- Step by Step Setup Guide -->
+          <div class="bg-[#111320] p-4 rounded-xl border border-[#282d47] space-y-2.5 text-xs text-slate-300">
+            <p class="font-bold text-[#d6ac40] flex items-center gap-1.5">
+              <svg class="w-4 h-4" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+              <span>خطوات إنشاء ونشر السكربت على حسابك في Google Drive:</span>
+            </p>
+            <ol class="list-decimal list-inside space-y-1.5 text-[11.5px] text-slate-300 leading-relaxed mr-1">
+              <li>افتح <a href="#" id="link-open-drive" class="text-[#d6ac40] hover:underline font-bold">Google Drive</a> وأنشئ مجلداً جديداً لاستقبال الملفات، ثم افتحه وانسخ معرف المجلد (Folder ID) من شريط العنوان.</li>
+              <li>ضع الـ ID المنسوخ مكان قيمة <code class="bg-[#16192a] px-1 py-0.5 rounded text-amber-300 font-mono">MAIN_FOLDER_ID</code> في السطر الثالث من الكود.</li>
+              <li>افتح <a href="#" id="link-open-gas" class="text-[#d6ac40] hover:underline font-bold">Google Apps Script</a> والصق الكود بالكامل، ثم اضغط على أيقونة الحفظ.</li>
+              <li>من قائمة الدوال في الأعلى، اختر الدالة <code class="bg-[#16192a] px-1 py-0.5 rounded text-emerald-400 font-mono">forceAllPermissions</code> واضغط <strong>Run (تشغيل)</strong> للموافقة على صلاحيات Drive والاتصال.</li>
+              <li>اضغط على <strong>Deploy (نشر)</strong> في الزاوية العلوية -> ثم <strong>New deployment (نشر جديد)</strong>.</li>
+              <li>اضغط على أيقونة الترس واختر <strong>Web app (تطبيق ويب)</strong>.</li>
+              <li>اضبط الإعدادات كالتالي:
+                <ul class="list-disc list-inside mr-4 text-slate-400 mt-0.5">
+                  <li><strong>Execute as:</strong> Me (حسابك)</li>
+                  <li><strong>Who has access:</strong> Anyone (أي مستخدم)</li>
+                </ul>
+              </li>
+              <li>اضغط <strong>Deploy</strong> وانسخ رابط الـ <strong>Web app URL</strong> المنتهي بـ <code class="text-amber-300 font-mono">/exec</code> والصقه في حقل الإعدادات أعلاه.</li>
+            </ol>
+          </div>
+
+          <!-- Code View Area -->
+          <div class="relative bg-[#0d0e17] rounded-xl border border-[#282d47] overflow-hidden">
+            <div class="flex items-center justify-between px-3.5 py-2 bg-[#111320] border-b border-[#282d47] text-[11px] font-mono text-slate-400">
+              <span>Code.gs (Google Apps Script)</span>
+              <span class="text-emerald-400">JavaScript</span>
+            </div>
+            <pre class="p-3.5 text-[11px] font-mono text-slate-300 overflow-x-auto max-h-64 custom-scrollbar leading-relaxed select-text" dir="ltr"><code id="script-code-display">function doPost(e) {
+  try {
+    var MAIN_FOLDER_ID = "1slgjSJK29P5JtqNRGyAfkfCh4buspZVF";
+    var data = JSON.parse(e.postData.contents);
+
+    var mimeType = data.type || "image/jpeg";
+    var fileName = data.name || "file";
+    var blob = Utilities.newBlob(
+      Utilities.base64Decode(data.file), 
+      mimeType, 
+      fileName
+    );
+
+    // 1. الوصول للمجلد الرئيسي وإنشاء المجلدات الفرعية إن لزم الأمر
+    var currentFolder = DriveApp.getFolderById(MAIN_FOLDER_ID);
+    if (data.folder) {
+      var folderNames = data.folder.split('/');
+      for (var i = 0; i < folderNames.length; i++) {
+        var folderName = folderNames[i].trim();
+        if (folderName !== "") {
+          var folders = currentFolder.getFoldersByName(folderName);
+          if (folders.hasNext()) {
+            currentFolder = folders.next();
+          } else {
+            currentFolder = currentFolder.createFolder(folderName);
+          }
+        }
+      }
+    }
+
+    // 2. 🔄 ميزة الاستبدال السحري (Overwrite) للحفاظ على نفس الرابط
+    var existingFiles = currentFolder.getFilesByName(fileName);
+    var file;
+    var fileId = "";
+    var isUpdated = false;
+
+    if (existingFiles.hasNext()) {
+      // ✅ الملف موجود: نقوم بتحديث محتواه من الداخل دون تغيير الـ ID
+      file = existingFiles.next();
+      fileId = file.getId();
+      
+      var token = ScriptApp.getOAuthToken();
+      var updateUrl = "https://www.googleapis.com/upload/drive/v3/files/" + fileId + "?uploadType=media";
+      
+      var options = {
+        method: "PATCH",
+        headers: {
+          Authorization: "Bearer " + token,
+          "Content-Type": mimeType
+        },
+        payload: blob.getBytes(),
+        muteHttpExceptions: true
+      };
+      
+      // إرسال البيانات الجديدة للملف القديم
+      UrlFetchApp.fetch(updateUrl, options);
+      isUpdated = true;
+      
+    } else {
+      // 🆕 الملف غير موجود: نقوم بإنشاء ملف جديد
+      file = currentFolder.createFile(blob);
+      fileId = file.getId();
+      
+      try {
+        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      } catch (err) {
+        console.log("Sharing error: " + err);
+      }
+    }
+
+    // 3. 🖼️ تحديد الرابط النهائي (lh3 للصور، وتنزيل مباشر للملفات)
+    var finalUrl = "";
+    
+    if (mimeType.indexOf("image") !== -1) {
+      // إيقاف السكربت ثانيتين لضمان توليد سيرفرات جوجل لرابط lh3
+      Utilities.sleep(2000); 
+      try {
+        var thumbUrl = file.getThumbnailLink();
+        if (thumbUrl) {
+          finalUrl = thumbUrl.replace(/\=s\d+/, "=s2048"); // الحصول على أقصى جودة
+        } else {
+          finalUrl = "https://drive.google.com/uc?id=" + fileId;
+        }
+      } catch (thumbErr) {
+        finalUrl = "https://drive.google.com/uc?id=" + fileId;
+      }
+    } else {
+      // للملفات غير الصور (مثل Excel و PDF)
+      finalUrl = "https://drive.google.com/uc?export=download&id=" + fileId;
+    }
+
+    // 4. إرجاع النتيجة للواجهة
+    return ContentService
+      .createTextOutput(JSON.stringify({ 
+        success: true, 
+        url: finalUrl,
+        fileId: fileId,
+        updated: isUpdated // سيعطيك true إذا تم استبدال ملف قديم
+      }))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ success: false, error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doOptions(e) {
+  return ContentService.createTextOutput("OK").setMimeType(ContentService.MimeType.TEXT);
+}
+
+function forceAllPermissions() {
+  DriveApp.getFiles(); // لإجبار جوجل على طلب صلاحية Drive
+  UrlFetchApp.fetch("https://www.google.com"); // لإجبار جوجل على طلب صلاحية الاتصال الخارجي
+}</code></pre>
+          </div>
+
+        </div>
+
+      </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer-bar flex-shrink-0">
+      <div class="flex items-center gap-2">
+        <span class="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+        <span id="footer-status-text">جاهز للرفع</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="font-mono text-slate-500">Google Drive API v1.0</span>
+        <span class="text-slate-600">|</span>
+        <span class="text-emerald-400 font-medium">Google Apps Script</span>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="fixed bottom-12 left-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

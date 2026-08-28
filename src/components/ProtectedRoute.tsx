@@ -88,6 +88,7 @@ const PATH_PERMISSION_MAP: Record<string, string> = {
   '/admin/municipality-rent-prices': 'municipality_rent_prices',
   '/admin/municipality-organizer': 'municipality_organizer',
   '/admin/image-gallery': 'image_gallery',
+  '/admin/drive-uploader': 'settings',
   '/admin/activity-log': 'activity_log',
 };
 

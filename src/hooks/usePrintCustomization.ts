@@ -328,7 +328,24 @@ const defaultSettings: PrintCustomizationSettings = {
 
 export function usePrintCustomization(settingKey: string = 'default') {
   const { confirm: systemConfirm } = useSystemDialog();
-  const [settings, setSettings] = useState<PrintCustomizationSettings>(defaultSettings);
+  const [settings, setSettings] = useState<PrintCustomizationSettings>(() => {
+    try {
+      const cached = localStorage.getItem(`print_customization_${settingKey}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        const localDimLabels = localStorage.getItem('show_size_dimension_labels') || 'false';
+        const localSingleFace = localStorage.getItem('calc_meters_as_single_face') || 'false';
+        return { 
+          ...defaultSettings, 
+          ...parsed, 
+          setting_key: settingKey,
+          show_size_dimension_labels: localDimLabels,
+          calc_meters_as_single_face: localSingleFace
+        };
+      }
+    } catch {}
+    return { ...defaultSettings, setting_key: settingKey };
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -336,6 +353,19 @@ export function usePrintCustomization(settingKey: string = 'default') {
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
+
+  // استماع للتحديثات الفورية بين المكونات
+  useEffect(() => {
+    const handleCustomEvent = (e: any) => {
+      if (e.detail?.settingKey === settingKey && e.detail?.settings) {
+        setSettings(e.detail.settings);
+      }
+    };
+    window.addEventListener('print_customization_updated', handleCustomEvent);
+    return () => {
+      window.removeEventListener('print_customization_updated', handleCustomEvent);
+    };
+  }, [settingKey]);
 
   // جلب الإعدادات من قاعدة البيانات
   const fetchSettings = useCallback(async () => {
@@ -356,17 +386,34 @@ export function usePrintCustomization(settingKey: string = 'default') {
       if (data) {
         const localDimLabels = localStorage.getItem('show_size_dimension_labels') || 'false';
         const localSingleFace = localStorage.getItem('calc_meters_as_single_face') || 'false';
-        // دمج البيانات مع الإعدادات الافتراضية للحقول الجديدة
-        setSettings({ ...defaultSettings, ...data, show_size_dimension_labels: localDimLabels, calc_meters_as_single_face: localSingleFace, status_overrides: (data as any).status_overrides || undefined } as PrintCustomizationSettings);
+        const mergedSettings = {
+          ...defaultSettings,
+          ...data,
+          setting_key: settingKey,
+          show_size_dimension_labels: localDimLabels,
+          calc_meters_as_single_face: localSingleFace,
+          status_overrides: (data as any).status_overrides || undefined
+        } as PrintCustomizationSettings;
+        
+        setSettings(mergedSettings);
+        try {
+          localStorage.setItem(`print_customization_${settingKey}`, JSON.stringify(mergedSettings));
+        } catch {}
       } else {
         const localDimLabels = localStorage.getItem('show_size_dimension_labels') || 'false';
         const localSingleFace = localStorage.getItem('calc_meters_as_single_face') || 'false';
-        setSettings(prev => ({ ...prev, show_size_dimension_labels: localDimLabels, calc_meters_as_single_face: localSingleFace }));
+        setSettings(prev => ({ 
+          ...prev, 
+          setting_key: settingKey,
+          show_size_dimension_labels: localDimLabels, 
+          calc_meters_as_single_face: localSingleFace 
+        }));
       }
     } catch (error) {
       console.error('Error in fetchSettings:', error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [settingKey]);
 
   // حفظ الإعدادات في قاعدة البيانات
@@ -375,7 +422,11 @@ export function usePrintCustomization(settingKey: string = 'default') {
       setSaving(true);
       const currentSettings = settingsRef.current;
       const resolvedNewSettings = typeof newSettings === 'function' ? newSettings(currentSettings) : newSettings;
-      const updatedSettings = { ...currentSettings, ...resolvedNewSettings };
+      const updatedSettings: PrintCustomizationSettings = { 
+        ...currentSettings, 
+        ...resolvedNewSettings, 
+        setting_key: settingKey 
+      };
 
       if (resolvedNewSettings.show_size_dimension_labels !== undefined) {
         localStorage.setItem('show_size_dimension_labels', String(resolvedNewSettings.show_size_dimension_labels));
@@ -384,27 +435,80 @@ export function usePrintCustomization(settingKey: string = 'default') {
         localStorage.setItem('calc_meters_as_single_face', String(resolvedNewSettings.calc_meters_as_single_face));
       }
 
-      // Strip fields not present in the DB schema (kept client-side only)
-      const { map_label_scale, show_size_dimension_labels, calc_meters_as_single_face, ...dbPayload } = updatedSettings as any;
+      // حفظ محلي فوري
+      try {
+        localStorage.setItem(`print_customization_${settingKey}`, JSON.stringify(updatedSettings));
+      } catch {}
 
-      const { error } = await supabase
+      // تجهيز كائن الحفظ في قاعدة البيانات
+      const { 
+        id, 
+        created_at, 
+        map_label_scale, 
+        show_size_dimension_labels, 
+        calc_meters_as_single_face, 
+        ...dbPayload 
+      } = updatedSettings as any;
+
+      const payloadToSave = {
+        ...dbPayload,
+        setting_key: settingKey,
+        updated_at: new Date().toISOString()
+      };
+
+      // 1. محاولة الإدخال أو التحديث عبر upsert
+      const { error: upsertError } = await supabase
         .from('billboard_print_customization')
-        .upsert({
-          ...dbPayload,
-          setting_key: settingKey,
-          updated_at: new Date().toISOString()
-        }, {
+        .upsert(payloadToSave, {
           onConflict: 'setting_key'
         });
 
-      if (error) {
-        console.error('Error saving settings:', error);
-        toast.error('فشل حفظ الإعدادات');
-        return false;
+      if (upsertError) {
+        console.warn('Upsert failed, falling back to direct update/insert:', upsertError);
+        
+        // فحص وجود السجل
+        const { data: existing } = await supabase
+          .from('billboard_print_customization')
+          .select('id')
+          .eq('setting_key', settingKey)
+          .maybeSingle();
+
+        if (existing?.id) {
+          const { error: updateError } = await supabase
+            .from('billboard_print_customization')
+            .update(payloadToSave)
+            .eq('id', existing.id);
+          
+          if (updateError) {
+            console.error('Update also failed:', updateError);
+            toast.warning('تم حفظ الإعدادات محلياً (تعذر الحفظ في السحابة)');
+            setSettings(updatedSettings);
+            return true;
+          }
+        } else {
+          const { error: insertError } = await supabase
+            .from('billboard_print_customization')
+            .insert(payloadToSave);
+
+          if (insertError) {
+            console.error('Insert also failed:', insertError);
+            toast.warning('تم حفظ الإعدادات محلياً (تعذر الحفظ في السحابة)');
+            setSettings(updatedSettings);
+            return true;
+          }
+        }
       }
 
       setSettings(updatedSettings);
-      toast.success('تم حفظ الإعدادات بنجاح');
+      
+      // إرسال إشعار التحديث الفوري لبقية المكونات المفتوحة
+      try {
+        window.dispatchEvent(new CustomEvent('print_customization_updated', {
+          detail: { settingKey, settings: updatedSettings }
+        }));
+      } catch {}
+
+      toast.success('تم حفظ إعدادات الطباعة بنجاح');
       return true;
     } catch (error) {
       console.error('Error in saveSettings:', error);
@@ -420,18 +524,23 @@ export function usePrintCustomization(settingKey: string = 'default') {
     setSettings(prev => {
       const overrides = prev.status_overrides || {} as StatusOverrides;
       const statusSettings = overrides[status] || {};
-      return {
-        ...prev,
-        status_overrides: {
-          ...overrides,
-          [status]: {
-            ...statusSettings,
-            [key]: value,
-          },
+      const newOverrides = {
+        ...overrides,
+        [status]: {
+          ...statusSettings,
+          [key]: value,
         },
       };
+      const updated = {
+        ...prev,
+        status_overrides: newOverrides
+      };
+      try {
+        localStorage.setItem(`print_customization_${settingKey}`, JSON.stringify(updated));
+      } catch {}
+      return updated;
     });
-  }, []);
+  }, [settingKey]);
 
   // دمج الإعدادات مع الحالة المحددة
   const getSettingsForStatus = useCallback((status: StatusMode): PrintCustomizationSettings => {
@@ -439,9 +548,16 @@ export function usePrintCustomization(settingKey: string = 'default') {
     const overrides = settings.status_overrides[status] || {};
     return { ...settings, ...overrides };
   }, [settings]);
+
   const updateSetting = useCallback((key: keyof PrintCustomizationSettings, value: string) => {
-    setSettings(prev => ({ ...prev, [key]: value }));
-  }, []);
+    setSettings(prev => {
+      const updated = { ...prev, [key]: value };
+      try {
+        localStorage.setItem(`print_customization_${settingKey}`, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  }, [settingKey]);
 
   // إعادة الإعدادات للوضع الافتراضي
   const resetToDefaults = useCallback(async () => {

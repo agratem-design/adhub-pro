@@ -358,13 +358,20 @@ export default function MunicipalityPrintSettingsDialog({
     }
   };
 
+  const prevOpenRef = useRef(false);
+
   useEffect(() => {
     if (open) {
-      setLocalSettings(settings);
-      setPreviewZoom(1.0); // Default Zoom to 100%
-      loadSampleBillboard();
+      if (!prevOpenRef.current) {
+        setLocalSettings(settings);
+        setPreviewZoom(1.0); // Default Zoom to 100%
+        loadSampleBillboard();
+      }
+      prevOpenRef.current = true;
+    } else {
+      prevOpenRef.current = false;
     }
-  }, [open, settings, items]);
+  }, [open, settings]);
 
   const loadSampleBillboard = async (targetIndex?: number) => {
     // 1. Prioritize active collection items from props
@@ -431,6 +438,9 @@ export default function MunicipalityPrintSettingsDialog({
   };
 
   const handleSave = async () => {
+    try {
+      localStorage.setItem('mun_show_height_in_print', String(showHeightInPrint));
+    } catch {}
     const success = await saveSettings(localSettings);
     if (success) {
       if (onSaveSuccess) onSaveSuccess();
@@ -760,8 +770,38 @@ export default function MunicipalityPrintSettingsDialog({
                                   value={localSettings[field.key] as string || ''}
                                   onChange={e => updateLocal(field.key, e.target.value)}
                                   className="h-9 text-xs rounded-xl bg-slate-950/40 border-white/5 focus:border-indigo-500/30 text-white placeholder-slate-500"
-                                  placeholder={field.key === 'custom_pin_url' ? 'رابط ملف SVG للدبوس المخصص' : 'اكتب القيمة هنا'}
+                                  placeholder={field.key === 'custom_pin_url' ? 'رابط ملف SVG للدبوس المخصص' : field.key === 'cover_logo_url' ? 'رابط ملف الشعار (SVG / PNG)' : 'اكتب القيمة هنا'}
                                 />
+                              )}
+
+                              {field.key === 'cover_logo_url' && (
+                                <div className="space-y-1.5 mt-2">
+                                  <div className="text-[10px] font-bold text-slate-400">اختر شعاراً سريعاً:</div>
+                                  <div className="grid grid-cols-4 gap-2">
+                                    {[
+                                      { name: 'الشعار الذهبي', url: '/logofaresgold.svg' },
+                                      { name: 'الشعار الأبيض', url: '/logofares2.svg' },
+                                      { name: 'الرمز فقط', url: '/logo-symbol.svg' },
+                                      { name: 'النص فقط', url: '/logo-text.svg' },
+                                    ].map(item => (
+                                      <button
+                                        key={item.url}
+                                        type="button"
+                                        onClick={() => updateLocal('cover_logo_url', item.url)}
+                                        className={`p-1.5 rounded-xl border text-[9.5px] flex flex-col items-center gap-1 transition-all ${
+                                          (localSettings.cover_logo_url || '/logofaresgold.svg') === item.url
+                                            ? 'border-indigo-500 bg-indigo-500/20 text-white font-bold'
+                                            : 'border-white/5 bg-slate-950/40 text-slate-400 hover:text-white'
+                                        }`}
+                                      >
+                                        <div className="h-6 w-full flex items-center justify-center p-0.5">
+                                          <img src={item.url} alt={item.name} className="h-full object-contain" />
+                                        </div>
+                                        <span>{item.name}</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
                               )}
 
                               {field.key === 'custom_pin_url' && (

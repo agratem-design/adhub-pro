@@ -22,7 +22,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Slider } from '@/components/ui/slider';
-import { Plus, Trash2, Save, Printer, MapPin, ArrowUp, ArrowDown, ArrowUpDown, Search, Edit2, FolderOpen, Upload, Building2, Settings2, GripVertical, ArrowLeftRight, Replace, Filter, Sticker, LayoutGrid, List, FileSpreadsheet, Camera, ImageIcon, Loader2, CheckCircle2, AlertTriangle, Sparkles, X as XIcon, XIcon as XIcon2, Info, RefreshCw, Eye, Check, SlidersHorizontal, ChevronDown, Wrench, Clock, Ban, Clipboard, Maximize2, ZoomIn, ZoomOut, ExternalLink, Download, PenTool, FileText, Layers, Tag } from 'lucide-react';
+import { Plus, Trash2, Save, Printer, MapPin, ArrowUp, ArrowDown, ArrowUpDown, Search, Edit2, FolderOpen, Upload, Building2, Settings2, GripVertical, ArrowLeftRight, Replace, Filter, Sticker, LayoutGrid, List, FileSpreadsheet, Camera, ImageIcon, Loader2, CheckCircle2, AlertTriangle, Sparkles, X as XIcon, XIcon as XIcon2, Info, RefreshCw, Eye, Check, SlidersHorizontal, ChevronDown, Wrench, Clock, Ban, Clipboard, Maximize2, ZoomIn, ZoomOut, ExternalLink, Download, PenTool, FileText, Layers, Tag, Copy, Files, Calendar, BookOpen } from 'lucide-react';
 import { extractExifData } from '@/utils/exifExtractor';
 import { uploadImage } from '@/services/imageUploadService';
 import { compressLossless } from '@/utils/imageCompressor';
@@ -551,8 +551,23 @@ const expandShortGoogleMapsUrl = async (
 };
 
 export default function MunicipalityBillboardOrganizer() {
-  const [collections, setCollections] = useState<{ id: string; name: string; created_at: string }[]>([]);
+  const [collections, setCollections] = useState<{ id: string; name: string; created_at: string; municipality_name?: string; city?: string }[]>([]);
   const [currentCollection, setCurrentCollection] = useState<Collection>({ name: '', municipality_name: '', items: [] });
+  
+  // Duplicate / Save as copy / Delete collection states
+  const [duplicateTarget, setDuplicateTarget] = useState<{ id: string; name: string } | null>(null);
+  const [duplicateNewName, setDuplicateNewName] = useState<string>('');
+  const [duplicateAutoOpen, setDuplicateAutoOpen] = useState<boolean>(true);
+  const [isDuplicating, setIsDuplicating] = useState<boolean>(false);
+
+  const [showSaveAsCopyDialog, setShowSaveAsCopyDialog] = useState<boolean>(false);
+  const [saveAsCopyName, setSaveAsCopyName] = useState<string>('');
+  const [isSavingAsCopy, setIsSavingAsCopy] = useState<boolean>(false);
+
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+
+  const [collectionsSearchQuery, setCollectionsSearchQuery] = useState<string>('');
   
   // Helper to parse size and calculate area
   const parseDimensions = (sizeStr: string) => {
@@ -674,6 +689,17 @@ export default function MunicipalityBillboardOrganizer() {
       })).sort((a, b) => b.count - a.count)
     };
   }, [currentCollection.items, selectedItems, customSettings.faces_count_show, customSettings.calc_meters_as_single_face]);
+
+  const filteredCollections = useMemo(() => {
+    if (!collectionsSearchQuery.trim()) return collections;
+    const q = collectionsSearchQuery.toLowerCase().trim();
+    return collections.filter(c => 
+      (c.name && c.name.toLowerCase().includes(q)) ||
+      (c.municipality_name && c.municipality_name.toLowerCase().includes(q)) ||
+      (c.city && c.city.toLowerCase().includes(q))
+    );
+  }, [collections, collectionsSearchQuery]);
+
   const [collectionName, setCollectionName] = useState('');
   const [municipalityName, setMunicipalityName] = useState('');
   const [cityName, setCityName] = useState('');
@@ -812,7 +838,76 @@ export default function MunicipalityBillboardOrganizer() {
     loadOrganizerDefault('signaturesFontSize', 16)
   );
 
-  const [printStudioTab, setPrintStudioTab] = useState<'signatures' | 'layout' | 'status' | 'background'>('signatures');
+  // 🆕 Cover Page Customization States
+  const [coverPageEnabled, setCoverPageEnabled] = useState<boolean>(() => 
+    loadOrganizerDefault('coverPageEnabled', true)
+  );
+  const [coverTitle, setCoverTitle] = useState<string>(() => 
+    loadOrganizerDefault('coverTitle', '')
+  );
+  const [coverPhrase, setCoverPhrase] = useState<string>(() => 
+    loadOrganizerDefault('coverPhrase', 'لوحات')
+  );
+  const [coverSubtitle, setCoverSubtitle] = useState<string>(() => 
+    loadOrganizerDefault('coverSubtitle', '')
+  );
+  const [coverTitleFontSize, setCoverTitleFontSize] = useState<number>(() => 
+    loadOrganizerDefault('coverTitleFontSize', 36)
+  );
+  const [coverPhraseFontSize, setCoverPhraseFontSize] = useState<number>(() => 
+    loadOrganizerDefault('coverPhraseFontSize', 28)
+  );
+  const [coverSubtitleFontSize, setCoverSubtitleFontSize] = useState<number>(() => 
+    loadOrganizerDefault('coverSubtitleFontSize', 18)
+  );
+  const [coverLogoUrl, setCoverLogoUrl] = useState<string>(() => 
+    loadOrganizerDefault('coverLogoUrl', '/logofaresgold.svg')
+  );
+  const [coverLogoSize, setCoverLogoSize] = useState<number>(() => 
+    loadOrganizerDefault('coverLogoSize', 220)
+  );
+  const [uploadingCoverLogo, setUploadingCoverLogo] = useState(false);
+  const coverLogoInputRef = useRef<HTMLInputElement>(null);
+
+  const handleCoverLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingCoverLogo(true);
+    try {
+      const fileName = `cover_logo_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const url = await uploadImage(file, fileName, 'municipality-logos');
+      if (url) {
+        setCoverLogoUrl(url);
+        toast.success('تم رفع شعار الغلاف بنجاح');
+      } else {
+        throw new Error('فشل رفع الشعار');
+      }
+    } catch (err: any) {
+      console.error('Error uploading cover logo:', err);
+      toast.error(`فشل في رفع الشعار: ${err?.message || 'خطأ غير معروف'}`);
+    } finally {
+      setUploadingCoverLogo(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const [printStudioTab, setPrintStudioTab] = useState<'signatures' | 'cover' | 'layout' | 'status' | 'background'>('signatures');
+  const [previewBlueprintMode, setPreviewBlueprintMode] = useState<'card' | 'cover'>('card');
+
+  const resolveCoverTitle = (templateStr: string, municipality: string, cityNameVal: string, collName: string) => {
+    if (!templateStr || !templateStr.trim()) {
+      return municipality || collName || 'البلدية';
+    }
+    let res = templateStr;
+    res = res.replace(/\{municipality\}/gi, municipality || '');
+    res = res.replace(/\{البلدية\}/gi, municipality || '');
+    res = res.replace(/\{city\}/gi, cityNameVal || '');
+    res = res.replace(/\{المدينة\}/gi, cityNameVal || '');
+    res = res.replace(/\{name\}/gi, collName || '');
+    res = res.replace(/\{اسم المجموعة\}/gi, collName || '');
+    res = res.replace(/\{القائمة\}/gi, collName || '');
+    return res.trim();
+  };
 
   const applySignersPreset = (preset: '3_official' | '2_side' | '1_center' | '4_grid') => {
     if (preset === '3_official') {
@@ -884,6 +979,15 @@ export default function MunicipalityBillboardOrganizer() {
         if (data?.setting_value) {
           const sv = data.setting_value as any;
           if (sv.headerTitleTemplate) setSummaryHeaderTitle(sv.headerTitleTemplate);
+          if (sv.coverTitle !== undefined) setCoverTitle(sv.coverTitle);
+          if (sv.coverPhrase !== undefined) setCoverPhrase(sv.coverPhrase);
+          if (sv.coverSubtitle !== undefined) setCoverSubtitle(sv.coverSubtitle);
+          if (sv.coverPageEnabled !== undefined) setCoverPageEnabled(sv.coverPageEnabled);
+          if (sv.coverLogoUrl !== undefined) setCoverLogoUrl(sv.coverLogoUrl);
+          if (sv.coverLogoSize !== undefined) setCoverLogoSize(sv.coverLogoSize);
+          if (sv.coverTitleFontSize !== undefined) setCoverTitleFontSize(sv.coverTitleFontSize);
+          if (sv.coverPhraseFontSize !== undefined) setCoverPhraseFontSize(sv.coverPhraseFontSize);
+          if (sv.coverSubtitleFontSize !== undefined) setCoverSubtitleFontSize(sv.coverSubtitleFontSize);
           if (sv.showSignatures !== undefined) setShowSignatures(sv.showSignatures);
           if (sv.signaturesPage) setSignaturesPage(sv.signaturesPage);
           if (Array.isArray(sv.signersList) && sv.signersList.length > 0) {
@@ -902,6 +1006,15 @@ export default function MunicipalityBillboardOrganizer() {
   const saveAsGlobalDefaults = async () => {
     const defaultsPayload = {
       headerTitleTemplate: summaryHeaderTitle,
+      coverTitle,
+      coverPhrase,
+      coverSubtitle,
+      coverPageEnabled,
+      coverLogoUrl,
+      coverLogoSize,
+      coverTitleFontSize,
+      coverPhraseFontSize,
+      coverSubtitleFontSize,
       showSignatures,
       signaturesPage,
       signersList,
@@ -940,7 +1053,7 @@ export default function MunicipalityBillboardOrganizer() {
             updated_at: new Date().toISOString()
           });
       }
-      toast.success('تم حفظ الترويسة والتوقيعات كإعداد افتراضي عام لجميع القوائم الجديدة');
+      toast.success('تم حفظ إعدادات الغلاف والترويسة والتوقيعات كإعداد افتراضي عام');
     } catch (e: any) {
       toast.warning('تم الحفظ محلياً: ' + (e?.message || ''));
     }
@@ -958,6 +1071,15 @@ export default function MunicipalityBillboardOrganizer() {
       if (data?.description && data.description.trim().startsWith('{')) {
         const parsed = JSON.parse(data.description);
         if (parsed.headerTitleTemplate !== undefined) setSummaryHeaderTitle(parsed.headerTitleTemplate);
+        if (parsed.coverTitle !== undefined) setCoverTitle(parsed.coverTitle);
+        if (parsed.coverPhrase !== undefined) setCoverPhrase(parsed.coverPhrase);
+        if (parsed.coverSubtitle !== undefined) setCoverSubtitle(parsed.coverSubtitle);
+        if (parsed.coverPageEnabled !== undefined) setCoverPageEnabled(parsed.coverPageEnabled);
+        if (parsed.coverLogoUrl !== undefined) setCoverLogoUrl(parsed.coverLogoUrl);
+        if (parsed.coverLogoSize !== undefined) setCoverLogoSize(parsed.coverLogoSize);
+        if (parsed.coverTitleFontSize !== undefined) setCoverTitleFontSize(parsed.coverTitleFontSize);
+        if (parsed.coverPhraseFontSize !== undefined) setCoverPhraseFontSize(parsed.coverPhraseFontSize);
+        if (parsed.coverSubtitleFontSize !== undefined) setCoverSubtitleFontSize(parsed.coverSubtitleFontSize);
         if (parsed.showSignatures !== undefined) setShowSignatures(parsed.showSignatures);
         if (parsed.signaturesPage !== undefined) setSignaturesPage(parsed.signaturesPage);
         if (Array.isArray(parsed.signersList)) {
@@ -965,7 +1087,7 @@ export default function MunicipalityBillboardOrganizer() {
         }
         if (parsed.signaturesFontSize !== undefined) setSignaturesFontSize(parsed.signaturesFontSize);
         if (parsed.summaryRowsPerPage !== undefined) setSummaryRowsPerPage(parsed.summaryRowsPerPage);
-        toast.success(`تم استيراد إعدادات الترويسة والتوقيعات من "${data.name}" بنجاح`);
+        toast.success(`تم استيراد إعدادات الغلاف والترويسة والتوقيعات من "${data.name}" بنجاح`);
       } else {
         toast.info('هذه القائمة لا تحتوي على تخصيصات ترويسة وتوقيعات محفوظة');
       }
@@ -1344,7 +1466,7 @@ export default function MunicipalityBillboardOrganizer() {
   const loadCollections = async () => {
     const { data } = await supabase
       .from('municipality_collections')
-      .select('id, name, created_at')
+      .select('id, name, created_at, municipality_name, city')
       .order('created_at', { ascending: false });
     if (data) setCollections(data);
   };
@@ -1393,6 +1515,15 @@ export default function MunicipalityBillboardOrganizer() {
 
       if (parsedConfig) {
         if (parsedConfig.headerTitleTemplate !== undefined) setSummaryHeaderTitle(parsedConfig.headerTitleTemplate);
+        if (parsedConfig.coverTitle !== undefined) setCoverTitle(parsedConfig.coverTitle);
+        if (parsedConfig.coverPhrase !== undefined) setCoverPhrase(parsedConfig.coverPhrase);
+        if (parsedConfig.coverSubtitle !== undefined) setCoverSubtitle(parsedConfig.coverSubtitle);
+        if (parsedConfig.coverPageEnabled !== undefined) setCoverPageEnabled(parsedConfig.coverPageEnabled);
+        if (parsedConfig.coverLogoUrl !== undefined) setCoverLogoUrl(parsedConfig.coverLogoUrl);
+        if (parsedConfig.coverLogoSize !== undefined) setCoverLogoSize(parsedConfig.coverLogoSize);
+        if (parsedConfig.coverTitleFontSize !== undefined) setCoverTitleFontSize(parsedConfig.coverTitleFontSize);
+        if (parsedConfig.coverPhraseFontSize !== undefined) setCoverPhraseFontSize(parsedConfig.coverPhraseFontSize);
+        if (parsedConfig.coverSubtitleFontSize !== undefined) setCoverSubtitleFontSize(parsedConfig.coverSubtitleFontSize);
         if (parsedConfig.showSignatures !== undefined) setShowSignatures(parsedConfig.showSignatures);
         if (parsedConfig.signaturesPage !== undefined) setSignaturesPage(parsedConfig.signaturesPage);
         if (Array.isArray(parsedConfig.signersList)) {
@@ -1487,6 +1618,15 @@ export default function MunicipalityBillboardOrganizer() {
       const printConfig = {
         municipality: municipalityName,
         headerTitleTemplate: summaryHeaderTitle,
+        coverTitle,
+        coverPhrase,
+        coverSubtitle,
+        coverPageEnabled,
+        coverLogoUrl,
+        coverLogoSize,
+        coverTitleFontSize,
+        coverPhraseFontSize,
+        coverSubtitleFontSize,
         showSignatures,
         signaturesPage,
         signersList,
@@ -1498,7 +1638,7 @@ export default function MunicipalityBillboardOrganizer() {
       };
 
       const collectionPayload: any = {
-        name: collectionName,
+        name: collectionName.trim(),
         description: JSON.stringify(printConfig),
         municipality_name: municipalityName || null,
         city: cityName || null,
@@ -1536,14 +1676,218 @@ export default function MunicipalityBillboardOrganizer() {
 
       await supabase.from('municipality_collection_items').insert(itemsToInsert);
 
-      setCurrentCollection(prev => ({ ...prev, id: collectionId }));
+      setCurrentCollection(prev => ({ ...prev, id: collectionId, name: collectionName.trim() }));
       toast.success('تم الحفظ بنجاح');
       try { if (collectionId) localStorage.setItem('last_municipality_collection_id', collectionId); } catch {}
       loadCollections();
-    } catch (e) {
-      toast.error('فشل في الحفظ');
+    } catch (e: any) {
+      console.error('[saveCollection] error:', e);
+      toast.error('فشل في الحفظ: ' + (e?.message || ''));
     } finally {
       setSaving(false);
+    }
+  };
+
+  // حفظ اللوحات الحالية كنسخة جديدة منفصلة
+  const saveAsNewCollection = async (customName: string) => {
+    if (currentCollection.items.length === 0) {
+      toast.error('أضف لوحات أولاً');
+      return;
+    }
+    const finalName = customName.trim();
+    if (!finalName) {
+      toast.error('يرجى كتابة اسم النسخة الجديدة');
+      return;
+    }
+    setIsSavingAsCopy(true);
+    try {
+      const printConfig = {
+        municipality: municipalityName,
+        headerTitleTemplate: summaryHeaderTitle,
+        coverTitle,
+        coverPhrase,
+        coverSubtitle,
+        coverPageEnabled,
+        coverLogoUrl,
+        coverLogoSize,
+        coverTitleFontSize,
+        coverPhraseFontSize,
+        coverSubtitleFontSize,
+        showSignatures,
+        signaturesPage,
+        signersList,
+        signaturesFontSize,
+        summaryRowsPerPage,
+        showStatusInPrint,
+        showHeightInPrint,
+        printImageSource,
+      };
+
+      const collectionPayload: any = {
+        name: finalName,
+        description: JSON.stringify(printConfig),
+        municipality_name: municipalityName || null,
+        city: cityName || null,
+        default_size: defaultSize || null,
+      };
+
+      const { data: newColl, error: collErr } = await supabase
+        .from('municipality_collections')
+        .insert(collectionPayload)
+        .select('id')
+        .single();
+
+      if (collErr || !newColl?.id) {
+        throw new Error(collErr?.message || 'فشل في إنشاء النسخة الجديدة');
+      }
+
+      const newCollectionId = newColl.id;
+
+      const itemsToInsert = currentCollection.items.map(item => ({
+        collection_id: newCollectionId,
+        sequence_number: item.sequence_number,
+        billboard_id: item.billboard_id || null,
+        billboard_name: item.billboard_name || null,
+        size: item.size,
+        faces_count: item.faces_count,
+        location_text: item.location_text,
+        nearest_landmark: item.nearest_landmark,
+        latitude: item.latitude,
+        longitude: item.longitude,
+        item_type: item.item_type,
+        design_face_a: item.design_face_a || null,
+        design_face_b: item.design_face_b || null,
+        image_url: item.image_url || null,
+        status: item.status || 'تم التركيب',
+        overlay_config: item.overlay_config ? item.overlay_config : null,
+      }));
+
+      const { error: itemsErr } = await supabase.from('municipality_collection_items').insert(itemsToInsert);
+      if (itemsErr) {
+        throw new Error(itemsErr.message || 'فشل في نسخ عناصر اللوحات');
+      }
+
+      setCurrentCollection(prev => ({ ...prev, id: newCollectionId, name: finalName }));
+      setCollectionName(finalName);
+      toast.success(`تم حفظ القائمة كنسخة جديدة باسم "${finalName}" بنجاح (${itemsToInsert.length} لوحة)`);
+      try { localStorage.setItem('last_municipality_collection_id', newCollectionId); } catch {}
+      await loadCollections();
+      setShowSaveAsCopyDialog(false);
+    } catch (e: any) {
+      console.error('[saveAsNewCollection] error:', e);
+      toast.error(`فشل في حفظ النسخة: ${e?.message || 'خطأ غير معروف'}`);
+    } finally {
+      setIsSavingAsCopy(false);
+    }
+  };
+
+  // نسخ قائمة محفوظة بالكامل مع لوحاتها وتسميتها باسم جديد
+  const handleDuplicateCollection = async () => {
+    if (!duplicateTarget) return;
+    const finalName = duplicateNewName.trim();
+    if (!finalName) {
+      toast.error('يرجى كتابة اسم النسخة الجديدة');
+      return;
+    }
+
+    setIsDuplicating(true);
+    try {
+      // 1. جلب بيانات القائمة الأصلية وعناصرها
+      const [collRes, itemsRes] = await Promise.all([
+        supabase.from('municipality_collections').select('*').eq('id', duplicateTarget.id).single(),
+        supabase.from('municipality_collection_items').select('*').eq('collection_id', duplicateTarget.id).order('sequence_number'),
+      ]);
+
+      if (collRes.error || !collRes.data) {
+        throw new Error(collRes.error?.message || 'تعذر جلب بيانات القائمة الأصلية');
+      }
+
+      const sourceColl = collRes.data;
+      const sourceItems = itemsRes.data || [];
+
+      // 2. إنشاء السجل الجديد في جدول المجموعات
+      const { data: newColl, error: collInsertErr } = await supabase
+        .from('municipality_collections')
+        .insert({
+          name: finalName,
+          description: sourceColl.description,
+          municipality_name: sourceColl.municipality_name,
+          city: sourceColl.city,
+          default_size: sourceColl.default_size,
+        })
+        .select('id')
+        .single();
+
+      if (collInsertErr || !newColl?.id) {
+        throw new Error(collInsertErr?.message || 'تعذر إنشاء القائمة الجديدة');
+      }
+
+      const newId = newColl.id;
+
+      // 3. نسخ جميع اللوحات إن وجدت
+      if (sourceItems.length > 0) {
+        const clonedItems = sourceItems.map((item: any) => ({
+          collection_id: newId,
+          sequence_number: item.sequence_number,
+          billboard_id: item.billboard_id || null,
+          billboard_name: item.billboard_name || null,
+          size: item.size || '',
+          faces_count: item.faces_count || 'وجهين',
+          location_text: item.location_text || '',
+          nearest_landmark: item.nearest_landmark || '',
+          latitude: item.latitude,
+          longitude: item.longitude,
+          item_type: item.item_type || 'existing',
+          design_face_a: item.design_face_a || null,
+          design_face_b: item.design_face_b || null,
+          image_url: item.image_url || null,
+          status: item.status || 'تم التركيب',
+          overlay_config: item.overlay_config || null,
+        }));
+
+        const { error: itemsInsertErr } = await supabase.from('municipality_collection_items').insert(clonedItems);
+        if (itemsInsertErr) {
+          throw new Error(itemsInsertErr.message || 'تعذر نسخ اللوحات للقائمة الجديدة');
+        }
+      }
+
+      toast.success(`تم نسخ القائمة باسم "${finalName}" بنجاح (${sourceItems.length} لوحة)`);
+      await loadCollections();
+      setDuplicateTarget(null);
+
+      if (duplicateAutoOpen) {
+        setShowCollectionsDialog(false);
+        await loadCollection(newId);
+      }
+    } catch (err: any) {
+      console.error('[handleDuplicateCollection] error:', err);
+      toast.error(`فشل في نسخ القائمة: ${err?.message || 'خطأ غير معروف'}`);
+    } finally {
+      setIsDuplicating(false);
+    }
+  };
+
+  // حذف قائمة محفوظة
+  const handleDeleteCollection = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      await supabase.from('municipality_collection_items').delete().eq('collection_id', deleteTarget.id);
+      const { error } = await supabase.from('municipality_collections').delete().eq('id', deleteTarget.id);
+      if (error) throw error;
+
+      toast.success(`تم حذف القائمة "${deleteTarget.name}" بنجاح`);
+      if (currentCollection.id === deleteTarget.id) {
+        setCurrentCollection(prev => ({ ...prev, id: undefined }));
+        try { localStorage.removeItem('last_municipality_collection_id'); } catch {}
+      }
+      await loadCollections();
+      setDeleteTarget(null);
+    } catch (err: any) {
+      console.error('[handleDeleteCollection] error:', err);
+      toast.error(`فشل في حذف القائمة: ${err?.message || 'خطأ غير معروف'}`);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -1553,6 +1897,9 @@ export default function MunicipalityBillboardOrganizer() {
     setMunicipalityName('');
     setCityName('');
     setDefaultSize('');
+    setCoverTitle('');
+    setCoverPhrase('لوحات');
+    setCoverSubtitle('');
     try {
       localStorage.removeItem('last_municipality_collection_id');
     } catch {}
@@ -2934,11 +3281,14 @@ export default function MunicipalityBillboardOrganizer() {
       const effectiveStatusColor = statusColor;
 
       // ✅ صفحة الغلاف
-      const coverEnabled = (s as any).cover_page_enabled !== 'false';
-      if (coverEnabled && displayMunicipality) {
+      const coverEnabled = coverPageEnabled && (s as any).cover_page_enabled !== 'false';
+      const effectiveCoverTitle = resolveCoverTitle(coverTitle, municipalityName, cityName, collectionName);
+      if (coverEnabled && (effectiveCoverTitle || displayMunicipality)) {
         const matchingBg = printBackgrounds.find(bg => bg.url === customBackgroundUrl);
-        let coverLogoUrl = matchingBg?.logo_url || (s as any).cover_logo_url || '/logofaresgold.svg';
-        const coverPhrase = (s as any).cover_phrase || 'لوحات';
+        let finalCoverLogoUrl = coverLogoUrl || matchingBg?.logo_url || (s as any).cover_logo_url || '/logofaresgold.svg';
+        const finalCoverPhrase = coverPhrase || (s as any).cover_phrase || 'لوحات';
+        const finalCoverTitle = effectiveCoverTitle || displayMunicipality;
+        const finalCoverSubtitle = coverSubtitle || '';
 
         const formatCssSize = (val: any, fallback: string) => {
           if (!val) return fallback;
@@ -2954,20 +3304,11 @@ export default function MunicipalityBillboardOrganizer() {
           return str;
         };
 
-        const rawLogoSize = matchingBg?.logo_size || (s as any).cover_logo_size || '220px';
-        const coverLogoSize = formatCssSize(rawLogoSize, '220px');
-        const coverPhraseFontSize = formatCssSize((s as any).cover_phrase_font_size, '28px');
-        const coverMunicipalityFontSize = formatCssSize((s as any).cover_municipality_font_size, '36px');
-        
-        const logoTop = (s as any).cover_logo_top || '65mm';
-        const logoLeft = (s as any).cover_logo_left || '50%';
-        const logoAlign = (s as any).cover_logo_align || 'center';
-        const phraseTop = (s as any).cover_phrase_top || '138mm';
-        const phraseLeft = (s as any).cover_phrase_left || '50%';
-        const phraseAlign = (s as any).cover_phrase_align || 'center';
-        const muniTop = (s as any).cover_municipality_top || '154mm';
-        const muniLeft = (s as any).cover_municipality_left || '50%';
-        const muniAlign = (s as any).cover_municipality_align || 'center';
+        const rawLogoSize = coverLogoSize ? `${coverLogoSize}px` : (matchingBg?.logo_size || (s as any).cover_logo_size || '220px');
+        const finalCoverLogoSize = formatCssSize(rawLogoSize, '220px');
+        const effectiveCoverPhraseFontSize = coverPhraseFontSize ? `${coverPhraseFontSize}px` : formatCssSize((s as any).cover_phrase_font_size, '28px');
+        const effectiveCoverTitleFontSize = coverTitleFontSize ? `${coverTitleFontSize}px` : formatCssSize((s as any).cover_municipality_font_size, '36px');
+        const effectiveCoverSubtitleFontSize = coverSubtitleFontSize ? `${coverSubtitleFontSize}px` : '18px';
 
         const coverBgEnabled = (s as any).cover_background_enabled === 'true';
         const coverBgUrl = (s as any).cover_background_url;
@@ -2980,15 +3321,20 @@ export default function MunicipalityBillboardOrganizer() {
               ${coverBgHtml}
               <div style="position:absolute;top:45%;left:0;right:0;width:100%;transform:translateY(-50%);text-align:center;margin:0 auto;display:block;z-index:5;">
                 <div style="width:100%;text-align:center;margin:0 auto 20px auto;display:block;clear:both;">
-                  <img src="${normalizeGoogleImageUrl(coverLogoUrl)}" alt="شعار" style="display:inline-block;margin:0 auto;text-align:center;width:${coverLogoSize};max-width:90%;height:auto;vertical-align:middle;" crossorigin="anonymous" onerror="this.style.display='none'" />
+                  <img src="${normalizeGoogleImageUrl(finalCoverLogoUrl)}" alt="شعار" style="display:inline-block;margin:0 auto;text-align:center;width:${finalCoverLogoSize};max-width:90%;height:auto;vertical-align:middle;" crossorigin="anonymous" onerror="this.style.display='none'" />
                 </div>
                 <div style="width:100%;text-align:center;margin:0 auto;display:block;">
-                  <div style="font-family:'Doran',Arial,sans-serif;font-size:${coverPhraseFontSize};font-weight:700;color:#000;line-height:1.3;text-align:center;margin:0 auto 8px auto;display:block;">
-                    ${coverPhrase}
+                  <div style="font-family:'Doran',Arial,sans-serif;font-size:${effectiveCoverPhraseFontSize};font-weight:700;color:#000;line-height:1.3;text-align:center;margin:0 auto 8px auto;display:block;">
+                    ${finalCoverPhrase}
                   </div>
-                  <div style="font-family:'Doran',Arial,sans-serif;font-size:${coverMunicipalityFontSize};font-weight:700;color:#000;line-height:1.3;text-align:center;margin:0 auto;display:block;">
-                    ${displayMunicipality}
+                  <div style="font-family:'Doran',Arial,sans-serif;font-size:${effectiveCoverTitleFontSize};font-weight:700;color:#000;line-height:1.3;text-align:center;margin:0 auto;display:block;">
+                    ${finalCoverTitle}
                   </div>
+                  ${finalCoverSubtitle ? `
+                    <div style="font-family:'Doran',Arial,sans-serif;font-size:${effectiveCoverSubtitleFontSize};font-weight:600;color:#555;line-height:1.4;text-align:center;margin:12px auto 0 auto;display:block;">
+                      ${finalCoverSubtitle}
+                    </div>
+                  ` : ''}
                 </div>
               </div>
             </div>
@@ -3753,6 +4099,24 @@ export default function MunicipalityBillboardOrganizer() {
                 <Save className="h-3.5 w-3.5" />
                 {saving ? 'حفظ...' : 'حفظ'}
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-lg text-xs gap-1.5 border-indigo-500/20 bg-indigo-500/8 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/15 font-medium"
+                onClick={() => {
+                  if (currentCollection.items.length === 0) {
+                    toast.error('أضف لوحات أولاً لحفظ نسخة');
+                    return;
+                  }
+                  setSaveAsCopyName(collectionName ? `${collectionName} - نسخة` : 'قائمة جديدة');
+                  setShowSaveAsCopyDialog(true);
+                }}
+                disabled={currentCollection.items.length === 0 || isSavingAsCopy}
+                title="حفظ اللوحات الحالية كقائمة جديدة منفصلة باسم جديد"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">حفظ كنسخة</span>
+              </Button>
               <div className="w-px h-5 bg-border/30 mx-1 hidden sm:block" />
               <Button size="sm" variant="outline" className="h-8 rounded-lg text-xs gap-1.5 border-amber-500/20 bg-amber-500/8 text-amber-600 dark:text-amber-400 hover:bg-amber-500/15" onClick={() => printStickers(currentCollection.items, stickerSettings, municipalityName)} disabled={currentCollection.items.length === 0}>
                 <Sticker className="h-3.5 w-3.5" />
@@ -3832,12 +4196,95 @@ export default function MunicipalityBillboardOrganizer() {
                 </Select>
               </div>
             </div>
-            {(municipalityName || cityName || defaultSize) && (
+
+            {/* Cover Page Title & Phrase Section */}
+            <div className="mt-4 pt-4 border-t border-border/10">
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                <div className="md:col-span-6 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                      <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
+                      <span>العنوان المطبوع في صفحة الغلاف</span>
+                    </Label>
+                    <span className="text-[10px] text-muted-foreground">
+                      (الصفحة الأولى للمستند)
+                    </span>
+                  </div>
+                  <Input
+                    value={coverTitle}
+                    onChange={e => setCoverTitle(e.target.value)}
+                    placeholder={`تلقائي: ${municipalityName || collectionName || 'اسم البلدية أو المجموعة'}`}
+                    className="h-10 rounded-xl bg-background/50 border-border/15 focus-visible:ring-indigo-500 font-bold"
+                  />
+                </div>
+
+                <div className="md:col-span-3 space-y-1.5">
+                  <Label className="text-xs text-muted-foreground font-medium">العبارة الافتتاحية للغلاف</Label>
+                  <Input
+                    value={coverPhrase}
+                    onChange={e => setCoverPhrase(e.target.value)}
+                    placeholder="مثال: لوحات (أو مواقع لوحات...)"
+                    className="h-10 rounded-xl bg-background/50 border-border/15 focus-visible:ring-indigo-500 font-medium"
+                  />
+                </div>
+
+                <div className="md:col-span-3 flex items-center justify-between p-2.5 rounded-xl border border-border/15 bg-background/40 h-10">
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs font-semibold text-foreground">تفعيل الغلاف</span>
+                  </div>
+                  <Switch
+                    checked={coverPageEnabled}
+                    onCheckedChange={setCoverPageEnabled}
+                  />
+                </div>
+              </div>
+
+              {/* Quick variable buttons & live preview */}
+              <div className="flex items-center gap-2 flex-wrap mt-2.5">
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] font-bold text-muted-foreground">إدراج ذكي:</span>
+                  <button
+                    type="button"
+                    onClick={() => setCoverTitle(prev => (prev ? prev + ' ' : '') + '{البلدية}')}
+                    className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-500 border border-indigo-500/20 transition-all"
+                  >
+                    + {'{البلدية}'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCoverTitle(prev => (prev ? prev + ' ' : '') + '{المدينة}')}
+                    className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-500/10 hover:bg-purple-500/20 text-purple-500 border border-purple-500/20 transition-all"
+                  >
+                    + {'{المدينة}'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCoverTitle(prev => (prev ? prev + ' ' : '') + '{اسم المجموعة}')}
+                    className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/20 transition-all"
+                  >
+                    + {'{اسم المجموعة}'}
+                  </button>
+                </div>
+
+                <div className="text-[10px] text-muted-foreground mr-auto flex items-center gap-1.5 bg-muted/20 px-2.5 py-1 rounded-lg border border-border/10">
+                  <span className="text-amber-500 font-bold">معاينة نص الغلاف:</span>
+                  <span className="text-foreground font-semibold">
+                    {coverPageEnabled 
+                      ? `"${coverPhrase || 'لوحات'} ${resolveCoverTitle(coverTitle, municipalityName, cityName, collectionName)}"`
+                      : '(الغلاف معطّل)'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {(municipalityName || cityName || defaultSize || coverTitle) && (
               <div className="flex items-center gap-2 flex-wrap mt-4 pt-3.5 border-t border-border/10">
                 <span className="text-[11px] text-muted-foreground">روابط البيانات النشطة:</span>
                 {municipalityName && <Badge variant="secondary" className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/10 gap-1 rounded-lg"><Building2 className="h-3 w-3" />{municipalityName}</Badge>}
                 {cityName && <Badge variant="secondary" className="bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/10 rounded-lg">{cityName}</Badge>}
                 {defaultSize && <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/10 rounded-lg">المقاس الافتراضي: {defaultSize}</Badge>}
+                {coverTitle && <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/10 rounded-lg">عنوان الغلاف: {resolveCoverTitle(coverTitle, municipalityName, cityName, collectionName)}</Badge>}
               </div>
             )}
           </CardContent>
@@ -5825,39 +6272,337 @@ export default function MunicipalityBillboardOrganizer() {
 
       {/* Saved collections dialog */}
       <Dialog open={showCollectionsDialog} onOpenChange={(open) => { setShowCollectionsDialog(open); if (open) loadCollections(); }}>
-        <DialogContent className="max-w-md border-border/15 rounded-3xl bg-background/98 backdrop-blur-md">
-          <DialogHeader>
-            <DialogTitle className="font-bold">المجموعات المحفوظة</DialogTitle>
-            <DialogDescription className="sr-only">قائمة المجموعات المحفوظة سابقةً لتحديدها أو تحميلها</DialogDescription>
-          </DialogHeader>
-          <div className="py-2">
-            {collections.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground text-sm">
-                لا توجد مجموعات محفوظة حالياً
-              </div>
-            ) : (
-              <div className="max-h-[350px] overflow-y-auto custom-scrollbar pr-1">
-                <div className="space-y-2">
-                  {collections.map(c => (
-                    <div
-                      key={c.id}
-                      className="flex items-center justify-between p-3.5 border border-border/10 rounded-2xl hover:bg-muted/50 cursor-pointer transition-colors group/item"
-                      onClick={() => loadCollection(c.id)}
-                    >
-                      <div>
-                        <div className="font-semibold text-sm group-hover/item:text-indigo-500 transition-colors">{c.name}</div>
-                        <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1.5">
-                          <span>تاريخ الحفظ:</span>
-                          <span>{new Date(c.created_at).toLocaleDateString('ar-LY', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
-                        </div>
-                      </div>
-                      <Button variant="secondary" size="sm" className="rounded-xl h-8 text-xs font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/10 hover:bg-indigo-500 hover:text-white transition-all">فتح</Button>
-                    </div>
-                  ))}
+        <DialogContent className="max-w-lg border-border/15 rounded-3xl bg-background/98 backdrop-blur-xl shadow-2xl p-0 overflow-hidden">
+          <div className="p-5 sm:p-6 border-b border-border/15 bg-card/60">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 rounded-xl shadow-sm">
+                  <FolderOpen className="h-4 w-4" />
                 </div>
+                <div>
+                  <DialogTitle className="font-bold text-base">المجموعات المحفوظة</DialogTitle>
+                  <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                    إدارة، فتح، نسخ، وحذف القوائم المنظمة سابقةً
+                  </DialogDescription>
+                </div>
+              </div>
+              <Badge variant="outline" className="text-xs font-semibold bg-primary/5 text-primary border-primary/20">
+                {collections.length} قائمة
+              </Badge>
+            </div>
+
+            {collections.length > 0 && (
+              <div className="mt-3.5 relative">
+                <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  value={collectionsSearchQuery}
+                  onChange={(e) => setCollectionsSearchQuery(e.target.value)}
+                  placeholder="بحث باسم القائمة أو البلدية أو المدينة..."
+                  className="pr-9 pl-8 h-9 text-xs rounded-xl bg-background/80 border-border/20 focus-visible:ring-indigo-500"
+                />
+                {collectionsSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setCollectionsSearchQuery('')}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs p-0.5"
+                  >
+                    <XIcon className="h-3 w-3" />
+                  </button>
+                )}
               </div>
             )}
           </div>
+
+          <div className="p-3 sm:p-4 max-h-[420px] overflow-y-auto custom-scrollbar">
+            {collections.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground text-sm space-y-2">
+                <FolderOpen className="h-8 w-8 mx-auto opacity-30" />
+                <p className="font-medium">لا توجد مجموعات محفوظة حالياً</p>
+                <p className="text-xs text-muted-foreground/70">قم بتنظيم اللوحات والضغط على "حفظ" لحفظ قائمتك الأولى</p>
+              </div>
+            ) : filteredCollections.length === 0 ? (
+              <div className="text-center py-10 text-muted-foreground text-xs">
+                لا توجد نتائج مطابقة لبحثك "{collectionsSearchQuery}"
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredCollections.map(c => {
+                  const isCurrent = currentCollection.id === c.id;
+                  return (
+                    <div
+                      key={c.id}
+                      className={`flex items-center justify-between p-3 sm:p-3.5 border rounded-2xl transition-all group/item ${
+                        isCurrent
+                          ? 'border-indigo-500/40 bg-indigo-500/5 shadow-sm'
+                          : 'border-border/15 hover:border-border/40 hover:bg-muted/40'
+                      }`}
+                    >
+                      <div
+                        className="flex-1 min-w-0 cursor-pointer pl-2"
+                        onClick={() => loadCollection(c.id)}
+                      >
+                        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                          <span className="font-semibold text-sm text-foreground group-hover/item:text-indigo-500 transition-colors truncate">
+                            {c.name}
+                          </span>
+                          {isCurrent && (
+                            <Badge className="text-[10px] h-5 bg-indigo-500 text-white font-bold px-1.5">
+                              الحالية
+                            </Badge>
+                          )}
+                          {c.municipality_name && (
+                            <Badge variant="outline" className="text-[10px] h-4.5 border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/5 px-1.5">
+                              {c.municipality_name}
+                            </Badge>
+                          )}
+                          {c.city && c.city !== c.municipality_name && (
+                            <Badge variant="outline" className="text-[10px] h-4.5 border-slate-500/20 text-muted-foreground px-1.5">
+                              {c.city}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1.5 font-mono">
+                          <Calendar className="h-3 w-3 inline text-muted-foreground/60" />
+                          <span>{new Date(c.created_at).toLocaleDateString('ar-LY', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="rounded-xl h-8 px-3 text-xs font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/15 hover:bg-indigo-500 hover:text-white transition-all gap-1"
+                          onClick={() => loadCollection(c.id)}
+                          title="فتح وتحميل القائمة"
+                        >
+                          <FolderOpen className="h-3 w-3" />
+                          <span>فتح</span>
+                        </Button>
+
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="rounded-xl h-8 px-2.5 text-xs font-semibold border-amber-500/25 bg-amber-500/8 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-all gap-1"
+                          onClick={() => {
+                            setDuplicateTarget({ id: c.id, name: c.name });
+                            setDuplicateNewName(`${c.name} - نسخة`);
+                          }}
+                          title="نسخ هذه القائمة باسم جديد"
+                        >
+                          <Copy className="h-3 w-3" />
+                          <span className="hidden sm:inline">نسخ</span>
+                        </Button>
+
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="rounded-xl h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                          onClick={() => setDeleteTarget({ id: c.id, name: c.name })}
+                          title="حذف القائمة"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Duplicate Collection Modal */}
+      <Dialog open={!!duplicateTarget} onOpenChange={(open) => { if (!open) setDuplicateTarget(null); }}>
+        <DialogContent className="max-w-md border-border/20 rounded-3xl bg-background/98 backdrop-blur-xl shadow-2xl">
+          <DialogHeader>
+            <div className="flex items-center gap-2.5 text-amber-500 mb-1">
+              <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                <Copy className="h-4 w-4" />
+              </div>
+              <DialogTitle className="font-bold text-base text-foreground">نسخ قائمة وتسميتها باسم جديد</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              سيتم استنساخ جميع لوحات وترتيب وإعدادات القائمة <strong className="text-foreground">"{duplicateTarget?.name}"</strong> إلى قائمة جديدة تماماً.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-foreground">اسم القائمة الجديدة *</Label>
+              <Input
+                value={duplicateNewName}
+                onChange={(e) => setDuplicateNewName(e.target.value)}
+                placeholder="أدخل اسم النسخة الجديدة..."
+                className="h-10 rounded-xl font-bold bg-background/60 border-border/20 focus-visible:ring-amber-500"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isDuplicating && duplicateNewName.trim()) {
+                    handleDuplicateCollection();
+                  }
+                }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between p-3 rounded-xl border border-border/15 bg-muted/20">
+              <div className="space-y-0.5">
+                <div className="text-xs font-semibold text-foreground">فتح القائمة بعد النسخ فوراً</div>
+                <div className="text-[11px] text-muted-foreground">تحميل القائمة الجديدة في مساحة العمل تلقائياً</div>
+              </div>
+              <Switch
+                checked={duplicateAutoOpen}
+                onCheckedChange={setDuplicateAutoOpen}
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl text-xs"
+              onClick={() => setDuplicateTarget(null)}
+              disabled={isDuplicating}
+            >
+              إلغاء
+            </Button>
+            <Button
+              size="sm"
+              className="rounded-xl text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-slate-950 gap-1.5 shadow-md shadow-amber-500/20"
+              onClick={handleDuplicateCollection}
+              disabled={isDuplicating || !duplicateNewName.trim()}
+            >
+              {isDuplicating ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>جاري النسخ...</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5" />
+                  <span>تأكيد النسخ</span>
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Save As Copy Modal */}
+      <Dialog open={showSaveAsCopyDialog} onOpenChange={setShowSaveAsCopyDialog}>
+        <DialogContent className="max-w-md border-border/20 rounded-3xl bg-background/98 backdrop-blur-xl shadow-2xl">
+          <DialogHeader>
+            <div className="flex items-center gap-2.5 text-indigo-500 mb-1">
+              <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
+                <Copy className="h-4 w-4" />
+              </div>
+              <DialogTitle className="font-bold text-base text-foreground">حفظ كنسخة جديدة</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground">
+              حفظ اللوحات والتخصيصات الحالية كقائمة جديدة منفصلة دون التعديل على القائمة الأصلية.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium text-foreground">اسم القائمة الجديدة *</Label>
+              <Input
+                value={saveAsCopyName}
+                onChange={(e) => setSaveAsCopyName(e.target.value)}
+                placeholder="أدخل اسم القائمة الجديدة..."
+                className="h-10 rounded-xl font-bold bg-background/60 border-border/20 focus-visible:ring-indigo-500"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !isSavingAsCopy && saveAsCopyName.trim()) {
+                    saveAsNewCollection(saveAsCopyName);
+                  }
+                }}
+              />
+            </div>
+            <div className="text-[11px] text-muted-foreground bg-muted/20 p-2.5 rounded-xl border border-border/10">
+              💡 سيتم حفظ <strong className="text-foreground">{currentCollection.items.length}</strong> لوحة بالترتيب والإعدادات الحالية في سجل جديد.
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl text-xs"
+              onClick={() => setShowSaveAsCopyDialog(false)}
+              disabled={isSavingAsCopy}
+            >
+              إلغاء
+            </Button>
+            <Button
+              size="sm"
+              className="rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 shadow-md shadow-indigo-600/20"
+              onClick={() => saveAsNewCollection(saveAsCopyName)}
+              disabled={isSavingAsCopy || !saveAsCopyName.trim()}
+            >
+              {isSavingAsCopy ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>جاري الحفظ...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="h-3.5 w-3.5" />
+                  <span>حفظ كنسخة جديدة</span>
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Modal */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <DialogContent className="max-w-md border-destructive/20 rounded-3xl bg-background/98 backdrop-blur-xl shadow-2xl">
+          <DialogHeader>
+            <div className="flex items-center gap-2.5 text-destructive mb-1">
+              <div className="p-2 bg-destructive/10 border border-destructive/20 rounded-xl">
+                <AlertTriangle className="h-4 w-4" />
+              </div>
+              <DialogTitle className="font-bold text-base text-foreground">تأكيد حذف القائمة</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              هل أنت متأكد من حذف القائمة <strong className="text-destructive font-bold">"{deleteTarget?.name}"</strong>؟
+              <br />
+              سيتم حذف جميع اللوحات المنسوبة إليها بشكل نهائي ولا يمكن التراجع عن هذا الإجراء.
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="gap-2 sm:gap-0 mt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl text-xs"
+              onClick={() => setDeleteTarget(null)}
+              disabled={isDeleting}
+            >
+              إلغاء
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              className="rounded-xl text-xs font-semibold gap-1.5 shadow-md shadow-destructive/20"
+              onClick={handleDeleteCollection}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>جاري الحذف...</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>تأكيد الحذف</span>
+                </>
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -5904,81 +6649,153 @@ export default function MunicipalityBillboardOrganizer() {
             <div className="lg:col-span-4 bg-muted/20 p-5 flex flex-col justify-between border-l border-border/20 overflow-y-auto custom-scrollbar">
               <div className="space-y-4 flex flex-col items-center">
                 <div className="w-full flex items-center justify-between">
-                  <span className="text-[11px] text-amber-500 font-extrabold uppercase tracking-wider flex items-center gap-1.5">
-                    <Eye className="h-3.5 w-3.5 animate-pulse" /> معاينة ديناميكية للبطاقة
-                  </span>
+                  <div className="flex items-center gap-1 bg-background/80 p-1 rounded-xl border border-border/20">
+                    <button
+                      type="button"
+                      onClick={() => setPreviewBlueprintMode('card')}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                        previewBlueprintMode === 'card'
+                          ? 'bg-amber-500 text-slate-950 shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      معاينة البطاقة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPreviewBlueprintMode('cover');
+                        setPrintStudioTab('cover');
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 ${
+                        previewBlueprintMode === 'cover'
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      <BookOpen className="h-3 w-3" />
+                      <span>معاينة الغلاف</span>
+                    </button>
+                  </div>
                   <span className="text-[10px] text-muted-foreground font-mono">
-                    A4 Portrait (210×297mm)
+                    A4 Portrait
                   </span>
                 </div>
                 
-                {/* Simulated Card Blueprint */}
-                <div className="w-full max-w-[280px] aspect-[1/1.38] bg-white text-black border border-slate-300 rounded-2xl shadow-xl p-4 flex flex-col justify-between relative overflow-hidden select-none font-sans">
-                  {/* Header info */}
-                  <div className="flex items-start justify-between border-b border-slate-100 pb-2">
-                    <div className="space-y-0.5">
-                      <div className="text-[10px] font-extrabold text-slate-700">موقع بلدية {municipalityName || 'الخمس'}</div>
-                      <div className="text-[9px] text-slate-400">لوحة رقم #1</div>
+                {previewBlueprintMode === 'cover' ? (
+                  /* Simulated Cover Page Blueprint */
+                  <div className="w-full max-w-[280px] aspect-[1/1.38] bg-white text-black border border-slate-300 rounded-2xl shadow-xl p-4 flex flex-col justify-between items-center text-center relative overflow-hidden select-none font-sans">
+                    <div className="w-full flex items-center justify-between border-b border-slate-100 pb-1.5 text-[8px] font-bold text-slate-400">
+                      <span>صفحة الغلاف (الصفحة 1)</span>
+                      <span>{coverPageEnabled ? 'مفعّلة' : 'معطّلة'}</span>
                     </div>
-                    {/* Status badge representation */}
-                    {showStatusInPrint && (
-                      <div className={`px-2 py-0.5 rounded text-[8px] font-black border uppercase ${
-                        statusColor ? '' : 'bg-amber-100 border-amber-300 text-amber-600'
-                      }`} style={{ 
-                        color: statusColor || undefined, 
-                        borderColor: statusColor || undefined,
-                        fontSize: statusFontSize ? `${parseFloat(statusFontSize) * 0.7}px` : undefined 
-                      }}>
-                        متاحة
-                      </div>
-                    )}
-                  </div>
 
-                  {/* Main Image Block */}
-                  <div className="flex-1 my-2.5 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 flex flex-col relative">
-                    {printImageSource === 'actual_image' && (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 p-2">
-                        <ImageIcon className="h-8 w-8 mb-1 opacity-40 text-slate-500" />
-                        <span className="text-[9px] font-bold">صورة الموقع الميدانية</span>
+                    {!coverPageEnabled ? (
+                      <div className="my-auto p-4 bg-rose-50 border border-rose-200 rounded-2xl text-rose-600 text-[11px] font-bold space-y-1">
+                        <div>صفحة الغلاف معطّلة</div>
+                        <div className="text-[9px] font-normal text-rose-500">لن يتم طباعة صفحة الغلاف في المستند</div>
                       </div>
-                    )}
-
-                    {printImageSource === 'map_pin' && (
-                      <div className="w-full h-full flex flex-col">
-                        <div className="flex-1 bg-slate-100 border-b border-slate-200 flex items-center justify-center text-slate-400">
-                          <ImageIcon className="h-6 w-6 opacity-30 text-slate-500" />
+                    ) : (
+                      <div className="space-y-3 w-full my-auto py-4">
+                        <div className="mx-auto flex items-center justify-center p-1.5" style={{ height: `${Math.min(90, Math.max(40, (coverLogoSize / 220) * 64))}px` }}>
+                          <img 
+                            src={coverLogoUrl || '/logofaresgold.svg'} 
+                            alt="شعار" 
+                            style={{ maxHeight: '100%', maxWidth: `${Math.min(180, (coverLogoSize / 220) * 120)}px` }}
+                            className="object-contain" 
+                            onError={e => { (e.target as HTMLElement).style.display = 'none'; }} 
+                          />
                         </div>
-                        <div className="flex-1 bg-slate-200 flex items-center justify-center text-slate-500 gap-1">
-                          <MapPin className="h-4 w-4 text-amber-500 animate-bounce" />
-                          <span className="text-[8px] font-bold">تحديد الإحداثيات</span>
+                        <div className="space-y-1.5 px-2">
+                          <div className="text-[11px] font-bold text-slate-600">
+                            {coverPhrase || 'لوحات'}
+                          </div>
+                          <div className="text-xs font-black text-slate-900 leading-tight">
+                            {resolveCoverTitle(coverTitle, municipalityName || 'الخمس', cityName, collectionName)}
+                          </div>
+                          {coverSubtitle && (
+                            <div className="text-[9px] font-medium text-slate-500 pt-1 border-t border-slate-100">
+                              {coverSubtitle}
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
 
-                    {printImageSource === 'map_only' && (
-                      <div className="w-full h-full bg-slate-200 flex flex-col items-center justify-center text-slate-600 p-2 gap-1.5">
-                        <MapPin className="h-6 w-6 text-amber-600 animate-bounce" />
-                        <span className="text-[8px] font-bold">الخريطة الجغرافية فقط</span>
+                    <div className="w-full border-t border-slate-100 pt-1 text-[8px] text-slate-400 font-mono flex justify-between items-center">
+                      <span>شركة الفارس الذهبي</span>
+                      <span>A4 Paper</span>
+                    </div>
+                  </div>
+                ) : (
+                  /* Simulated Card Blueprint */
+                  <div className="w-full max-w-[280px] aspect-[1/1.38] bg-white text-black border border-slate-300 rounded-2xl shadow-xl p-4 flex flex-col justify-between relative overflow-hidden select-none font-sans">
+                    {/* Header info */}
+                    <div className="flex items-start justify-between border-b border-slate-100 pb-2">
+                      <div className="space-y-0.5">
+                        <div className="text-[10px] font-extrabold text-slate-700">موقع بلدية {municipalityName || 'الخمس'}</div>
+                        <div className="text-[9px] text-slate-400">لوحة رقم #1</div>
                       </div>
-                    )}
+                      {/* Status badge representation */}
+                      {showStatusInPrint && (
+                        <div className={`px-2 py-0.5 rounded text-[8px] font-black border uppercase ${
+                          statusColor ? '' : 'bg-amber-100 border-amber-300 text-amber-600'
+                        }`} style={{ 
+                          color: statusColor || undefined, 
+                          borderColor: statusColor || undefined,
+                          fontSize: statusFontSize ? `${parseFloat(statusFontSize) * 0.7}px` : undefined 
+                        }}>
+                          متاحة
+                        </div>
+                      )}
+                    </div>
 
-                    {/* Coords bar */}
-                    <div className="h-5 bg-slate-800 text-white flex items-center justify-center text-[8px] font-mono whitespace-nowrap">
-                      32.8872, 13.1913
+                    {/* Main Image Block */}
+                    <div className="flex-1 my-2.5 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 flex flex-col relative">
+                      {printImageSource === 'actual_image' && (
+                        <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 p-2">
+                          <ImageIcon className="h-8 w-8 mb-1 opacity-40 text-slate-500" />
+                          <span className="text-[9px] font-bold">صورة الموقع الميدانية</span>
+                        </div>
+                      )}
+
+                      {printImageSource === 'map_pin' && (
+                        <div className="w-full h-full flex flex-col">
+                          <div className="flex-1 bg-slate-100 border-b border-slate-200 flex items-center justify-center text-slate-400">
+                            <ImageIcon className="h-6 w-6 opacity-30 text-slate-500" />
+                          </div>
+                          <div className="flex-1 bg-slate-200 flex items-center justify-center text-slate-500 gap-1">
+                            <MapPin className="h-4 w-4 text-amber-500 animate-bounce" />
+                            <span className="text-[8px] font-bold">تحديد الإحداثيات</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {printImageSource === 'map_only' && (
+                        <div className="w-full h-full bg-slate-200 flex flex-col items-center justify-center text-slate-600 p-2 gap-1.5">
+                          <MapPin className="h-6 w-6 text-amber-600 animate-bounce" />
+                          <span className="text-[8px] font-bold">الخريطة الجغرافية فقط</span>
+                        </div>
+                      )}
+
+                      {/* Coords bar */}
+                      <div className="h-5 bg-slate-800 text-white flex items-center justify-center text-[8px] font-mono whitespace-nowrap">
+                        32.8872, 13.1913
+                      </div>
+                    </div>
+
+                    {/* Bottom details block */}
+                    <div className="flex justify-between items-end border-t border-slate-100 pt-2 text-[9px] font-medium text-slate-500">
+                      <div className="space-y-0.5">
+                        <div>المقاس: 8 × 3 {showHeightInPrint ? '× 1.2' : ''}</div>
+                        {customSettings.faces_count_show !== 'false' && <div>الأوجه: وجهين</div>}
+                      </div>
+                      <div className="w-8 h-8 bg-slate-100 border border-slate-200 flex items-center justify-center text-[7px] text-slate-400">
+                        QR
+                      </div>
                     </div>
                   </div>
-
-                  {/* Bottom details block */}
-                  <div className="flex justify-between items-end border-t border-slate-100 pt-2 text-[9px] font-medium text-slate-500">
-                    <div className="space-y-0.5">
-                      <div>المقاس: 8 × 3 {showHeightInPrint ? '× 1.2' : ''}</div>
-                      {customSettings.faces_count_show !== 'false' && <div>الأوجه: وجهين</div>}
-                    </div>
-                    <div className="w-8 h-8 bg-slate-100 border border-slate-200 flex items-center justify-center text-[7px] text-slate-400">
-                      QR
-                    </div>
-                  </div>
-                </div>
+                )}
               </div>
 
               {/* Summary Stats Overview */}
@@ -5992,12 +6809,14 @@ export default function MunicipalityBillboardOrganizer() {
                     <span className="font-extrabold text-foreground">{currentCollection.items.length} لوحة</span>
                   </div>
                   <div className="p-2 rounded-xl bg-muted/40 flex flex-col">
-                    <span className="text-[10px] text-muted-foreground">صفحات الملخص:</span>
-                    <span className="font-extrabold text-foreground">{Math.max(1, Math.ceil(currentCollection.items.length / (summaryRowsPerPage || 17)))} صفحة</span>
+                    <span className="text-[10px] text-muted-foreground">صفحة الغلاف:</span>
+                    <span className={`font-extrabold ${coverPageEnabled ? 'text-emerald-500' : 'text-muted-foreground'}`}>
+                      {coverPageEnabled ? 'مفعّلة (صفحة 1)' : 'معطّلة'}
+                    </span>
                   </div>
                   <div className="p-2 rounded-xl bg-muted/40 flex flex-col">
-                    <span className="text-[10px] text-muted-foreground">الصفوف بالصفحة:</span>
-                    <span className="font-extrabold text-foreground">{summaryRowsPerPage || 17} صفاً</span>
+                    <span className="text-[10px] text-muted-foreground">صفحات الملخص:</span>
+                    <span className="font-extrabold text-foreground">{Math.max(1, Math.ceil(currentCollection.items.length / (summaryRowsPerPage || 17)))} صفحة</span>
                   </div>
                   <div className="p-2 rounded-xl bg-muted/40 flex flex-col">
                     <span className="text-[10px] text-muted-foreground">الموقعون المفعلون:</span>
@@ -6012,11 +6831,14 @@ export default function MunicipalityBillboardOrganizer() {
               
               {/* Tab Switcher Header */}
               <div className="p-3 border-b border-border/20 bg-muted/10 shrink-0">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
                   <button
                     type="button"
-                    onClick={() => setPrintStudioTab('signatures')}
-                    className={`px-3 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-2 border ${
+                    onClick={() => {
+                      setPrintStudioTab('signatures');
+                      setPreviewBlueprintMode('card');
+                    }}
+                    className={`px-2.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 border ${
                       printStudioTab === 'signatures'
                         ? 'bg-primary text-primary-foreground border-primary shadow-sm'
                         : 'bg-background hover:bg-muted/60 text-muted-foreground border-border/20'
@@ -6028,47 +6850,351 @@ export default function MunicipalityBillboardOrganizer() {
 
                   <button
                     type="button"
-                    onClick={() => setPrintStudioTab('layout')}
-                    className={`px-3 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-2 border ${
+                    onClick={() => {
+                      setPrintStudioTab('cover');
+                      setPreviewBlueprintMode('cover');
+                    }}
+                    className={`px-2.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 border ${
+                      printStudioTab === 'cover'
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                        : 'bg-background hover:bg-muted/60 text-muted-foreground border-border/20'
+                    }`}
+                  >
+                    <BookOpen className="h-3.5 w-3.5" />
+                    <span>صفحة الغلاف</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPrintStudioTab('layout');
+                      setPreviewBlueprintMode('card');
+                    }}
+                    className={`px-2.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 border ${
                       printStudioTab === 'layout'
                         ? 'bg-primary text-primary-foreground border-primary shadow-sm'
                         : 'bg-background hover:bg-muted/60 text-muted-foreground border-border/20'
                     }`}
                   >
                     <List className="h-3.5 w-3.5" />
-                    <span>تخطيط الطباعة والصفوف</span>
+                    <span>تخطيط الصفوف</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => setPrintStudioTab('status')}
-                    className={`px-3 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-2 border ${
+                    onClick={() => {
+                      setPrintStudioTab('status');
+                      setPreviewBlueprintMode('card');
+                    }}
+                    className={`px-2.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 border ${
                       printStudioTab === 'status'
                         ? 'bg-primary text-primary-foreground border-primary shadow-sm'
                         : 'bg-background hover:bg-muted/60 text-muted-foreground border-border/20'
                     }`}
                   >
                     <Tag className="h-3.5 w-3.5" />
-                    <span>شارة الحالة والمظهر</span>
+                    <span>شارة الحالة</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => setPrintStudioTab('background')}
-                    className={`px-3 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-2 border ${
+                    onClick={() => {
+                      setPrintStudioTab('background');
+                      setPreviewBlueprintMode('card');
+                    }}
+                    className={`px-2.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 border ${
                       printStudioTab === 'background'
                         ? 'bg-primary text-primary-foreground border-primary shadow-sm'
                         : 'bg-background hover:bg-muted/60 text-muted-foreground border-border/20'
                     }`}
                   >
                     <FileSpreadsheet className="h-3.5 w-3.5" />
-                    <span>قالب ورقة الخلفية</span>
+                    <span>ورقة الخلفية</span>
                   </button>
                 </div>
               </div>
 
               {/* Tab Contents (Spacious Scroll Area) */}
               <div className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar">
+                
+                {/* ── TAB: COVER PAGE ── */}
+                {printStudioTab === 'cover' && (
+                  <div className="space-y-5 animate-in fade-in duration-200">
+                    
+                    {/* Master Cover Enable Switch */}
+                    <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-3 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="cover_page_enabled_toggle" className="text-xs font-black text-foreground flex items-center gap-1.5">
+                            <BookOpen className="h-4 w-4 text-indigo-500" />
+                            <span>تضمين صفحة الغلاف في مستند الطباعة</span>
+                          </Label>
+                          <div className="text-[10px] text-muted-foreground">
+                            طباعة صفحة أولى رسمية مستقلة تحتوي على الشعار والعبارة الافتتاحية واسم البلدية
+                          </div>
+                        </div>
+                        <Switch
+                          id="cover_page_enabled_toggle"
+                          checked={coverPageEnabled}
+                          onCheckedChange={setCoverPageEnabled}
+                        />
+                      </div>
+                    </div>
+
+                    {coverPageEnabled && (
+                      <div className="space-y-4">
+                        {/* Cover Title Main Card */}
+                        <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-3 shadow-sm">
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <Label htmlFor="cover_title_input" className="text-xs font-black text-foreground flex items-center gap-1.5">
+                                <Building2 className="h-4 w-4 text-primary" />
+                                <span>العنوان الرئيسي لصفحة الغلاف *</span>
+                              </Label>
+                              <div className="text-[10px] text-muted-foreground">
+                                النص البارز الذي يظهر بخط كبير في وسط صفحة الغلاف
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setCoverTitle(municipalityName ? `بلدية ${municipalityName}` : '')}
+                              className="text-[11px] text-primary hover:underline font-semibold"
+                            >
+                              استخدام اسم البلدية
+                            </button>
+                          </div>
+
+                          <Input
+                            id="cover_title_input"
+                            value={coverTitle}
+                            onChange={e => setCoverTitle(e.target.value)}
+                            placeholder={`تلقائي: ${municipalityName || collectionName || 'بلدية الخمس'}`}
+                            className="h-10 text-xs rounded-xl bg-background border-border/30 font-bold"
+                          />
+
+                          {/* Variable Insert buttons */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-bold text-muted-foreground">إدراج متغير ذكي:</span>
+                              <button
+                                type="button"
+                                onClick={() => setCoverTitle(prev => (prev ? prev + ' ' : '') + '{البلدية}')}
+                                className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-all"
+                              >
+                                + {'{البلدية}'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCoverTitle(prev => (prev ? prev + ' ' : '') + '{المدينة}')}
+                                className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-all"
+                              >
+                                + {'{المدينة}'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setCoverTitle(prev => (prev ? prev + ' ' : '') + '{اسم المجموعة}')}
+                                className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-all"
+                              >
+                                + {'{اسم المجموعة}'}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Live Cover Title Preview */}
+                          <div className="p-3 bg-indigo-500/5 border border-indigo-500/20 rounded-xl text-indigo-600 dark:text-indigo-400 font-bold flex items-center gap-2 text-xs">
+                            <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">معاينة الغلاف:</span>
+                            <span>"{coverPhrase || 'لوحات'} {resolveCoverTitle(coverTitle, municipalityName || 'الخمس', cityName, collectionName)}"</span>
+                          </div>
+                        </div>
+
+                        {/* Cover Phrase & Subtitle Card */}
+                        <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-4 shadow-sm">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                              <Label htmlFor="cover_phrase_input" className="text-xs font-bold text-foreground">
+                                العبارة الافتتاحية (أعلى العنوان)
+                              </Label>
+                              <Input
+                                id="cover_phrase_input"
+                                value={coverPhrase}
+                                onChange={e => setCoverPhrase(e.target.value)}
+                                placeholder="لوحات"
+                                className="h-9 text-xs rounded-xl bg-background border-border/30 font-medium"
+                              />
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <Label htmlFor="cover_subtitle_input" className="text-xs font-bold text-foreground">
+                                عنوان فرعي / نص إضافي (اختياري)
+                              </Label>
+                              <Input
+                                id="cover_subtitle_input"
+                                value={coverSubtitle}
+                                onChange={e => setCoverSubtitle(e.target.value)}
+                                placeholder="مثلاً: تقرير المواقع المعتمدة لعام 2026"
+                                className="h-9 text-xs rounded-xl bg-background border-border/30 font-medium"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Font Sizes Grid */}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 border-t border-border/10">
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="font-bold text-muted-foreground">حجم خط العنوان:</span>
+                                <span className="font-mono font-bold text-primary">{coverTitleFontSize}px</span>
+                              </div>
+                              <Slider
+                                value={[coverTitleFontSize]}
+                                onValueChange={([val]) => setCoverTitleFontSize(val)}
+                                min={20}
+                                max={60}
+                                step={1}
+                              />
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="font-bold text-muted-foreground">حجم خط العبارة:</span>
+                                <span className="font-mono font-bold text-primary">{coverPhraseFontSize}px</span>
+                              </div>
+                              <Slider
+                                value={[coverPhraseFontSize]}
+                                onValueChange={([val]) => setCoverPhraseFontSize(val)}
+                                min={16}
+                                max={48}
+                                step={1}
+                              />
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="font-bold text-muted-foreground">حجم خط العنوان الفرعي:</span>
+                                <span className="font-mono font-bold text-primary">{coverSubtitleFontSize}px</span>
+                              </div>
+                              <Slider
+                                value={[coverSubtitleFontSize]}
+                                onValueChange={([val]) => setCoverSubtitleFontSize(val)}
+                                min={12}
+                                max={32}
+                                step={1}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Cover Logo Customization Card */}
+                        <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-4 shadow-sm">
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <Label className="text-xs font-black text-foreground flex items-center gap-1.5">
+                                <ImageIcon className="h-4 w-4 text-amber-500" />
+                                <span>شعار صفحة الغلاف</span>
+                              </Label>
+                              <div className="text-[10px] text-muted-foreground">
+                                اختيار الشعار المطبوع أعلى صفحة الغلاف أو رفع شعار مخصص
+                              </div>
+                            </div>
+                            {coverLogoUrl !== '/logofaresgold.svg' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCoverLogoUrl('/logofaresgold.svg');
+                                  setCoverLogoSize(220);
+                                }}
+                                className="text-[11px] text-primary hover:underline font-semibold flex items-center gap-1"
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                                استعادة الشعار الافتراضي
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Preset Logos Grid */}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                            {[
+                              { id: 'gold', name: 'الشعار الذهبي', url: '/logofaresgold.svg' },
+                              { id: 'white', name: 'الشعار الأبيض', url: '/logofares2.svg' },
+                              { id: 'symbol', name: 'الرمز فقط', url: '/logo-symbol.svg' },
+                              { id: 'text', name: 'النص فقط', url: '/logo-text.svg' },
+                            ].map(preset => {
+                              const isSelected = coverLogoUrl === preset.url;
+                              return (
+                                <button
+                                  key={preset.id}
+                                  type="button"
+                                  onClick={() => setCoverLogoUrl(preset.url)}
+                                  className={`p-2.5 rounded-xl border flex flex-col items-center gap-2 transition-all ${
+                                    isSelected 
+                                      ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary' 
+                                      : 'border-border/20 bg-background hover:bg-muted/40'
+                                  }`}
+                                >
+                                  <div className="h-10 w-full flex items-center justify-center p-1 bg-slate-950/20 rounded-lg">
+                                    <img src={preset.url} alt={preset.name} className="h-full max-w-full object-contain" />
+                                  </div>
+                                  <span className={`text-[10px] font-bold ${isSelected ? 'text-primary' : 'text-muted-foreground'}`}>
+                                    {preset.name}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* Custom Logo Upload & Input */}
+                          <div className="pt-2 border-t border-border/10 flex flex-col sm:flex-row items-center gap-3">
+                            <input
+                              ref={coverLogoInputRef}
+                              type="file"
+                              accept="image/*,.svg"
+                              onChange={handleCoverLogoUpload}
+                              className="hidden"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={uploadingCoverLogo}
+                              onClick={() => coverLogoInputRef.current?.click()}
+                              className="h-9 text-xs rounded-xl gap-1.5 border-dashed border-primary/40 text-primary hover:bg-primary/10 w-full sm:w-auto"
+                            >
+                              {uploadingCoverLogo ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Upload className="h-3.5 w-3.5" />
+                              )}
+                              <span>{uploadingCoverLogo ? 'جاري الرفع...' : 'رفع شعار مخصص (SVG / PNG)'}</span>
+                            </Button>
+
+                            <div className="flex-1 w-full flex items-center gap-2">
+                              <Input
+                                value={coverLogoUrl}
+                                onChange={e => setCoverLogoUrl(e.target.value)}
+                                placeholder="أو اكتب رابط الشعار مباشرة..."
+                                className="h-9 text-[11px] rounded-xl bg-background border-border/30"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Logo Size Slider */}
+                          <div className="pt-2 border-t border-border/10 space-y-1.5">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="font-bold text-muted-foreground">حجم وعرض الشعار في الغلاف:</span>
+                              <span className="font-mono font-bold text-amber-500">{coverLogoSize}px</span>
+                            </div>
+                            <Slider
+                              value={[coverLogoSize]}
+                              onValueChange={([val]) => setCoverLogoSize(val)}
+                              min={100}
+                              max={450}
+                              step={5}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
                 
                 {/* ── TAB 1: SIGNATURES & HEADER TITLE ── */}
                 {printStudioTab === 'signatures' && (
