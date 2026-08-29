@@ -861,13 +861,27 @@ export default function MunicipalityBillboardOrganizer() {
     loadOrganizerDefault('coverSubtitleFontSize', 18)
   );
   const [coverLogoUrl, setCoverLogoUrl] = useState<string>(() => 
-    loadOrganizerDefault('coverLogoUrl', '/logofaresgold.svg')
+    loadOrganizerDefault('coverLogoUrl', 'auto')
   );
   const [coverLogoSize, setCoverLogoSize] = useState<number>(() => 
     loadOrganizerDefault('coverLogoSize', 220)
   );
   const [uploadingCoverLogo, setUploadingCoverLogo] = useState(false);
   const coverLogoInputRef = useRef<HTMLInputElement>(null);
+
+  const matchingBg = useMemo(() => {
+    return printBackgrounds.find(bg => bg.url === customBackgroundUrl);
+  }, [printBackgrounds, customBackgroundUrl]);
+
+  const activeCoverLogoUrl = useMemo(() => {
+    if (coverLogoUrl && coverLogoUrl !== 'auto' && coverLogoUrl.trim() !== '') return coverLogoUrl;
+    return matchingBg?.logo_url || (customSettings as any).cover_logo_url || '/logofaresgold.svg';
+  }, [coverLogoUrl, matchingBg, customSettings]);
+
+  const activeCoverLogoSize = useMemo(() => {
+    if (coverLogoSize && coverLogoUrl && coverLogoUrl !== 'auto' && coverLogoUrl.trim() !== '') return `${coverLogoSize}px`;
+    return matchingBg?.logo_size || (customSettings as any).cover_logo_size || '220px';
+  }, [coverLogoSize, coverLogoUrl, matchingBg, customSettings]);
 
   const handleCoverLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -3285,7 +3299,9 @@ export default function MunicipalityBillboardOrganizer() {
       const effectiveCoverTitle = resolveCoverTitle(coverTitle, municipalityName, cityName, collectionName);
       if (coverEnabled && (effectiveCoverTitle || displayMunicipality)) {
         const matchingBg = printBackgrounds.find(bg => bg.url === customBackgroundUrl);
-        let finalCoverLogoUrl = coverLogoUrl || matchingBg?.logo_url || (s as any).cover_logo_url || '/logofaresgold.svg';
+        const finalCoverLogoUrl = (coverLogoUrl && coverLogoUrl !== 'auto' && coverLogoUrl.trim() !== '')
+          ? coverLogoUrl
+          : (matchingBg?.logo_url || (s as any).cover_logo_url || '/logofaresgold.svg');
         const finalCoverPhrase = coverPhrase || (s as any).cover_phrase || 'لوحات';
         const finalCoverTitle = effectiveCoverTitle || displayMunicipality;
         const finalCoverSubtitle = coverSubtitle || '';
@@ -3304,7 +3320,9 @@ export default function MunicipalityBillboardOrganizer() {
           return str;
         };
 
-        const rawLogoSize = coverLogoSize ? `${coverLogoSize}px` : (matchingBg?.logo_size || (s as any).cover_logo_size || '220px');
+        const rawLogoSize = (coverLogoSize && coverLogoUrl && coverLogoUrl !== 'auto' && coverLogoUrl.trim() !== '')
+          ? `${coverLogoSize}px`
+          : (matchingBg?.logo_size || (s as any).cover_logo_size || '220px');
         const finalCoverLogoSize = formatCssSize(rawLogoSize, '220px');
         const effectiveCoverPhraseFontSize = coverPhraseFontSize ? `${coverPhraseFontSize}px` : formatCssSize((s as any).cover_phrase_font_size, '28px');
         const effectiveCoverTitleFontSize = coverTitleFontSize ? `${coverTitleFontSize}px` : formatCssSize((s as any).cover_municipality_font_size, '36px');
@@ -6697,11 +6715,11 @@ export default function MunicipalityBillboardOrganizer() {
                       </div>
                     ) : (
                       <div className="space-y-3 w-full my-auto py-4">
-                        <div className="mx-auto flex items-center justify-center p-1.5" style={{ height: `${Math.min(90, Math.max(40, (coverLogoSize / 220) * 64))}px` }}>
+                        <div className="mx-auto flex items-center justify-center p-1.5" style={{ height: `${Math.min(90, Math.max(40, (parseFloat(activeCoverLogoSize) / 220) * 64))}px` }}>
                           <img 
-                            src={coverLogoUrl || '/logofaresgold.svg'} 
+                            src={normalizeGoogleImageUrl(activeCoverLogoUrl)} 
                             alt="شعار" 
-                            style={{ maxHeight: '100%', maxWidth: `${Math.min(180, (coverLogoSize / 220) * 120)}px` }}
+                            style={{ maxHeight: '100%', maxWidth: `${Math.min(180, (parseFloat(activeCoverLogoSize) / 220) * 120)}px` }}
                             className="object-contain" 
                             onError={e => { (e.target as HTMLElement).style.display = 'none'; }} 
                           />
@@ -7092,53 +7110,115 @@ export default function MunicipalityBillboardOrganizer() {
                                 <span>شعار صفحة الغلاف</span>
                               </Label>
                               <div className="text-[10px] text-muted-foreground">
-                                اختيار الشعار المطبوع أعلى صفحة الغلاف أو رفع شعار مخصص
+                                يتم ربط الشعار تلقائياً بورقة الخلفية المختارة، أو يمكنك تخصيص شعار مستقل
                               </div>
                             </div>
-                            {coverLogoUrl !== '/logofaresgold.svg' && (
+                            {coverLogoUrl !== 'auto' && (
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setCoverLogoUrl('/logofaresgold.svg');
-                                  setCoverLogoSize(220);
+                                  setCoverLogoUrl('auto');
                                 }}
                                 className="text-[11px] text-primary hover:underline font-semibold flex items-center gap-1"
                               >
                                 <RotateCcw className="h-3 w-3" />
-                                استعادة الشعار الافتراضي
+                                العودة للشعار التلقائي من الخلفية
                               </button>
                             )}
                           </div>
 
-                          {/* Preset Logos Grid */}
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                            {[
-                              { id: 'gold', name: 'الشعار الذهبي', url: '/logofaresgold.svg' },
-                              { id: 'white', name: 'الشعار الأبيض', url: '/logofares2.svg' },
-                              { id: 'symbol', name: 'الرمز فقط', url: '/logo-symbol.svg' },
-                              { id: 'text', name: 'النص فقط', url: '/logo-text.svg' },
-                            ].map(preset => {
-                              const isSelected = coverLogoUrl === preset.url;
-                              return (
-                                <button
-                                  key={preset.id}
-                                  type="button"
-                                  onClick={() => setCoverLogoUrl(preset.url)}
-                                  className={`p-2.5 rounded-xl border flex flex-col items-center gap-2 transition-all ${
-                                    isSelected 
-                                      ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary' 
-                                      : 'border-border/20 bg-background hover:bg-muted/40'
-                                  }`}
-                                >
-                                  <div className="h-10 w-full flex items-center justify-center p-1 bg-slate-950/20 rounded-lg">
-                                    <img src={preset.url} alt={preset.name} className="h-full max-w-full object-contain" />
-                                  </div>
-                                  <span className={`text-[10px] font-bold ${isSelected ? 'text-primary' : 'text-muted-foreground'}`}>
-                                    {preset.name}
-                                  </span>
-                                </button>
-                              );
-                            })}
+                          {/* Auto Background-Linked Banner */}
+                          <div className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition-all ${
+                            coverLogoUrl === 'auto' || !coverLogoUrl 
+                              ? 'bg-primary/10 border-primary/40 text-primary' 
+                              : 'bg-muted/30 border-border/20 text-muted-foreground'
+                          }`}>
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-lg bg-slate-900 border border-border/20 p-1 flex items-center justify-center shrink-0">
+                                <img 
+                                  src={normalizeGoogleImageUrl(matchingBg?.logo_url || '/logofaresgold.svg')} 
+                                  alt="شعار الخلفية" 
+                                  className="h-full max-w-full object-contain" 
+                                />
+                              </div>
+                              <div>
+                                <div className="text-xs font-bold flex items-center gap-1.5">
+                                  <span>شعار قالب الخلفية:</span>
+                                  <span className="text-foreground underline">{matchingBg?.name || 'الخلفية الافتراضية'}</span>
+                                  {(coverLogoUrl === 'auto' || !coverLogoUrl) && (
+                                    <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-primary text-primary-foreground font-black mr-1">
+                                      مُفعّل تلقائياً
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] opacity-80">
+                                  الحجم المعتمد للخلفية: <span className="font-mono font-bold">{matchingBg?.logo_size || '220px'}</span> (يتغير تلقائياً بتغيير ورقة الخلفية)
+                                </div>
+                              </div>
+                            </div>
+
+                            {(coverLogoUrl !== 'auto' && coverLogoUrl) && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setCoverLogoUrl('auto')}
+                                className="h-8 text-xs rounded-xl gap-1 shrink-0"
+                              >
+                                تفعيل شعار الخلفية
+                              </Button>
+                            )}
+                          </div>
+
+                          {/* Preset Logos Grid (Manual Overrides) */}
+                          <div className="space-y-1.5 pt-1">
+                            <div className="text-[11px] font-bold text-foreground">أو اختر شعاراً بديلاً يدوياً:</div>
+                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setCoverLogoUrl('auto')}
+                                className={`p-2.5 rounded-xl border flex flex-col items-center gap-1.5 transition-all ${
+                                  coverLogoUrl === 'auto' || !coverLogoUrl 
+                                    ? 'border-primary bg-primary/15 shadow-sm ring-1 ring-primary' 
+                                    : 'border-border/20 bg-background hover:bg-muted/40'
+                                }`}
+                              >
+                                <div className="h-8 w-full flex items-center justify-center p-0.5 bg-slate-950/20 rounded-lg">
+                                  <FileSpreadsheet className="h-4 w-4 text-primary" />
+                                </div>
+                                <span className={`text-[10px] font-bold ${coverLogoUrl === 'auto' || !coverLogoUrl ? 'text-primary' : 'text-muted-foreground'}`}>
+                                  تلقائي (من الخلفية)
+                                </span>
+                              </button>
+
+                              {[
+                                { id: 'gold', name: 'الشعار الذهبي', url: '/logofaresgold.svg' },
+                                { id: 'white', name: 'الشعار الأبيض', url: '/logofares2.svg' },
+                                { id: 'symbol', name: 'الرمز فقط', url: '/logo-symbol.svg' },
+                                { id: 'text', name: 'النص فقط', url: '/logo-text.svg' },
+                              ].map(preset => {
+                                const isSelected = coverLogoUrl === preset.url;
+                                return (
+                                  <button
+                                    key={preset.id}
+                                    type="button"
+                                    onClick={() => setCoverLogoUrl(preset.url)}
+                                    className={`p-2.5 rounded-xl border flex flex-col items-center gap-1.5 transition-all ${
+                                      isSelected 
+                                        ? 'border-primary bg-primary/15 shadow-sm ring-1 ring-primary' 
+                                        : 'border-border/20 bg-background hover:bg-muted/40'
+                                    }`}
+                                  >
+                                    <div className="h-8 w-full flex items-center justify-center p-0.5 bg-slate-950/20 rounded-lg">
+                                      <img src={preset.url} alt={preset.name} className="h-full max-w-full object-contain" />
+                                    </div>
+                                    <span className={`text-[10px] font-bold ${isSelected ? 'text-primary' : 'text-muted-foreground'}`}>
+                                      {preset.name}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
 
                           {/* Custom Logo Upload & Input */}
@@ -7168,9 +7248,9 @@ export default function MunicipalityBillboardOrganizer() {
 
                             <div className="flex-1 w-full flex items-center gap-2">
                               <Input
-                                value={coverLogoUrl}
+                                value={coverLogoUrl === 'auto' ? '' : coverLogoUrl}
                                 onChange={e => setCoverLogoUrl(e.target.value)}
-                                placeholder="أو اكتب رابط الشعار مباشرة..."
+                                placeholder="أو اكتب رابط شعار مخصص..."
                                 className="h-9 text-[11px] rounded-xl bg-background border-border/30"
                               />
                             </div>
@@ -7180,10 +7260,10 @@ export default function MunicipalityBillboardOrganizer() {
                           <div className="pt-2 border-t border-border/10 space-y-1.5">
                             <div className="flex items-center justify-between text-[11px]">
                               <span className="font-bold text-muted-foreground">حجم وعرض الشعار في الغلاف:</span>
-                              <span className="font-mono font-bold text-amber-500">{coverLogoSize}px</span>
+                              <span className="font-mono font-bold text-amber-500">{activeCoverLogoSize}</span>
                             </div>
                             <Slider
-                              value={[coverLogoSize]}
+                              value={[parseInt(activeCoverLogoSize) || 220]}
                               onValueChange={([val]) => setCoverLogoSize(val)}
                               min={100}
                               max={450}
@@ -7743,7 +7823,16 @@ export default function MunicipalityBillboardOrganizer() {
                           اختيار ورقة الخلفية الرسمية مع الترويسة والترقيم للبلدية
                         </div>
                       </div>
-                      <BackgroundSelector value={customBackgroundUrl} onChange={setCustomBackgroundUrl} />
+                      <BackgroundSelector 
+                        value={customBackgroundUrl} 
+                        onChange={(newUrl) => {
+                          setCustomBackgroundUrl(newUrl);
+                          const bg = printBackgrounds.find(b => b.url === newUrl);
+                          if (bg) {
+                            toast.info(`تم تطبيق قالب "${bg.name}" وربط شعاره تلقائياً`);
+                          }
+                        }} 
+                      />
                     </div>
                   </div>
                 )}
