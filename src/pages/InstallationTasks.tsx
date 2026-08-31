@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { usePersistedFilters } from '@/hooks/usePersistedFilters';
 import { generateFallbackPath } from '@/utils/fallbackPathGenerator';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
@@ -57,6 +58,7 @@ import { CreatePrintTaskFromInstallation } from '@/components/tasks/CreatePrintT
 import { TaskTotalCostSummary } from '@/components/tasks/TaskTotalCostSummary';
 import { MergeTeamTasksDialog } from '@/components/tasks/MergeTeamTasksDialog';
 import { EditTaskTypeDialog } from '@/components/tasks/EditTaskTypeDialog';
+import { findOptimalTeamForInstallation, sortTeamsByPriority } from '@/utils/teamAssignment';
 import { TransferBillboardsDialog } from '@/components/tasks/TransferBillboardsDialog';
 import { UnifiedPrintAllDialog, BillboardPrintItem } from '@/components/shared/printing/UnifiedPrintAllDialog';
 import BillboardPrintSettingsDialog from '@/components/billboards/BillboardPrintSettingsDialog';
@@ -132,57 +134,26 @@ function normalizeString(str: string | null | undefined): string {
 }
 
 function findCorrectTeam(sortedTeams: any[], billboardSize: string | null, billboardCity: string | null, billboardCompanyId: string | null): any {
-  const normSize = normalizeString(billboardSize);
-  const normCity = normalizeString(billboardCity);
-
-  const matchesSizeAndCity = (t: any) => {
-    const sizeMatch = Array.isArray(t.sizes) && t.sizes.some((s: any) => normalizeString(s) === normSize);
-    if (!sizeMatch) return false;
-    if (Array.isArray(t.cities) && t.cities.length > 0 && normCity) {
-      const cityMatch = t.cities.some((c: any) => normalizeString(c) === normCity);
-      if (!cityMatch) return false;
-    }
-    return true;
-  };
-
-  // 1. إذا اللوحة لها شركة مالكة، نبحث أولاً في الفرق المرتبطة بهذه الشركة
-  if (billboardCompanyId) {
-    const companyTeam = sortedTeams.find((t: any) => {
-      if (!matchesSizeAndCity(t)) return false;
-      return Array.isArray(t.friend_company_ids) && t.friend_company_ids.includes(billboardCompanyId);
-    });
-    if (companyTeam) return companyTeam;
-  }
-
-  // fallback 1: فرق عامة (بدون شركة) تطابق مدينة + مقاس
-  const generalTeam = sortedTeams.find((t: any) => {
-    if (!matchesSizeAndCity(t)) return false;
-    if (Array.isArray(t.friend_company_ids) && t.friend_company_ids.length > 0) return false;
-    return true;
-  });
-  if (generalTeam) return generalTeam;
-
-  // fallback 2: أي فريق يطابق مدينة + مقاس (حتى لو مرتبط بشركة)
-  const anyTeamCitySize = sortedTeams.find((t: any) => matchesSizeAndCity(t));
-  if (anyTeamCitySize) return anyTeamCitySize;
-
-  // fallback 3: أي فريق يطابق المقاس فقط
-  const anySizeTeam = sortedTeams.find((t: any) => 
-    Array.isArray(t.sizes) && t.sizes.some((s: any) => normalizeString(s) === normSize)
-  );
-  if (anySizeTeam) return anySizeTeam;
-
-  // fallback 4: أي فريق كحل أخير
-  return sortedTeams[0] || null;
+  return findOptimalTeamForInstallation(sortedTeams, billboardSize, billboardCity, billboardCompanyId);
 }
 
 export default function InstallationTasks() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { confirm: systemConfirm } = useSystemDialog();
   const [addTaskDialogOpen, setAddTaskDialogOpen] = useState(false);
   const [selectedContractIds, setSelectedContractIds] = useState<number[]>([]);
   const [selectedTeamId, setSelectedTeamId] = useState<string>('');
   const [taskType, setTaskType] = useState<'installation' | 'reinstallation'>('installation');
+
+  useEffect(() => {
+    if (searchParams.get('create') !== '1') return;
+    setAddTaskDialogOpen(true);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('create');
+    setSearchParams(nextParams, { replace: true });
+  }, [searchParams, setSearchParams]);
   const { filters: pageFilters, setFilter: setPageFilter } = usePersistedFilters('installation-page', {
     searchTerm: '',
     filterStatus: 'all',
@@ -210,7 +181,8 @@ export default function InstallationTasks() {
   const [installedImageFaceBUrl, setInstalledImageFaceBUrl] = useState<string>('');
   const [uploadingInstalledA, setUploadingInstalledA] = useState(false);
   const [uploadingInstalledB, setUploadingInstalledB] = useState(false);
-  const [installedUploadMethod, setInstalledUploadMethod] = useState<'url' | 'file'>('file');
+  const [installedUploadMethodA, setInstalledUploadMethodA] = useState<'url' | 'file'>('file');
+  const [installedUploadMethodB, setInstalledUploadMethodB] = useState<'url' | 'file'>('file');
   const [pasteTargetFace, setPasteTargetFace] = useState<'A' | 'B'>('A');
   // Bulk completion
   const [showCompletionDialog, setShowCompletionDialog] = useState(false);
@@ -1132,6 +1104,9 @@ export default function InstallationTasks() {
       setSelectedBillboardIds([]);
       refetchTasks();
       refetchTaskItems();
+      if (searchParams.get('from') === 'hub') {
+        navigate('/admin/composite-tasks', { replace: true });
+      }
     },
     onError: (error: any) => {
       toast.error(error.message || 'فشل في إضافة المهمة');
@@ -2094,7 +2069,7 @@ export default function InstallationTasks() {
   }, [tasks, allTaskItems]);
 
   // ── New UI state ──
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => searchParams.get('task'));
 
   const selectedTaskObj = useMemo(() => selectedTaskId ? tasks.find(t => t.id === selectedTaskId) : null, [selectedTaskId, tasks]);
   const selectedTaskItemsList = useMemo(() => selectedTaskId ? allTaskItems.filter(i => i.task_id === selectedTaskId) : [], [selectedTaskId, allTaskItems]);
@@ -2167,14 +2142,44 @@ export default function InstallationTasks() {
               selectedTaskIdForCompletion={selectedTaskIdForCompletion}
               isMergedTask={selectedIsMergedTask}
               derivedContractIds={selectedDerivedContractIds}
-              onBack={() => setSelectedTaskId(null)}
+              onBack={() => {
+                if (searchParams.get('from') === 'hub') {
+                  navigate('/admin/composite-tasks', { replace: true });
+                  return;
+                }
+                setSelectedTaskId(null);
+                const nextParams = new URLSearchParams(searchParams);
+                nextParams.delete('task');
+                setSearchParams(nextParams, { replace: true });
+              }}
               onSwitchTask={setSelectedTaskId}
-              onManageDesigns={() => { setSelectedTaskForDesign(selectedTaskId); setDesignDialogOpen(true); }}
+              onManageDesigns={() => {
+                setSelectedTaskForDesign(selectedTaskId);
+                setSelectedGroupTaskIds(null);
+                setDesignDialogOpen(true);
+              }}
               onDistributeDesigns={() => {
-                if (selectedTaskDesigns.length === 0) { toast.info('يرجى إضافة تصاميم أولاً'); setSelectedTaskForDesign(selectedTaskId); setDesignDialogOpen(true); return; }
-                setSelectedTaskForDesign(selectedTaskId); setBulkDesignDialogOpen(true);
+                if (selectedTaskDesigns.length === 0) {
+                  toast.info('يرجى إضافة تصاميم أولاً');
+                  setSelectedTaskForDesign(selectedTaskId);
+                  setSelectedGroupTaskIds(null);
+                  setDesignDialogOpen(true);
+                  return;
+                }
+                setSelectedTaskForDesign(selectedTaskId);
+                setSelectedGroupTaskIds([selectedTaskId]);
+                setBulkDesignDialogOpen(true);
               }}
               onEditTaskType={() => { setSelectedTaskForEdit({ id: selectedTaskId, taskType: selectedTaskObj.task_type || 'installation' }); setEditTaskTypeDialogOpen(true); }}
+              onTransferBillboards={() => {
+                setSelectedTaskForTransfer({
+                  taskId: selectedTaskId,
+                  teamId: selectedTaskObj.team_id,
+                  teamName: selectedTeam?.team_name || 'غير محدد',
+                  contractId: selectedTaskObj.contract_id,
+                });
+                setTransferDialogOpen(true);
+              }}
               onPrintAll={() => {
                 setSelectedContractForPrint({
                   contractNumber: selectedTaskObj.contract_id,
@@ -2198,7 +2203,19 @@ export default function InstallationTasks() {
                 }
               }}
               onCreatePrintTask={() => { setSelectedTaskForPrint(selectedTaskId); setCreatePrintTaskDialogOpen(true); }}
-              onCompleteBillboards={() => { setSelectedTaskIdForCompletion(selectedTaskId); setSelectedItemsForCompletion(prev => selectedItemsForDate.length > 0 ? [...selectedItemsForDate] : prev.length > 0 ? prev : []); setSelectedItemsForDate([]); setSelectedTaskIdForBulk(null); setShowCompletionDialog(true); }}
+              onCompleteBillboards={() => {
+                setSelectedTaskIdForCompletion(selectedTaskId);
+                const pendingItems = selectedTaskItemsList.filter(i => i.status !== 'completed');
+                const defaultSelection = pendingItems.length > 0 ? pendingItems.map(i => i.id) : selectedTaskItemsList.map(i => i.id);
+                setSelectedItemsForCompletion(prev => {
+                  if (selectedItemsForDate.length > 0) return [...selectedItemsForDate];
+                  if (prev.length > 0) return prev;
+                  return defaultSelection;
+                });
+                setSelectedItemsForDate([]);
+                setSelectedTaskIdForBulk(null);
+                setShowCompletionDialog(true);
+              }}
               onSetInstallationDate={() => { setSelectedTaskIdForBulk(selectedTaskId); setSelectedItemsForDate(selectedTaskItemsList.map(i => i.id)); }}
               onAddBillboards={() => { setSelectedTaskForAddBillboards({ taskId: selectedTaskId, contractId: selectedTaskObj.contract_id, contractIds: selectedDerivedContractIds, existingBillboardIds: selectedTaskItemsList.map(i => i.billboard_id), customerName: selectedTaskContract?.['Customer Name'] || '' }); setAddBillboardsDialogOpen(true); }}
               onCreateCompositeTask={selectedTaskObj.task_type === 'reinstallation' ? () => { setSelectedTaskForComposite({ taskId: selectedTaskId, contractId: selectedTaskObj.contract_id, customerName: selectedTaskContract?.['Customer Name'] || 'غير محدد', customerId: (selectedTaskContract as any)?.customer_id || null }); setCreateCompositeDialogOpen(true); } : undefined}
@@ -2639,7 +2656,12 @@ export default function InstallationTasks() {
       {/* Add Task Dialog - Enhanced Version */}
       <EnhancedAddInstallationTaskDialog
         open={addTaskDialogOpen}
-        onOpenChange={setAddTaskDialogOpen}
+        onOpenChange={(open) => {
+          setAddTaskDialogOpen(open);
+          if (!open && searchParams.get('from') === 'hub') {
+            navigate('/admin/composite-tasks', { replace: true });
+          }
+        }}
         taskType={taskType}
         onTaskTypeChange={setTaskType}
         teams={teams as any}
@@ -2707,7 +2729,7 @@ export default function InstallationTasks() {
           open={bulkDesignDialogOpen}
           onOpenChange={setBulkDesignDialogOpen}
           taskItems={(() => {
-            const targetIds = selectedGroupTaskIds || [selectedTaskForDesign];
+            const targetIds = (selectedGroupTaskIds && selectedGroupTaskIds.length > 0) ? selectedGroupTaskIds : [selectedTaskForDesign];
             return allTaskItems
               .filter(i => targetIds.includes(i.task_id))
               .map(item => ({
@@ -2716,7 +2738,7 @@ export default function InstallationTasks() {
               }));
           })()}
           taskDesigns={(() => {
-            const targetIds = selectedGroupTaskIds || [selectedTaskForDesign];
+            const targetIds = (selectedGroupTaskIds && selectedGroupTaskIds.length > 0) ? selectedGroupTaskIds : [selectedTaskForDesign];
             const all = targetIds.flatMap(id => designsByTask[id] || []);
             // ✅ إزالة التصاميم المكررة حسب رابط التصميم
             const seen = new Set<string>();
@@ -3026,6 +3048,8 @@ export default function InstallationTasks() {
               const url = face === 'A' ? installedImageFaceAUrl : installedImageFaceBUrl;
               const setUrl = face === 'A' ? setInstalledImageFaceAUrl : setInstalledImageFaceBUrl;
               const uploading = face === 'A' ? uploadingInstalledA : uploadingInstalledB;
+              const uploadMethod = face === 'A' ? installedUploadMethodA : installedUploadMethodB;
+              const setUploadMethod = face === 'A' ? setInstalledUploadMethodA : setInstalledUploadMethodB;
               const label = face === 'A' ? 'الوجه الأمامي' : 'الوجه الخلفي (اختياري)';
               const colorClass = face === 'A' ? 'border-emerald-500/30 bg-emerald-50/30 dark:bg-emerald-950/20' : 'border-blue-500/30 bg-blue-50/30 dark:bg-blue-950/20';
               const dotColor = face === 'A' ? 'bg-emerald-500' : 'bg-blue-500';
@@ -3034,7 +3058,7 @@ export default function InstallationTasks() {
 
               return (
                 <div 
-                  className={`p-4 rounded-lg border-2 transition-all ${isActive ? 'border-primary ring-2 ring-primary/20' : `border-dashed ${colorClass}`} space-y-3 cursor-pointer`}
+                  className={`p-4 rounded-xl border-2 transition-all ${isActive ? 'border-primary ring-2 ring-primary/20' : `border-dashed ${colorClass}`} space-y-3 cursor-pointer`}
                   onClick={() => setPasteTargetFace(face)}
                   onPaste={async (e) => {
                     e.preventDefault();
@@ -3059,29 +3083,28 @@ export default function InstallationTasks() {
                   }}
                   tabIndex={0}
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center gap-2">
                       <div className={`w-3 h-3 rounded-full ${dotColor}`} />
-                      <Label className="font-bold">{label}</Label>
-                      {isActive && <Badge variant="outline" className="text-[10px] h-5 border-primary text-primary">هدف اللصق</Badge>}
+                      <Label className="font-bold cursor-pointer">{label}</Label>
+                      {isActive && <Badge variant="outline" className="text-[10px] h-5 border-primary text-primary font-bold">هدف اللصق النشط</Badge>}
                     </div>
-                    <div className="flex gap-1">
-                      <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); handlePasteFromClipboard(face); }} className="text-xs h-7 px-2" title="لصق من الحافظة">
- <span className="text-[10px]"></span>
-                        لصق
+                    <div className="flex items-center gap-1.5">
+                      <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); handlePasteFromClipboard(face); }} className="text-xs h-7 px-2.5 font-bold" title="لصق من الحافظة">
+                        لصق (Ctrl+V)
                       </Button>
-                      <Button size="sm" variant={installedUploadMethod === 'file' ? 'default' : 'outline'} onClick={(e) => { e.stopPropagation(); setInstalledUploadMethod('file'); }} className="text-xs h-7 px-2">
+                      <Button size="sm" variant={uploadMethod === 'file' ? 'default' : 'outline'} onClick={(e) => { e.stopPropagation(); setUploadMethod('file'); }} className="text-xs h-7 px-2 font-bold">
                         <Upload className="h-3 w-3 ml-1" />
-                        رفع
+                        رفع ملف
                       </Button>
-                      <Button size="sm" variant={installedUploadMethod === 'url' ? 'default' : 'outline'} onClick={(e) => { e.stopPropagation(); setInstalledUploadMethod('url'); }} className="text-xs h-7 px-2">
+                      <Button size="sm" variant={uploadMethod === 'url' ? 'default' : 'outline'} onClick={(e) => { e.stopPropagation(); setUploadMethod('url'); }} className="text-xs h-7 px-2 font-bold">
                         <LinkIcon className="h-3 w-3 ml-1" />
                         رابط
                       </Button>
                     </div>
                   </div>
 
-                  {installedUploadMethod === 'url' ? (
+                  {uploadMethod === 'url' ? (
                     <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                       <div className="flex-1 relative">
                         <Link2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -3090,12 +3113,12 @@ export default function InstallationTasks() {
                           onChange={(e) => setUrl(e.target.value)}
                           placeholder="الصق رابط الصورة هنا..."
                           dir="ltr"
-                          className="pr-10 font-mono text-sm"
+                          className="pr-10 font-mono text-sm rounded-xl"
                           onFocus={() => setPasteTargetFace(face)}
                         />
                       </div>
                       {url && (
-                        <Button variant="ghost" size="icon" onClick={() => setUrl('')} className="text-destructive hover:text-destructive">
+                        <Button variant="ghost" size="icon" onClick={() => setUrl('')} className="text-destructive hover:text-destructive rounded-xl">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       )}
@@ -3122,17 +3145,17 @@ export default function InstallationTasks() {
                           const file = e.dataTransfer.files?.[0];
                           if (file && !uploading) handleInstalledFileUpload(file, face);
                         }}
-                        className="flex flex-col items-center justify-center h-24 border-2 border-dashed rounded-lg cursor-pointer hover:bg-accent/50 transition-colors"
+                        className="flex flex-col items-center justify-center h-24 border-2 border-dashed rounded-xl cursor-pointer hover:bg-accent/50 transition-colors"
                       >
                         {uploading ? (
                           <>
                             <Loader2 className="h-6 w-6 animate-spin text-primary mb-1" />
-                            <span className="text-xs text-muted-foreground">جاري الرفع...</span>
+                            <span className="text-xs text-muted-foreground font-bold">جاري الرفع إلى التخزين...</span>
                           </>
                         ) : (
                           <>
                             <Upload className="h-6 w-6 text-muted-foreground mb-1" />
-                            <span className="text-xs text-muted-foreground">اسحب الصورة أو انقر أو الصق (Ctrl+V)</span>
+                            <span className="text-xs text-muted-foreground font-semibold">اسحب الصورة هنا أو انقر للاختيار أو الصق مباشرة</span>
                           </>
                         )}
                       </div>
@@ -3140,9 +3163,21 @@ export default function InstallationTasks() {
                   )}
 
                   {url && (
-                    <div className="relative aspect-video rounded-lg overflow-hidden border bg-background">
+                    <div className="relative aspect-video max-h-[180px] rounded-xl overflow-hidden border bg-background shadow-inner">
                       <img src={url} alt={`معاينة ${label}`} className="w-full h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).src = '/placeholder.svg'; }} />
                       <Badge className={`absolute top-2 right-2 ${badgeColor}`}>{label}</Badge>
+                      <Button
+                        size="icon"
+                        variant="destructive"
+                        className="absolute top-2 left-2 h-7 w-7 rounded-lg opacity-80 hover:opacity-100 shadow-md"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setUrl('');
+                        }}
+                        title="حذف الصورة"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
                   )}
                 </div>

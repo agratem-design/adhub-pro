@@ -1126,7 +1126,7 @@ export function SendAccountStatementDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       {!controlledOpen && (
         <DialogTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-2">
+          <Button variant="outline" size="sm" className="h-10 cursor-pointer gap-2 transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 hover:text-primary active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
             <MessageSquare className="h-4 w-4" />
             إرسال كشف حساب
           </Button>
@@ -1209,7 +1209,7 @@ export function SendAccountStatementDialog({
             {sendAsPDF && sendingMethod !== 'textly' && (
               <div className="text-sm text-amber-600 p-3 bg-amber-50 rounded-lg flex items-center gap-2">
                 <AlertCircle className="h-4 w-4" />
- ️ إرسال ملفات PDF يتطلب استخدام Textly API
+                إرسال ملفات PDF يتطلب استخدام Textly API
               </div>
             )}
           </div>

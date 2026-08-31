@@ -51,6 +51,7 @@ android/captures/
 *.tar.gz
 AdHub_Backups/
 backups/
+tmp/
 supabase/.temp/
 .supabase/
 

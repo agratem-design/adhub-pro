@@ -30,7 +30,8 @@ import {
   Minus,
   User,
   ChevronRight,
-  ChevronLeft
+  ChevronLeft,
+  Sparkles
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { BillboardImage } from '@/components/BillboardImage';
@@ -595,12 +596,21 @@ export function EnhancedAddInstallationTaskDialog({
       }
     }
 
+    // توليد الاسم التلقائي إذا لم يتم إدخال اسم مخصص
+    const selectedContractsList = contracts.filter(c => selectedContractIds.includes(c.Contract_Number));
+    const adTypes = [...new Set(selectedContractsList.map(c => c['Ad Type']).filter(Boolean))].join(' / ');
+    const custName = selectedCustomer?.name || selectedContractsList[0]?.['Customer Name'] || '';
+    const typeLabel = taskType === 'reinstallation' ? 'إعادة تركيب' : 'تركيب جديد';
+    const contractsLabel = selectedContractIds.length > 0 ? `(عقد #${selectedContractIds.join('، #')})` : '';
+    const autoGenName = [adTypes, custName, typeLabel, contractsLabel].filter(Boolean).join(' - ');
+    const finalTaskName = taskName.trim() || autoGenName || `مهمة ${typeLabel}`;
+
     onSubmit({
       contractIds: selectedContractIds,
       customerId: selectedCustomerId,
       billboardIds: selectedBillboardIds,
       teamAssignments,
-      task_name: taskName
+      task_name: finalTaskName
     });
   };
 
@@ -725,17 +735,38 @@ export function EnhancedAddInstallationTaskDialog({
             {/* ================= STEP 1: Customer & Contracts Selection ================= */}
             {currentStep === 1 && (
               <div className="space-y-5">
-                {/* Task Name Section */}
+                {/* Task Name Section with Auto-generate Button */}
                 <div className="space-y-2">
-                  <Label className="text-xs font-extrabold flex items-center gap-2 text-foreground/80">
-                    <FileText className="h-4.5 w-4.5 text-primary" />
-                    اسم مهمة التركيب (اختياري)
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-extrabold flex items-center gap-2 text-foreground/80">
+                      <FileText className="h-4.5 w-4.5 text-primary" />
+                      اسم مهمة التركيب (يتم توليده تلقائياً أو تخصيصه)
+                    </Label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        const selectedContractsList = contracts.filter(c => selectedContractIds.includes(c.Contract_Number));
+                        const adTypes = [...new Set(selectedContractsList.map(c => c['Ad Type']).filter(Boolean))].join(' / ');
+                        const custName = selectedCustomer?.name || selectedContractsList[0]?.['Customer Name'] || '';
+                        const typeLabel = taskType === 'reinstallation' ? 'إعادة تركيب' : 'تركيب جديد';
+                        const contractsLabel = selectedContractIds.length > 0 ? `(عقد #${selectedContractIds.join('، #')})` : '';
+                        const autoGenName = [adTypes, custName, typeLabel, contractsLabel].filter(Boolean).join(' - ');
+                        if (autoGenName) setTaskName(autoGenName);
+                        else toast.info('يرجى اختيار الزبون أو العقود أولاً لتوليد الاسم');
+                      }}
+                      className="h-7 px-2 text-[11px] font-bold text-amber-500 hover:bg-amber-500/10 gap-1 rounded-lg"
+                    >
+                      <Sparkles className="h-3 w-3" />
+                      توليد تلقائي
+                    </Button>
+                  </div>
                   <Input
-                    placeholder="أدخل اسماً مميزاً للمهمة (مثال: تركيب لوحات طريق المطار)..."
+                    placeholder="سيتم توليد الاسم تلقائياً (مثال: الربيع - محمد البحباح - تركيب جديد - عقد #1287) أو أدخل اسماً مخصصاً..."
                     value={taskName}
                     onChange={(e) => setTaskName(e.target.value)}
-                    className="h-11 text-xs rounded-xl border-border/80 bg-background/50 hover:bg-background/80 focus-visible:ring-primary transition-all text-right"
+                    className="h-11 text-xs rounded-xl border-border/80 bg-background/50 hover:bg-background/80 focus-visible:ring-primary transition-all text-right font-medium"
                   />
                 </div>
 

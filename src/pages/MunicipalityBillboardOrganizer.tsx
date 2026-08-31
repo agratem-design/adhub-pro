@@ -22,7 +22,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Slider } from '@/components/ui/slider';
-import { Plus, Trash2, Save, Printer, MapPin, ArrowUp, ArrowDown, ArrowUpDown, Search, Edit2, FolderOpen, Upload, Building2, Settings2, GripVertical, ArrowLeftRight, Replace, Filter, Sticker, LayoutGrid, List, FileSpreadsheet, Camera, ImageIcon, Loader2, CheckCircle2, AlertTriangle, Sparkles, X as XIcon, XIcon as XIcon2, Info, RefreshCw, Eye, Check, SlidersHorizontal, ChevronDown, Wrench, Clock, Ban, Clipboard, Maximize2, ZoomIn, ZoomOut, ExternalLink, Download, PenTool, FileText, Layers, Tag, Copy, Files, Calendar, BookOpen } from 'lucide-react';
+import { Plus, Trash2, Save, Printer, MapPin, ArrowUp, ArrowDown, ArrowUpDown, Search, Edit2, FolderOpen, Upload, Building2, Settings2, GripVertical, ArrowLeftRight, Replace, Filter, Sticker, LayoutGrid, List, FileSpreadsheet, Camera, ImageIcon, Loader2, CheckCircle2, AlertTriangle, Sparkles, X as XIcon, XIcon as XIcon2, Info, RefreshCw, RotateCcw, Eye, Check, SlidersHorizontal, ChevronDown, Wrench, Clock, Ban, Clipboard, Maximize2, ZoomIn, ZoomOut, ExternalLink, Download, PenTool, FileText, Layers, Tag, Copy, Files, Calendar, BookOpen } from 'lucide-react';
 import { extractExifData } from '@/utils/exifExtractor';
 import { uploadImage } from '@/services/imageUploadService';
 import { compressLossless } from '@/utils/imageCompressor';

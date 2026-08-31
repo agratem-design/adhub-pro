@@ -12,8 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/sonner';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Edit, Trash2, Printer, Plus, AlertCircle, TrendingUp, Users, Wallet, CreditCard, Clock, Building2, Phone as PhoneIcon, Merge } from 'lucide-react';
+import { Edit, Trash2, Printer, Plus, AlertCircle, TrendingUp, Users, Wallet, CreditCard, Clock, Building2, Phone as PhoneIcon, Merge, RefreshCw } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { useNavigate } from 'react-router-dom';
 import { Billboard } from '@/types';
@@ -28,7 +27,7 @@ import { SendDebtRemindersDialog } from '@/components/billing/SendDebtRemindersD
 import { SendOverdueInvoicesRemindersDialog } from '@/components/billing/SendOverdueInvoicesRemindersDialog';
 import { BulkAccountStatementDialog } from '@/components/customers/BulkAccountStatementDialog';
 import { SendDebtReportDialog } from '@/components/customers/SendDebtReportDialog';
-import { Mail, FileSpreadsheet, AlertTriangle, DollarSign, Send, Receipt } from 'lucide-react';
+import { Mail, AlertTriangle, DollarSign, Send, Receipt } from 'lucide-react';
 import { getMergedInvoiceStylesAsync } from '@/hooks/useInvoiceSettingsSync';
 import { calculateCustomerFinancials } from '@/hooks/useCustomerFinancials';
 import { filterCompositeRelatedPrintedInvoices } from '@/components/billing/BillingUtils';
@@ -111,11 +110,12 @@ function CustomerRow({
 
   const isOverdue = overdueInfo.hasOverdue;
   const hasUnpaidDebt = remaining > 0;
-  const isHighlighted = isOverdue || hasUnpaidDebt;
   
-  const rowClassName = isHighlighted
-    ? "group hover:bg-destructive/10 transition-all duration-300 bg-destructive/5 border-r-4 border-r-destructive" 
-    : "group hover:bg-accent/10 transition-all duration-300";
+  const rowClassName = isOverdue
+    ? "group border-r-4 border-r-destructive bg-destructive/[0.045] transition-colors duration-200 hover:bg-destructive/[0.075]"
+    : hasUnpaidDebt
+      ? "group border-r-4 border-r-amber-500/70 bg-amber-500/[0.025] transition-colors duration-200 hover:bg-amber-500/[0.055]"
+      : "group border-r-4 border-r-transparent transition-colors duration-200 hover:bg-primary/[0.035]";
 
   const netRemaining = remaining;
   const basicRemaining = remaining + (customer.totalPurchases || 0);
@@ -128,23 +128,25 @@ function CustomerRow({
   return (
     <TableRow className={rowClassName}>
       {/* اسم الزبون */}
-      <TableCell className="font-medium py-4">
-        <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold shadow-sm ${
-            isHighlighted 
-              ? 'bg-destructive/20 text-destructive' 
-              : 'bg-primary/10 text-primary'
+      <TableCell className="min-w-[250px] py-4 font-medium">
+        <div className="flex items-start gap-3">
+          <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border text-sm font-black shadow-sm ${
+            isOverdue
+              ? 'border-destructive/30 bg-destructive/15 text-destructive'
+              : hasUnpaidDebt
+                ? 'border-amber-500/30 bg-amber-500/10 text-amber-500'
+                : 'border-primary/25 bg-primary/10 text-primary'
           }`}>
             {customer.name.charAt(0)}
           </div>
-          <div className="flex flex-col">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              {isHighlighted && <AlertCircle className="h-4 w-4 text-destructive animate-pulse" />}
-              <span className={`font-semibold ${isHighlighted ? "text-destructive" : "text-foreground"}`}>
+              {isOverdue && <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />}
+              <span className={`truncate font-bold ${isOverdue ? "text-destructive" : "text-foreground"}`} title={customer.name}>
                 {customer.name}
               </span>
             </div>
-            <div className="flex gap-1.5 mt-1 flex-wrap">
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
               {customer.isCustomer && (
                 <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-[10px] px-1.5 py-0">
                   زبون
@@ -156,7 +158,7 @@ function CustomerRow({
                 </Badge>
               )}
               {customer.isSupplier && (
-                <Badge className="bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/30 text-[10px] px-1.5 py-0" variant="outline">
+                <Badge className="border-border/70 bg-muted/60 px-1.5 py-0 text-[10px] text-muted-foreground" variant="outline">
                   مورد
                   {customer.supplierType === 'billboard_rental' && ' (إيجار)'}
                   {customer.supplierType === 'general_purchases' && ' (مشتريات)'}
@@ -164,91 +166,73 @@ function CustomerRow({
                 </Badge>
               )}
               {customer.unallocatedBalance && customer.unallocatedBalance > 0 ? (
-                <Badge variant="outline" className="bg-red-500/15 text-red-500 border-red-500/35 text-[10px] font-bold px-1.5 py-0 animate-pulse">
- ️ رصيد معلق: {customer.unallocatedBalance.toLocaleString('ar-LY')} د.ل
+                <Badge variant="outline" className="gap-1 border-red-500/35 bg-red-500/10 px-1.5 py-0 text-[10px] font-bold text-red-500">
+                  <AlertCircle className="h-3 w-3" />
+                  رصيد معلق: {customer.unallocatedBalance.toLocaleString('ar-LY')} د.ل
                 </Badge>
+              ) : null}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              {customer.phone ? (
+                <span className="inline-flex items-center gap-1.5" dir="ltr">
+                  <PhoneIcon className="h-3.5 w-3.5" />{customer.phone}
+                </span>
+              ) : null}
+              {customer.company ? (
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                  <Building2 className="h-3.5 w-3.5 shrink-0" />
+                  <span className="max-w-40 truncate" title={customer.company}>{customer.company}</span>
+                </span>
               ) : null}
             </div>
           </div>
         </div>
       </TableCell>
 
-      {/* الهاتف والشركة */}
-      <TableCell className="py-4">
-        <div className="flex flex-col gap-1">
-          {customer.phone ? (
-            <div className="flex items-center gap-1.5 text-sm">
-              <PhoneIcon className="h-3.5 w-3.5 text-muted-foreground" />
-              <span dir="ltr">{customer.phone}</span>
-            </div>
-          ) : (
-            <span className="text-muted-foreground/50 text-sm">—</span>
-          )}
-          {customer.company && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Building2 className="h-3 w-3" />
-              <span>{customer.company}</span>
-            </div>
-          )}
-        </div>
-      </TableCell>
-
       {/* العقود */}
       <TableCell className="text-center py-4">
-        <div className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 font-semibold text-sm">
+        <div className="inline-flex h-9 min-w-9 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 px-2 font-manrope text-sm font-black text-primary">
           {customer.contractsCount}
         </div>
       </TableCell>
 
-      {/* الإجمالي */}
-      <TableCell className="py-4">
-        <div className="flex flex-col items-end">
-          <span className="font-bold font-manrope text-foreground">{customer.totalRent.toLocaleString('ar-LY')}</span>
-          <span className="text-[10px] text-muted-foreground">د.ل</span>
-        </div>
-      </TableCell>
-
-      {/* المدفوع */}
-      <TableCell className="py-4">
-        <div className="flex flex-col items-end">
-          <span className="font-semibold font-manrope text-emerald-600 dark:text-emerald-400">{customer.totalPaid.toLocaleString('ar-LY')}</span>
-          <span className="text-[10px] text-muted-foreground">د.ل</span>
-        </div>
-      </TableCell>
-
-      {/* رصيد الحساب */}
-      <TableCell className="py-4">
-        <div className="flex flex-col items-end">
-          <span className="font-semibold font-manrope text-blue-600 dark:text-blue-400">{customer.accountBalance.toLocaleString('ar-LY')}</span>
-          <span className="text-[10px] text-muted-foreground">د.ل</span>
-        </div>
-      </TableCell>
-
-      {/* المتبقي */}
-      <TableCell className="py-4">
-        <div className="flex flex-col items-end">
-          <span className={`font-bold font-manrope ${basicRemaining > 0 ? 'text-destructive' : 'text-emerald-600 dark:text-emerald-400'}`}>
-            {basicRemaining < 0 ? `(${Math.abs(basicRemaining).toLocaleString('ar-LY')})` : basicRemaining.toLocaleString('ar-LY')}
-          </span>
-          <span className="text-[10px] text-muted-foreground">د.ل</span>
-        </div>
-      </TableCell>
-
-      {/* صافي المتبقي */}
-      <TableCell className="py-4">
-        <div className="flex flex-col items-end">
-          <span className={`font-bold font-manrope ${netRemaining > 0 ? 'text-destructive' : 'text-emerald-600 dark:text-emerald-400'}`}>
-            {netRemaining < 0 ? `(${Math.abs(netRemaining).toLocaleString('ar-LY')})` : netRemaining.toLocaleString('ar-LY')}
-          </span>
-          <div className="flex items-center gap-1 mt-0.5">
-            <span className="text-[10px] text-muted-foreground">د.ل</span>
-            <span className="text-[9px] text-muted-foreground/75 font-bold">(شامل المقاصة)</span>
+      {/* الملخص المالي */}
+      <TableCell className="min-w-[300px] py-4">
+        <div className="grid grid-cols-3 gap-2">
+          <div className="rounded-lg border border-border/45 bg-background/40 px-2.5 py-2">
+            <span className="block text-[10px] font-bold text-muted-foreground">الإجمالي</span>
+            <span className="mt-0.5 block font-manrope text-sm font-black text-foreground">{customer.totalRent.toLocaleString('ar-LY')}</span>
+          </div>
+          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-2.5 py-2">
+            <span className="block text-[10px] font-bold text-muted-foreground">المدفوع</span>
+            <span className="mt-0.5 block font-manrope text-sm font-black text-emerald-500">{customer.totalPaid.toLocaleString('ar-LY')}</span>
+          </div>
+          <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 px-2.5 py-2">
+            <span className="block text-[10px] font-bold text-muted-foreground">الرصيد</span>
+            <span className="mt-0.5 block font-manrope text-sm font-black text-blue-500">{customer.accountBalance.toLocaleString('ar-LY')}</span>
           </div>
         </div>
       </TableCell>
 
+      {/* المتبقي */}
+      <TableCell className="min-w-[150px] py-4">
+        <div className="rounded-xl border border-border/45 bg-background/35 px-3 py-2 text-left">
+          <span className="block text-[10px] font-bold text-muted-foreground">صافي المتبقي</span>
+          <span className={`mt-0.5 block font-manrope text-base font-black ${netRemaining > 0 ? 'text-destructive' : 'text-emerald-500'}`}>
+            {netRemaining < 0 ? `(${Math.abs(netRemaining).toLocaleString('ar-LY')})` : netRemaining.toLocaleString('ar-LY')}
+          </span>
+          <span className="mt-1 block text-[9px] font-medium text-muted-foreground">
+            قبل المقاصة:
+            <span className={`mr-1 font-manrope font-bold ${basicRemaining > 0 ? 'text-destructive' : 'text-emerald-500'}`}>
+            {basicRemaining < 0 ? `(${Math.abs(basicRemaining).toLocaleString('ar-LY')})` : basicRemaining.toLocaleString('ar-LY')}
+            </span>
+          </span>
+          <span className="text-[9px] text-muted-foreground">دينار ليبي</span>
+        </div>
+      </TableCell>
+
       {/* نسبة السداد */}
-      <TableCell className="py-4 min-w-[140px]">
+      <TableCell className="min-w-[145px] py-4">
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">نسبة السداد</span>
@@ -257,12 +241,12 @@ function CustomerRow({
               paymentPercentage >= 50 ? 'text-amber-600' : 'text-destructive'
             }`}>{paymentPercentage}%</span>
           </div>
-          <div className="h-2 w-full bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+          <div className="h-2 w-full overflow-hidden rounded-full bg-muted/60">
             <div 
-              className={`h-full rounded-full transition-all duration-500 ${
-                paymentPercentage >= 100 ? 'bg-gradient-to-r from-emerald-500 to-emerald-400' : 
-                paymentPercentage >= 50 ? 'bg-gradient-to-r from-amber-500 to-amber-400' : 
-                'bg-gradient-to-r from-destructive to-red-400'
+              className={`h-full rounded-full transition-all duration-300 motion-reduce:transition-none ${
+                paymentPercentage >= 100 ? 'bg-emerald-500' :
+                paymentPercentage >= 50 ? 'bg-amber-500' :
+                'bg-destructive'
               }`}
               style={{ width: `${Math.min(100, paymentPercentage)}%` }}
             />
@@ -274,7 +258,8 @@ function CustomerRow({
       <TableCell className="py-4">
         {isOverdue ? (
           <div className="flex flex-col gap-1 items-start">
-            <Badge variant="destructive" className="text-xs shadow-sm animate-pulse">
+            <Badge variant="destructive" className="gap-1 text-xs shadow-sm">
+              <AlertCircle className="h-3.5 w-3.5" />
               متأخر {overdueInfo.oldestDaysOverdue} يوم
             </Badge>
             <span className="text-xs font-medium text-destructive">
@@ -283,7 +268,8 @@ function CustomerRow({
           </div>
         ) : remaining < 0 ? (
           <div className="flex flex-col gap-1 items-start">
-            <Badge className="text-xs bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 shadow-sm" variant="outline">
+            <Badge className="gap-1 border-emerald-500/30 bg-emerald-500/15 text-xs text-emerald-700 shadow-sm dark:text-emerald-400" variant="outline">
+              <Wallet className="h-3.5 w-3.5" />
               رصيد دائن للعميل
             </Badge>
             <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
@@ -299,29 +285,36 @@ function CustomerRow({
       </TableCell>
 
       {/* الإجراءات */}
-      <TableCell className="py-4">
-        <div className="flex gap-2 opacity-70 group-hover:opacity-100 transition-opacity">
+      <TableCell className="min-w-[260px] py-4">
+        <div className="flex flex-wrap items-center gap-2">
           <Button 
+            type="button"
             size="sm" 
             onClick={onViewBilling}
-            className="bg-primary/90 hover:bg-primary shadow-sm"
+            className="h-10 cursor-pointer gap-1.5 bg-primary text-primary-foreground shadow-sm transition-all duration-200 hover:bg-primary/90 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none"
           >
-            <Wallet className="h-4 w-4 ml-1" />
-            الفواتير
+            <Wallet className="h-4 w-4" />
+            حساب العميل
           </Button>
           <Button 
-            size="sm" 
+            type="button"
+            size="icon"
             variant="outline" 
             onClick={onEdit}
-            className="hover:bg-accent"
+            className="h-10 w-10 cursor-pointer transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 hover:text-primary active:scale-95 motion-reduce:transform-none motion-reduce:transition-none"
+            aria-label={`تعديل بيانات ${customer.name}`}
+            title="تعديل بيانات العميل"
           >
             <Edit className="h-4 w-4" />
           </Button>
           <Button 
-            size="sm" 
+            type="button"
+            size="icon"
             variant="outline" 
             onClick={onDelete}
-            className="hover:bg-destructive/10 text-destructive hover:text-destructive"
+            className="h-10 w-10 cursor-pointer text-destructive transition-all duration-200 hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive active:scale-95 motion-reduce:transform-none motion-reduce:transition-none"
+            aria-label={`حذف ${customer.name}`}
+            title="حذف العميل"
           >
             <Trash2 className="h-4 w-4" />
           </Button>
@@ -329,6 +322,95 @@ function CustomerRow({
         </div>
       </TableCell>
     </TableRow>
+  );
+}
+
+function CustomerMobileCard({
+  customer,
+  remaining,
+  paymentPercentage,
+  onViewBilling,
+  onEdit,
+  onDelete
+}: {
+  customer: CustomerSummary;
+  remaining: number;
+  paymentPercentage: number;
+  onViewBilling: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const overdueInfo = customer.overdueInfo || {
+    hasOverdue: false,
+    oldestDueDate: null,
+    oldestDaysOverdue: 0,
+    totalOverdueAmount: 0,
+    overdueCount: 0
+  };
+  const basicRemaining = remaining + (customer.totalPurchases || 0);
+  const customerData = { ...customer, remaining };
+  const accentClass = overdueInfo.hasOverdue
+    ? 'border-destructive/40 bg-destructive/[0.035]'
+    : remaining > 0
+      ? 'border-amber-500/35 bg-amber-500/[0.025]'
+      : 'border-border/60 bg-card/70';
+
+  return (
+    <article className={`overflow-hidden rounded-2xl border shadow-sm transition-all duration-200 hover:shadow-md motion-safe:hover:-translate-y-0.5 ${accentClass}`}>
+      <div className="space-y-4 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border text-sm font-black ${overdueInfo.hasOverdue ? 'border-destructive/30 bg-destructive/15 text-destructive' : 'border-primary/25 bg-primary/10 text-primary'}`}>
+              {customer.name.charAt(0)}
+            </div>
+            <div className="min-w-0">
+              <h3 className="truncate font-bold text-foreground" title={customer.name}>{customer.name}</h3>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {customer.isCustomer && <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-[10px] text-emerald-500">زبون</Badge>}
+                {customer.pricingCategory && <Badge variant="outline" className="border-blue-500/25 bg-blue-500/10 text-[10px] text-blue-500">فئة: {customer.pricingCategory}</Badge>}
+                {customer.isSupplier && <Badge variant="outline" className="border-border/70 bg-muted/60 text-[10px] text-muted-foreground">مورد</Badge>}
+              </div>
+            </div>
+          </div>
+          {overdueInfo.hasOverdue ? (
+            <Badge variant="destructive" className="shrink-0 gap-1 text-[10px]"><AlertCircle className="h-3 w-3" />متأخر {overdueInfo.oldestDaysOverdue} يوم</Badge>
+          ) : remaining < 0 ? (
+            <Badge variant="outline" className="shrink-0 border-emerald-500/30 bg-emerald-500/10 text-[10px] text-emerald-500">رصيد دائن</Badge>
+          ) : (
+            <Badge variant="outline" className="shrink-0 border-emerald-500/30 bg-emerald-500/10 text-[10px] text-emerald-500">محدث</Badge>
+          )}
+        </div>
+
+        {(customer.phone || customer.company) && (
+          <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-xl border border-border/45 bg-background/35 px-3 py-2 text-xs text-muted-foreground">
+            {customer.phone && <span className="inline-flex items-center gap-1.5" dir="ltr"><PhoneIcon className="h-3.5 w-3.5" />{customer.phone}</span>}
+            {customer.company && <span className="inline-flex min-w-0 items-center gap-1.5"><Building2 className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{customer.company}</span></span>}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-xl border border-border/45 bg-background/35 p-2.5"><span className="text-[10px] font-bold text-muted-foreground">الإجمالي</span><p className="mt-1 font-manrope text-sm font-black text-foreground">{customer.totalRent.toLocaleString('ar-LY')}</p></div>
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-2.5"><span className="text-[10px] font-bold text-muted-foreground">المدفوع</span><p className="mt-1 font-manrope text-sm font-black text-emerald-500">{customer.totalPaid.toLocaleString('ar-LY')}</p></div>
+          <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-2.5"><span className="text-[10px] font-bold text-muted-foreground">الرصيد</span><p className="mt-1 font-manrope text-sm font-black text-blue-500">{customer.accountBalance.toLocaleString('ar-LY')}</p></div>
+          <div className={`rounded-xl border p-2.5 ${remaining > 0 ? 'border-destructive/25 bg-destructive/5' : 'border-emerald-500/20 bg-emerald-500/5'}`}><span className="text-[10px] font-bold text-muted-foreground">صافي المتبقي</span><p className={`mt-1 font-manrope text-sm font-black ${remaining > 0 ? 'text-destructive' : 'text-emerald-500'}`}>{remaining < 0 ? `(${Math.abs(remaining).toLocaleString('ar-LY')})` : remaining.toLocaleString('ar-LY')}</p><span className="text-[9px] text-muted-foreground">قبل المقاصة: {basicRemaining.toLocaleString('ar-LY')}</span></div>
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs"><span className="font-bold text-muted-foreground">نسبة السداد</span><span className={`font-manrope font-black ${paymentPercentage >= 100 ? 'text-emerald-500' : paymentPercentage >= 50 ? 'text-amber-500' : 'text-destructive'}`}>{paymentPercentage}%</span></div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted/60"><div className={`h-full rounded-full transition-all duration-300 motion-reduce:transition-none ${paymentPercentage >= 100 ? 'bg-emerald-500' : paymentPercentage >= 50 ? 'bg-amber-500' : 'bg-destructive'}`} style={{ width: `${Math.min(100, paymentPercentage)}%` }} /></div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/45 pt-3">
+          <span className="inline-flex h-9 items-center rounded-xl border border-primary/20 bg-primary/10 px-3 text-xs font-bold text-primary">{customer.contractsCount} عقد</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" onClick={onViewBilling} className="h-10 cursor-pointer gap-1.5 transition-all duration-200 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none"><Wallet className="h-4 w-4" />حساب العميل</Button>
+            <Button type="button" size="icon" variant="outline" onClick={onEdit} className="h-10 w-10 cursor-pointer transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 hover:text-primary active:scale-95 motion-reduce:transform-none motion-reduce:transition-none" aria-label={`تعديل بيانات ${customer.name}`} title="تعديل بيانات العميل"><Edit className="h-4 w-4" /></Button>
+            <Button type="button" size="icon" variant="outline" onClick={onDelete} className="h-10 w-10 cursor-pointer text-destructive transition-all duration-200 hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive active:scale-95 motion-reduce:transform-none motion-reduce:transition-none" aria-label={`حذف ${customer.name}`} title="حذف العميل"><Trash2 className="h-4 w-4" /></Button>
+            <SendAccountStatementDialog customer={customerData} overdueInfo={overdueInfo} />
+          </div>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -1556,129 +1638,133 @@ export default function Customers() {
     }
   };
 
-  const searchQ = search.trim().toLowerCase();
   const visible = filteredAndSortedCustomers;
+  const totalCustomerValue = customersSummary.reduce((sum, customer) => sum + customer.totalRent, 0);
+  const totalOutstandingValue = customersSummary.reduce((sum, customer) => sum + Math.max(0, customer.totalRent - customer.totalPaid), 0);
+  const collectionRate = totalCustomerValue > 0 ? Math.min(100, Math.round((totalAllPaid / totalCustomerValue) * 100)) : 0;
+  const overdueCustomersCount = customersSummary.filter(customer => customer.overdueInfo?.hasOverdue).length;
+
+  const openCustomerBilling = (customer: CustomerSummary) => {
+    const id = typeof customer.id === 'string' ? customer.id : String(customer.id);
+    navigate(`/admin/customer-billing?id=${encodeURIComponent(id)}&name=${encodeURIComponent(customer.name)}`);
+  };
+
+  const openCustomerEditor = async (customer: CustomerSummary) => {
+    setEditingCustomerId(customer.id);
+    setCustomerNameInput(customer.name);
+    setCustomerPhoneInput(customer.phone || '');
+    setCustomerCompanyInput(customer.company || '');
+    setDuplicateNameWarning(null);
+
+    if (!customer.id.startsWith('name:')) {
+      const { data } = await supabase
+        .from('customers')
+        .select('is_customer, is_supplier, supplier_type, printer_id, pricing_category')
+        .eq('id', customer.id)
+        .single();
+
+      if (data) {
+        setIsCustomerChecked(data.is_customer ?? true);
+        setIsSupplierChecked(data.is_supplier ?? false);
+        setSupplierTypeInput(data.supplier_type || '');
+        setSelectedPrinterId((data as any).printer_id || '');
+        setPricingCategoryInput((data as any).pricing_category || 'عادي');
+      }
+    }
+
+    setNewCustomerOpen(true);
+  };
+
+  const requestCustomerDelete = (customer: CustomerSummary) => {
+    setCustomerToDelete(customer);
+    const remaining = customer.remainingDebt;
+    setDeleteCheckResult({
+      hasContracts: customer.contractsCount > 0,
+      hasDebt: remaining > 0,
+      contractsCount: customer.contractsCount,
+      debtAmount: remaining
+    });
+    setDeleteCustomerOpen(true);
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Modern Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary/10 via-primary/5 to-background p-4 sm:p-6 border border-primary/10">
-        <div className="absolute top-0 left-0 w-40 h-40 bg-primary/5 rounded-full -translate-x-20 -translate-y-20" />
-        <div className="absolute bottom-0 right-0 w-32 h-32 bg-primary/5 rounded-full translate-x-16 translate-y-16" />
-        <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent flex items-center gap-3">
-              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-primary/20 rounded-xl flex items-center justify-center">
-                <Users className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+    <div className="space-y-5 pb-6" dir="rtl">
+      <section className="relative overflow-hidden rounded-2xl border border-primary/25 bg-card/75 p-4 shadow-sm sm:p-6">
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-l from-transparent via-primary to-transparent" />
+        <div className="relative flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-primary/25 bg-primary/10 shadow-sm">
+              <Users className="h-6 w-6 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-black tracking-tight text-foreground sm:text-3xl">إدارة العملاء</h1>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">متابعة بيانات العملاء والعقود والتحصيل من شاشة واحدة.</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span className="rounded-lg border border-border/60 bg-background/45 px-2.5 py-1 font-bold text-foreground">{customersSummary.length} عميل</span>
+                <span className="rounded-lg border border-destructive/25 bg-destructive/10 px-2.5 py-1 font-bold text-destructive">{overdueCustomersCount} متأخر</span>
               </div>
-              إدارة الزبائن
-            </h1>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-2">إدارة شاملة لبيانات وحسابات الزبائن • {customersSummary.length} زبون</p>
+            </div>
           </div>
-          <div className="flex gap-2 flex-wrap">
-            <Button onClick={() => navigate('/admin/overdue-payments')} variant="destructive" size="sm" className="gap-2 shadow-lg">
-              <AlertTriangle className="h-4 w-4" />
-              <span className="hidden sm:inline">الدفعات المتأخرة</span>
-              <span className="sm:hidden">متأخرة</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" onClick={() => navigate('/admin/overdue-payments')} className="h-10 cursor-pointer gap-2 border-destructive/35 text-destructive transition-all duration-200 hover:bg-destructive/10 hover:text-destructive active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
+              <AlertTriangle className="h-4 w-4" />الدفعات المتأخرة
             </Button>
-            <Button onClick={() => setBulkStatementOpen(true)} variant="outline" size="sm" className="gap-2">
-              <Mail className="h-4 w-4" />
-              <span className="hidden sm:inline">كشوفات جماعية</span>
-              <span className="sm:hidden">كشوفات</span>
+            <Button type="button" variant="outline" onClick={() => setBulkStatementOpen(true)} className="h-10 cursor-pointer gap-2 transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
+              <Mail className="h-4 w-4" />كشوفات جماعية
             </Button>
-            <Button onClick={() => setDebtReportOpen(true)} variant="outline" size="sm" className="gap-2">
-              <Send className="h-4 w-4" />
-              <span className="hidden sm:inline">تقرير الديون للإدارة</span>
-              <span className="sm:hidden">تقرير ديون</span>
+            <Button type="button" variant="outline" onClick={() => setDebtReportOpen(true)} className="h-10 cursor-pointer gap-2 transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
+              <Send className="h-4 w-4" />تقرير الديون
             </Button>
-            <Button onClick={() => { setEditingCustomerId(null); setNewCustomerOpen(true); setCustomerNameInput(''); setCustomerPhoneInput(''); setCustomerCompanyInput(''); setPricingCategoryInput('عادي'); setIsCustomerChecked(true); setIsSupplierChecked(false); setSupplierTypeInput(''); setSelectedPrinterId(''); }} size="sm" className="shadow-lg">
-              <Plus className="h-4 w-4 ml-1" />
-              إضافة زبون
+            <Button type="button" onClick={() => { setEditingCustomerId(null); setNewCustomerOpen(true); setCustomerNameInput(''); setCustomerPhoneInput(''); setCustomerCompanyInput(''); setPricingCategoryInput('عادي'); setIsCustomerChecked(true); setIsSupplierChecked(false); setSupplierTypeInput(''); setSelectedPrinterId(''); }} className="h-10 cursor-pointer gap-2 shadow-md transition-all duration-200 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
+              <Plus className="h-4 w-4" />إضافة عميل
             </Button>
           </div>
         </div>
-        
-        {/* Collection Rate Progress */}
-        {(() => {
-          const totalRent = customersSummary.reduce((s, c) => s + c.totalRent, 0);
-          const collectionRate = totalRent > 0 ? Math.round((totalAllPaid / totalRent) * 100) : 0;
-          return (
-            <div className="relative mt-6 pt-4 border-t border-primary/10">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-muted-foreground">نسبة التحصيل الإجمالية</span>
-                <span className="text-lg font-bold text-primary">{collectionRate}%</span>
-              </div>
-              <Progress value={collectionRate} className="h-2" />
-            </div>
-          );
-        })()}
-      </div>
+        <div className="relative mt-5 border-t border-border/50 pt-4">
+          <div className="mb-2 flex items-center justify-between gap-4 text-sm">
+            <span className="font-bold text-muted-foreground">نسبة التحصيل الإجمالية</span>
+            <span className="font-manrope text-lg font-black text-primary">{collectionRate}%</span>
+          </div>
+          <Progress value={collectionRate} className="h-2.5 bg-muted/60" />
+        </div>
+      </section>
 
-      {/* Statistics Cards - Modern Design */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-primary/10 via-primary/5 to-background shadow-lg hover:shadow-xl transition-all duration-300 group">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-primary/10 rounded-full -translate-y-8 translate-x-8 group-hover:scale-110 transition-transform" />
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">إجمالي الزبائن</CardTitle>
-            <div className="w-12 h-12 bg-primary/20 rounded-xl flex items-center justify-center shadow-inner">
-              <Users className="h-6 w-6 text-primary" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold text-primary">{customersSummary.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">زبون مسجل</p>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Card className="group border-border/60 bg-card/70 shadow-sm transition-all duration-200 hover:border-primary/35 hover:shadow-md motion-safe:hover:-translate-y-0.5">
+          <CardContent className="flex items-center justify-between gap-3 p-4 sm:p-5">
+            <div><p className="text-xs font-bold text-muted-foreground">إجمالي العملاء</p><p className="mt-1 font-manrope text-2xl font-black text-primary sm:text-3xl">{customersSummary.length}</p><p className="mt-1 text-[10px] text-muted-foreground">عميل مسجل</p></div>
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10"><Users className="h-5 w-5 text-primary" /></div>
           </CardContent>
         </Card>
-
-        <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-green-500/10 via-green-500/5 to-background shadow-lg hover:shadow-xl transition-all duration-300 group">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-green-500/10 rounded-full -translate-y-8 translate-x-8 group-hover:scale-110 transition-transform" />
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">إجمالي الإيرادات</CardTitle>
-            <div className="w-12 h-12 bg-green-500/20 rounded-xl flex items-center justify-center shadow-inner">
-              <Wallet className="h-6 w-6 text-green-600" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-green-600">{customersSummary.reduce((s, c) => s + c.totalRent, 0).toLocaleString('ar-LY')}</div>
-            <p className="text-xs text-muted-foreground mt-1">دينار ليبي</p>
+        <Card className="group border-border/60 bg-card/70 shadow-sm transition-all duration-200 hover:border-emerald-500/30 hover:shadow-md motion-safe:hover:-translate-y-0.5">
+          <CardContent className="flex items-center justify-between gap-3 p-4 sm:p-5">
+            <div className="min-w-0"><p className="text-xs font-bold text-muted-foreground">إجمالي الإيرادات</p><p className="mt-1 truncate font-manrope text-xl font-black text-emerald-500 sm:text-2xl">{totalCustomerValue.toLocaleString('ar-LY')}</p><p className="mt-1 text-[10px] text-muted-foreground">دينار ليبي</p></div>
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-emerald-500/25 bg-emerald-500/10"><Wallet className="h-5 w-5 text-emerald-500" /></div>
           </CardContent>
         </Card>
-
-        <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-blue-500/10 via-blue-500/5 to-background shadow-lg hover:shadow-xl transition-all duration-300 group">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/10 rounded-full -translate-y-8 translate-x-8 group-hover:scale-110 transition-transform" />
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">المدفوعات</CardTitle>
-            <div className="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center shadow-inner">
-              <CreditCard className="h-6 w-6 text-blue-600" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-blue-600">{totalAllPaid.toLocaleString('ar-LY')}</div>
-            <p className="text-xs text-muted-foreground mt-1">دينار ليبي</p>
+        <Card className="group border-border/60 bg-card/70 shadow-sm transition-all duration-200 hover:border-blue-500/30 hover:shadow-md motion-safe:hover:-translate-y-0.5">
+          <CardContent className="flex items-center justify-between gap-3 p-4 sm:p-5">
+            <div className="min-w-0"><p className="text-xs font-bold text-muted-foreground">المدفوعات</p><p className="mt-1 truncate font-manrope text-xl font-black text-blue-500 sm:text-2xl">{totalAllPaid.toLocaleString('ar-LY')}</p><p className="mt-1 text-[10px] text-muted-foreground">دينار ليبي</p></div>
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-blue-500/25 bg-blue-500/10"><CreditCard className="h-5 w-5 text-blue-500" /></div>
           </CardContent>
         </Card>
-
-        <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-destructive/10 via-destructive/5 to-background shadow-lg hover:shadow-xl transition-all duration-300 group">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-destructive/10 rounded-full -translate-y-8 translate-x-8 group-hover:scale-110 transition-transform" />
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">المتبقي</CardTitle>
-            <div className="w-12 h-12 bg-destructive/20 rounded-xl flex items-center justify-center shadow-inner">
-              <Clock className="h-6 w-6 text-destructive" />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-destructive">{customersSummary.reduce((s, c) => s + Math.max(0, c.totalRent - c.totalPaid), 0).toLocaleString('ar-LY')}</div>
-            <p className="text-xs text-muted-foreground mt-1">دينار ليبي</p>
+        <Card className="group border-border/60 bg-card/70 shadow-sm transition-all duration-200 hover:border-destructive/30 hover:shadow-md motion-safe:hover:-translate-y-0.5">
+          <CardContent className="flex items-center justify-between gap-3 p-4 sm:p-5">
+            <div className="min-w-0"><p className="text-xs font-bold text-muted-foreground">المتبقي</p><p className="mt-1 truncate font-manrope text-xl font-black text-destructive sm:text-2xl">{totalOutstandingValue.toLocaleString('ar-LY')}</p><p className="mt-1 text-[10px] text-muted-foreground">دينار ليبي</p></div>
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-destructive/25 bg-destructive/10"><Clock className="h-5 w-5 text-destructive" /></div>
           </CardContent>
         </Card>
       </div>
       
-      <Card className="bg-gradient-card border-0 shadow-card">
-        <CardHeader>
-          <CardTitle>قائمة الزبائن</CardTitle>
+      <Card className="border-border/60 bg-card/55 shadow-sm">
+        <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-border/50 pb-4">
+          <div>
+            <CardTitle className="text-xl font-black">قائمة العملاء</CardTitle>
+            <p className="mt-1 text-xs text-muted-foreground">عرض {visible.length} من أصل {customersSummary.length} عميل</p>
+          </div>
+          <Badge variant="outline" className="border-primary/25 bg-primary/10 px-3 py-1 font-manrope font-black text-primary">{visible.length}</Badge>
         </CardHeader>
-        <CardContent>
-          {/* المرشحات والبحث */}
+        <CardContent className="space-y-4 p-3 sm:p-5">
           <CustomerFilters
             search={search}
             onSearchChange={setSearch}
@@ -1690,41 +1776,39 @@ export default function Customers() {
             onFilterStatusChange={setFilterStatus}
           />
           
-          {/* Action buttons */}
-          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button onClick={() => { setCustomerNameInput(''); setCustomerPhoneInput(''); setCustomerCompanyInput(''); setPricingCategoryInput('عادي'); setEditingCustomerId(null); setDuplicateNameWarning(null); setNewCustomerOpen(true); }}>
-                <Plus className="h-4 w-4 ml-2" />
-                إضافة زبون جديد
-              </Button>
-              <Button variant="outline" onClick={() => navigate('/admin/customer-merge')}>
-                <Merge className="h-4 w-4 ml-2" />
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border/60 bg-background/30 p-3">
+              <Button type="button" variant="outline" onClick={() => navigate('/admin/customer-merge')} className="h-10 cursor-pointer gap-2 transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
+                <Merge className="h-4 w-4" />
                 دمج الزبائن
               </Button>
               <Button 
-                variant="destructive" 
+                type="button"
+                variant="outline"
                 onClick={() => setOverdueRemindersOpen(true)}
+                className="h-10 cursor-pointer gap-2 border-destructive/35 text-destructive transition-all duration-200 hover:bg-destructive/10 hover:text-destructive active:scale-95 motion-reduce:transform-none motion-reduce:transition-none"
               >
-                <AlertTriangle className="h-4 w-4 ml-2" />
+                <AlertTriangle className="h-4 w-4" />
                 تذكيرات المتأخرين
               </Button>
               <Button 
-                variant="default"
-                className="bg-destructive hover:bg-destructive/90 text-destructive-foreground font-semibold shadow-sm"
+                type="button"
+                variant="outline"
+                className="h-10 cursor-pointer gap-2 border-destructive/35 text-destructive transition-all duration-200 hover:bg-destructive/10 hover:text-destructive active:scale-95 motion-reduce:transform-none motion-reduce:transition-none"
                 onClick={() => setDebtRemindersOpen(true)}
               >
-                <DollarSign className="h-4 w-4 ml-2" />
+                <DollarSign className="h-4 w-4" />
                 تذكيرات الديون
               </Button>
               <Button 
+                type="button"
                 variant="outline"
-                className="border-orange-500/50 text-orange-600 hover:bg-orange-500/10"
+                className="h-10 cursor-pointer gap-2 border-amber-500/40 text-amber-600 transition-all duration-200 hover:bg-amber-500/10 hover:text-amber-600 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none dark:text-amber-400 dark:hover:text-amber-400"
                 onClick={() => setInvoiceRemindersOpen(true)}
               >
-                <Receipt className="h-4 w-4 ml-2" />
+                <Receipt className="h-4 w-4" />
                 تذكيرات الفواتير
               </Button>
-              <Button disabled={syncing} onClick={async () => {
+              <Button type="button" variant="outline" className="h-10 cursor-pointer transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none" disabled={syncing} onClick={async () => {
                 try {
                   setSyncing(true);
                   const { data: sessionData } = await supabase.auth.getSession();
@@ -1766,18 +1850,9 @@ export default function Customers() {
                   setSyncing(false);
                 }
               }}>
+                <RefreshCw className={`ml-2 h-4 w-4 ${syncing ? 'animate-spin motion-reduce:animate-none' : ''}`} />
                 {syncing ? 'جاري المزامنة...' : 'مزامنة العملاء'}
               </Button>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button 
-                variant="outline"
-                onClick={() => setBulkStatementOpen(true)}
-              >
-                <FileSpreadsheet className="h-4 w-4 ml-2" />
-                كشوفات جماعية
-              </Button>
-            </div>
           </div>
           
           {/* Collapsible Overdue Payments Alert */}
@@ -2018,33 +2093,36 @@ export default function Customers() {
             </DialogContent>
           </Dialog>
 
-          <div className="overflow-x-auto rounded-xl border border-border/50 shadow-sm">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  <TableHead className="font-bold text-foreground">الزبون</TableHead>
-                  <TableHead className="font-bold text-foreground">التواصل</TableHead>
-                  <TableHead className="font-bold text-foreground text-center">العقود</TableHead>
-                  <TableHead className="font-bold text-foreground text-left">الإجمالي</TableHead>
-                  <TableHead className="font-bold text-foreground text-left">المدفوع</TableHead>
-                  <TableHead className="font-bold text-foreground text-left">الرصيد</TableHead>
-                  <TableHead className="font-bold text-foreground text-left">المتبقي</TableHead>
-                  <TableHead className="font-bold text-foreground text-left">
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger className="flex items-center gap-1 font-bold text-foreground">
-                          <span>صافي المتبقي</span>
-                          <span className="text-muted-foreground text-[10px] font-normal cursor-help">(؟)</span>
-                        </TooltipTrigger>
-                        <TooltipContent className="bg-slate-900 border border-slate-700 text-slate-100 p-2.5 rounded-lg shadow-xl text-right">
-                          <p dir="rtl" className="text-xs">الرصيد المتبقي النهائي بعد خصم فواتير المشتريات وإيجارات الصديقة (عمليات المقاصة)</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </TableHead>
-                  <TableHead className="font-bold text-foreground">السداد</TableHead>
-                  <TableHead className="font-bold text-foreground">الحالة</TableHead>
-                  <TableHead className="font-bold text-foreground">الإجراءات</TableHead>
+          <div className="grid gap-3 xl:hidden">
+            {visible.map(customer => (
+              <CustomerMobileCard
+                key={customer.id}
+                customer={customer}
+                remaining={customer.remainingDebt}
+                paymentPercentage={customer.repaymentPercentage}
+                onViewBilling={() => openCustomerBilling(customer)}
+                onEdit={() => openCustomerEditor(customer)}
+                onDelete={() => requestCustomerDelete(customer)}
+              />
+            ))}
+            {visible.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-border/70 bg-background/30 px-4 py-12 text-center text-sm text-muted-foreground">
+                لا توجد بيانات مطابقة للبحث أو المرشحات
+              </div>
+            )}
+          </div>
+
+          <div className="hidden overflow-x-auto rounded-2xl border border-border/60 bg-card/60 shadow-sm xl:block">
+            <Table className="min-w-[1120px]">
+              <TableHeader className="bg-muted/35">
+                <TableRow className="border-border/60 hover:bg-transparent">
+                  <TableHead className="h-12 font-bold text-foreground">العميل والتواصل</TableHead>
+                  <TableHead className="h-12 text-center font-bold text-foreground">العقود</TableHead>
+                  <TableHead className="h-12 font-bold text-foreground">الملخص المالي</TableHead>
+                  <TableHead className="h-12 font-bold text-foreground">المتبقي</TableHead>
+                  <TableHead className="h-12 font-bold text-foreground">السداد</TableHead>
+                  <TableHead className="h-12 font-bold text-foreground">الحالة</TableHead>
+                  <TableHead className="h-12 font-bold text-foreground">الإجراءات</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -2059,55 +2137,15 @@ export default function Customers() {
                       customer={c}
                       remaining={remaining}
                       paymentPercentage={paymentPercentage}
-                      onViewBilling={() => {
-                        const id = typeof c.id === 'string' ? c.id : String(c.id);
-                        navigate(`/admin/customer-billing?id=${encodeURIComponent(id)}&name=${encodeURIComponent(c.name)}`);
-                      }}
-                      onEdit={async () => {
-                        setEditingCustomerId(c.id);
-                        setCustomerNameInput(c.name);
-                        setCustomerPhoneInput(c.phone || '');
-                        setCustomerCompanyInput(c.company || '');
-                        setDuplicateNameWarning(null);
-                        
-                        // Load customer type data from database
-                        if (!c.id.startsWith('name:')) {
-                          const { data } = await supabase
-                            .from('customers')
-                            .select('is_customer, is_supplier, supplier_type, printer_id, pricing_category')
-                            .eq('id', c.id)
-                            .single();
-                          
-                          if (data) {
-                            setIsCustomerChecked(data.is_customer ?? true);
-                            setIsSupplierChecked(data.is_supplier ?? false);
-                            setSupplierTypeInput(data.supplier_type || '');
-                            setSelectedPrinterId((data as any).printer_id || '');
-                            setPricingCategoryInput((data as any).pricing_category || 'عادي');
-                          }
-                        }
-                        
-                        setNewCustomerOpen(true);
-                      }}
-                      onDelete={async () => {
-                        setCustomerToDelete(c);
-                        // Check if customer has contracts or debt
-                        const hasDebt = remaining > 0;
-                        const contractsCount = c.contractsCount;
-                        setDeleteCheckResult({
-                          hasContracts: contractsCount > 0,
-                          hasDebt,
-                          contractsCount,
-                          debtAmount: remaining
-                        });
-                        setDeleteCustomerOpen(true);
-                      }}
+                      onViewBilling={() => openCustomerBilling(c)}
+                      onEdit={() => openCustomerEditor(c)}
+                      onDelete={() => requestCustomerDelete(c)}
                     />
                   );
                 })}
                 {visible.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center text-muted-foreground py-6">لا توجد بيانات</TableCell>
+                    <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">لا توجد بيانات مطابقة للبحث أو المرشحات</TableCell>
                   </TableRow>
                 )}
               </TableBody>

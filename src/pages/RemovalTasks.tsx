@@ -49,7 +49,8 @@ import {
   RotateCcw,
   Merge,
   Wrench,
-  ShieldAlert
+  ShieldAlert,
+  RefreshCw
 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { BillboardBulkPrintDialog } from '@/components/billboards/BillboardBulkPrintDialog';
@@ -60,6 +61,7 @@ import { RemovalTasksBoard } from '@/components/removal/RemovalTasksBoard';
 import { Progress } from '@/components/ui/progress';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SendTeamInstallationReportDialog } from '@/components/installation/SendTeamInstallationReportDialog';
+import { findOptimalTeamForRemoval, sortTeamsByPriority } from '@/utils/teamAssignment';
 
 interface RemovalTask {
   id: string;
@@ -99,50 +101,32 @@ function normalizeString(str: string | null | undefined): string {
 }
 
 function findCorrectTeamForRemoval(sortedTeams: any[], billboardSize: string | null, billboardCity: string | null, billboardCompanyId: string | null): any {
-  const normSize = normalizeString(billboardSize);
-  const normCity = normalizeString(billboardCity);
+  return findOptimalTeamForRemoval(sortedTeams, billboardSize, billboardCity, billboardCompanyId);
+}
 
-  const matchesSizeAndCity = (t: any) => {
-    const sizeMatch = Array.isArray(t.sizes) && t.sizes.some((s: any) => normalizeString(s) === normSize);
-    if (!sizeMatch) return false;
-    if (Array.isArray(t.cities) && t.cities.length > 0 && normCity) {
-      const cityMatch = t.cities.some((c: any) => normalizeString(c) === normCity);
-      if (!cityMatch) return false;
-    }
-    return true;
-  };
+async function getLatestInstallationSnapshot(contractIds: number[], billboardId: number) {
+  const normalizedContractIds = [...new Set(contractIds.map(Number).filter(Number.isFinite))];
+  if (normalizedContractIds.length === 0) return null;
 
-  // 1. إذا اللوحة لها شركة مالكة، نبحث أولاً في الفرق المرتبطة بهذه الشركة
-  if (billboardCompanyId) {
-    const companyTeam = sortedTeams.find((t: any) => {
-      if (!matchesSizeAndCity(t)) return false;
-      const isCompanyMatch = t.friend_company_id === billboardCompanyId || 
-        (Array.isArray(t.friend_company_ids) && t.friend_company_ids.includes(billboardCompanyId));
-      return isCompanyMatch;
-    });
-    if (companyTeam) return companyTeam;
-  }
+  const { data: installationTasks, error: tasksError } = await supabase
+    .from('installation_tasks')
+    .select('id')
+    .in('contract_id', normalizedContractIds);
+  if (tasksError) throw tasksError;
 
-  // fallback 1: فرق عامة (بدون شركة) تطابق مدينة + مقاس
-  const generalTeam = sortedTeams.find((t: any) => {
-    if (!matchesSizeAndCity(t)) return false;
-    const hasCompany = t.friend_company_id || (Array.isArray(t.friend_company_ids) && t.friend_company_ids.length > 0);
-    return !hasCompany;
-  });
-  if (generalTeam) return generalTeam;
+  const taskIds = (installationTasks || []).map((task: any) => task.id).filter(Boolean);
+  if (taskIds.length === 0) return null;
 
-  // fallback 2: أي فريق يطابق مدينة + مقاس (حتى لو مرتبط بشركة)
-  const anyTeamCitySize = sortedTeams.find((t: any) => matchesSizeAndCity(t));
-  if (anyTeamCitySize) return anyTeamCitySize;
-
-  // fallback 3: أي فريق يطابق المقاس فقط
-  const anySizeTeam = sortedTeams.find((t: any) => 
-    Array.isArray(t.sizes) && t.sizes.some((s: any) => normalizeString(s) === normSize)
-  );
-  if (anySizeTeam) return anySizeTeam;
-
-  // fallback 4: أي فريق كحل أخير
-  return sortedTeams[0] || null;
+  const { data, error } = await supabase
+    .from('installation_task_items')
+    .select('design_face_a, design_face_b, installed_image_url, installed_image_face_a_url, installed_image_face_b_url')
+    .eq('billboard_id', billboardId)
+    .in('task_id', taskIds)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
 }
 
 export default function RemovalTasks() {
@@ -351,15 +335,8 @@ export default function RemovalTasks() {
           const size = billboard.Size;
           const city = billboard.City;
           
-          // ابحث عن الفريق المناسب: المقاس يطابق + المدينة ضمن القائمة + أعلى أولوية
-          const sortedTeams = [...teams].sort((a, b) => (b.priority || 0) - (a.priority || 0));
-          const suitableTeam = sortedTeams.find(team => {
-            const teamSizes: string[] = team.sizes || [];
-            const teamCities: string[] = team.cities || [];
-            const sizeMatch = teamSizes.includes(size);
-            const cityMatch = teamCities.length === 0 || teamCities.includes(city);
-            return sizeMatch && cityMatch;
-          });
+          // ابحث عن الفريق المناسب حسب الرتبة والأولوية وتخصص الفرقة والشركة الصديقة
+          const suitableTeam = findOptimalTeamForRemoval(teams, billboard.Size, billboard.City, billboard.friend_company_id);
 
           // إذا لم يوجد فريق مناسب بالمدينة والمقاس، لا نُسند اللوحة
           if (!suitableTeam) continue;
@@ -395,13 +372,10 @@ export default function RemovalTasks() {
 
           // إضافة اللوحات للمهمة مع نسخ التصاميم وصور التركيب
           for (const billboardId of teamData.billboards) {
-            const { data: installationItems } = await supabase
-              .from('installation_task_items')
-              .select('design_face_a, design_face_b, installed_image_url')
-              .eq('billboard_id', billboardId)
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .maybeSingle();
+            const installationItems = await getLatestInstallationSnapshot(
+              [Number(contract.Contract_Number)],
+              billboardId,
+            );
 
             let designFaceA = installationItems?.design_face_a || null;
             let designFaceB = installationItems?.design_face_b || null;
@@ -697,7 +671,7 @@ export default function RemovalTasks() {
     },
   });
 
-  // جلب التصاميم من مهام التركيب للوحات - بحث بـ billboard_id فقط (بدون قيد العقد)
+  // جلب التصاميم من مهام التركيب مع حفظ هوية العقد لمنع ظهور تصميم عقد سابق على نفس اللوحة.
   const itemBillboardIds = rawTaskItems.map((i) => i.billboard_id).filter(Boolean);
   
   // بناء خريطة task_id -> contract_id من مهام الإزالة (لا تزال مطلوبة للـ queryKey)
@@ -709,40 +683,56 @@ export default function RemovalTasks() {
     return m;
   }, [tasks]);
 
+  const removalContractSignature = useMemo(() => rawTaskItems
+    .map(item => `${item.task_id}:${removalTaskContractMap.get(item.task_id) || ''}`)
+    .join('|'), [rawTaskItems, removalTaskContractMap]);
+
   const { data: installationDesigns = [] } = useQuery({
-    queryKey: ['installation-designs-for-removal-v2', itemBillboardIds.join(',')],
+    queryKey: ['installation-designs-for-removal-v3', itemBillboardIds.join(','), removalContractSignature],
     enabled: itemBillboardIds.length > 0,
     staleTime: 5 * 60 * 1000,
     queryFn: async () => {
-      // بحث مباشر بـ billboard_id - فقط العناصر التي تحتوي على تصميم فعلي (لا يهم أي فرقة أو عقد)
       const { data, error } = await supabase
         .from('installation_task_items')
         .select('billboard_id, design_face_a, design_face_b, installed_image_face_a_url, installed_image_face_b_url, task_id, created_at')
         .in('billboard_id', itemBillboardIds)
-        .not('design_face_a', 'is', null)  // فقط العناصر ذات التصميم
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return data || [];
+
+      const taskIds = [...new Set((data || []).map((item: any) => item.task_id).filter(Boolean))];
+      if (taskIds.length === 0) return [];
+
+      const { data: installationTasks, error: tasksError } = await supabase
+        .from('installation_tasks')
+        .select('id, contract_id')
+        .in('id', taskIds);
+      if (tasksError) throw tasksError;
+
+      const contractByTask = new Map((installationTasks || []).map((task: any) => [task.id, Number(task.contract_id)]));
+      return (data || []).map((item: any) => ({
+        ...item,
+        contract_id: contractByTask.get(item.task_id) || null,
+      }));
     },
   });
 
-  // دمج التصاميم من مهام التركيب في عناصر الإزالة - مطابقة بـ billboard_id فقط
+  // دمج التصاميم بمفتاح العقد + اللوحة، وليس باللوحة وحدها.
   const allTaskItems = useMemo(() => {
     if (!installationDesigns.length) return rawTaskItems;
     
-    // بناء خريطة: billboard_id -> أحدث تصميم (فقط العناصر التي تحتوي على تصميم فعلي)
-    const designMap = new Map<number, any>();
+    const designMap = new Map<string, any>();
     installationDesigns.forEach((d: any) => {
-      // تجاهل العناصر بدون تصميم
       if (!d.design_face_a && !d.design_face_b) return;
-      if (!designMap.has(d.billboard_id)) {
-        designMap.set(d.billboard_id, d);
+      const key = `${Number(d.contract_id)}:${Number(d.billboard_id)}`;
+      if (!designMap.has(key)) {
+        designMap.set(key, d);
       }
     });
     
     return rawTaskItems.map(item => {
       if (item.design_face_a || item.design_face_b) return item;
-      const installDesign = designMap.get(item.billboard_id);
+      const contractId = removalTaskContractMap.get(item.task_id);
+      const installDesign = designMap.get(`${Number(contractId)}:${Number(item.billboard_id)}`);
       if (!installDesign) return item;
       return {
         ...item,
@@ -753,7 +743,7 @@ export default function RemovalTasks() {
         installed_image_face_b_url: (item as any).installed_image_face_b_url || installDesign.installed_image_face_b_url || null,
       } as any;
     });
-  }, [rawTaskItems, installationDesigns]);
+  }, [rawTaskItems, installationDesigns, removalTaskContractMap]);
 
 
   const billboardIds = allTaskItems.map((i) => i.billboard_id).filter(Boolean);
@@ -843,16 +833,9 @@ export default function RemovalTasks() {
       const teamsBySize: Record<string, { teamId: string; billboards: number[] }> = {};
 
       for (const billboard of billboardsData) {
-        const size = billboard.Size;
-        
-        const { data: suitableTeam } = await supabase
-          .from('installation_teams')
-          .select('id')
-          .contains('sizes', [size])
-          .limit(1)
-          .single();
-
+        const suitableTeam = findOptimalTeamForRemoval(teams, billboard.Size, billboard.City, billboard.friend_company_id);
         const teamId = suitableTeam?.id || teams[0]?.id;
+        if (!teamId) continue;
         
         if (!teamsBySize[teamId]) {
           teamsBySize[teamId] = { teamId, billboards: [] };
@@ -879,14 +862,7 @@ export default function RemovalTasks() {
         const taskId = newTask.id;
 
         for (const billboardId of teamData.billboards) {
-          // جلب التصاميم وصور التركيب من installation_task_items
-          const { data: installationItems } = await supabase
-            .from('installation_task_items')
-            .select('design_face_a, design_face_b, installed_image_url')
-            .eq('billboard_id', billboardId)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
+          const installationItems = await getLatestInstallationSnapshot(contractIdsArray, billboardId);
 
           const { error: itemError } = await supabase
             .from('removal_task_items')
@@ -1204,7 +1180,7 @@ export default function RemovalTasks() {
       
       const { data: teamsData } = await (supabase as any)
         .from('installation_teams')
-        .select('id, team_name, sizes, cities, priority, friend_company_id');
+        .select('id, team_name, sizes, cities, priority, friend_company_id, friend_company_ids');
       
       if (!teamsData?.length) throw new Error('لا توجد فرق');
       
@@ -1237,14 +1213,7 @@ export default function RemovalTasks() {
           createdTasksMap.set(mapKey, targetTaskId);
         }
         
-        // جلب صور التصميم من آخر مهمة تركيب للوحة
-        const { data: installationItems } = await supabase
-          .from('installation_task_items')
-          .select('design_face_a, design_face_b, installed_image_url')
-          .eq('billboard_id', bb.ID)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        const installationItems = await getLatestInstallationSnapshot([contractId], bb.ID);
 
         let designFaceA = installationItems?.design_face_a || null;
         let designFaceB = installationItems?.design_face_b || null;
@@ -1827,31 +1796,36 @@ export default function RemovalTasks() {
   }
 
   return (
-    <div className="container mx-auto p-3 sm:p-4 md:p-6 pb-16 space-y-4 md:space-y-6" dir="rtl">
-      {/* تنبيه العقود المنتهية */}
-      <ExpiredContractsAlert
-        teams={teams}
-        existingTaskContractIds={existingTaskContractIds}
-        onTaskCreated={() => {
-          queryClient.invalidateQueries({ queryKey: ['removal-tasks'] });
-          queryClient.invalidateQueries({ queryKey: ['all-removal-task-items'] });
-        }}
-      />
-
-      <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-card/45 backdrop-blur-md border border-[#d6ac40]/25 rounded-[22px] p-5 shadow-lg shadow-[#d6ac40]/5 select-none">
-        <div className="space-y-1.5 text-right flex items-center gap-3">
-          <div className="h-12 w-1.5 rounded-full bg-gradient-to-b from-[#d6ac40] to-[#b8860b]" aria-hidden="true" />
+    <div className="container mx-auto max-w-[1800px] space-y-4 p-3 pb-24 sm:p-4 md:space-y-5 md:p-6" dir="rtl">
+      <div className="flex flex-col gap-4 rounded-2xl border border-primary/20 bg-card/70 p-4 shadow-sm backdrop-blur-md md:flex-row md:items-center md:justify-between md:p-5">
+        <div className="flex items-center gap-3 text-right">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-primary/25 bg-primary/10 text-primary">
+            <ShieldAlert className="h-6 w-6" />
+          </div>
           <div className="space-y-1">
-            <h1 className="text-3xl font-black tracking-tight bg-gradient-to-r from-[#d6ac40] to-[#b8860b] bg-clip-text text-transparent">
+            <h1 className="text-2xl font-black tracking-tight text-foreground md:text-3xl">
               مهام إزالة الدعاية
             </h1>
-            <p className="text-xs font-medium text-muted-foreground/80">
-              إدارة ومتابعة مهام إزالة الدعاية للوحات المنتهي عقدها
+            <p className="text-xs font-medium leading-relaxed text-muted-foreground md:text-sm">
+              متابعة العقود المنتهية، توزيع اللوحات على الفرق وتوثيق الإزالة
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 mr-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex flex-wrap items-center gap-2 md:mr-auto" onClick={e => e.stopPropagation()}>
+          <div className="hidden items-center gap-2 rounded-xl border border-border/40 bg-background/50 px-3 py-2 lg:flex">
+            <span className="text-[10px] font-bold text-muted-foreground">مهام نشطة</span>
+            <span className="font-mono text-sm font-black text-foreground">
+              {tasks.filter(task => (itemsByTask[task.id] || []).some(item => item.status !== 'completed')).length}
+            </span>
+          </div>
+          <div className="hidden items-center gap-2 rounded-xl border border-rose-500/20 bg-rose-500/5 px-3 py-2 lg:flex">
+            <span className="text-[10px] font-bold text-muted-foreground">لوحات بانتظار الإزالة</span>
+            <span className="font-mono text-sm font-black text-rose-400">
+              {allTaskItems.filter(item => item.status !== 'completed').length}
+            </span>
+          </div>
+
           {/* إجراء سياقي: يظهر فقط عند تحديد مهام */}
           {selectedTasks.size > 0 && (
             <>
@@ -1912,7 +1886,7 @@ export default function RemovalTasks() {
                   }
                 }}
                 size="sm"
-                className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-[#d6ac40]/15 text-[#b8860b] border border-[#d6ac40]/40 hover:bg-[#d6ac40]/25 hover:border-[#d6ac40]/60 cursor-pointer transition-all duration-200 hover:scale-[1.02]"
+                className="h-10 cursor-pointer gap-2 rounded-xl border border-primary/35 bg-primary/10 px-4 text-xs font-bold text-primary transition-all duration-200 hover:bg-primary/15 active:scale-95"
               >
                 <Merge className="h-3.5 w-3.5" />
                 دمج {selectedTasks.size} مهام
@@ -1921,7 +1895,7 @@ export default function RemovalTasks() {
               <Button
                 onClick={() => setSendTeamDialogOpen(true)}
                 size="sm"
-                className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-emerald-500/15 text-emerald-600 border border-emerald-500/40 hover:bg-emerald-500/25 hover:border-emerald-500/60 cursor-pointer transition-all duration-200 hover:scale-[1.02]"
+                className="h-10 cursor-pointer gap-2 rounded-xl border border-emerald-500/35 bg-emerald-500/10 px-4 text-xs font-bold text-emerald-500 transition-all duration-200 hover:bg-emerald-500/15 active:scale-95"
               >
                 <MessageCircle className="h-3.5 w-3.5" />
                 إرسال للفرق
@@ -1936,9 +1910,9 @@ export default function RemovalTasks() {
             onClick={() => setStatsDialogOpen(true)}
             variant="outline"
             size="sm"
-            className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-background/50 border-border/30 text-muted-foreground hover:text-foreground hover:bg-muted/40 hover:border-[#d6ac40]/40 cursor-pointer transition-all duration-200 hover:scale-[1.02]"
+            className="h-10 cursor-pointer gap-2 rounded-xl border-border/40 bg-background/50 px-4 text-xs font-bold text-muted-foreground transition-all duration-200 hover:border-primary/30 hover:bg-muted/40 hover:text-foreground active:scale-95"
           >
-            <BarChart3 className="h-3.5 w-3.5 text-[#b8860b]" />
+            <BarChart3 className="h-3.5 w-3.5 text-primary" />
             تقرير الإحصائيات
           </Button>
 
@@ -1948,9 +1922,9 @@ export default function RemovalTasks() {
               <Button
                 variant="outline"
                 size="sm"
-                className="gap-2 rounded-xl px-4 h-10 text-xs font-bold bg-background/50 border-border/30 text-muted-foreground hover:text-foreground hover:bg-muted/40 hover:border-[#d6ac40]/40 cursor-pointer transition-all duration-200 hover:scale-[1.02]"
+                className="h-10 cursor-pointer gap-2 rounded-xl border-border/40 bg-background/50 px-4 text-xs font-bold text-muted-foreground transition-all duration-200 hover:border-primary/30 hover:bg-muted/40 hover:text-foreground active:scale-95"
               >
-                <Wrench className="h-3.5 w-3.5 text-[#b8860b]" />
+                <Wrench className="h-3.5 w-3.5 text-primary" />
                 أدوات الصيانة
                 <ChevronDown className="h-3 w-3 opacity-60" />
               </Button>
@@ -2010,17 +1984,40 @@ export default function RemovalTasks() {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          <Button
+            onClick={() => {
+              queryClient.invalidateQueries({ queryKey: ['removal-tasks'] });
+              queryClient.invalidateQueries({ queryKey: ['all-removal-task-items'] });
+            }}
+            variant="outline"
+            size="icon"
+            className="h-10 w-10 cursor-pointer rounded-xl border-border/40 bg-background/50 text-muted-foreground transition-all duration-200 hover:border-primary/30 hover:bg-primary/10 hover:text-primary active:scale-95"
+            aria-label="تحديث مهام الإزالة"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+
           {/* إجراء أساسي: إزالة يدوية */}
           <Button
             onClick={() => setManualOpen(true)}
             size="sm"
-            className="gap-2 rounded-xl px-5 h-10 text-xs font-black bg-gradient-to-l from-[#d6ac40] to-[#b8860b] hover:from-[#e0b850] hover:to-[#c89610] text-[#0a0a14] shadow-lg shadow-[#d6ac40]/30 cursor-pointer transition-all duration-200 hover:scale-[1.02]"
+            className="h-10 cursor-pointer gap-2 rounded-xl bg-primary px-5 text-xs font-black text-primary-foreground shadow-md shadow-primary/15 transition-all duration-200 hover:bg-primary/90 active:scale-95"
           >
             <Package className="h-3.5 w-3.5" />
             إزالة يدوية
           </Button>
         </div>
       </div>
+
+      {/* تنبيه العقود المنتهية */}
+      <ExpiredContractsAlert
+        teams={teams}
+        existingTaskContractIds={existingTaskContractIds}
+        onTaskCreated={() => {
+          queryClient.invalidateQueries({ queryKey: ['removal-tasks'] });
+          queryClient.invalidateQueries({ queryKey: ['all-removal-task-items'] });
+        }}
+      />
 
       {/* ── Hybrid Visual Board ── */}
       <RemovalTasksBoard
@@ -2139,7 +2136,7 @@ export default function RemovalTasks() {
         onSendWhatsApp={(task, items) => {
           const contract = contractByNumber[task.contract_id];
           const team = teamById[task.team_id];
-          const teamPhone = team?.phone;
+          const teamPhone = team?.phone || team?.phone_number;
           const teamName = team?.team_name || 'فريق غير محدد';
           const customerName = contract?.['Customer Name'] || 'غير محدد';
           const adType = contract?.['Ad Type'] || '';
@@ -2220,12 +2217,14 @@ export default function RemovalTasks() {
       <AnimatePresence>
         {selectedItems.size > 0 && (
           <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
-            className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50">
-            <div className="bg-gradient-to-l from-[#d6ac40] to-[#b8860b] text-[#0a0a14] px-6 py-4 shadow-2xl shadow-[#d6ac40]/40 rounded-2xl flex items-center gap-3 flex-wrap justify-center ring-1 ring-[#d6ac40]/50">
-              <Badge variant="secondary" className="bg-[#0a0a14] text-[#d6ac40] text-lg px-4 py-2 font-black border-0">{selectedItems.size} لوحة محددة</Badge>
+            className="fixed bottom-4 left-1/2 z-50 w-[calc(100%-1.5rem)] max-w-3xl -translate-x-1/2">
+            <div className="flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-primary/30 bg-card/95 p-3 text-foreground shadow-2xl shadow-black/30 backdrop-blur-xl sm:justify-start">
+              <Badge variant="secondary" className="h-10 rounded-xl border border-primary/20 bg-primary/10 px-4 text-sm font-black text-primary">
+                {selectedItems.size} لوحة محددة
+              </Badge>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="secondary" className="gap-2 bg-[#0a0a14]/15 hover:bg-[#0a0a14]/25 text-[#0a0a14] border-0 font-bold cursor-pointer">
+                  <Button variant="outline" className="h-10 cursor-pointer gap-2 rounded-xl border-border/50 bg-background/60 text-xs font-bold transition-all duration-200 hover:border-primary/30 hover:bg-primary/10 active:scale-95">
                     <CalendarIcon className="h-4 w-4" />
                     {removalDate ? format(removalDate, 'dd MMM yyyy', { locale: ar }) : 'تاريخ الإزالة'}
                   </Button>
@@ -2237,12 +2236,12 @@ export default function RemovalTasks() {
               <Button
                 onClick={() => completeItemsMutation.mutate()}
                 disabled={!removalDate || completeItemsMutation.isPending}
-                className="gap-2 bg-[#0a0a14] text-[#d6ac40] hover:bg-[#0a0a14]/85 font-black cursor-pointer shadow-md"
+                className="h-10 cursor-pointer gap-2 rounded-xl bg-primary px-5 text-xs font-black text-primary-foreground shadow-md shadow-primary/15 transition-all duration-200 hover:bg-primary/90 active:scale-95 sm:mr-auto"
               >
                 <CheckCircle2 className="h-4 w-4" />
                 {completeItemsMutation.isPending ? 'جاري...' : 'تأكيد الإزالة'}
               </Button>
-              <Button variant="ghost" size="icon" className="text-[#0a0a14] hover:bg-[#0a0a14]/15 cursor-pointer" onClick={() => { setSelectedItems(new Set()); setSelectedTeamId(''); }}>
+              <Button variant="ghost" size="icon" className="h-10 w-10 cursor-pointer rounded-xl text-muted-foreground transition-all duration-200 hover:bg-muted/60 hover:text-foreground active:scale-95" onClick={() => { setSelectedItems(new Set()); setSelectedTeamId(''); }} aria-label="إلغاء تحديد اللوحات">
                 <X className="h-4 w-4" />
               </Button>
             </div>
@@ -2252,15 +2251,23 @@ export default function RemovalTasks() {
 
       {/* Print Dialog */}
       <Dialog open={printDialogOpen} onOpenChange={setPrintDialogOpen} modal={true}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>خيارات الطباعة</DialogTitle>
+        <DialogContent className="overflow-hidden rounded-2xl border-primary/20 bg-card p-0 sm:max-w-lg">
+          <DialogHeader className="border-b border-border/35 bg-primary/[0.05] p-5 text-right">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+                <Printer className="h-5 w-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-base font-black">خيارات طباعة مهمة الإزالة</DialogTitle>
+                <p className="mt-1 text-[11px] text-muted-foreground">حدد شكل التقرير والصور التي تريد إظهارها</p>
+              </div>
+            </div>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>نوع الطباعة</Label>
+          <div className="space-y-4 p-5">
+            <div className="rounded-xl border border-border/40 bg-background/40 p-3">
+              <Label className="text-xs font-bold">نوع الطباعة</Label>
               <Select value={printType} onValueChange={(v: any) => setPrintType(v)}>
-                <SelectTrigger className="mt-2">
+                <SelectTrigger className="mt-2 h-10 rounded-xl border-border/45 bg-background/70">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent position="popper" sideOffset={5}>
@@ -2270,10 +2277,10 @@ export default function RemovalTasks() {
               </Select>
             </div>
 
-            <div>
-              <Label>نوع الصور</Label>
+            <div className="rounded-xl border border-border/40 bg-background/40 p-3">
+              <Label className="text-xs font-bold">نوع الصور</Label>
               <Select value={printImageType} onValueChange={(v: any) => setPrintImageType(v)}>
-                <SelectTrigger className="mt-2">
+                <SelectTrigger className="mt-2 h-10 rounded-xl border-border/45 bg-background/70">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent position="popper" sideOffset={5}>
@@ -2283,7 +2290,7 @@ export default function RemovalTasks() {
               </Select>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex min-h-11 items-center gap-3 rounded-xl border border-border/40 bg-background/40 px-3">
               <Checkbox
                 id="include-designs"
                 checked={includeDesigns}
@@ -2294,12 +2301,13 @@ export default function RemovalTasks() {
               </Label>
             </div>
 
-            <div className="flex gap-2 justify-end">
-              <Button variant="outline" onClick={() => setPrintDialogOpen(false)}>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-border/30 pt-4">
+              <Button variant="outline" onClick={() => setPrintDialogOpen(false)} className="h-10 cursor-pointer rounded-xl px-5 text-xs font-bold active:scale-95">
                 إلغاء
               </Button>
-              <Button onClick={executePrint}>
-                طباعة
+              <Button onClick={executePrint} className="h-10 cursor-pointer gap-2 rounded-xl bg-primary px-5 text-xs font-black text-primary-foreground active:scale-95">
+                <Printer className="h-4 w-4" />
+                تجهيز الطباعة
               </Button>
             </div>
           </div>
@@ -2308,19 +2316,21 @@ export default function RemovalTasks() {
 
       {/* Print All Team Billboards Dialog */}
       <Dialog open={printAllDialogOpen} onOpenChange={setPrintAllDialogOpen} modal={true}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>طباعة جميع لوحات الفريق</DialogTitle>
+        <DialogContent className="overflow-hidden rounded-2xl border-primary/20 bg-card p-0 sm:max-w-lg">
+          <DialogHeader className="border-b border-border/35 bg-primary/[0.05] p-5 text-right">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary"><Printer className="h-5 w-5" /></div>
+              <div>
+                <DialogTitle className="text-base font-black">طباعة لوحات فريق الإزالة</DialogTitle>
+                <p className="mt-1 text-[11px] text-muted-foreground">سيتم تجهيز اللوحات المعلقة فقط للفريق المحدد</p>
+              </div>
+            </div>
           </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              سيتم طباعة جميع اللوحات المعلقة للفريق المحدد
-            </p>
-
-            <div>
-              <Label>نوع الصور</Label>
+          <div className="space-y-4 p-5">
+            <div className="rounded-xl border border-border/40 bg-background/40 p-3">
+              <Label className="text-xs font-bold">نوع الصور</Label>
               <Select value={printImageType} onValueChange={(v: any) => setPrintImageType(v)}>
-                <SelectTrigger className="mt-2">
+                <SelectTrigger className="mt-2 h-10 rounded-xl border-border/45 bg-background/70">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent position="popper" sideOffset={5}>
@@ -2330,7 +2340,7 @@ export default function RemovalTasks() {
               </Select>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex min-h-11 items-center gap-3 rounded-xl border border-border/40 bg-background/40 px-3">
               <Checkbox
                 id="include-designs-all"
                 checked={includeDesigns}
@@ -2341,8 +2351,8 @@ export default function RemovalTasks() {
               </Label>
             </div>
 
-            <div className="flex gap-2 justify-end flex-wrap">
-              <Button variant="outline" onClick={() => setPrintAllDialogOpen(false)}>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-border/30 pt-4">
+              <Button variant="outline" onClick={() => setPrintAllDialogOpen(false)} className="h-10 cursor-pointer rounded-xl px-5 text-xs font-bold active:scale-95">
                 إلغاء
               </Button>
               {printAllTeamId && (() => {
@@ -2397,14 +2407,14 @@ export default function RemovalTasks() {
                   <Button
                     onClick={handleSendWhatsApp}
                     variant="outline"
-                    className="gap-2 border-green-500/40 text-green-600 hover:bg-green-500/10"
+                    className="h-10 cursor-pointer gap-2 rounded-xl border-emerald-500/30 px-4 text-xs font-bold text-emerald-500 transition-all duration-200 hover:bg-emerald-500/10 active:scale-95"
                   >
                     <MessageCircle className="h-4 w-4" />
                     واتساب
                   </Button>
                 );
               })()}
-              <Button onClick={() => {
+              <Button className="h-10 cursor-pointer gap-2 rounded-xl bg-primary px-5 text-xs font-black text-primary-foreground transition-all duration-200 hover:bg-primary/90 active:scale-95" onClick={() => {
                 if (printAllTeamId) {
                   // Get all pending items for this team
                   const teamTasks = tasksByTeamForPrint[printAllTeamId] || [];
@@ -2440,6 +2450,7 @@ export default function RemovalTasks() {
                   toast.success(`تم تجهيز ${billboardsForPrint.length} لوحة للطباعة`);
                 }
               }}>
+                <Printer className="h-4 w-4" />
                 طباعة الكل
               </Button>
             </div>

@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { Plus, X, Printer } from 'lucide-react';
+import { Plus, Trash2, Printer } from 'lucide-react';
 import { formatAmount } from '@/lib/formatUtils';
 import { supabase } from '@/integrations/supabase/client';
 import { generateSalesInvoiceHTML } from '@/components/billing/InvoiceTemplates';
@@ -11,6 +11,7 @@ import { ImageUploadZone } from '@/components/ui/image-upload-zone';
 import { DimensionsRow, DuplicateItemControl } from '@/components/billing/InvoiceItemExtras';
 
 interface SalesItem {
+  id?: string;
   item_name: string;
   quantity: number;
   unit: string;
@@ -38,7 +39,7 @@ export function SalesInvoiceDialog({
   onSuccess
 }: SalesInvoiceDialogProps) {
   const [items, setItems] = useState<SalesItem[]>([
-    { item_name: '', quantity: 1, unit: 'قطعة', unit_price: 0, total_price: 0, image_url: '' }
+    { id: 'item-init', item_name: '', quantity: 1, unit: 'قطعة', unit_price: 0, total_price: 0, image_url: '' }
   ]);
   const [unitSuggestions, setUnitSuggestions] = useState<string[]>([]);
   const defaultUnits = ['قطعة', 'متر', 'كيلو', 'لفة', 'علبة', 'كرتون', 'لتر', 'طن', 'حبة', 'عدد'];
@@ -65,24 +66,56 @@ export function SalesInvoiceDialog({
   }, [open]);
 
   const addItem = () => {
-    setItems([...items, { item_name: '', quantity: 1, unit: 'قطعة', unit_price: 0, total_price: 0, image_url: '' }]);
+    setItems([
+      ...items,
+      {
+        id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        item_name: '',
+        quantity: 1,
+        unit: 'قطعة',
+        unit_price: 0,
+        total_price: 0,
+        image_url: '',
+        width: null,
+        height: null,
+        depth: null
+      }
+    ]);
   };
 
   const removeItem = (index: number) => {
-    if (items.length === 1) {
-      toast.error('يجب أن يحتوي على عنصر واحد على الأقل');
+    if (items.length <= 1) {
+      setItems([
+        {
+          id: `item-${Date.now()}`,
+          item_name: '',
+          quantity: 1,
+          unit: 'قطعة',
+          unit_price: 0,
+          total_price: 0,
+          image_url: '',
+          width: null,
+          height: null,
+          depth: null
+        }
+      ]);
+      toast.info('تم تفريغ بيانات الصنف');
       return;
     }
     setItems(items.filter((_, i) => i !== index));
+    toast.success('تم حذف الصنف');
   };
 
   const duplicateItem = (index: number, count: number) => {
     const src = items[index];
     if (!src.item_name.trim()) {
-      toast.error('يرجى تعبئة الصنف قبل النسخ');
+      toast.error('يرجى تعبئة اسم الصنف قبل النسخ');
       return;
     }
-    const copies: SalesItem[] = Array.from({ length: count }, () => ({ ...src }));
+    const copies: SalesItem[] = Array.from({ length: count }, (_, cIdx) => ({
+      ...src,
+      id: `item-${Date.now()}-${cIdx}-${Math.random().toString(36).slice(2, 6)}`
+    }));
     setItems([...items.slice(0, index + 1), ...copies, ...items.slice(index + 1)]);
     toast.success(`تم نسخ الصنف ${count} مرة`);
   };
@@ -92,22 +125,37 @@ export function SalesInvoiceDialog({
     newItems[index] = { ...newItems[index], [field]: value };
     
     if (field === 'quantity' || field === 'unit_price') {
-      newItems[index].total_price = newItems[index].quantity * newItems[index].unit_price;
+      const q = Number(field === 'quantity' ? value : newItems[index].quantity) || 0;
+      const p = Number(field === 'unit_price' ? value : newItems[index].unit_price) || 0;
+      newItems[index].total_price = q * p;
     }
     
     setItems(newItems);
   };
 
-  const subtotal = items.reduce((sum, item) => sum + item.total_price, 0);
-  const totalAmount = subtotal - discount;
+  const subtotal = items.reduce((sum, item) => sum + (Number(item.total_price) || 0), 0);
+  const totalAmount = Math.max(0, subtotal - (Number(discount) || 0));
 
   const handleSave = async (shouldPrint: boolean = false) => {
     try {
       setIsSaving(true);
 
-      const validItems = items.filter(item => item.item_name.trim() && item.quantity > 0 && item.unit_price > 0);
+      const validItems = items
+        .filter(item => item.item_name.trim())
+        .map(({ id, ...rest }) => ({
+          item_name: rest.item_name.trim(),
+          quantity: Number(rest.quantity) || 1,
+          unit: rest.unit || 'قطعة',
+          unit_price: Number(rest.unit_price) || 0,
+          total_price: (Number(rest.quantity) || 1) * (Number(rest.unit_price) || 0),
+          image_url: rest.image_url ? rest.image_url.trim() : null,
+          width: rest.width ?? null,
+          height: rest.height ?? null,
+          depth: rest.depth ?? null
+        }));
+
       if (validItems.length === 0) {
-        toast.error('يرجى إضافة عنصر واحد على الأقل');
+        toast.error('يرجى إضافة صنف واحد على الأقل مع تحديد اسمه');
         return;
       }
 
@@ -125,7 +173,7 @@ export function SalesInvoiceDialog({
           paid_amount: 0,
           paid: false,
           invoice_name: invoiceName || null,
-          discount: discount || 0,
+          discount: Number(discount) || 0,
           notes: notes || null
         })
         .select()
@@ -142,7 +190,7 @@ export function SalesInvoiceDialog({
       onOpenChange(false);
       onSuccess();
       
-      setItems([{ item_name: '', quantity: 1, unit: 'قطعة', unit_price: 0, total_price: 0, image_url: '' }]);
+      setItems([{ id: `item-${Date.now()}`, item_name: '', quantity: 1, unit: 'قطعة', unit_price: 0, total_price: 0, image_url: '' }]);
       setInvoiceName('');
       setInvoiceDate(new Date().toISOString().split('T')[0]);
       setDiscount(0);
@@ -156,24 +204,24 @@ export function SalesInvoiceDialog({
   };
 
   const printInvoice = async (invoice: any) => {
-    const items = typeof invoice.items === 'string' ? JSON.parse(invoice.items) : invoice.items;
+    const rawItems = typeof invoice.items === 'string' ? JSON.parse(invoice.items) : invoice.items;
     const invoiceData = {
       invoiceNumber: invoice.invoice_number,
       invoiceDate: invoice.invoice_date,
       customerName: invoice.customer_name,
       invoiceName: invoice.invoice_name || undefined,
-      items: items.map((item: SalesItem) => ({
-        description: item.item_name,
+      items: (rawItems || []).map((item: any) => ({
+        description: item.item_name || item.description || '',
         quantity: item.quantity,
         unit: item.unit || '',
-        unitPrice: item.unit_price,
-        total: item.total_price,
+        unitPrice: item.unit_price ?? item.unitPrice ?? 0,
+        total: item.total_price ?? item.total ?? 0,
         image_url: item.image_url || undefined,
         width: item.width ?? null,
         height: item.height ?? null,
         depth: item.depth ?? null
       })),
-      discount: invoice.discount || 0,
+      discount: Number(invoice.discount) || 0,
       totalAmount: invoice.total_amount,
       notes: invoice.notes || undefined
     };
@@ -218,33 +266,36 @@ export function SalesInvoiceDialog({
           {/* Items Table */}
           <div className="expenses-preview-item">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="expenses-preview-label">الأصناف</h3>
-              <Button onClick={addItem} size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90">
-                <Plus className="h-4 w-4 ml-1" />
-                إضافة صنف
+              <h3 className="expenses-preview-label font-bold text-base">الأصناف</h3>
+              <Button onClick={addItem} size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1 font-medium">
+                <Plus className="h-4 w-4" />
+                إضافة صنف جديد
               </Button>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               {items.map((item, index) => (
-                <div key={index} className="bg-muted/30 p-4 rounded-lg border border-border">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="font-medium text-card-foreground text-lg">
+                <div key={item.id || `item-${index}`} className="bg-muted/30 p-4 rounded-xl border border-border space-y-3 relative transition-all shadow-sm">
+                  <div className="flex items-center justify-between pb-2 border-b border-border/50">
+                    <span className="font-semibold text-card-foreground text-base">
                       صنف {index + 1}
                     </span>
                     <Button
+                      type="button"
                       variant="ghost"
                       size="sm"
                       onClick={() => removeItem(index)}
-                      disabled={items.length === 1}
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 px-2.5 gap-1.5 rounded-lg"
+                      title={items.length === 1 ? 'تفريغ بيانات هذا الصنف' : 'حذف هذا الصنف بالكامل'}
                     >
-                      <X className="h-4 w-4" />
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                      <span className="text-xs font-semibold">{items.length === 1 ? 'تفريغ الصنف' : 'حذف الصنف'}</span>
                     </Button>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                     <div className="md:col-span-2">
-                      <label className="expenses-form-label block mb-2">اسم الصنف</label>
+                      <label className="expenses-form-label block mb-1.5 text-xs">اسم الصنف <span className="text-destructive">*</span></label>
                       <Input
                         placeholder="اسم الصنف"
                         value={item.item_name}
@@ -253,7 +304,7 @@ export function SalesInvoiceDialog({
                       />
                     </div>
                     <div>
-                      <label className="expenses-form-label block mb-2">الوحدة</label>
+                      <label className="expenses-form-label block mb-1.5 text-xs">الوحدة</label>
                       <Input
                         list={`sales-unit-suggestions-${index}`}
                         value={item.unit}
@@ -268,7 +319,7 @@ export function SalesInvoiceDialog({
                       </datalist>
                     </div>
                     <div>
-                      <label className="expenses-form-label block mb-2">الكمية</label>
+                      <label className="expenses-form-label block mb-1.5 text-xs">الكمية</label>
                       <Input
                         type="number"
                         placeholder="الكمية"
@@ -279,7 +330,7 @@ export function SalesInvoiceDialog({
                       />
                     </div>
                     <div>
-                      <label className="expenses-form-label block mb-2">السعر</label>
+                      <label className="expenses-form-label block mb-1.5 text-xs">السعر الإفرادي</label>
                       <Input
                         type="number"
                         placeholder="السعر"
@@ -291,30 +342,53 @@ export function SalesInvoiceDialog({
                       />
                     </div>
                   </div>
-                  {/* صورة الصنف */}
-                  <div className="mt-3">
-                    <label className="expenses-form-label block mb-2">صورة الصنف (اختياري)</label>
+
+                  {/* صورة الصنف مع زر حذف مباشر */}
+                  <div className="mt-2 pt-2 border-t border-border/40">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="expenses-form-label text-xs">صورة الصنف (اختياري)</label>
+                      {item.image_url && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            updateItem(index, 'image_url', '');
+                            toast.success('تم حذف صورة الصنف');
+                          }}
+                          className="text-xs text-destructive hover:text-destructive hover:bg-destructive/10 h-7 px-2 gap-1 font-medium"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          حذف الصورة
+                        </Button>
+                      )}
+                    </div>
                     <ImageUploadZone
                       value={item.image_url}
-                      onChange={(url) => updateItem(index, 'image_url' as any, url)}
+                      onChange={(url) => updateItem(index, 'image_url', url)}
+                      onClear={() => updateItem(index, 'image_url', '')}
                       imageName={`sales-item-${index}`}
                       folder="invoices"
                       showUrlInput={false}
                       showPreview={!!item.image_url}
                       dropZoneHeight="h-16"
-                      previewHeight="h-20"
-                      label="اسحب أو انقر لرفع صورة الصنف"
+                      previewHeight="h-24"
+                      label=""
                     />
                   </div>
+
                   <DimensionsRow
                     width={item.width}
                     height={item.height}
                     depth={item.depth}
                     onChange={(f, v) => updateItem(index, f, v)}
                   />
-                  <div className="mt-3 text-sm text-muted-foreground bg-muted/20 p-2 rounded">
-                    الإجمالي: <span className="expenses-amount-calculated font-bold">{formatAmount(item.total_price)} د.ل</span>
+
+                  <div className="mt-2 flex items-center justify-between text-sm bg-muted/40 p-2.5 rounded-lg border border-border/50">
+                    <span className="text-muted-foreground font-medium">إجمالي هذا الصنف:</span>
+                    <span className="expenses-amount-calculated font-bold text-base text-primary">{formatAmount(item.total_price)} د.ل</span>
                   </div>
+
                   <DuplicateItemControl
                     onDuplicate={(c) => duplicateItem(index, c)}
                     disabled={!item.item_name.trim()}
@@ -358,7 +432,7 @@ export function SalesInvoiceDialog({
                 <span className="font-semibold">{formatAmount(subtotal)} د.ل</span>
               </div>
               {discount > 0 && (
-                <div className="flex justify-between text-lg text-red-600">
+                <div className="flex justify-between text-lg text-red-600 dark:text-red-400">
                   <span>التخفيض:</span>
                   <span className="font-semibold">- {formatAmount(discount)} د.ل</span>
                 </div>
@@ -371,8 +445,9 @@ export function SalesInvoiceDialog({
           </div>
 
           {/* Actions */}
-          <div className="expenses-actions justify-end pt-4 border-t border-border">
+          <div className="expenses-actions justify-end pt-4 border-t border-border gap-2">
             <Button
+              type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
               disabled={isSaving}
@@ -381,16 +456,18 @@ export function SalesInvoiceDialog({
               إلغاء
             </Button>
             <Button
+              type="button"
               onClick={() => handleSave(false)}
               disabled={isSaving}
-              className="stat-green bg-green-600 hover:bg-green-700 text-white font-semibold"
+              className="stat-green bg-green-600 hover:bg-green-700 text-white font-semibold shadow"
             >
               حفظ الفاتورة
             </Button>
             <Button
+              type="button"
               onClick={() => handleSave(true)}
               disabled={isSaving}
-              className="bg-primary text-primary-foreground hover:bg-primary/90 font-semibold"
+              className="bg-primary text-primary-foreground hover:bg-primary/90 font-semibold shadow"
             >
               <Printer className="h-4 w-4 ml-1" />
               حفظ وطباعة

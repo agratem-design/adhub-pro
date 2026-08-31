@@ -295,6 +295,24 @@ export default function PaymentsReceiptsPage() {
         }
       });
       
+      // جلب أنواع الإعلانات للمهام المجمعة وفواتير المبيعات
+      const compositeIds = [...new Set((paymentsData || []).filter(p => (p as any).composite_task_id).map(p => (p as any).composite_task_id as string))];
+      const compositeAdTypesMap: Record<string, string> = {};
+      if (compositeIds.length > 0) {
+        const { data: ctData } = await supabase
+          .from('composite_tasks')
+          .select('id, contract_id')
+          .in('id', compositeIds);
+        if (ctData) {
+          ctData.forEach((ct: any) => {
+            const cNum = Number(ct.contract_id);
+            if (cNum && adTypeMap[cNum]) {
+              compositeAdTypesMap[ct.id] = adTypeMap[cNum];
+            }
+          });
+        }
+      }
+
       const filteredPaymentsData = (paymentsData || []).filter(payment => {
         if (payment.entry_type === 'purchase_invoice' && payment.purchase_invoice_id) {
           return existingPurchaseInvoiceIds.has(payment.purchase_invoice_id);
@@ -321,12 +339,17 @@ export default function PaymentsReceiptsPage() {
             companyName = companyName ? `${companyName} | ${printerLabel}` : printerLabel;
           }
         }
+
+        const compId = (payment as any).composite_task_id;
+        const resolvedAdType = payment.contract_number 
+          ? adTypeMap[payment.contract_number] 
+          : (compId && compositeAdTypesMap[compId] ? compositeAdTypesMap[compId] : null);
         
         return {
           ...payment,
           customer_name: customerName,
           company_name: companyName,
-          ad_type: payment.contract_number ? adTypeMap[payment.contract_number] : null
+          ad_type: resolvedAdType
         };
       });
 

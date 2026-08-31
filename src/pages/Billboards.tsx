@@ -35,6 +35,7 @@ import { useBillboardContract } from '@/hooks/useBillboardContract';
 import { isBillboardAvailable } from '@/utils/contractUtils';
 import { smartArabicMatch } from '@/lib/arabicSearch';
 import { supabase } from '@/integrations/supabase/client';
+import { Billboard } from '@/types';
 import { toast } from 'sonner';
 import { MapSkeleton } from '@/components/Map/MapSkeleton';
 

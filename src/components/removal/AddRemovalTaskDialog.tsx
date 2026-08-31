@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { format, subDays, differenceInDays } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'framer-motion';
+import { findOptimalTeamForRemoval, sortTeamsByPriority } from '@/utils/teamAssignment';
 import { 
   Search, 
   Building2,
@@ -64,7 +65,7 @@ export function AddRemovalTaskDialog({
       setSearchTerm('');
       setSelectedContracts(new Set());
       setSelectedBillboards(new Set());
-      setSelectedTeamId(teams.length > 0 ? teams[0].id : '');
+      setSelectedTeamId('auto');
       setNotes('');
       setCurrentStep(1);
     }
@@ -221,45 +222,94 @@ export function AddRemovalTaskDialog({
         throw new Error('لا توجد لوحات متاحة للإضافة');
       }
 
-      let teamId = selectedTeamId;
-      if (!teamId && teams.length > 0) {
-        teamId = teams[0].id;
-      }
-
       const contractNumbers = Array.from(selectedContracts);
-      const { data: task, error: taskError } = await supabase
-        .from('removal_tasks')
-        .insert({
-          contract_id: contractNumbers[0],
-          contract_ids: contractNumbers,
-          team_id: teamId,
-          status: 'pending'
-        })
-        .select()
-        .single();
+      const isAutoDistribute = !selectedTeamId || selectedTeamId === 'auto';
+      const billboardsObjList = billboardsToAdd.map(id => availableBillboards.find(b => b.ID === id) || { ID: id });
 
-      if (taskError) throw taskError;
+      if (isAutoDistribute) {
+        const teamBillboardsMap = new Map<string, number[]>();
 
-      for (const billboardId of billboardsToAdd) {
-        const { data: installationItem } = await supabase
-          .from('installation_task_items')
-          .select('design_face_a, design_face_b, installed_image_url')
-          .eq('billboard_id', billboardId)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        for (const billboard of billboardsObjList) {
+          const optimalTeam = findOptimalTeamForRemoval(teams, billboard.Size, billboard.City, billboard.friend_company_id);
+          const teamId = optimalTeam?.id || (teams.length > 0 ? sortTeamsByPriority(teams)[0]?.id : '');
+          if (!teamId) continue;
+          if (!teamBillboardsMap.has(teamId)) {
+            teamBillboardsMap.set(teamId, []);
+          }
+          teamBillboardsMap.get(teamId)!.push(billboard.ID);
+        }
 
-        await supabase
-          .from('removal_task_items')
+        for (const [teamId, bbIds] of teamBillboardsMap) {
+          const { data: task, error: taskError } = await supabase
+            .from('removal_tasks')
+            .insert({
+              contract_id: contractNumbers[0],
+              contract_ids: contractNumbers,
+              team_id: teamId,
+              status: 'pending'
+            })
+            .select()
+            .single();
+
+          if (taskError) throw taskError;
+
+          for (const billboardId of bbIds) {
+            const { data: installationItem } = await supabase
+              .from('installation_task_items')
+              .select('design_face_a, design_face_b, installed_image_url')
+              .eq('billboard_id', billboardId)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            await supabase
+              .from('removal_task_items')
+              .insert({
+                task_id: task.id,
+                billboard_id: billboardId,
+                status: 'pending',
+                notes: notes || null,
+                design_face_a: installationItem?.design_face_a || null,
+                design_face_b: installationItem?.design_face_b || null,
+                installed_image_url: installationItem?.installed_image_url || null
+              });
+          }
+        }
+      } else {
+        const { data: task, error: taskError } = await supabase
+          .from('removal_tasks')
           .insert({
-            task_id: task.id,
-            billboard_id: billboardId,
-            status: 'pending',
-            notes: notes || null,
-            design_face_a: installationItem?.design_face_a || null,
-            design_face_b: installationItem?.design_face_b || null,
-            installed_image_url: installationItem?.installed_image_url || null
-          });
+            contract_id: contractNumbers[0],
+            contract_ids: contractNumbers,
+            team_id: selectedTeamId,
+            status: 'pending'
+          })
+          .select()
+          .single();
+
+        if (taskError) throw taskError;
+
+        for (const billboardId of billboardsToAdd) {
+          const { data: installationItem } = await supabase
+            .from('installation_task_items')
+            .select('design_face_a, design_face_b, installed_image_url')
+            .eq('billboard_id', billboardId)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          await supabase
+            .from('removal_task_items')
+            .insert({
+              task_id: task.id,
+              billboard_id: billboardId,
+              status: 'pending',
+              notes: notes || null,
+              design_face_a: installationItem?.design_face_a || null,
+              design_face_b: installationItem?.design_face_b || null,
+              installed_image_url: installationItem?.installed_image_url || null
+            });
+        }
       }
       
       return billboardsToAdd.length;
@@ -277,7 +327,7 @@ export function AddRemovalTaskDialog({
 
   const canProceedToStep2 = selectedContracts.size > 0;
   const canProceedToStep3 = selectedBillboards.size > 0;
-  const canSubmit = selectedTeamId && selectedBillboards.size > 0;
+  const canSubmit = selectedBillboards.size > 0;
 
   const steps = [
     { number: 1, title: 'اختيار العقود', icon: FileText },
@@ -604,10 +654,16 @@ export function AddRemovalTaskDialog({
                     <div className="flex items-center gap-3">
                       <Users className="h-8 w-8 text-green-600" />
                       <div>
-                        <p className="text-2xl font-bold text-green-700">
-                          {teams.find(t => t.id === selectedTeamId)?.team_name || '-'}
+                        <p className="text-xl font-bold text-green-700">
+                          {selectedTeamId === 'auto' || !selectedTeamId
+                            ? 'توزيع تلقائي ذكي'
+                            : (teams.find(t => t.id === selectedTeamId)?.team_name || '-')}
                         </p>
-                        <p className="text-sm text-green-600">الفريق المسؤول</p>
+                        <p className="text-sm text-green-600">
+                          {selectedTeamId === 'auto' || !selectedTeamId
+                            ? 'حسب الرتبة والأولوية'
+                            : 'الفريق المسؤول'}
+                        </p>
                       </div>
                     </div>
                   </Card>
@@ -617,17 +673,28 @@ export function AddRemovalTaskDialog({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-3">
-                    <Label className="text-base font-medium">اختر فريق التركيب</Label>
+                    <Label className="text-base font-medium">اختر فريق الإزالة</Label>
                     <Select value={selectedTeamId} onValueChange={setSelectedTeamId}>
                       <SelectTrigger className="h-12 text-lg">
                         <SelectValue placeholder="اختيار الفريق" />
                       </SelectTrigger>
                       <SelectContent>
-                        {teams.filter(team => team.id && team.id.trim() !== '').map(team => (
+                        <SelectItem value="auto" className="text-base py-3">
+                          <div className="flex items-center gap-2">
+                            <Users className="h-4 w-4 text-primary" />
+                            <span>توزيع تلقائي ذكي (حسب الرتبة والأولوية والمقاس والمدينة)</span>
+                          </div>
+                        </SelectItem>
+                        {sortTeamsByPriority(teams.filter(team => team.id && team.id.trim() !== '')).map((team, idx) => (
                           <SelectItem key={team.id} value={team.id} className="text-base py-3">
-                            <div className="flex items-center gap-2">
-                              <Users className="h-4 w-4" />
-                              {team.team_name}
+                            <div className="flex items-center justify-between w-full gap-2">
+                              <div className="flex items-center gap-2">
+                                <Users className="h-4 w-4 text-primary" />
+                                <span>{team.team_name}</span>
+                              </div>
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-primary/10 text-primary font-bold">
+                                رتبة #{idx + 1} (أولوية: {team.priority || 0})
+                              </span>
                             </div>
                           </SelectItem>
                         ))}

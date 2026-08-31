@@ -100,25 +100,33 @@ const DesignPanel = ({
             {urls.length > 1 && (
               <>
                 <button
+                  type="button"
                   onClick={goPrev}
-                  className="absolute right-1 top-1/2 -translate-y-1/2 z-30 w-6 h-6 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
+                  className="absolute right-2 top-1/2 z-30 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-xl border border-white/15 bg-black/65 text-white opacity-100 transition-all duration-200 hover:bg-black/85 active:scale-95 md:opacity-0 md:group-hover:opacity-100"
+                  aria-label="التصميم السابق"
                 >
-                  <ChevronRight className="h-3.5 w-3.5" />
+                  <ChevronRight className="h-4 w-4" />
                 </button>
                 <button
+                  type="button"
                   onClick={goNext}
-                  className="absolute left-1 top-1/2 -translate-y-1/2 z-30 w-6 h-6 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center transition-all opacity-0 group-hover:opacity-100"
+                  className="absolute left-2 top-1/2 z-30 flex h-10 w-10 -translate-y-1/2 cursor-pointer items-center justify-center rounded-xl border border-white/15 bg-black/65 text-white opacity-100 transition-all duration-200 hover:bg-black/85 active:scale-95 md:opacity-0 md:group-hover:opacity-100"
+                  aria-label="التصميم التالي"
                 >
-                  <ChevronLeft className="h-3.5 w-3.5" />
+                  <ChevronLeft className="h-4 w-4" />
                 </button>
                 {/* Dots */}
                 <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 z-30 flex gap-1">
                   {urls.map((_, i) => (
                     <button
+                      type="button"
                       key={i}
                       onClick={e => { e.stopPropagation(); setCurrentIdx(i); }}
-                      className={`w-1.5 h-1.5 rounded-full transition-all ${i === currentIdx % urls.length ? 'bg-white scale-125' : 'bg-white/40'}`}
-                    />
+                      className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full transition-transform duration-200 active:scale-95"
+                      aria-label={`عرض التصميم ${i + 1}`}
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full transition-all ${i === currentIdx % urls.length ? 'scale-125 bg-white' : 'bg-white/40'}`} />
+                    </button>
                   ))}
                 </div>
               </>
@@ -147,32 +155,42 @@ const DesignPanel = ({
           onClick={() => setLightboxOpen(false)}
         >
           <button
+            type="button"
             onClick={() => setLightboxOpen(false)}
-            className="absolute top-4 right-4 z-10 p-3 bg-white/10 hover:bg-white/20 rounded-full transition-all border border-white/20"
+            className="absolute right-4 top-4 z-10 flex h-11 w-11 cursor-pointer items-center justify-center rounded-xl border border-white/20 bg-white/10 transition-all duration-200 hover:bg-white/20 active:scale-95"
+            aria-label="إغلاق المعاينة"
           >
             <X className="w-6 h-6 text-white" />
           </button>
           {urls.length > 1 && (
             <>
               <button
+                type="button"
                 onClick={e => { e.stopPropagation(); setCurrentIdx(i => (i - 1 + urls.length) % urls.length); }}
-                className="absolute right-6 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center border border-white/20"
+                className="absolute right-6 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 cursor-pointer items-center justify-center rounded-xl border border-white/20 bg-white/10 text-white transition-all duration-200 hover:bg-white/20 active:scale-95"
+                aria-label="التصميم السابق"
               >
                 <ChevronRight className="h-5 w-5" />
               </button>
               <button
+                type="button"
                 onClick={e => { e.stopPropagation(); setCurrentIdx(i => (i + 1) % urls.length); }}
-                className="absolute left-6 top-1/2 -translate-y-1/2 z-10 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center border border-white/20"
+                className="absolute left-6 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 cursor-pointer items-center justify-center rounded-xl border border-white/20 bg-white/10 text-white transition-all duration-200 hover:bg-white/20 active:scale-95"
+                aria-label="التصميم التالي"
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
               <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-10 flex gap-2">
                 {urls.map((_, i) => (
                   <button
+                    type="button"
                     key={i}
                     onClick={e => { e.stopPropagation(); setCurrentIdx(i); }}
-                    className={`w-2.5 h-2.5 rounded-full transition-all ${i === currentIdx % urls.length ? 'bg-white scale-125' : 'bg-white/40'}`}
-                  />
+                    className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-transform duration-200 active:scale-95"
+                    aria-label={`عرض التصميم ${i + 1}`}
+                  >
+                    <span className={`h-2.5 w-2.5 rounded-full transition-all ${i === currentIdx % urls.length ? 'scale-125 bg-white' : 'bg-white/40'}`} />
+                  </button>
                 ))}
               </div>
             </>
@@ -269,7 +287,7 @@ export function RemovalMobileTaskCard({
 
   return (
     <div
-      className="relative rounded-2xl overflow-hidden"
+      className="relative overflow-hidden rounded-2xl"
       style={{ background: cardBg, border: cardBorder, boxShadow: cardShadow, minHeight: 160 }}
     >
       {/* Progress bar at top */}
@@ -295,7 +313,7 @@ export function RemovalMobileTaskCard({
 
           {/* ── Right: Design Panel (responsive width and height) ── */}
           <div
-            className="w-full md:w-[170px] h-[200px] md:h-auto shrink-0 overflow-hidden relative pt-1"
+            className="relative h-[200px] w-full shrink-0 overflow-hidden pt-1 md:h-auto md:w-[180px]"
             onClick={e => e.stopPropagation()}
           >
             <DesignPanel
@@ -305,11 +323,12 @@ export function RemovalMobileTaskCard({
             />
 
             {/* Checkbox overlay */}
-            <div className="absolute top-3 right-3 z-30">
+            <div className="absolute right-3 top-3 z-30 flex h-10 w-10 items-center justify-center rounded-xl bg-black/30 backdrop-blur-sm">
               <Checkbox
                 checked={isSelected}
                 onCheckedChange={onToggleSelect}
-                className="h-5 w-5 rounded-full border-2 border-white/45 bg-black/40 backdrop-blur-sm data-[state=checked]:!bg-red-500 data-[state=checked]:!border-red-500 cursor-pointer transition-all [&_svg]:!text-white [&_svg]:stroke-[3.5px] [&_svg]:h-3 [&_svg]:w-3"
+                className="h-6 w-6 cursor-pointer rounded-md border-2 border-white/55 bg-black/40 transition-all data-[state=checked]:!border-primary data-[state=checked]:!bg-primary [&_svg]:!h-3.5 [&_svg]:!w-3.5 [&_svg]:!stroke-[3.5px] [&_svg]:!text-primary-foreground"
+                aria-label="تحديد مهمة الفريق"
               />
             </div>
 
@@ -330,55 +349,50 @@ export function RemovalMobileTaskCard({
           </div>
 
           {/* ── Center: Info ── */}
-          <div className="flex-1 min-w-0 px-4 py-4 flex flex-col justify-between gap-3 pt-3">
+          <div className="flex min-w-0 flex-1 flex-col justify-between gap-3 px-4 py-4 pt-3">
 
             {/* Customer name + status */}
             <div className="space-y-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-base font-black text-foreground leading-tight truncate">
-                  {task.customerName}
+                <span className="truncate text-base font-black leading-tight text-foreground">
+                  {task.team?.team_name || 'فريق غير محدد'}
                 </span>
                 {isFullyCompleted ? (
-                  <Badge className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 font-extrabold text-[10px] h-5 px-2 py-0 rounded-full shrink-0">
+                  <Badge className="h-6 shrink-0 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2 py-0 text-[10px] font-extrabold text-emerald-500">
                     <CheckCircle2 className="h-3 w-3 ml-1" />
                     مكتملة
                   </Badge>
                 ) : isPartiallyCompleted ? (
-                  <Badge className="bg-amber-500/10 text-amber-500 border border-amber-500/20 font-extrabold text-[10px] h-5 px-2 py-0 rounded-full shrink-0">
+                  <Badge className="h-6 shrink-0 rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-0 text-[10px] font-extrabold text-amber-500">
                     <Clock className="h-3 w-3 ml-1" />
                     {completedItems}/{items.length}
                   </Badge>
                 ) : (
-                  <Badge className="bg-red-500/10 text-red-400 border border-red-500/20 font-extrabold text-[10px] h-5 px-2 py-0 rounded-full shrink-0">
+                  <Badge className="h-6 shrink-0 rounded-lg border border-rose-500/20 bg-rose-500/10 px-2 py-0 text-[10px] font-extrabold text-rose-400">
                     <AlertTriangle className="h-3 w-3 ml-1" />
                     معلقة
                   </Badge>
                 )}
               </div>
+              <p className="truncate text-[11px] font-medium text-muted-foreground">{task.customerName} • مهمة إزالة {items.length} لوحة</p>
             </div>
 
             {/* Metadata row */}
             <div className="flex flex-wrap items-center gap-2 text-xs">
               {task.contract_id && (
-                <span className="inline-flex items-center gap-1 bg-red-500/10 text-red-500 border border-red-500/20 font-extrabold px-2 py-0.5 rounded-lg font-mono">
+                <span className="inline-flex items-center gap-1 rounded-lg border border-primary/20 bg-primary/10 px-2 py-1 font-mono font-extrabold text-primary">
                   #{task.contract_id}
                 </span>
               )}
               {task.adType && task.adType !== '—' && (
-                <span className="inline-flex items-center gap-1 bg-blue-500/10 text-blue-500 border border-blue-500/20 font-bold px-2 py-0.5 rounded-lg">
+                <span className="inline-flex items-center gap-1 rounded-lg border border-primary/15 bg-primary/5 px-2 py-1 font-bold text-foreground/80">
                   {task.adType}
                 </span>
               )}
               {task.contractEndDate && (
-                <span className="inline-flex items-center gap-1 bg-muted/40 border border-border/25 px-2 py-0.5 rounded-lg text-muted-foreground font-semibold">
+                <span className="inline-flex items-center gap-1 rounded-lg border border-border/25 bg-muted/40 px-2 py-1 font-semibold text-muted-foreground">
                   <CalendarDays className="h-3 w-3 text-muted-foreground/60 shrink-0" />
                   {format(new Date(task.contractEndDate), 'dd/MM/yyyy', { locale: ar })}
-                </span>
-              )}
-              {task.team && (
-                <span className="inline-flex items-center gap-1 bg-muted/40 border border-border/25 px-2 py-0.5 rounded-lg text-muted-foreground font-semibold">
-                  <Users className="h-3 w-3 text-muted-foreground/60 shrink-0" />
-                  <span className="truncate max-w-[120px]">{task.team.team_name}</span>
                 </span>
               )}
             </div>
@@ -390,12 +404,12 @@ export function RemovalMobileTaskCard({
                 {items.length} لوحة
               </span>
               {hasInstalledPhoto && (
-                <span className="inline-flex items-center gap-1 bg-violet-500/10 border border-violet-500/20 px-2 py-0.5 rounded-lg text-violet-500 font-semibold cursor-pointer hover:bg-violet-500/20 transition-colors"
+                <button type="button" className="inline-flex h-9 cursor-pointer items-center gap-1 rounded-lg border border-violet-500/20 bg-violet-500/10 px-2 font-semibold text-violet-400 transition-all duration-200 hover:bg-violet-500/20 active:scale-95"
                   onClick={e => { e.stopPropagation(); onViewInstalledPhoto?.(); }}
                 >
                   <Camera className="h-3 w-3 shrink-0" />
                   صورة تركيب
-                </span>
+                </button>
               )}
             </div>
 
@@ -418,7 +432,8 @@ export function RemovalMobileTaskCard({
             {/* Expand/collapse trigger */}
             <CollapsibleTrigger asChild>
               <button
-                className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors bg-muted/30 hover:bg-muted/50 rounded-lg px-3 py-1.5 w-full"
+                type="button"
+                className="flex h-10 w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-muted/30 px-3 text-[11px] font-bold text-muted-foreground transition-all duration-200 hover:bg-muted/50 hover:text-foreground active:scale-[0.99]"
                 onClick={e => e.stopPropagation()}
               >
                 <span>{isExpanded ? 'إخفاء اللوحات' : `عرض اللوحات (${items.length})`}</span>
@@ -431,16 +446,16 @@ export function RemovalMobileTaskCard({
 
           {/* ── Left: Actions column (responsive layout) ── */}
           <div
-            className="w-full md:w-[160px] shrink-0 p-3 flex flex-col justify-between items-stretch border-t md:border-t-0 md:border-r border-border/30 pt-4"
+            className="flex w-full shrink-0 flex-col items-stretch justify-between border-t border-border/30 p-3 pt-4 md:w-[190px] md:border-r md:border-t-0"
             onClick={e => e.stopPropagation()}
           >
             {/* Action buttons */}
-            <div className="flex flex-col gap-2 w-full">
+            <div className="grid w-full grid-cols-2 gap-2 md:grid-cols-1">
               {onCompleteAll && items.some((i: any) => i.status !== 'completed') && (
                 <Button
                   size="sm"
                   onClick={() => onCompleteAll()}
-                  className="w-full h-8 rounded-xl font-bold text-xs gap-1 shadow-sm bg-emerald-500/10 text-emerald-500 border border-emerald-500/30 hover:bg-emerald-500 hover:text-white transition-all"
+                  className="h-10 w-full cursor-pointer gap-1 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-xs font-bold text-emerald-500 shadow-sm transition-all duration-200 hover:bg-emerald-500 hover:text-white active:scale-95"
                 >
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   إكمال الكل
@@ -452,7 +467,7 @@ export function RemovalMobileTaskCard({
                   size="sm"
                   variant="outline"
                   onClick={() => onPrintPending()}
-                  className="w-full h-8 rounded-xl font-bold text-xs gap-1 border-amber-500/20 text-amber-500 hover:bg-amber-500/10 hover:border-amber-500/50 hover:text-amber-500 transition-all animate-pulse"
+                  className="h-10 w-full cursor-pointer gap-1 rounded-xl border-primary/25 bg-primary/5 text-xs font-bold text-primary transition-all duration-200 hover:border-primary/45 hover:bg-primary/10 hover:text-primary active:scale-95"
                 >
                   <Printer className="h-3.5 w-3.5" />
                   طباعة المعلقة
@@ -464,7 +479,7 @@ export function RemovalMobileTaskCard({
                   size="sm"
                   variant="outline"
                   onClick={() => onPrintCompleted()}
-                  className="w-full h-8 rounded-xl font-bold text-xs gap-1 border-emerald-500/20 text-emerald-500 hover:bg-emerald-500/10 hover:border-emerald-500/50 hover:text-emerald-500 transition-all"
+                  className="h-10 w-full cursor-pointer gap-1 rounded-xl border-emerald-500/20 text-xs font-bold text-emerald-500 transition-all duration-200 hover:border-emerald-500/50 hover:bg-emerald-500/10 hover:text-emerald-500 active:scale-95"
                 >
                   <Printer className="h-3.5 w-3.5" />
                   طباعة المكتملة
@@ -476,7 +491,7 @@ export function RemovalMobileTaskCard({
                   size="sm"
                   variant="outline"
                   onClick={() => onSendWhatsApp()}
-                  className="w-full h-8 rounded-xl font-bold text-xs gap-1 border-emerald-500/20 text-emerald-500 hover:bg-emerald-500/10 hover:border-emerald-500/50 transition-all"
+                  className="h-10 w-full cursor-pointer gap-1 rounded-xl border-emerald-500/20 text-xs font-bold text-emerald-500 transition-all duration-200 hover:border-emerald-500/50 hover:bg-emerald-500/10 active:scale-95"
                 >
                   <MessageCircle className="h-3.5 w-3.5" />
                   واتساب
@@ -488,7 +503,7 @@ export function RemovalMobileTaskCard({
                   size="sm"
                   variant="outline"
                   onClick={() => onUndoLast()}
-                  className="w-full h-8 rounded-xl font-bold text-xs gap-1 border-orange-500/20 text-orange-400 hover:bg-orange-500/10 transition-all"
+                  className="h-10 w-full cursor-pointer gap-1 rounded-xl border-orange-500/20 text-xs font-bold text-orange-400 transition-all duration-200 hover:bg-orange-500/10 active:scale-95"
                 >
                   <Undo2 className="h-3.5 w-3.5" />
                   تراجع
@@ -500,7 +515,7 @@ export function RemovalMobileTaskCard({
                   size="sm"
                   variant="outline"
                   onClick={() => onSyncMissing()}
-                  className="w-full h-8 rounded-xl font-bold text-xs gap-1 border-blue-500/20 text-blue-500 hover:bg-blue-500/10 hover:border-blue-500/50 transition-all"
+                  className="h-10 w-full cursor-pointer gap-1 rounded-xl border-blue-500/20 text-xs font-bold text-blue-400 transition-all duration-200 hover:border-blue-500/50 hover:bg-blue-500/10 active:scale-95"
                 >
                   <Package className="h-3.5 w-3.5" />
                   إضافة الناقصة
@@ -513,7 +528,7 @@ export function RemovalMobileTaskCard({
               size="sm"
               variant="outline"
               onClick={() => onDelete()}
-              className="w-full h-8 rounded-xl font-bold text-xs gap-1 text-destructive border-destructive/20 hover:bg-destructive/10 hover:border-destructive/40 transition-all mt-3 md:mt-auto"
+              className="col-span-2 mt-2 h-10 w-full cursor-pointer gap-1 rounded-xl border-destructive/20 text-xs font-bold text-destructive transition-all duration-200 hover:border-destructive/40 hover:bg-destructive/10 active:scale-95 md:col-span-1 md:mt-3"
             >
               <Trash2 className="h-3.5 w-3.5" />
               حذف

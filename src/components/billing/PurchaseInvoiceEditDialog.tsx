@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { Plus, X, Printer } from 'lucide-react';
+import { Plus, Trash2, Printer } from 'lucide-react';
 import { formatAmount } from '@/lib/formatUtils';
 import { supabase } from '@/integrations/supabase/client';
 import { generatePurchaseInvoiceHTML } from '@/components/billing/InvoiceTemplates';
@@ -11,6 +11,7 @@ import { ImageUploadZone } from '@/components/ui/image-upload-zone';
 import { DimensionsRow, DuplicateItemControl } from '@/components/billing/InvoiceItemExtras';
 
 interface PurchaseItem {
+  id?: string;
   item_name: string;
   quantity: number;
   unit: string;
@@ -51,26 +52,31 @@ export function PurchaseInvoiceEditDialog({
   onSuccess
 }: PurchaseInvoiceEditDialogProps) {
   const [items, setItems] = useState<PurchaseItem[]>([
-    { item_name: '', quantity: 1, unit: 'قطعة', unit_price: 0, total_price: 0, image_url: '' }
+    { id: 'item-init', item_name: '', quantity: 1, unit: 'قطعة', unit_price: 0, total_price: 0, image_url: '' }
   ]);
   const [invoiceName, setInvoiceName] = useState('فاتورة مشتريات');
   const [invoiceDate, setInvoiceDate] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [discount, setDiscount] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
+  const lastLoadedInvoiceIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (invoice) {
-      loadInvoiceItems();
-      setInvoiceName(invoice.invoice_name || 'فاتورة مشتريات');
-      setNotes(invoice.notes || '');
-      setDiscount(Number((invoice as any).discount) || 0);
-      // تحويل التاريخ إلى صيغة yyyy-mm-dd للـ input
-      const raw = invoice.invoice_date || '';
-      const iso = raw ? new Date(raw).toISOString().slice(0, 10) : '';
-      setInvoiceDate(iso || raw.slice(0, 10));
+    if (open && invoice) {
+      if (lastLoadedInvoiceIdRef.current !== invoice.id) {
+        lastLoadedInvoiceIdRef.current = invoice.id;
+        loadInvoiceItems();
+        setInvoiceName(invoice.invoice_name || 'فاتورة مشتريات');
+        setNotes(invoice.notes || '');
+        setDiscount(Number((invoice as any).discount) || 0);
+        const raw = invoice.invoice_date || '';
+        const iso = raw ? new Date(raw).toISOString().slice(0, 10) : '';
+        setInvoiceDate(iso || raw.slice(0, 10));
+      }
+    } else if (!open) {
+      lastLoadedInvoiceIdRef.current = null;
     }
-  }, [invoice]);
+  }, [open, invoice]);
 
   const loadInvoiceItems = async () => {
     if (!invoice) return;
@@ -85,7 +91,8 @@ export function PurchaseInvoiceEditDialog({
       if (error) throw error;
 
       if (data && data.length > 0) {
-        setItems(data.map((item: any) => ({
+        setItems(data.map((item: any, idx: number) => ({
+          id: item.id || `item-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
           item_name: item.item_name,
           quantity: item.quantity,
           unit: item.unit || 'قطعة',
@@ -96,6 +103,8 @@ export function PurchaseInvoiceEditDialog({
           height: item.height ?? null,
           depth: item.depth ?? null,
         })));
+      } else {
+        setItems([{ id: `item-${Date.now()}`, item_name: '', quantity: 1, unit: 'قطعة', unit_price: 0, total_price: 0, image_url: '' }]);
       }
     } catch (error) {
       console.error('Error loading invoice items:', error);
@@ -104,26 +113,58 @@ export function PurchaseInvoiceEditDialog({
   };
 
   const addItem = () => {
-    setItems([...items, { item_name: '', quantity: 1, unit: 'قطعة', unit_price: 0, total_price: 0, image_url: '' }]);
+    setItems([
+      ...items,
+      {
+        id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        item_name: '',
+        quantity: 1,
+        unit: 'قطعة',
+        unit_price: 0,
+        total_price: 0,
+        image_url: '',
+        width: null,
+        height: null,
+        depth: null
+      }
+    ]);
   };
 
   const duplicateItem = (index: number, count: number) => {
     const src = items[index];
     if (!src.item_name.trim()) {
-      toast.error('يرجى تعبئة الصنف قبل النسخ');
+      toast.error('يرجى تعبئة اسم الصنف قبل النسخ');
       return;
     }
-    const copies: PurchaseItem[] = Array.from({ length: count }, () => ({ ...src }));
+    const copies: PurchaseItem[] = Array.from({ length: count }, (_, cIdx) => ({
+      ...src,
+      id: `item-${Date.now()}-${cIdx}-${Math.random().toString(36).slice(2, 6)}`
+    }));
     setItems([...items.slice(0, index + 1), ...copies, ...items.slice(index + 1)]);
     toast.success(`تم نسخ الصنف ${count} مرة`);
   };
 
   const removeItem = (index: number) => {
-    if (items.length === 1) {
-      toast.error('يجب أن يحتوي على عنصر واحد على الأقل');
+    if (items.length <= 1) {
+      setItems([
+        {
+          id: `item-${Date.now()}`,
+          item_name: '',
+          quantity: 1,
+          unit: 'قطعة',
+          unit_price: 0,
+          total_price: 0,
+          image_url: '',
+          width: null,
+          height: null,
+          depth: null
+        }
+      ]);
+      toast.info('تم تفريغ بيانات الصنف');
       return;
     }
     setItems(items.filter((_, i) => i !== index));
+    toast.success('تم حذف الصنف');
   };
 
   const updateItem = (index: number, field: keyof PurchaseItem, value: any) => {
@@ -131,13 +172,15 @@ export function PurchaseInvoiceEditDialog({
     newItems[index] = { ...newItems[index], [field]: value };
 
     if (field === 'quantity' || field === 'unit_price') {
-      newItems[index].total_price = newItems[index].quantity * newItems[index].unit_price;
+      const q = Number(field === 'quantity' ? value : newItems[index].quantity) || 0;
+      const p = Number(field === 'unit_price' ? value : newItems[index].unit_price) || 0;
+      newItems[index].total_price = q * p;
     }
 
     setItems(newItems);
   };
 
-  const subtotal = items.reduce((sum, item) => sum + item.total_price, 0);
+  const subtotal = items.reduce((sum, item) => sum + (Number(item.total_price) || 0), 0);
   const totalAmount = Math.max(0, subtotal - (discount || 0));
 
   const handleSave = async (shouldPrint: boolean = false) => {
@@ -313,29 +356,29 @@ export function PurchaseInvoiceEditDialog({
               </Button>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               {items.map((item, index) => (
-                <div key={index} className="bg-muted/30 p-4 rounded-lg border border-border">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="font-medium text-card-foreground text-lg">
+                <div key={item.id || `item-${index}`} className="bg-muted/30 p-4 rounded-xl border border-border space-y-3 relative shadow-sm">
+                  <div className="flex items-center justify-between pb-2 border-b border-border/50">
+                    <span className="font-semibold text-card-foreground text-base">
                       صنف {index + 1}
                     </span>
-                    {items.length > 1 && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeItem(index)}
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removeItem(index)}
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8 px-2.5 gap-1.5 rounded-lg"
+                      title={items.length === 1 ? 'تفريغ بيانات هذا الصنف' : 'حذف هذا الصنف بالكامل'}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                      <span className="text-xs font-semibold">{items.length === 1 ? 'تفريغ الصنف' : 'حذف الصنف'}</span>
+                    </Button>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                     <div className="md:col-span-2">
-                      <label className="expenses-form-label block mb-2">اسم الصنف *</label>
+                      <label className="expenses-form-label block mb-1.5 text-xs">اسم الصنف <span className="text-destructive">*</span></label>
                       <Input
                         value={item.item_name}
                         onChange={(e) => updateItem(index, 'item_name', e.target.value)}
@@ -345,7 +388,7 @@ export function PurchaseInvoiceEditDialog({
                     </div>
 
                     <div>
-                      <label className="expenses-form-label block mb-2">الوحدة</label>
+                      <label className="expenses-form-label block mb-1.5 text-xs">الوحدة</label>
                       <Input
                         value={item.unit || ''}
                         onChange={(e) => updateItem(index, 'unit', e.target.value)}
@@ -355,7 +398,7 @@ export function PurchaseInvoiceEditDialog({
                     </div>
 
                     <div>
-                      <label className="expenses-form-label block mb-2">الكمية *</label>
+                      <label className="expenses-form-label block mb-1.5 text-xs">الكمية <span className="text-destructive">*</span></label>
                       <Input
                         type="number"
                         min="1"
@@ -366,7 +409,7 @@ export function PurchaseInvoiceEditDialog({
                     </div>
 
                     <div>
-                      <label className="expenses-form-label block mb-2">سعر الوحدة *</label>
+                      <label className="expenses-form-label block mb-1.5 text-xs">سعر الوحدة <span className="text-destructive">*</span></label>
                       <Input
                         type="number"
                         min="0"
@@ -378,19 +421,37 @@ export function PurchaseInvoiceEditDialog({
                     </div>
                   </div>
 
-                  {/* صورة الصنف */}
-                  <div className="mt-3">
-                    <label className="expenses-form-label block mb-2">صورة الصنف (اختياري)</label>
+                  {/* صورة الصنف مع زر حذف مباشر */}
+                  <div className="mt-2 pt-2 border-t border-border/40">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="expenses-form-label text-xs">صورة الصنف (اختياري)</label>
+                      {item.image_url && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            updateItem(index, 'image_url', '');
+                            toast.success('تم حذف صورة الصنف');
+                          }}
+                          className="text-xs text-destructive hover:text-destructive hover:bg-destructive/10 h-7 px-2 gap-1 font-medium"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          حذف الصورة
+                        </Button>
+                      )}
+                    </div>
                     <ImageUploadZone
                       value={item.image_url}
-                      onChange={(url) => updateItem(index, 'image_url' as any, url)}
+                      onChange={(url) => updateItem(index, 'image_url', url)}
+                      onClear={() => updateItem(index, 'image_url', '')}
                       imageName={`purchase-edit-item-${index}`}
                       folder="invoices"
                       showUrlInput={false}
                       showPreview={!!item.image_url}
                       dropZoneHeight="h-16"
-                      previewHeight="h-20"
-                      label="اسحب أو انقر لرفع صورة الصنف"
+                      previewHeight="h-24"
+                      label=""
                     />
                   </div>
                   <DimensionsRow
@@ -399,8 +460,9 @@ export function PurchaseInvoiceEditDialog({
                     depth={item.depth}
                     onChange={(f, v) => updateItem(index, f, v)}
                   />
-                  <div className="mt-3 text-sm text-muted-foreground bg-muted/20 p-2 rounded">
-                    الإجمالي: <span className="expenses-amount-calculated font-bold">{formatAmount(item.total_price)} د.ل</span>
+                  <div className="mt-2 flex items-center justify-between text-sm bg-muted/40 p-2.5 rounded-lg border border-border/50">
+                    <span className="text-muted-foreground font-medium">إجمالي هذا الصنف:</span>
+                    <span className="expenses-amount-calculated font-bold text-base text-primary">{formatAmount(item.total_price)} د.ل</span>
                   </div>
                   <DuplicateItemControl
                     onDuplicate={(c) => duplicateItem(index, c)}

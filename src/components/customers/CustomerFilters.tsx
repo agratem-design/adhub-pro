@@ -25,23 +25,21 @@ export function CustomerFilters({
   onFilterStatusChange
 }: CustomerFiltersProps) {
   return (
-    <div className="flex flex-col gap-4 mb-6">
-      <div className="flex flex-col sm:flex-row gap-4">
-        {/* بحث */}
-        <div className="flex-1 relative">
-          <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+    <div className="rounded-2xl border border-border/60 bg-background/35 p-3 shadow-sm sm:p-4">
+      <div className="grid gap-3 md:grid-cols-[minmax(260px,1fr)_190px_48px_190px]">
+        <div className="relative min-w-0">
+          <Search className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-primary/80" />
           <SearchInputWithHistory
             historyKey="customers"
             placeholder="البحث بالاسم أو الشركة أو رقم الهاتف..."
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="pr-10"
+            className="h-11 rounded-xl border-border/70 bg-card/70 pr-10 transition-all duration-200 focus-visible:border-primary/60"
           />
         </div>
 
-        {/* الترتيب حسب */}
         <Select value={sortBy} onValueChange={onSortChange}>
-          <SelectTrigger className="w-full sm:w-[200px]">
+          <SelectTrigger className="h-11 w-full cursor-pointer rounded-xl border-border/70 bg-card/70 transition-all duration-200 hover:border-primary/40">
             <SelectValue placeholder="الترتيب حسب" />
           </SelectTrigger>
           <SelectContent>
@@ -53,19 +51,20 @@ export function CustomerFilters({
           </SelectContent>
         </Select>
 
-        {/* اتجاه الترتيب */}
         <Button
+          type="button"
           variant="outline"
           size="icon"
           onClick={onSortOrderToggle}
-          className="shrink-0"
+          className="h-11 w-full cursor-pointer rounded-xl border-border/70 bg-card/70 transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 hover:text-primary active:scale-95 motion-reduce:transform-none motion-reduce:transition-none md:w-12"
+          aria-label={sortOrder === 'asc' ? 'ترتيب تصاعدي' : 'ترتيب تنازلي'}
+          title={sortOrder === 'asc' ? 'ترتيب تصاعدي' : 'ترتيب تنازلي'}
         >
           {sortOrder === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />}
         </Button>
 
-        {/* فلتر الحالة */}
         <Select value={filterStatus} onValueChange={onFilterStatusChange}>
-          <SelectTrigger className="w-full sm:w-[200px]">
+          <SelectTrigger className="h-11 w-full cursor-pointer rounded-xl border-border/70 bg-card/70 transition-all duration-200 hover:border-primary/40">
             <SelectValue placeholder="حالة الدفع" />
           </SelectTrigger>
           <SelectContent>

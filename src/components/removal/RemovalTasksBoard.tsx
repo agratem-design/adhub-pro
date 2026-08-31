@@ -1,5 +1,4 @@
 import React, { useState, useMemo } from 'react';
-import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { usePersistedFilters } from '@/hooks/usePersistedFilters';
 import { Button } from '@/components/ui/button';
@@ -15,7 +14,7 @@ import {
   Trash2, ChevronDown,
   LayoutList, Layers, X,
   ChevronLeft, ChevronRight,
-  AlertTriangle,
+  AlertTriangle, CalendarDays, Megaphone,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { RemovalTaskItemCard } from './RemovalTaskItemCard';
@@ -60,6 +59,9 @@ interface Props {
 
 type SortField = 'client' | 'contract' | 'billboards' | 'status' | 'date' | 'team';
 type SortDir = 'asc' | 'desc';
+
+const getContractGroupKey = (task: { contract_id?: number | null; id: string }) =>
+  task.contract_id != null ? `contract:${task.contract_id}` : `task:${task.id}`;
 
 const STATUS_CONFIG = {
   completed: {
@@ -116,8 +118,8 @@ const SortIconEl = ({ field, sortField, sortDir }: { field: SortField; sortField
   sortField !== field
     ? <ArrowUpDown className="h-3 w-3 opacity-30" />
     : sortDir === 'asc'
-      ? <ArrowUp className="h-3 w-3 text-red-400" />
-      : <ArrowDown className="h-3 w-3 text-red-400" />;
+      ? <ArrowUp className="h-3 w-3 text-primary" />
+      : <ArrowDown className="h-3 w-3 text-primary" />;
 
 export const RemovalTasksBoard: React.FC<Props> = ({
   tasks, allTaskItems, billboardById, contractByNumber, teamById, teams,
@@ -149,7 +151,7 @@ export const RemovalTasksBoard: React.FC<Props> = ({
 
   const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
-  const PAGE_SIZE = 15;
+  const GROUPS_PER_PAGE = 15;
 
   const handleSort = (field: SortField) => {
     if (sortField === field) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
@@ -190,7 +192,7 @@ export const RemovalTasksBoard: React.FC<Props> = ({
       adType: contract?.['Ad Type'] || '—',
       contractEndDate: contract?.['End Date'] || null,
     };
-  }), [tasks, allTaskItems, contractByNumber, teamById, itemsByTask]);
+  }), [tasks, contractByNumber, teamById, itemsByTask]);
 
   const filtered = useMemo(() => {
     let r = enriched;
@@ -218,6 +220,9 @@ export const RemovalTasksBoard: React.FC<Props> = ({
   // Count for tabs
   const activeCount = useMemo(() => enriched.filter(t => t.displayStatus !== 'completed').length, [enriched]);
   const completedCount = useMemo(() => enriched.filter(t => t.displayStatus === 'completed').length, [enriched]);
+  const pendingItemsCount = Math.max(0, totalItems - completedItems);
+  const overallCompletionPct = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
+  const hasActiveFilters = Boolean(search || filterStatus !== 'all' || filterTeam !== 'all');
 
   const sorted = useMemo(() => [...filtered].sort((a, b) => {
     let av: any, bv: any;
@@ -234,28 +239,42 @@ export const RemovalTasksBoard: React.FC<Props> = ({
     return sortDir === 'asc' ? cmp : -cmp;
   }), [filtered, sortField, sortDir]);
 
-  const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
-  const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // ترقيم الصفحات يكون حسب العقود حتى لا تنقسم فرق العقد نفسه بين صفحتين.
+  const sortedContractGroups = useMemo(() => {
+    const groups = new Map<string, typeof sorted>();
+    sorted.forEach(task => {
+      const key = getContractGroupKey(task);
+      const current = groups.get(key) || [];
+      current.push(task);
+      groups.set(key, current);
+    });
+    return Array.from(groups.values());
+  }, [sorted]);
+  const totalPages = Math.ceil(sortedContractGroups.length / GROUPS_PER_PAGE);
+  const paginatedGroups = sortedContractGroups.slice((page - 1) * GROUPS_PER_PAGE, page * GROUPS_PER_PAGE);
+  const paginated = paginatedGroups.flat();
 
   const allOnPageSel = paginated.length > 0 && paginated.every(t => selected.has(t.id));
   const toggleAll = () => {
     const next = new Set(selected);
-    allOnPageSel ? paginated.forEach(t => next.delete(t.id)) : paginated.forEach(t => next.add(t.id));
+    if (allOnPageSel) paginated.forEach(t => next.delete(t.id));
+    else paginated.forEach(t => next.add(t.id));
     setSelected(next);
   };
   const toggleOne = (id: string) => {
     const next = new Set(selected);
-    next.has(id) ? next.delete(id) : next.add(id);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
     setSelected(next);
   };
 
   const SortPill = ({ field, label }: { field: SortField; label: string }) => (
     <button
       onClick={() => handleSort(field)}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all duration-150 border ${
+      className={`flex h-9 cursor-pointer items-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition-all duration-200 active:scale-95 ${
         sortField === field
-          ? 'bg-red-500/15 text-red-400 border-red-500/30'
-          : 'text-muted-foreground border-border/40 hover:text-red-400 hover:border-red-500/20'
+          ? 'border-primary/30 bg-primary/15 text-primary'
+          : 'border-border/40 text-muted-foreground hover:border-primary/20 hover:text-primary'
       }`}
     >
       {label}
@@ -272,20 +291,20 @@ export const RemovalTasksBoard: React.FC<Props> = ({
     return (
       <div className="bg-card/45 backdrop-blur-md border border-border/25 px-4 py-1.5 flex items-center gap-4 text-[11px] text-muted-foreground rounded-2xl shrink-0 shadow-sm w-fit mr-auto">
         <div className="flex items-center gap-2 font-bold text-muted-foreground/80 select-none">
-          <span>{sorted.length > 0 ? `عرض ${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, sorted.length)} من ${sorted.length} مهمة` : 'لا توجد نتائج'}</span>
+          <span>{sortedContractGroups.length > 0 ? `عرض ${(page - 1) * GROUPS_PER_PAGE + 1}–${Math.min(page * GROUPS_PER_PAGE, sortedContractGroups.length)} من ${sortedContractGroups.length} عقد/مجموعة` : 'لا توجد نتائج'}</span>
           <span className="text-[10px] text-muted-foreground/35 font-normal">|</span>
           <span className="text-[10px] text-muted-foreground/50 font-normal">الصفحة {page} من {totalPages}</span>
         </div>
         <div className="flex items-center gap-1">
-          <Button variant="outline" size="sm" className="h-7 px-2 border-border/30 rounded-xl text-[10px] gap-1 font-bold text-muted-foreground/80 hover:text-foreground hover:bg-muted/50" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+          <Button variant="outline" size="sm" className="h-9 cursor-pointer gap-1 rounded-xl border-border/30 px-3 text-[10px] font-bold text-muted-foreground/80 transition-all duration-200 hover:bg-muted/50 hover:text-foreground" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
             <ChevronRight className="h-3 w-3" />السابق
           </Button>
-          {startPage > 1 && (<><Button size="sm" className="h-7 w-7 p-0 text-[10px] rounded-xl bg-transparent hover:bg-muted/50 text-muted-foreground border border-transparent" onClick={() => onPageChange(1)}>1</Button>{startPage > 2 && <span className="text-muted-foreground/40 px-1 text-[10px]">...</span>}</>)}
+          {startPage > 1 && (<><Button size="sm" className="h-9 w-9 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 text-[10px] text-muted-foreground transition-all duration-200 hover:bg-muted/50" onClick={() => onPageChange(1)}>1</Button>{startPage > 2 && <span className="text-muted-foreground/40 px-1 text-[10px]">...</span>}</>)}
           {pageNumbers.map(p => (
-            <Button key={p} size="sm" className={`h-7 w-7 p-0 text-[10px] rounded-xl transition-all ${p === page ? 'bg-primary hover:bg-primary/90 text-primary-foreground font-black shadow-md shadow-primary/10' : 'bg-transparent hover:bg-muted/50 text-muted-foreground border border-transparent'}`} onClick={() => onPageChange(p)}>{p}</Button>
+            <Button key={p} size="sm" className={`h-9 w-9 cursor-pointer rounded-xl p-0 text-[10px] transition-all duration-200 ${p === page ? 'bg-primary text-primary-foreground font-black shadow-md shadow-primary/10 hover:bg-primary/90' : 'bg-transparent hover:bg-muted/50 text-muted-foreground border border-transparent'}`} onClick={() => onPageChange(p)}>{p}</Button>
           ))}
-          {endPage < totalPages && (<>{endPage < totalPages - 1 && <span className="text-muted-foreground/40 px-1 text-[10px]">...</span>}<Button size="sm" className="h-7 w-7 p-0 text-[10px] rounded-xl bg-transparent hover:bg-muted/50 text-muted-foreground border border-transparent" onClick={() => onPageChange(totalPages)}>{totalPages}</Button></>)}
-          <Button variant="outline" size="sm" className="h-7 px-2 border-border/30 rounded-xl text-[10px] gap-1 font-bold text-muted-foreground/80 hover:text-foreground hover:bg-muted/50" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
+          {endPage < totalPages && (<>{endPage < totalPages - 1 && <span className="text-muted-foreground/40 px-1 text-[10px]">...</span>}<Button size="sm" className="h-9 w-9 cursor-pointer rounded-xl border border-transparent bg-transparent p-0 text-[10px] text-muted-foreground transition-all duration-200 hover:bg-muted/50" onClick={() => onPageChange(totalPages)}>{totalPages}</Button></>)}
+          <Button variant="outline" size="sm" className="h-9 cursor-pointer gap-1 rounded-xl border-border/30 px-3 text-[10px] font-bold text-muted-foreground/80 transition-all duration-200 hover:bg-muted/50 hover:text-foreground" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
             التالي<ChevronLeft className="h-3 w-3" />
           </Button>
         </div>
@@ -295,35 +314,35 @@ export const RemovalTasksBoard: React.FC<Props> = ({
 
   return (
     <>
-      <div className="flex flex-col h-full gap-4.5" dir="rtl">
+      <div className="flex h-full flex-col gap-4" dir="rtl">
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4.5 shrink-0">
+        <div className="grid shrink-0 grid-cols-2 gap-3 md:grid-cols-5">
           {[
-            { label: 'إجمالي المهام', value: totalTasks, color: 'text-red-400', icon: LayoutList, bg: 'bg-red-500/10', border: 'border-red-500/20', accent: 'bg-red-500', pct: 100 },
-            { label: 'معلقة', value: pendingTasks, color: 'text-amber-400', icon: Clock, bg: 'bg-amber-500/10', border: 'border-amber-500/20', accent: 'bg-amber-500', pct: totalTasks > 0 ? Math.round((pendingTasks / totalTasks) * 100) : 0 },
-            { label: 'مكتملة', value: completedTasks, color: 'text-emerald-400', icon: CheckCircle2, bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', accent: 'bg-emerald-500', pct: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0 },
-            { label: 'إجمالي اللوحات', value: totalItems, color: 'text-blue-400', icon: Layers, bg: 'bg-blue-500/10', border: 'border-blue-500/20', accent: 'bg-blue-500', pct: 100 },
-            { label: 'لوحات مُزالة', value: completedItems, color: 'text-emerald-400', icon: CheckCircle2, bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', accent: 'bg-emerald-500', pct: totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0 },
+            { label: 'إجمالي المهام', value: totalTasks, color: 'text-primary', icon: LayoutList, bg: 'bg-primary/10', border: 'border-primary/20', accent: 'bg-primary', pct: 100 },
+            { label: 'مهام نشطة', value: activeCount, color: 'text-amber-400', icon: Clock, bg: 'bg-amber-500/10', border: 'border-amber-500/20', accent: 'bg-amber-500', pct: totalTasks > 0 ? Math.round((activeCount / totalTasks) * 100) : 0 },
+            { label: 'لوحات بانتظار الإزالة', value: pendingItemsCount, color: 'text-rose-400', icon: AlertTriangle, bg: 'bg-rose-500/10', border: 'border-rose-500/20', accent: 'bg-rose-500', pct: totalItems > 0 ? Math.round((pendingItemsCount / totalItems) * 100) : 0 },
+            { label: 'لوحات تمت إزالتها', value: completedItems, color: 'text-emerald-400', icon: CheckCircle2, bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', accent: 'bg-emerald-500', pct: overallCompletionPct },
+            { label: 'نسبة الإنجاز', value: `${overallCompletionPct}%`, color: 'text-blue-400', icon: Layers, bg: 'bg-blue-500/10', border: 'border-blue-500/20', accent: 'bg-blue-500', pct: overallCompletionPct },
           ].map(({ label, value, color, icon: Icon, bg, border, accent, pct }) => (
-            <div key={label} className={`relative bg-card/45 backdrop-blur-lg border ${border} rounded-2xl p-5 flex flex-col justify-between min-h-[135px] transition-all duration-300 hover:scale-[1.02] hover:shadow-lg hover:shadow-black/20 group overflow-hidden text-right`} style={{ background: `linear-gradient(135deg, hsl(var(--card)/0.8) 0%, hsl(var(--card)/0.45) 100%)` }}>
-              <div className={`absolute top-0 left-0 right-0 h-[3px] ${accent} opacity-70 group-hover:opacity-100 transition-opacity`} />
+            <div key={label} className={`group relative flex min-h-[104px] flex-col justify-between overflow-hidden rounded-2xl border ${border} bg-card/60 p-4 text-right shadow-sm backdrop-blur-md transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md`}>
+              <div className={`absolute inset-x-0 top-0 h-0.5 ${accent} opacity-80`} />
               <div className="flex items-start justify-between">
-                <div className="space-y-1.5 text-right flex-1 min-w-0">
-                  <p className="text-[10px] font-bold text-muted-foreground/80 tracking-wide uppercase truncate">{label}</p>
-                  <p className="text-2xl font-black tracking-tight text-foreground leading-none">{value}</p>
+                <div className="min-w-0 flex-1 space-y-1 text-right">
+                  <p className="truncate text-[10px] font-bold text-muted-foreground">{label}</p>
+                  <p className="font-mono text-2xl font-black leading-none tracking-tight text-foreground">{value}</p>
                 </div>
-                <div className={`p-2.5 rounded-xl ${bg} border border-white/5 transition-all duration-300 group-hover:scale-105 shrink-0 mr-3`}>
-                  <Icon className={`h-5 w-5 ${color}`} />
+                <div className={`mr-3 shrink-0 rounded-xl border border-border/20 p-2 ${bg}`}>
+                  <Icon className={`h-4 w-4 ${color}`} />
                 </div>
               </div>
-              <div className="space-y-2 mt-2 text-right">
-                <div className="flex items-center justify-between text-[10px] font-extrabold text-muted-foreground/60">
-                  <span>النسبة:</span>
+              <div className="mt-2 space-y-1.5 text-right">
+                <div className="flex items-center justify-between text-[9px] font-bold text-muted-foreground/70">
+                  <span>من الإجمالي</span>
                   <span className={color}>{pct}%</span>
                 </div>
-                <div className="h-1.5 w-full bg-muted/30 rounded-full overflow-hidden border border-white/5">
-                  <div className={`h-full rounded-full ${accent} transition-all duration-500`} style={{ width: `${pct}%` }} />
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/40">
+                  <div className={`h-full rounded-full ${accent} motion-safe:transition-all motion-safe:duration-300`} style={{ width: `${pct}%` }} />
                 </div>
               </div>
             </div>
@@ -331,13 +350,13 @@ export const RemovalTasksBoard: React.FC<Props> = ({
         </div>
 
         {/* Tabs: معلقة / مكتملة */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex w-full shrink-0 items-center gap-1 rounded-xl border border-border/30 bg-card/50 p-1 sm:w-fit">
           <button
             onClick={() => { setActiveTab('active'); onPageChange(1); }}
-            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border ${
+            className={`h-10 flex-1 cursor-pointer rounded-lg px-4 text-xs font-bold transition-all duration-200 sm:flex-none ${
               activeTab === 'active'
-                ? 'bg-red-500/15 text-red-400 border-red-500/30'
-                : 'bg-card text-muted-foreground border-border hover:border-red-500/20'
+                ? 'bg-rose-500/15 text-rose-400 shadow-sm'
+                : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
             }`}
           >
             <AlertTriangle className="h-3.5 w-3.5 inline ml-1.5" />
@@ -345,10 +364,10 @@ export const RemovalTasksBoard: React.FC<Props> = ({
           </button>
           <button
             onClick={() => { setActiveTab('completed'); onPageChange(1); }}
-            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border ${
+            className={`h-10 flex-1 cursor-pointer rounded-lg px-4 text-xs font-bold transition-all duration-200 sm:flex-none ${
               activeTab === 'completed'
-                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                : 'bg-card text-muted-foreground border-border hover:border-emerald-500/20'
+                ? 'bg-emerald-500/15 text-emerald-400 shadow-sm'
+                : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
             }`}
           >
             <CheckCircle2 className="h-3.5 w-3.5 inline ml-1.5" />
@@ -357,22 +376,22 @@ export const RemovalTasksBoard: React.FC<Props> = ({
         </div>
 
         {/* Toolbar & Filter Control Center */}
-        <div className="bg-card/55 backdrop-blur-lg border border-border/30 rounded-[22px] p-4 flex flex-col lg:flex-row gap-4.5 items-center justify-between shrink-0 shadow-lg">
-          <div className="flex flex-wrap items-center gap-3 flex-1 w-full lg:w-auto">
+        <div className="flex shrink-0 flex-col items-center justify-between gap-3 rounded-2xl border border-border/30 bg-card/55 p-3 shadow-sm backdrop-blur-lg xl:flex-row">
+          <div className="flex w-full flex-1 flex-wrap items-center gap-2 xl:w-auto">
             {/* Search Input */}
-            <div className="relative flex-1 min-w-[200px] max-w-md">
+            <div className="relative min-w-[220px] flex-1 xl:max-w-md">
               <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
               <Input
                 placeholder="بحث برقم العقد، الزبون، الفريق..."
                 value={search}
                 onChange={e => { setSearch(e.target.value); onPageChange(1); }}
-                className="pr-10 bg-background border-border/50 rounded-xl h-10 text-sm"
+                className="h-10 rounded-xl border-border/40 bg-background/70 pr-10 text-xs focus-visible:ring-primary/40"
               />
             </div>
             
             {/* Status Select */}
             <Select value={filterStatus} onValueChange={v => { setFilterStatus(v); onPageChange(1); }}>
-              <SelectTrigger className="w-[145px] h-10 bg-background border-border/50 text-sm rounded-xl">
+              <SelectTrigger className="h-10 w-[145px] rounded-xl border-border/40 bg-background/70 text-xs">
                 <SelectValue placeholder="الحالة" />
               </SelectTrigger>
               <SelectContent>
@@ -386,7 +405,7 @@ export const RemovalTasksBoard: React.FC<Props> = ({
 
             {/* Team Select */}
             <Select value={filterTeam} onValueChange={v => { setFilterTeam(v); onPageChange(1); }}>
-              <SelectTrigger className="w-[155px] h-10 bg-background border-border/50 text-sm rounded-xl">
+              <SelectTrigger className="h-10 w-[155px] rounded-xl border-border/40 bg-background/70 text-xs">
                 <SelectValue placeholder="الفريق" />
               </SelectTrigger>
               <SelectContent>
@@ -395,28 +414,29 @@ export const RemovalTasksBoard: React.FC<Props> = ({
               </SelectContent>
             </Select>
 
-            {/* Print all for team - improved UI */}
-            {onPrintAllTeam && (
-              <div className="flex items-center gap-2">
-                {/* Print ALL pending button */}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-10 px-3 gap-2 rounded-xl border-amber-500/30 text-amber-500 hover:bg-amber-500/10 hover:border-amber-500/60 font-bold text-xs transition-all"
-                  onClick={() => {
-                    // Print first team that has pending items
-                    const firstTeam = teams.find(t => enriched.some(task => task.team_id === t.id && task.items?.some((i: any) => i.status !== 'completed')));
-                    if (firstTeam) onPrintAllTeam(firstTeam.id);
-                  }}
-                >
-                  <Printer className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">طباعة</span>
-                </Button>
+            {hasActiveFilters && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearch('');
+                  setFilterStatus('all');
+                  setFilterTeam('all');
+                  onPageChange(1);
+                }}
+                className="h-10 cursor-pointer gap-1.5 rounded-xl px-3 text-xs text-muted-foreground transition-all duration-200 hover:bg-muted/50 hover:text-foreground active:scale-95"
+              >
+                <X className="h-3.5 w-3.5" />
+                مسح الفلاتر
+              </Button>
+            )}
 
-                {/* Per-team dropdown */}
-                <Select onValueChange={(teamId) => onPrintAllTeam(teamId)}>
-                  <SelectTrigger className="h-10 bg-amber-500/8 border-amber-500/25 text-amber-500 rounded-xl w-auto px-3 gap-1.5 hover:bg-amber-500/15 transition-all text-xs font-bold">
-                    <span>فرقة</span>
+            {onPrintAllTeam && (
+              <Select onValueChange={(teamId) => onPrintAllTeam(teamId)}>
+                  <SelectTrigger className="h-10 w-auto cursor-pointer gap-1.5 rounded-xl border-primary/25 bg-primary/5 px-3 text-xs font-bold text-primary transition-all duration-200 hover:bg-primary/10">
+                    <Printer className="h-3.5 w-3.5" />
+                    <span>طباعة حسب الفريق</span>
                     <ChevronDown className="h-3.5 w-3.5" />
                   </SelectTrigger>
                   <SelectContent>
@@ -426,21 +446,41 @@ export const RemovalTasksBoard: React.FC<Props> = ({
                       .map(t => (
                         <SelectItem key={t.id} value={t.id} className="gap-2">
                           <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full bg-amber-400" />
+                            <div className="h-2 w-2 rounded-full bg-primary" />
                             <span>{t.team_name}</span>
                           </div>
                         </SelectItem>
                       ))
                     }
                   </SelectContent>
-                </Select>
-              </div>
+              </Select>
             )}
+
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={onRefresh}
+              className="h-10 w-10 cursor-pointer rounded-xl border-border/40 bg-background/70 text-muted-foreground transition-all duration-200 hover:border-primary/30 hover:bg-primary/10 hover:text-primary active:scale-95"
+              aria-label="تحديث البيانات"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onAddTask}
+              className="h-10 cursor-pointer gap-2 rounded-xl border-primary/25 bg-primary/5 px-3 text-xs font-bold text-primary transition-all duration-200 hover:bg-primary/10 active:scale-95 xl:hidden"
+            >
+              <Package className="h-4 w-4" />
+              مهمة يدوية
+            </Button>
           </div>
           
           <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
             {/* Sort pills */}
-            <div className="hidden lg:flex items-center gap-2">
+            <div className="hidden xl:flex items-center gap-2">
               <span className="text-xs text-muted-foreground/50 shrink-0">ترتيب:</span>
               <SortPill field="date" label="التاريخ" />
               <SortPill field="client" label="العميل" />
@@ -478,36 +518,38 @@ export const RemovalTasksBoard: React.FC<Props> = ({
               initial={{ opacity: 0, y: -10, scale: 0.98 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -10, scale: 0.98 }}
-              className="bg-[#d6ac40]/10 border border-[#d6ac40]/30 rounded-2xl px-5 py-3 flex flex-wrap gap-2.5 items-center shrink-0 shadow-md shadow-[#d6ac40]/5"
+              className="flex shrink-0 flex-wrap items-center gap-2.5 rounded-2xl border border-primary/30 bg-primary/10 px-4 py-3 shadow-md shadow-primary/5"
             >
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-[#d6ac40] animate-pulse" />
-                <span className="text-[#b8860b] font-bold text-sm">{selected.size} مهمة محددة</span>
+                <div className="h-2 w-2 rounded-full bg-primary" />
+                <span className="text-sm font-bold text-primary">{selected.size} مهمة محددة</span>
               </div>
-              <div className="w-px h-5 bg-red-500/25 mx-1" />
+              <div className="mx-1 hidden h-5 w-px bg-primary/25 sm:block" />
               {onBulkComplete && (
-                <Button size="sm" variant="ghost" className="h-8 px-3 text-xs gap-1.5 text-emerald-400 hover:bg-emerald-500/15 rounded-xl"
+                <Button size="sm" variant="ghost" className="h-10 cursor-pointer gap-1.5 rounded-xl px-3 text-xs text-emerald-400 transition-all duration-200 hover:bg-emerald-500/15 active:scale-95"
                   onClick={() => { onBulkComplete(Array.from(selected)); }}>
                   <CheckCircle2 className="h-3.5 w-3.5" /> إكمال المحدد
                 </Button>
               )}
               {onBulkPrint && (
-                <Button size="sm" variant="ghost" className="h-8 px-3 text-xs gap-1.5 text-amber-400 hover:bg-amber-500/15 rounded-xl"
+                <Button size="sm" variant="ghost" className="h-10 cursor-pointer gap-1.5 rounded-xl px-3 text-xs text-primary transition-all duration-200 hover:bg-primary/15 active:scale-95"
                   onClick={() => { onBulkPrint(Array.from(selected)); }}>
                   <Printer className="h-3.5 w-3.5" /> طباعة المحدد
                 </Button>
               )}
               {onBulkDelete && (
-                <Button size="sm" variant="ghost" className="h-8 px-3 text-xs gap-1.5 text-red-400 hover:bg-red-500/15 mr-auto rounded-xl"
+                <Button size="sm" variant="ghost" className="mr-auto h-10 cursor-pointer gap-1.5 rounded-xl px-3 text-xs text-rose-400 transition-all duration-200 hover:bg-rose-500/15 active:scale-95"
                   onClick={() => { onBulkDelete(Array.from(selected)); setSelected(new Set()); }}>
                   <Trash2 className="h-3.5 w-3.5" /> حذف المحدد
                 </Button>
               )}
               <button
+                type="button"
                 onClick={() => setSelected(new Set())}
-                className="h-8 w-8 flex items-center justify-center rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl text-muted-foreground transition-all duration-200 hover:bg-muted/50 hover:text-foreground active:scale-95"
+                aria-label="إلغاء تحديد المهام"
               >
-                <X className="h-3.5 w-3.5" />
+                <X className="h-4 w-4" />
               </button>
             </motion.div>
           )}
@@ -530,17 +572,17 @@ export const RemovalTasksBoard: React.FC<Props> = ({
             (() => {
               const groups: Record<string, typeof paginated> = {};
               paginated.forEach(task => {
-                const key = String(task.contract_id || 'no-contract');
+                const key = getContractGroupKey(task);
                 if (!groups[key]) groups[key] = [];
                 groups[key].push(task);
               });
               const groupEntries = Object.entries(groups);
-              const allSingle = groupEntries.every(([, g]) => g.length === 1);
-
               const renderTask = (task: any, idx: number) => {
                 const isSelected = selected.has(task.id);
 
-                const installedImg = task.items.map((i: any) => i.installed_image_url).find(Boolean);
+                const installedImg = task.items
+                  .map((i: any) => i.installed_image_face_a_url || i.installed_image_url || i.installed_image_face_b_url)
+                  .find(Boolean);
                 const lastCompleted = task.items.filter((i: any) => i.status === 'completed').slice(-1)[0];
 
                 return (
@@ -566,7 +608,7 @@ export const RemovalTasksBoard: React.FC<Props> = ({
                       onSyncMissing={onSyncMissingBillboards && task.contract_id ? () => onSyncMissingBillboards(task.contract_id, [task.id]) : undefined}
                     >
                       {/* لوحات المهمة */}
-                      <div className="px-4 py-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      <div className="grid grid-cols-1 gap-3 px-3 py-3 md:grid-cols-2 2xl:grid-cols-3">
                         {task.items.map((item: any) => {
                           const billboard = billboardById[item.billboard_id];
                           return (
@@ -583,16 +625,18 @@ export const RemovalTasksBoard: React.FC<Props> = ({
                       </div>
                       {/* تأكيد حذف المهمة داخل المحتوى */}
                       {deleteConfirmId === task.id && (
-                        <div className="mx-4 mb-4 flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl p-3">
-                          <span className="text-sm text-red-400 font-medium flex-1">تأكيد حذف المهمة؟</span>
+                        <div className="mx-3 mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3">
+                          <span className="min-w-[160px] flex-1 text-sm font-medium text-rose-400">هل تريد حذف هذه المهمة؟</span>
                           <button
+                            type="button"
                             onClick={() => { onDeleteTask(task.id); setDeleteConfirmId(null); }}
-                            className="px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 text-xs font-bold hover:bg-red-500/35 transition-colors"
-                          >نعم</button>
+                            className="h-10 cursor-pointer rounded-xl bg-rose-500/20 px-4 text-xs font-bold text-rose-400 transition-all duration-200 hover:bg-rose-500/30 active:scale-95"
+                          >تأكيد الحذف</button>
                           <button
+                            type="button"
                             onClick={() => setDeleteConfirmId(null)}
-                            className="px-3 py-1.5 rounded-lg bg-muted/60 text-muted-foreground text-xs hover:bg-muted transition-colors"
-                          >لا</button>
+                            className="h-10 cursor-pointer rounded-xl bg-muted/60 px-4 text-xs text-muted-foreground transition-all duration-200 hover:bg-muted hover:text-foreground active:scale-95"
+                          >إلغاء</button>
                         </div>
                       )}
                     </RemovalMobileTaskCard>
@@ -600,59 +644,101 @@ export const RemovalTasksBoard: React.FC<Props> = ({
                 );
               };
 
-              if (allSingle) {
-                return paginated.map((task, idx) => renderTask(task, idx));
-              }
-
               return groupEntries.map(([contractKey, groupTasks]) => {
-                const cid = contractKey !== 'no-contract' ? Number(contractKey) : null;
+                const cid = contractKey.startsWith('contract:') ? Number(contractKey.replace('contract:', '')) : null;
                 const customerName = groupTasks[0]?.customerName || 'غير محدد';
                 const totalBillboards = groupTasks.reduce((s, t) => s + t.totalItems, 0);
                 const completedBillboards = groupTasks.reduce((s, t) => s + t.completed, 0);
                 const pct = totalBillboards > 0 ? Math.round((completedBillboards / totalBillboards) * 100) : 0;
                 const uniqueTeams = [...new Set(groupTasks.map(t => t.team?.team_name).filter(Boolean))];
-
-                if (groupTasks.length === 1) return renderTask(groupTasks[0], 0);
+                const uniqueAdTypes = [...new Set(groupTasks.map(t => t.adType).filter((v: string) => v && v !== '—'))];
+                const contractEndDate = groupTasks[0]?.contractEndDate;
+                const pendingGroupTasks = groupTasks.filter(t => t.displayStatus !== 'completed');
 
                 return (
-                  <Collapsible key={contractKey} defaultOpen>
+                  <Collapsible key={contractKey} defaultOpen className="group/contract overflow-hidden rounded-2xl border border-primary/20 bg-card/45 shadow-sm">
                     <CollapsibleTrigger asChild className="w-full">
-                      <div className="bg-card border border-border rounded-2xl px-5 py-3 flex flex-wrap items-center gap-3 hover:bg-muted/30 transition-colors cursor-pointer">
-                        <FolderOpen className="h-5 w-5 text-red-500 shrink-0" />
-                        {cid && <span className="font-bold text-foreground text-base">عقد #{cid}</span>}
-                        <span className="text-sm text-muted-foreground">— {customerName}</span>
-                        <div className="flex items-center gap-3 mr-auto">
-                          <span className="text-xs text-muted-foreground bg-muted/60 px-2 py-1 rounded-lg">
-                            <Users className="h-3 w-3 inline ml-1" />{groupTasks.length} فريق
-                          </span>
-                          <span className="text-xs text-muted-foreground bg-muted/60 px-2 py-1 rounded-lg">
-                            <Layers className="h-3 w-3 inline ml-1" />{completedBillboards}/{totalBillboards} لوحة
-                          </span>
-                          <span className={`text-xs font-bold px-2 py-1 rounded-lg ${pct === 100 ? 'bg-emerald-500/15 text-emerald-400' : pct > 0 ? 'bg-amber-500/15 text-amber-400' : 'bg-muted/60 text-muted-foreground'}`}>
-                            {pct}%
-                          </span>
-                          {uniqueTeams.length > 0 && (
-                            <span className="text-[10px] text-muted-foreground/70 truncate max-w-[200px]">{uniqueTeams.join(' • ')}</span>
-                          )}
-                          {onSyncMissingBillboards && cid && (
-                            <span onClick={e => e.stopPropagation()}>
+                      <div className="relative flex w-full cursor-pointer flex-col gap-3 bg-card/75 p-4 text-right transition-colors duration-200 hover:bg-primary/[0.04] sm:p-5">
+                        <div className="absolute inset-y-0 right-0 w-1 bg-primary" />
+                        <div className="flex flex-wrap items-start gap-3">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary">
+                            <FolderOpen className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-[220px] flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-base font-black text-foreground">{cid ? `عقد #${cid}` : 'مهمة بدون عقد'}</span>
+                              <span className={`rounded-lg px-2 py-1 text-[10px] font-black ${pct === 100 ? 'bg-emerald-500/15 text-emerald-400' : 'bg-primary/10 text-primary'}`}>
+                                {pct === 100 ? 'مكتمل' : `${pct}% منجز`}
+                              </span>
+                            </div>
+                            <p className="mt-1 truncate text-sm font-bold text-foreground/90">{customerName}</p>
+                            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-muted-foreground">
+                              {uniqueAdTypes.length > 0 && (
+                                <span className="flex items-center gap-1.5"><Megaphone className="h-3.5 w-3.5 text-primary/80" />{uniqueAdTypes.join('، ')}</span>
+                              )}
+                              {contractEndDate && (
+                                <span className="flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5 text-primary/80" />انتهى {new Date(contractEndDate).toLocaleDateString('ar-LY')}</span>
+                              )}
+                              <span className="flex items-center gap-1.5"><Users className="h-3.5 w-3.5 text-primary/80" />{uniqueTeams.length || groupTasks.length} {uniqueTeams.length === 1 ? 'فريق' : 'فرق'}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex min-w-[210px] flex-1 flex-col gap-2 sm:max-w-sm">
+                            <div className="flex items-center justify-between text-xs font-bold">
+                              <span className="text-muted-foreground">إنجاز لوحات العقد</span>
+                              <span className="text-foreground">{completedBillboards} / {totalBillboards}</span>
+                            </div>
+                            <div className="h-2 overflow-hidden rounded-full bg-muted/60">
+                              <div className={`h-full rounded-full transition-all duration-300 ${pct === 100 ? 'bg-emerald-500' : 'bg-primary'}`} style={{ width: `${pct}%` }} />
+                            </div>
+                            {uniqueTeams.length > 0 && <p className="truncate text-[10px] text-muted-foreground/80">{uniqueTeams.join(' • ')}</p>}
+                          </div>
+
+                          <div className="flex items-center gap-1" onClick={event => event.stopPropagation()}>
+                            {onBulkPrint && pendingGroupTasks.length > 0 && (
                               <Button
+                                type="button"
                                 size="sm"
-                                variant="ghost"
-                                className="h-7 px-2 text-xs gap-1 hover:bg-emerald-500/10 hover:text-emerald-500"
-                                onClick={() => onSyncMissingBillboards(cid, groupTasks.map(t => t.id))}
+                                variant="outline"
+                                className="h-10 cursor-pointer gap-1.5 rounded-xl border-primary/25 bg-primary/5 px-3 text-xs font-bold text-primary transition-all duration-200 hover:bg-primary/10 active:scale-95"
+                                onClick={() => onBulkPrint(groupTasks.map(task => task.id))}
                               >
-                                <Package className="h-3.5 w-3.5" />
-                                إضافة الناقصة
+                                <Printer className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">طباعة العقد</span>
                               </Button>
-                            </span>
-                          )}
-                          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform [[data-state=open]_&]:rotate-180" />
+                            )}
+                            {onBulkComplete && pendingGroupTasks.length > 0 && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-10 cursor-pointer gap-1.5 rounded-xl border-emerald-500/25 bg-emerald-500/5 px-3 text-xs font-bold text-emerald-400 transition-all duration-200 hover:bg-emerald-500/10 active:scale-95"
+                                onClick={() => onBulkComplete(pendingGroupTasks.map(task => task.id))}
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                <span className="hidden lg:inline">إكمال المتبقي</span>
+                              </Button>
+                            )}
+                            {onSyncMissingBillboards && cid && (
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-10 w-10 cursor-pointer rounded-xl text-muted-foreground transition-all duration-200 hover:bg-primary/10 hover:text-primary active:scale-95"
+                                onClick={() => onSyncMissingBillboards(cid, groupTasks.map(t => t.id))}
+                                aria-label="مزامنة لوحات العقد الناقصة"
+                                title="مزامنة اللوحات الناقصة"
+                              >
+                                <RefreshCw className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                          <ChevronDown className="mt-3 h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-data-[state=open]/contract:rotate-180" />
                         </div>
                       </div>
                     </CollapsibleTrigger>
                     <CollapsibleContent>
-                      <div className="flex flex-col gap-3 pr-4 pt-2 pb-1 border-r-2 border-red-500/20 mr-4">
+                      <div className="mr-3 flex flex-col gap-3 border-r border-primary/20 bg-background/25 p-3 pr-4 sm:mr-5 sm:p-4 sm:pr-5">
                         {groupTasks.map((task, idx) => renderTask(task, idx))}
                       </div>
                     </CollapsibleContent>

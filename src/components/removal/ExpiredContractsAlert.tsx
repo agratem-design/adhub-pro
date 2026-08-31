@@ -31,6 +31,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { findOptimalTeamForRemoval, sortTeamsByPriority } from '@/utils/teamAssignment';
 
 interface ExpiredContract {
   Contract_Number: number;
@@ -52,7 +53,7 @@ export function ExpiredContractsAlert({
   existingTaskContractIds,
   onTaskCreated 
 }: ExpiredContractsAlertProps) {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedContracts, setSelectedContracts] = useState<Set<number>>(new Set());
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -279,30 +280,14 @@ export function ExpiredContractsAlert({
         const isAutoDistribute = !selectedTeamId || selectedTeamId === 'auto';
 
         if (isAutoDistribute) {
-          // توزيع تلقائي حسب المقاس والمدينة
+          // توزيع تلقائي ذكي حسب الرتبة، الأولوية، المقاس، والمدينة، والشركة الصديقة
           const teamBillboardsMap = new Map<string, any[]>();
 
           for (const billboard of expiredBillboards) {
-            const billboardSize = billboard.Size || '';
-            const billboardCity = billboard.City || '';
-
-            // البحث عن الفريق المناسب حسب المقاس والمدينة
-            let matchedTeam = teams.find(team => {
-              const hasSize = team.sizes && team.sizes.length > 0 && team.sizes.some((s: string) => s.trim() === billboardSize.trim());
-              const hasCities = team.cities && team.cities.length > 0;
-              const hasCity = hasCities && team.cities.some((c: string) => c.trim() === billboardCity.trim());
-              return hasSize && (!hasCities || hasCity);
-            });
-
-            // إذا لم نجد تطابق بالمقاس والمدينة، نبحث بالمقاس فقط
-            if (!matchedTeam) {
-              matchedTeam = teams.find(team => {
-                return team.sizes && team.sizes.length > 0 && team.sizes.some((s: string) => s.trim() === billboardSize.trim());
-              });
-            }
-
-            // إذا لم نجد أي تطابق، نستخدم أول فريق
-            const teamId = matchedTeam?.id || (teams.length > 0 ? teams[0].id : '');
+            const optimalTeam = findOptimalTeamForRemoval(teams, billboard.Size, billboard.City, billboard.friend_company_id);
+            const teamId = optimalTeam?.id || (teams.length > 0 ? sortTeamsByPriority(teams)[0]?.id : '');
+            
+            if (!teamId) continue;
             if (!teamBillboardsMap.has(teamId)) {
               teamBillboardsMap.set(teamId, []);
             }
@@ -410,8 +395,8 @@ export function ExpiredContractsAlert({
 
   if (isLoading) {
     return (
-      <Card className="border-amber-500/30 bg-gradient-to-br from-amber-500/5 to-orange-500/5">
-        <CardContent className="py-8">
+      <Card className="rounded-2xl border-primary/20 bg-card/55">
+        <CardContent className="py-5">
           <div className="flex items-center justify-center gap-3">
             <RefreshCw className="h-5 w-5 animate-spin text-amber-500" />
             <span className="text-muted-foreground">جاري تحميل العقود المنتهية...</span>
@@ -423,8 +408,8 @@ export function ExpiredContractsAlert({
 
   if (expiredContracts.length === 0) {
     return (
-      <Card className="border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 to-green-500/5">
-        <CardContent className="py-8">
+      <Card className="rounded-2xl border-emerald-500/25 bg-emerald-500/[0.05]">
+        <CardContent className="py-5">
           <div className="flex items-center justify-center gap-3">
             <CheckCircle2 className="h-6 w-6 text-emerald-500" />
             <span className="text-emerald-600 font-medium">لا توجد عقود منتهية تحتاج لإنشاء مهام إزالة</span>
@@ -437,27 +422,27 @@ export function ExpiredContractsAlert({
   return (
     <>
       <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-        <Card className="border-amber-500/40 bg-gradient-to-br from-amber-500/5 via-orange-500/5 to-red-500/5 shadow-lg overflow-hidden">
+        <Card className="overflow-hidden rounded-2xl border-primary/20 bg-card/60 shadow-sm backdrop-blur-md">
           <CollapsibleTrigger asChild>
-            <CardHeader className="cursor-pointer hover:bg-accent/30 transition-colors py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="relative">
-                    <Bell className="h-6 w-6 text-amber-500" />
+            <CardHeader className="cursor-pointer py-3.5 transition-colors duration-200 hover:bg-primary/[0.04]">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10">
+                    <Bell className="h-5 w-5 text-primary" />
                     {stats.recentlyExpired > 0 && (
-                      <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-pulse">
+                      <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-card bg-rose-500 px-1 text-[9px] font-bold text-white">
                         {stats.recentlyExpired}
                       </span>
                     )}
                   </div>
                   <div>
-                    <CardTitle className="text-lg flex items-center gap-2">
-                      <span>تنبيه: عقود منتهية تحتاج إزالة</span>
-                      <Badge variant="secondary" className="bg-amber-500/20 text-amber-600">
+                    <CardTitle className="flex flex-wrap items-center gap-2 text-sm font-black sm:text-base">
+                      <span>عقود منتهية جاهزة لإنشاء مهام إزالة</span>
+                      <Badge variant="secondary" className="h-6 rounded-lg border border-primary/20 bg-primary/10 text-[10px] text-primary">
                         {stats.total} عقد
                       </Badge>
                     </CardTitle>
-                    <p className="text-sm text-muted-foreground mt-1">
+                    <p className="mt-1 text-[11px] text-muted-foreground">
                       {stats.recentlyExpired > 0 && (
                         <span className="text-red-500 font-medium">{stats.recentlyExpired} منتهي منذ أقل من أسبوع • </span>
                       )}
@@ -473,51 +458,54 @@ export function ExpiredContractsAlert({
                       e.stopPropagation();
                       refetch();
                     }}
-                    className="h-8 w-8"
+                    className="h-10 w-10 cursor-pointer rounded-xl text-muted-foreground transition-all duration-200 hover:bg-primary/10 hover:text-primary active:scale-95"
+                    aria-label="تحديث العقود المنتهية"
                   >
                     <RefreshCw className="h-4 w-4" />
                   </Button>
-                  {isOpen ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted/35 text-muted-foreground">
+                    {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </div>
                 </div>
               </div>
             </CardHeader>
           </CollapsibleTrigger>
           
           <CollapsibleContent>
-            <CardContent className="pt-0 space-y-4">
+            <CardContent className="space-y-4 border-t border-border/30 pt-4">
               {/* إحصائيات سريعة */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div className="bg-red-500/10 rounded-lg p-3 text-center border border-red-500/20">
-                  <div className="text-2xl font-bold text-red-500">{stats.recentlyExpired}</div>
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                <div className="rounded-xl border border-rose-500/20 bg-rose-500/[0.06] p-3 text-center">
+                  <div className="text-xl font-black text-rose-400">{stats.recentlyExpired}</div>
                   <div className="text-xs text-muted-foreground">منذ أقل من أسبوع</div>
                 </div>
-                <div className="bg-orange-500/10 rounded-lg p-3 text-center border border-orange-500/20">
-                  <div className="text-2xl font-bold text-orange-500">{stats.expired30Days}</div>
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-center">
+                  <div className="text-xl font-black text-amber-400">{stats.expired30Days}</div>
                   <div className="text-xs text-muted-foreground">منذ أقل من شهر</div>
                 </div>
-                <div className="bg-amber-500/10 rounded-lg p-3 text-center border border-amber-500/20">
-                  <div className="text-2xl font-bold text-amber-500">{stats.total}</div>
+                <div className="rounded-xl border border-primary/20 bg-primary/[0.06] p-3 text-center">
+                  <div className="text-xl font-black text-primary">{stats.total}</div>
                   <div className="text-xs text-muted-foreground">إجمالي العقود</div>
                 </div>
-                <div className="bg-blue-500/10 rounded-lg p-3 text-center border border-blue-500/20">
-                  <div className="text-2xl font-bold text-blue-500">{stats.totalBillboards}</div>
+                <div className="rounded-xl border border-blue-500/20 bg-blue-500/[0.06] p-3 text-center">
+                  <div className="text-xl font-black text-blue-400">{stats.totalBillboards}</div>
                   <div className="text-xs text-muted-foreground">إجمالي اللوحات</div>
                 </div>
               </div>
 
               {/* أدوات البحث والفلترة */}
-              <div className="flex flex-col md:flex-row gap-3">
+              <div className="flex flex-col gap-3 rounded-2xl border border-border/35 bg-background/30 p-3 md:flex-row">
                 <div className="relative flex-1">
                   <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     placeholder="بحث برقم العقد أو اسم الزبون..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pr-10"
+                    className="h-10 rounded-xl border-border/45 bg-background/70 pr-10 text-xs focus-visible:ring-primary/40"
                   />
                 </div>
                 <Select value={filterDays} onValueChange={(v: any) => setFilterDays(v)}>
-                  <SelectTrigger className="w-full md:w-[180px]">
+                  <SelectTrigger className="h-10 w-full rounded-xl border-border/45 bg-background/70 text-xs md:w-[180px]">
                     <SelectValue placeholder="فترة الانتهاء" />
                   </SelectTrigger>
                   <SelectContent>
@@ -532,7 +520,7 @@ export function ExpiredContractsAlert({
                     variant="outline"
                     size="sm"
                     onClick={selectAllVisible}
-                    className="whitespace-nowrap"
+                    className="h-10 cursor-pointer whitespace-nowrap rounded-xl px-3 text-xs font-bold active:scale-95"
                   >
                     تحديد الكل ({filteredContracts.length})
                   </Button>
@@ -541,7 +529,7 @@ export function ExpiredContractsAlert({
                       variant="ghost"
                       size="sm"
                       onClick={clearSelection}
-                      className="text-muted-foreground"
+                      className="h-10 cursor-pointer rounded-xl text-xs text-muted-foreground active:scale-95"
                     >
                       <X className="h-4 w-4 ml-1" />
                       إلغاء ({selectedContracts.size})
@@ -551,7 +539,7 @@ export function ExpiredContractsAlert({
               </div>
 
               {/* قائمة العقود */}
-              <ScrollArea className="h-[300px] rounded-lg border">
+              <ScrollArea className="h-[320px] rounded-2xl border border-border/40 bg-background/25">
                 <div className="p-2 space-y-2">
                   <AnimatePresence>
                     {filteredContracts.map((contract, index) => {
@@ -568,10 +556,10 @@ export function ExpiredContractsAlert({
                           exit={{ opacity: 0, y: -10 }}
                           transition={{ delay: index * 0.02 }}
                           className={`
-                            flex items-center gap-3 p-3 rounded-lg border-2 transition-all duration-200 cursor-pointer
+                            flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-all duration-200
                             ${isSelected 
-                              ? 'bg-primary/15 border-primary shadow-md' 
-                              : 'bg-card border-border/40 hover:border-primary/50 hover:bg-primary/5 hover:shadow-sm'
+                              ? 'border-primary bg-primary/10 shadow-sm'
+                              : 'border-border/40 bg-card/70 hover:border-primary/40 hover:bg-primary/[0.04]'
                             }
                           `}
                           onClick={() => toggleContract(contract.Contract_Number)}
@@ -579,16 +567,16 @@ export function ExpiredContractsAlert({
                           <Checkbox
                             checked={isSelected}
                             onCheckedChange={() => toggleContract(contract.Contract_Number)}
-                            className="pointer-events-none"
+                            className="pointer-events-none h-5 w-5 rounded-md"
                           />
                           
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-bold text-primary">#{contract.Contract_Number}</span>
-                              <Badge variant="outline" className="text-xs border-border">
+                              <Badge variant="outline" className="h-6 rounded-lg border-border px-2 text-[10px]">
                                 {contract['Ad Type'] || 'غير محدد'}
                               </Badge>
-                              <Badge variant="secondary" className="text-xs gap-1 bg-muted text-foreground">
+                              <Badge variant="secondary" className="h-6 gap-1 rounded-lg bg-muted px-2 text-[10px] text-foreground">
                                 <MapPin className="h-3 w-3" />
                                 {availableCount} لوحة
                                 {hasFiltered && (
@@ -616,8 +604,9 @@ export function ExpiredContractsAlert({
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg shrink-0"
+                              className="h-10 w-10 shrink-0 cursor-pointer rounded-xl text-muted-foreground transition-all duration-200 hover:bg-destructive/10 hover:text-destructive active:scale-95"
                               title="تجاهل التنبيه"
+                              aria-label={`تجاهل تنبيه العقد ${contract.Contract_Number}`}
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
@@ -658,7 +647,7 @@ export function ExpiredContractsAlert({
                 <motion.div
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="flex items-center justify-between p-4 bg-primary/5 rounded-lg border border-primary/20"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/20 bg-primary/5 p-4"
                 >
                   <div>
                     <span className="font-medium">تم تحديد {selectedContracts.size} عقد</span>
@@ -668,8 +657,7 @@ export function ExpiredContractsAlert({
                   </div>
                   <Button
                     onClick={() => setShowConfirmDialog(true)}
-                    className="gap-2"
-                    size="lg"
+                    className="h-10 cursor-pointer gap-2 rounded-xl bg-primary px-5 text-xs font-black text-primary-foreground shadow-sm shadow-primary/15 active:scale-95"
                   >
                     <Plus className="h-5 w-5" />
                     إنشاء مهام الإزالة
@@ -683,16 +671,16 @@ export function ExpiredContractsAlert({
 
       {/* نافذة التأكيد */}
       <Dialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
+        <DialogContent className="overflow-hidden rounded-2xl border-primary/20 bg-card p-0 sm:max-w-md">
+          <DialogHeader className="border-b border-border/35 bg-primary/[0.05] p-5">
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-primary" />
               إنشاء مهام الإزالة
             </DialogTitle>
           </DialogHeader>
           
-          <div className="space-y-4 py-4">
-            <div className="bg-muted/50 rounded-lg p-4">
+          <div className="space-y-4 p-5">
+            <div className="rounded-xl border border-border/35 bg-muted/35 p-4">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-muted-foreground">العقود المختارة:</span>
                 <Badge>{selectedContracts.size}</Badge>
@@ -705,14 +693,19 @@ export function ExpiredContractsAlert({
             <div className="space-y-2">
               <label className="text-sm font-medium">اختيار الفريق (اختياري)</label>
               <Select value={selectedTeamId} onValueChange={setSelectedTeamId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="تحديد تلقائي حسب المقاس" />
+                <SelectTrigger className="h-10 rounded-xl border-border/45 bg-background/70">
+                  <SelectValue placeholder="توزيع تلقائي ذكي حسب الرتبة والأولوية" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="auto">تحديد تلقائي</SelectItem>
-                  {teams.filter(team => team.id && team.id.trim() !== '').map(team => (
+                  <SelectItem value="auto">توزيع تلقائي ذكي (حسب الرتبة والأولوية والمقاس)</SelectItem>
+                  {sortTeamsByPriority(teams.filter(team => team.id && team.id.trim() !== '')).map((team, idx) => (
                     <SelectItem key={team.id} value={team.id}>
-                      {team.team_name}
+                      <div className="flex items-center justify-between w-full gap-2">
+                        <span>{team.team_name}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold">
+                          رتبة #{idx + 1} (أولوية: {team.priority || 0})
+                        </span>
+                      </div>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -720,14 +713,14 @@ export function ExpiredContractsAlert({
             </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowConfirmDialog(false)}>
+          <DialogFooter className="border-t border-border/35 p-5 pt-4">
+            <Button variant="outline" onClick={() => setShowConfirmDialog(false)} className="h-10 cursor-pointer rounded-xl px-5 text-xs font-bold active:scale-95">
               إلغاء
             </Button>
             <Button
               onClick={() => createTasksMutation.mutate()}
               disabled={createTasksMutation.isPending}
-              className="gap-2"
+              className="h-10 cursor-pointer gap-2 rounded-xl bg-primary px-5 text-xs font-black text-primary-foreground active:scale-95"
             >
               {createTasksMutation.isPending ? (
                 <>

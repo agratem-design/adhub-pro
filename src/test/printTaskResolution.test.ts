@@ -158,6 +158,35 @@ describe('Print Task Resolution & Integrity Service (P0)', () => {
     expect(faceBItem.printerTotalCost).toBe(120);
   });
 
+  it('does not create Face B when a stale task says two faces but the billboard is physically one-faced', () => {
+    const taskItems: InstallationItemInput[] = [{
+      id: 'item-bs1162',
+      billboard_id: 1162,
+      design_face_a: 'https://cdn.example.com/bs1162_a.jpg',
+      design_face_b: 'https://cdn.example.com/stale_bs1162_b.jpg',
+      faces_to_install: 2,
+    }];
+    const billboardsMap: Record<number, BillboardLookup> = {
+      1162: { id: 1162, size: '3x4', contractNumber: 1297, facesCount: 1 },
+    };
+    const contractMap: Record<number, ContractLookup> = {
+      1297: { contractNumber: 1297, customerId: 'cust-bs1162', customerName: 'العميل' },
+    };
+
+    const validation = resolveAndValidatePrintItems({
+      selectedBillboardIds: [1162],
+      taskItems,
+      billboardsMap,
+      contractMap,
+      printerPricePerMeter: 10,
+      customerPricePerMeter: 20,
+    });
+
+    expect(validation.valid).toBe(true);
+    expect(validation.resolvedItems).toHaveLength(1);
+    expect(validation.resolvedItems[0].face).toBe('a');
+  });
+
   // Test 5: Fallback to exact billboard in Contract.design_data
   it('Test 5: should resolve design from Contract.design_data strictly for matching billboard ID', () => {
     const item: InstallationItemInput = { id: 'item-1', billboard_id: 555 };

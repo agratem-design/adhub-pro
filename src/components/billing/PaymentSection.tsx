@@ -72,72 +72,148 @@ const getPaymentTypeText = (entryType: string): string => {
   }
 };
 
-const getPaymentTargetType = (payment: PaymentRow): string => {
-  if (payment.contract_number) return 'عقد';
-  if ((payment as any).composite_task_id) return 'مهمة مجمعة';
-  if (payment.printed_invoice_id) return 'فاتورة طباعة';
-  if (payment.sales_invoice_id) return 'فاتورة مبيعات';
-  if (payment.purchase_invoice_id) return 'فاتورة مشتريات';
-  if (payment.entry_type === 'payment') return 'دفعة';
-  if (payment.entry_type === 'account_payment') return 'دفعة حساب';
-  if (payment.entry_type === 'debt') return 'دين سابق';
-  if (payment.entry_type === 'general_debit') return 'وارد عام';
-  if (payment.entry_type === 'general_credit') return 'صادر عام';
-  return '—';
+export interface PaymentTargetInfo {
+  type: string;
+  targetNumber: string;
+  statement: string;
+  badgeLabel: string;
+  badgeColor: string;
+}
+
+export const getPaymentTargetInfo = (
+  payment: PaymentRow,
+  contractAdTypes: Record<number, string> = {},
+  compositeTasksInfo: Record<string, { task_number?: number; contract_id?: number; ad_type?: string; task_type?: string }> = {},
+  printedInvoices: Record<string, { invoice_number?: string; invoice_type?: string }> = {},
+  salesInvoices: Record<string, { invoice_number?: string; invoice_name?: string }> = {},
+  purchaseInvoices: Record<string, { invoice_number?: string }> = {}
+): PaymentTargetInfo => {
+  const compositeId = (payment as any).composite_task_id;
+  const printedInvId = payment.printed_invoice_id;
+  const salesInvId = payment.sales_invoice_id;
+  const purchInvId = payment.purchase_invoice_id;
+  const contractNum = payment.contract_number ? Number(payment.contract_number) : null;
+  const notes = payment.notes || '';
+
+  // 1. Composite Task
+  if (compositeId) {
+    const tInfo = compositeTasksInfo[compositeId];
+    const taskNum = tInfo?.task_number || (notes.match(/مهمة\s*(?:مجمعة)?\s*#?(\d+)/)?.[1]);
+    const cId = tInfo?.contract_id || (notes.match(/عقد\s*#?(\d+)/)?.[1] ? Number(notes.match(/عقد\s*#?(\d+)/)?.[1]) : undefined);
+    const adType = tInfo?.ad_type || (cId ? contractAdTypes[cId] : '') || (payment as any).ad_type || '';
+    const numDisplay = taskNum ? `مهمة #${taskNum}` : cId ? `مهمة (عقد #${cId})` : 'مهمة مجمعة';
+    return {
+      type: 'مهمة مجمعة',
+      targetNumber: numDisplay,
+      statement: (payment as any).statement_description || `دفعة على ${numDisplay}${adType ? ` (${adType})` : ''}`,
+      badgeLabel: `${numDisplay}${adType ? ` - ${adType}` : ''}`,
+      badgeColor: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30'
+    };
+  }
+
+  // 2. Direct Contract Number
+  if (contractNum) {
+    const adType = contractAdTypes[contractNum] || (payment as any).ad_type || '';
+    return {
+      type: 'عقد',
+      targetNumber: `عقد #${contractNum}`,
+      statement: (payment as any).statement_description || `دفعة على عقد رقم #${contractNum}${adType ? ` (${adType})` : ''}`,
+      badgeLabel: `عقد ${contractNum}${adType ? ` - ${adType}` : ''}`,
+      badgeColor: 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+    };
+  }
+
+  // 3. Sales Invoice
+  if (salesInvId || notes.includes('#SALE-') || notes.includes('فاتورة مبيعات')) {
+    const inv = salesInvoices[salesInvId || ''];
+    const numMatch = notes.match(/#SALE-[\w-]+/)?.[0] || (inv?.invoice_number ? `#${inv.invoice_number}` : '');
+    const numDisplay = numMatch ? `فاتورة مبيعات ${numMatch}` : 'فاتورة مبيعات';
+    const name = inv?.invoice_name || '';
+    return {
+      type: 'فاتورة مبيعات',
+      targetNumber: numMatch || 'فاتورة مبيعات',
+      statement: (payment as any).statement_description || `توزيع على ${numDisplay}${name ? ` (${name})` : ''}`,
+      badgeLabel: `${numDisplay}${name ? ` - ${name}` : ''}`,
+      badgeColor: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+    };
+  }
+
+  // 4. Print Invoice
+  if (printedInvId || notes.includes('#INV-') || notes.includes('فاتورة طباعة')) {
+    const inv = printedInvoices[printedInvId || ''];
+    const numMatch = notes.match(/#INV-[\w-]+/)?.[0] || (inv?.invoice_number ? `#${inv.invoice_number}` : '');
+    const numDisplay = numMatch ? `فاتورة طباعة ${numMatch}` : 'فاتورة طباعة';
+    return {
+      type: 'فاتورة طباعة',
+      targetNumber: numMatch || 'فاتورة طباعة',
+      statement: (payment as any).statement_description || `توزيع على ${numDisplay}`,
+      badgeLabel: `${numDisplay}`,
+      badgeColor: 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+    };
+  }
+
+  // 5. Purchase Invoice
+  if (purchInvId || notes.includes('فاتورة مشتريات') || notes.includes('PUR-')) {
+    const inv = purchaseInvoices[purchInvId || ''];
+    const numMatch = notes.match(/PUR-\d+/)?.[0] || (inv?.invoice_number ? `#${inv.invoice_number}` : '') || purchInvId?.slice(0, 8) || '';
+    const numDisplay = numMatch ? `فاتورة مشتريات ${numMatch}` : 'فاتورة مشتريات';
+    return {
+      type: 'فاتورة مشتريات',
+      targetNumber: numMatch ? `#${numMatch}` : 'فاتورة مشتريات',
+      statement: (payment as any).statement_description || `دفعة على ${numDisplay}`,
+      badgeLabel: numDisplay,
+      badgeColor: 'bg-purple-500/15 text-purple-300 border-purple-500/30'
+    };
+  }
+
+  // 6. Contract mentioned in notes
+  if (notes.includes('عقد #') || notes.match(/عقد\s*\d+/)) {
+    const cMatch = notes.match(/عقد\s*#?(\d+)/)?.[1];
+    const cNum = cMatch ? Number(cMatch) : null;
+    const adType = cNum ? contractAdTypes[cNum] : '';
+    return {
+      type: 'عقد',
+      targetNumber: cMatch ? `عقد #${cMatch}` : 'عقد',
+      statement: (payment as any).statement_description || notes,
+      badgeLabel: cMatch ? `عقد #${cMatch}${adType ? ` - ${adType}` : ''}` : notes,
+      badgeColor: 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+    };
+  }
+
+  // 7. General Account Payment
+  if (payment.entry_type === 'account_payment') {
+    return {
+      type: 'دفعة حساب',
+      targetNumber: 'حساب عام',
+      statement: (payment as any).statement_description || 'دفعة على الحساب العام للزبون',
+      badgeLabel: 'دفعة على الحساب',
+      badgeColor: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+    };
+  }
+
+  // 8. Debt
+  if (payment.entry_type === 'debt') {
+    return {
+      type: 'دين سابق',
+      targetNumber: 'دين سابق',
+      statement: (payment as any).statement_description || notes || 'دين سابق على الزبون',
+      badgeLabel: 'دين سابق',
+      badgeColor: 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+    };
+  }
+
+  return {
+    type: payment.entry_type === 'receipt' ? 'إيصال' : 'دفعة',
+    targetNumber: '—',
+    statement: (payment as any).statement_description || notes || 'دفعة عامة',
+    badgeLabel: `دفعة (${(Number(payment.amount) || 0).toLocaleString('ar-LY')} د.ل)`,
+    badgeColor: 'bg-slate-500/15 text-slate-300 border-slate-500/30'
+  };
 };
 
-const getPaymentTargetNumber = (payment: PaymentRow): string => {
-  if (payment.contract_number) return `عقد رقم ${payment.contract_number}`;
-  if ((payment as any).composite_task_id) return `مهمة مجمعة`;
-  if (payment.printed_invoice_id) return `فاتورة طباعة`;
-  if (payment.sales_invoice_id) return `فاتورة مبيعات`;
-  if (payment.purchase_invoice_id) return `فاتورة مشتريات`;
-  if (payment.entry_type === 'account_payment') return 'حساب عام';
-  if (payment.entry_type === 'debt') return 'دين سابق';
-  return '—';
-};
-
-// ✅ الحصول على البيان/الوصف التفصيلي للدفعة
-const getPaymentStatement = (payment: PaymentRow): string => {
-  // إذا كان هناك بيان مخصص
-  if ((payment as any).statement_description) return (payment as any).statement_description;
-  
-  // عقد
-  if (payment.contract_number) {
-    return `دفعة على عقد رقم ${payment.contract_number}`;
-  }
-  
-  // مهمة مجمعة
-  if ((payment as any).composite_task_id) {
-    const taskType = (payment as any).task_type;
-    if (taskType === 'طباعة_تركيب') return 'مهمة طباعة وتركيب';
-    if (taskType === 'طباعة_قص_تركيب') return 'مهمة طباعة وقص وتركيب';
-    return 'مهمة مجمعة';
-  }
-  
-  // فاتورة مبيعات
-  if (payment.sales_invoice_id) {
-    return 'فاتورة مبيعات';
-  }
-  
-  // فاتورة طباعة
-  if (payment.printed_invoice_id) {
-    return 'فاتورة طباعة';
-  }
-  
-  // فاتورة مشتريات
-  if (payment.purchase_invoice_id) {
-    return 'فاتورة مشتريات';
-  }
-  
-  // أنواع أخرى
-  if (payment.entry_type === 'account_payment') return 'دفعة على الحساب العام';
-  if (payment.entry_type === 'debt') return 'دين سابق';
-  if (payment.entry_type === 'general_debit') return 'وارد عام';
-  if (payment.entry_type === 'general_credit') return 'صادر عام';
-  
-  return payment.notes || '—';
-};
+const getPaymentTargetType = (payment: PaymentRow): string => getPaymentTargetInfo(payment).type;
+const getPaymentTargetNumber = (payment: PaymentRow): string => getPaymentTargetInfo(payment).targetNumber;
+const getPaymentStatement = (payment: PaymentRow): string => getPaymentTargetInfo(payment).statement;
 
 export function PaymentSection({
   payments,
@@ -164,6 +240,11 @@ export function PaymentSection({
   const [paymentsWithWithdrawal, setPaymentsWithWithdrawal] = useState<Set<string>>(new Set());
   const [withdrawalEmployeeNames, setWithdrawalEmployeeNames] = useState<Record<string, string>>({});
   const [compositeTaskNumbers, setCompositeTaskNumbers] = useState<Record<string, number>>({});
+  const [contractAdTypesMap, setContractAdTypesMap] = useState<Record<number, string>>({});
+  const [compositeTasksInfoMap, setCompositeTasksInfoMap] = useState<Record<string, { task_number?: number; contract_id?: number; ad_type?: string; task_type?: string }>>({});
+  const [printedInvoicesMap, setPrintedInvoicesMap] = useState<Record<string, { invoice_number?: string; invoice_type?: string }>>({});
+  const [salesInvoicesMap, setSalesInvoicesMap] = useState<Record<string, { invoice_number?: string; invoice_name?: string }>>({});
+  const [purchaseInvoicesMap, setPurchaseInvoicesMap] = useState<Record<string, { invoice_number?: string }>>({});
   
   // ✅ حالة إيجارات لوحات الأصدقاء وفواتير المشتريات لتعبئة شارات المقايضة بالبيانات الصحيحة
   const [friendRentals, setFriendRentals] = useState<any[]>([]);
@@ -371,29 +452,129 @@ export function PaymentSection({
     loadCustodyInfo();
     loadWithdrawalInfo();
 
-    // تحميل أرقام المهام المجمعة المرتبطة بالدفعات
-    const loadCompositeTaskNumbers = async () => {
-      const compositeIds = [...new Set(
-        payments
-          .filter(p => (p as any).composite_task_id)
-          .map(p => (p as any).composite_task_id as string)
-      )];
-      if (compositeIds.length === 0) return;
+    // تحميل كامل مراجع الدفعات (عقود، مهام مجمعة، فواتير مبيعات، فواتير طباعة ومشتريات)
+    const loadAllPaymentReferences = async () => {
+      if (!payments || payments.length === 0) return;
       try {
-        const { data } = await supabase
-          .from('composite_tasks')
-          .select('id, task_number')
-          .in('id', compositeIds);
-        if (data) {
-          const map: Record<string, number> = {};
-          data.forEach((t: any) => { if (t.task_number) map[t.id] = t.task_number; });
-          setCompositeTaskNumbers(map);
+        const contractNums = new Set<number>();
+        const compositeIds = new Set<string>();
+        const salesIds = new Set<string>();
+        const printedIds = new Set<string>();
+        const purchaseIds = new Set<string>();
+
+        payments.forEach(p => {
+          if (p.contract_number) {
+            const num = Number(p.contract_number);
+            if (!isNaN(num)) contractNums.add(num);
+          }
+          if (p.notes) {
+            const match = p.notes.match(/عقد\s*#?(\d+)/);
+            if (match) contractNums.add(Number(match[1]));
+          }
+          const cid = (p as any).composite_task_id;
+          if (cid) compositeIds.add(cid);
+          if (p.sales_invoice_id) salesIds.add(p.sales_invoice_id);
+          if (p.printed_invoice_id) printedIds.add(p.printed_invoice_id);
+          if (p.purchase_invoice_id) purchaseIds.add(p.purchase_invoice_id);
+        });
+
+        // 1. Composite Tasks
+        const fetchedCompositeInfo: Record<string, { task_number?: number; contract_id?: number; ad_type?: string; task_type?: string }> = {};
+        if (compositeIds.size > 0) {
+          const { data: ctData } = await supabase
+            .from('composite_tasks')
+            .select('id, task_number, contract_id, task_type')
+            .in('id', Array.from(compositeIds));
+          if (ctData) {
+            const mapNum: Record<string, number> = {};
+            ctData.forEach((t: any) => {
+              const cId = t.contract_id ? Number(t.contract_id) : undefined;
+              if (cId) contractNums.add(cId);
+              if (t.task_number) mapNum[t.id] = t.task_number;
+              fetchedCompositeInfo[t.id] = {
+                task_number: t.task_number,
+                contract_id: cId,
+                task_type: t.task_type
+              };
+            });
+            setCompositeTaskNumbers(mapNum);
+          }
         }
-      } catch (error) {
-        console.error('Error loading composite task numbers:', error);
+
+        // 2. Contracts Ad Types
+        const contractMap: Record<number, string> = {};
+        if (contractNums.size > 0) {
+          const { data: cData } = await supabase
+            .from('Contract')
+            .select('Contract_Number, "Ad Type"')
+            .in('Contract_Number', Array.from(contractNums));
+          if (cData) {
+            cData.forEach((c: any) => {
+              const adType = c['Ad Type'] || '';
+              if (adType) contractMap[Number(c.Contract_Number)] = adType;
+            });
+            setContractAdTypesMap(contractMap);
+          }
+        }
+
+        // Attach contract ad_type to composite tasks
+        Object.keys(fetchedCompositeInfo).forEach(id => {
+          const cId = fetchedCompositeInfo[id].contract_id;
+          if (cId && contractMap[cId]) {
+            fetchedCompositeInfo[id].ad_type = contractMap[cId];
+          }
+        });
+        setCompositeTasksInfoMap(fetchedCompositeInfo);
+
+        // 3. Sales Invoices
+        if (salesIds.size > 0) {
+          const { data: sData } = await supabase
+            .from('sales_invoices')
+            .select('id, invoice_number, invoice_name')
+            .in('id', Array.from(salesIds));
+          if (sData) {
+            const sMap: Record<string, { invoice_number?: string; invoice_name?: string }> = {};
+            sData.forEach((s: any) => {
+              sMap[s.id] = { invoice_number: s.invoice_number, invoice_name: s.invoice_name };
+            });
+            setSalesInvoicesMap(sMap);
+          }
+        }
+
+        // 4. Printed Invoices
+        if (printedIds.size > 0) {
+          const { data: pData } = await supabase
+            .from('printed_invoices')
+            .select('id, invoice_number, invoice_type')
+            .in('id', Array.from(printedIds));
+          if (pData) {
+            const pMap: Record<string, { invoice_number?: string; invoice_type?: string }> = {};
+            pData.forEach((pi: any) => {
+              pMap[pi.id] = { invoice_number: pi.invoice_number, invoice_type: pi.invoice_type };
+            });
+            setPrintedInvoicesMap(pMap);
+          }
+        }
+
+        // 5. Purchase Invoices
+        if (purchaseIds.size > 0) {
+          const { data: purData } = await supabase
+            .from('purchase_invoices')
+            .select('id, invoice_number')
+            .in('id', Array.from(purchaseIds));
+          if (purData) {
+            const purMap: Record<string, { invoice_number?: string }> = {};
+            purData.forEach((pur: any) => {
+              purMap[pur.id] = { invoice_number: pur.invoice_number };
+            });
+            setPurchaseInvoicesMap(purMap);
+          }
+        }
+      } catch (err) {
+        console.error('Error loading payment references:', err);
       }
     };
-    loadCompositeTaskNumbers();
+    loadAllPaymentReferences();
   }, [payments]);
 
   // ✅ حساب الرصيد التراكمي والمتبقي من الديون لكل دفعة
@@ -801,17 +982,17 @@ export function PaymentSection({
  ️ يوجد رصيد غير مستعمل: {unlinkedChildSum.toLocaleString('ar-LY')} د.ل
                                 </Badge>
                               )}
-                              {/* عرض أرقام العقود/المهام المجمعة */}
-                              <div className="flex flex-wrap gap-1">
+                              {/* عرض بنود التوزيع الذكية مع نوع الإعلان وأرقام الفواتير */}
+                              <div className="flex flex-wrap gap-1.5 pt-0.5">
                                 {distributionPayments.map((p, idx) => {
-                                  const compositeId = (p as any).composite_task_id;
-                                  const taskNum = compositeId ? compositeTaskNumbers[compositeId] : null;
+                                  const itemInfo = getPaymentTargetInfo(p, contractAdTypesMap, compositeTasksInfoMap, printedInvoicesMap, salesInvoicesMap, purchaseInvoicesMap);
                                   return (
-                                    <Badge key={idx} variant="outline" className="bg-slate-100 dark:bg-slate-800 text-xs">
-                                      {compositeId 
-                                        ? `مهمة مجمعة #${taskNum || '—'}`
-                                        : `عقد ${p.contract_number || '—'} - ${(p as any).ad_type || 'غير محدد'}`
-                                      }
+                                    <Badge 
+                                      key={idx} 
+                                      variant="outline" 
+                                      className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border shadow-xs ${itemInfo.badgeColor}`}
+                                    >
+                                      {itemInfo.badgeLabel}
                                     </Badge>
                                   );
                                 })}
@@ -917,15 +1098,22 @@ export function PaymentSection({
                                 {payments.findIndex(p => p.id === payment.id) + 1}
                               </span>
                             </TableCell>
-                            <TableCell className="expenses-contract-number">
-                              {getPaymentTargetType(payment)}
-                            </TableCell>
-                            <TableCell>
-                              {getPaymentTargetNumber(payment)}
-                            </TableCell>
-                            <TableCell className="text-muted-foreground text-sm">
-                              {getPaymentStatement(payment)}
-                            </TableCell>
+                            {(() => {
+                              const itemInfo = getPaymentTargetInfo(payment, contractAdTypesMap, compositeTasksInfoMap, printedInvoicesMap, salesInvoicesMap, purchaseInvoicesMap);
+                              return (
+                                <>
+                                  <TableCell className="expenses-contract-number font-bold">
+                                    {itemInfo.type}
+                                  </TableCell>
+                                  <TableCell className="font-mono font-bold">
+                                    {itemInfo.targetNumber}
+                                  </TableCell>
+                                  <TableCell className="text-muted-foreground text-sm font-semibold">
+                                    {itemInfo.statement}
+                                  </TableCell>
+                                </>
+                              );
+                            })()}
                             <TableCell>
                               <div className="flex flex-col gap-1 items-start">
                                 <span className={getPaymentTypeStyle(payment.entry_type)}>
@@ -996,15 +1184,22 @@ export function PaymentSection({
                           {payments.findIndex(p => p.id === payment.id) + 1}
                         </span>
                       </TableCell>
-                      <TableCell className="expenses-contract-number">
-                        {getPaymentTargetType(payment)}
-                      </TableCell>
-                      <TableCell>
-                        {getPaymentTargetNumber(payment)}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-sm">
-                        {getPaymentStatement(payment)}
-                      </TableCell>
+                      {(() => {
+                        const itemInfo = getPaymentTargetInfo(payment, contractAdTypesMap, compositeTasksInfoMap, printedInvoicesMap, salesInvoicesMap, purchaseInvoicesMap);
+                        return (
+                          <>
+                            <TableCell className="expenses-contract-number font-bold">
+                              {itemInfo.type}
+                            </TableCell>
+                            <TableCell className="font-mono font-bold">
+                              {itemInfo.targetNumber}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground text-sm font-semibold">
+                              {itemInfo.statement}
+                            </TableCell>
+                          </>
+                        );
+                      })()}
                       <TableCell>
                         <div className="flex flex-col gap-1 items-start">
                           <span className={getPaymentTypeStyle(payment.entry_type)}>

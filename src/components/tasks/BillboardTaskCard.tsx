@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { CustomDatePicker } from "@/components/ui/custom-date-picker";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { 
   DropdownMenu,
@@ -21,7 +21,7 @@ import {
   PaintBucket, Printer, RotateCcw, Palette, Box, DollarSign, Trash2, 
   Pencil, Plus, AlertTriangle, Lock, Unlock, Camera, Link2, RefreshCw, 
   Replace, ArrowLeftRight, History, Building2, PauseCircle, Repeat2, 
-  ChevronDown, ChevronUp, MoreVertical, SlidersHorizontal, Settings, HelpCircle, TrendingUp, TrendingDown, GitBranch, Layers 
+  ChevronDown, ChevronUp, MoreVertical, SlidersHorizontal, Settings, HelpCircle, TrendingUp, TrendingDown, GitBranch, Layers, Clock
 } from "lucide-react";
 import { ReplaceBillboardDialog } from './ReplaceBillboardDialog';
 import { EditReplacementDialog } from './EditReplacementDialog';
@@ -201,6 +201,45 @@ export function BillboardTaskCard({
                 onClick={() => setLightboxImage(faceBUrl)}
               >
                 <img src={faceBUrl} alt="تصميم الوجه الثاني" className="w-full h-full object-contain" />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderInstalledPhotosPreview = () => {
+    if (!item.installed_image_face_a_url && !item.installed_image_face_b_url) return null;
+
+    const hasBoth = Boolean(item.installed_image_face_a_url && item.installed_image_face_b_url);
+
+    return (
+      <div className="mt-2.5 p-2 bg-emerald-500/5 dark:bg-emerald-950/20 border border-emerald-500/30 rounded-2xl space-y-1.5" onClick={e => e.stopPropagation()}>
+        <div className="text-[10px] text-center text-emerald-700 dark:text-emerald-300 font-bold flex items-center justify-center gap-1">
+          <Camera className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+          <span>صور التركيب المنفذ</span>
+        </div>
+        <div className={cn("grid gap-2", hasBoth ? "grid-cols-2" : "grid-cols-1")}>
+          {item.installed_image_face_a_url && (
+            <div className="space-y-1">
+              <div className="text-[9px] text-center text-muted-foreground font-bold">صورة الوجه الأمامي</div>
+              <div 
+                className="relative aspect-[16/10] max-h-[140px] rounded-xl overflow-hidden bg-background border border-emerald-500/40 cursor-pointer hover:ring-2 hover:ring-emerald-500/40 transition-all shadow-inner"
+                onClick={() => setLightboxImage(item.installed_image_face_a_url)}
+              >
+                <img src={item.installed_image_face_a_url} alt="تركيب الوجه الأمامي" className="w-full h-full object-contain" />
+              </div>
+            </div>
+          )}
+          {item.installed_image_face_b_url && (
+            <div className="space-y-1">
+              <div className="text-[9px] text-center text-muted-foreground font-bold">صورة الوجه الخلفي</div>
+              <div 
+                className="relative aspect-[16/10] max-h-[140px] rounded-xl overflow-hidden bg-background border border-blue-500/40 cursor-pointer hover:ring-2 hover:ring-blue-500/40 transition-all shadow-inner"
+                onClick={() => setLightboxImage(item.installed_image_face_b_url)}
+              >
+                <img src={item.installed_image_face_b_url} alt="تركيب الوجه الخلفي" className="w-full h-full object-contain" />
               </div>
             </div>
           )}
@@ -667,6 +706,81 @@ export function BillboardTaskCard({
   const isDelayed = !isCompleted && item.created_at && differenceInDays(new Date(), new Date(item.created_at)) > 15;
   const delayDays = item.created_at ? differenceInDays(new Date(), new Date(item.created_at)) : 0;
 
+  const renderDesignSelector = () => {
+    if (taskDesigns.length === 0) return null;
+
+    const currentDesignImage = selectedDesign?.design_face_a_url || selectedDesign?.design_face_b_url;
+
+    return (
+      <div className="space-y-2 border-t border-border/40 pt-3" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-center justify-between gap-2">
+          <label className="flex items-center gap-1.5 text-xs font-black text-foreground">
+            <Palette className="h-4 w-4 text-primary" />
+            التصميم المطبق
+          </label>
+          <span className="text-[10px] font-bold text-muted-foreground">اضغط لاختيار تصميم آخر</span>
+        </div>
+        <Select value={selectedDesignId} onValueChange={handleDesignChange} disabled={saving}>
+          <SelectTrigger className="h-14 cursor-pointer rounded-xl border-primary/25 bg-primary/5 px-2.5 text-right transition-all duration-200 hover:border-primary/45 hover:bg-primary/10 focus:ring-2 focus:ring-primary/25">
+            <div className="flex min-w-0 flex-1 items-center gap-3" dir="rtl">
+              <div className="flex h-10 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/50 bg-muted/50">
+                {currentDesignImage ? (
+                  <img src={currentDesignImage} alt={selectedDesign?.design_name || 'التصميم المطبق'} className="h-full w-full object-cover" />
+                ) : (
+                  <ImageIcon className="h-5 w-5 text-muted-foreground/45" />
+                )}
+              </div>
+              <div className="min-w-0 flex-1 text-right">
+                <div className="truncate text-xs font-black text-foreground">
+                  {selectedDesign?.design_name || 'بدون تصميم محدد'}
+                </div>
+                <div className="mt-0.5 text-[10px] font-bold text-primary">
+                  {selectedDesign ? 'مطبق حاليًا على اللوحة' : 'اختر من قائمة التصاميم'}
+                </div>
+              </div>
+            </div>
+          </SelectTrigger>
+          <SelectContent className="max-h-[360px] min-w-[300px] rounded-xl border-border/60 p-1.5 shadow-xl" position="popper" sideOffset={6}>
+            <SelectItem value="none" className="min-h-12 cursor-pointer rounded-lg px-2 py-1.5">
+              <div className="flex items-center gap-3" dir="rtl">
+                <div className="flex h-9 w-12 items-center justify-center rounded-lg border border-border/50 bg-muted/50">
+                  <ImageIcon className="h-4 w-4 text-muted-foreground/50" />
+                </div>
+                <span className="text-xs font-bold">بدون تصميم</span>
+              </div>
+            </SelectItem>
+            {taskDesigns.map((design) => {
+              const preview = design.design_face_a_url || design.design_face_b_url;
+              const isApplied = design.id === selectedDesignId;
+              return (
+                <SelectItem key={design.id} value={design.id} className="min-h-14 cursor-pointer rounded-lg px-2 py-1.5 focus:bg-primary/10">
+                  <div className="flex min-w-0 items-center gap-3" dir="rtl">
+                    <div className="h-11 w-16 shrink-0 overflow-hidden rounded-lg border border-border/50 bg-muted/50">
+                      {preview ? (
+                        <img src={preview} alt={design.design_name} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center">
+                          <ImageIcon className="h-4 w-4 text-muted-foreground/50" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1 text-right">
+                      <div className="max-w-[180px] truncate text-xs font-black text-foreground">{design.design_name}</div>
+                      <div className={cn("mt-0.5 flex items-center gap-1 text-[10px] font-bold", isApplied ? "text-emerald-500" : "text-muted-foreground")}> 
+                        {isApplied && <CheckCircle2 className="h-3 w-3" />}
+                        {isApplied ? 'التصميم المطبق' : 'تطبيق هذا التصميم'}
+                      </div>
+                    </div>
+                  </div>
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  };
+
   // Visual layout for Reinstallation Branches (Collapsible)
   const renderReinstallBranches = () => {
     if ((item.reinstall_count || 0) === 0 && !item.replacement_status) return null;
@@ -707,13 +821,23 @@ export function BillboardTaskCard({
               </div>
 
               <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  {photoHistoryItems.find(h => h.reinstall_number === 1)?.installed_image_face_a_url || item.billboardImage ? (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {(photoHistoryItems.find(h => h.reinstall_number === 1)?.installed_image_face_a_url || item.installed_image_face_a_url || item.billboardImage) ? (
                     <img
-                      src={photoHistoryItems.find(h => h.reinstall_number === 1)?.installed_image_face_a_url || item.billboardImage}
-                      alt="صورة التركيب الأصلي"
-                      className="h-10 w-14 object-cover rounded-lg border border-border/60 cursor-pointer hover:opacity-90 shadow-sm"
-                      onClick={() => setPreviewImageUrl(photoHistoryItems.find(h => h.reinstall_number === 1)?.installed_image_face_a_url || item.billboardImage)}
+                      src={photoHistoryItems.find(h => h.reinstall_number === 1)?.installed_image_face_a_url || item.installed_image_face_a_url || item.billboardImage}
+                      alt="صورة التركيب الأصلي - أمامي"
+                      className="h-10 w-14 object-cover rounded-lg border border-emerald-500/40 cursor-pointer hover:opacity-90 shadow-sm"
+                      onClick={() => setPreviewImageUrl(photoHistoryItems.find(h => h.reinstall_number === 1)?.installed_image_face_a_url || item.installed_image_face_a_url || item.billboardImage)}
+                      title="الوجه الأمامي"
+                    />
+                  ) : null}
+                  {(photoHistoryItems.find(h => h.reinstall_number === 1)?.installed_image_face_b_url || item.installed_image_face_b_url) ? (
+                    <img
+                      src={photoHistoryItems.find(h => h.reinstall_number === 1)?.installed_image_face_b_url || item.installed_image_face_b_url}
+                      alt="صورة التركيب الأصلي - خلفي"
+                      className="h-10 w-14 object-cover rounded-lg border border-blue-500/40 cursor-pointer hover:opacity-90 shadow-sm"
+                      onClick={() => setPreviewImageUrl(photoHistoryItems.find(h => h.reinstall_number === 1)?.installed_image_face_b_url || item.installed_image_face_b_url)}
+                      title="الوجه الخلفي"
                     />
                   ) : null}
                   <div>
@@ -746,13 +870,23 @@ export function BillboardTaskCard({
                   </div>
 
                   <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 flex-wrap gap-2">
-                    <div className="flex items-center gap-2">
-                      {hist?.installed_image_face_a_url || (rNum === item.reinstall_count ? item.installed_image_face_a_url : null) ? (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {(hist?.installed_image_face_a_url || (rNum === item.reinstall_count ? item.installed_image_face_a_url : null)) ? (
                         <img
                           src={hist?.installed_image_face_a_url || item.installed_image_face_a_url || ''}
-                          alt={`صورة إعادة تركيب ${rNum}`}
-                          className="h-10 w-14 object-cover rounded-lg border border-border/60 cursor-pointer hover:opacity-90 shadow-sm"
+                          alt={`صورة إعادة تركيب ${rNum} - أمامي`}
+                          className="h-10 w-14 object-cover rounded-lg border border-emerald-500/40 cursor-pointer hover:opacity-90 shadow-sm"
                           onClick={() => setPreviewImageUrl(hist?.installed_image_face_a_url || item.installed_image_face_a_url || '')}
+                          title="الوجه الأمامي"
+                        />
+                      ) : null}
+                      {(hist?.installed_image_face_b_url || (rNum === item.reinstall_count ? item.installed_image_face_b_url : null)) ? (
+                        <img
+                          src={hist?.installed_image_face_b_url || item.installed_image_face_b_url || ''}
+                          alt={`صورة إعادة تركيب ${rNum} - خلفي`}
+                          className="h-10 w-14 object-cover rounded-lg border border-blue-500/40 cursor-pointer hover:opacity-90 shadow-sm"
+                          onClick={() => setPreviewImageUrl(hist?.installed_image_face_b_url || item.installed_image_face_b_url || '')}
+                          title="الوجه الخلفي"
                         />
                       ) : null}
                       <div>
@@ -1146,12 +1280,12 @@ export function BillboardTaskCard({
   // Completed State rendering override
   if (isCompleted) {
     return (
-      <div className="group relative w-full overflow-hidden p-4 bg-card/60 backdrop-blur-md border border-green-200 dark:border-green-800/60 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 rounded-[28px]">
-        <div className="space-y-3">
+      <div className="group relative w-full self-start overflow-hidden rounded-2xl border border-emerald-500/25 bg-card shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-500/45 hover:shadow-lg motion-reduce:transform-none">
+        <div className="space-y-0">
           
           {/* Billboard Image Panel */}
           <div 
-            className="relative aspect-[16/10] rounded-[18px] overflow-hidden bg-muted cursor-pointer shadow-sm"
+            className="relative aspect-[16/9] overflow-hidden bg-muted cursor-pointer shadow-sm"
             onClick={() => billboard?.Image_URL && setLightboxImage(billboard.Image_URL)}
           >
             {billboard?.Image_URL ? (
@@ -1168,7 +1302,7 @@ export function BillboardTaskCard({
                 <ImageIcon className="h-12 w-12 text-muted-foreground/30" />
               </div>
             )}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
             
             {/* Action Checkbox overlay */}
             <div 
@@ -1180,6 +1314,16 @@ export function BillboardTaskCard({
                 onCheckedChange={(checked) => onSelectionChange(checked as boolean)}
                 className="h-5 w-5 rounded-lg border-2 border-white/40 bg-black/40 backdrop-blur-sm data-[state=checked]:!bg-primary data-[state=checked]:!border-primary cursor-pointer transition-all [&_svg]:!text-white [&_svg]:stroke-[3.5px]"
               />
+            </div>
+
+            <div className="absolute right-3 bottom-3 z-10 flex items-center gap-2 text-white">
+              <span className="rounded-lg border border-white/20 bg-black/45 px-2.5 py-1 text-xs font-black backdrop-blur-sm" dir="ltr">
+                #{billboard?.ID || item.billboard_id}
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/90 px-2 py-1 text-[10px] font-bold shadow-sm">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                مكتملة
+              </span>
             </div>
             
 
@@ -1211,25 +1355,19 @@ export function BillboardTaskCard({
           </div>
 
           {/* Details & Tags */}
-          <div className="space-y-2.5">
-            <div className="flex items-center gap-2 border-b border-border/30 pb-2">
-              <Checkbox
-                id={`select-completed-${item.id}`}
-                checked={isSelected}
-                onCheckedChange={(checked) => onSelectionChange(checked as boolean)}
-                className="h-4.5 w-4.5 rounded border-border"
-              />
-              <label 
-                htmlFor={`select-completed-${item.id}`}
-                className="font-extrabold text-sm line-clamp-1 text-foreground leading-tight cursor-pointer flex-1"
-              >
+          <div className="space-y-3 p-4">
+            <div className="flex items-center gap-2 border-b border-border/40 pb-2.5">
+              <h3 className="flex-1 line-clamp-1 text-base font-black leading-tight text-foreground">
                 {billboard?.Billboard_Name || 'لوحة إعلانية'}
-              </label>
+              </h3>
+              <span className="rounded-lg border border-border/50 bg-muted/40 px-2 py-1 font-mono text-[10px] font-black text-muted-foreground">
+                {billboard?.Size || 'غير محدد'}
+              </span>
             </div>
             
             {/* Status Tags */}
             <div className="flex items-center gap-1.5 flex-wrap">
-              <Badge className="text-[9px] px-2 py-0.5 font-bold bg-green-500 hover:bg-green-600 text-white border-0">
+              <Badge className="text-[10px] px-2 py-0.5 font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25">
                 <CheckCircle2 className="h-3 w-3 mr-1" />
                 مكتملة بنجاح
               </Badge>
@@ -1239,8 +1377,8 @@ export function BillboardTaskCard({
                   <span>المقاس: {billboard.Size}</span>
                 </Badge>
               )}
-              <Badge variant="secondary" className="text-[9px] px-2 py-0.5 font-extrabold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/30 flex items-center gap-1 rounded-full">
-                <Layers className="h-3 w-3 text-purple-500" />
+              <Badge variant="secondary" className="text-[9px] px-2 py-0.5 font-extrabold bg-primary/10 text-primary border border-primary/30 flex items-center gap-1 rounded-full">
+                <Layers className="h-3 w-3 text-primary" />
                 <span>
                   الوجوه: {
                     item.reinstalled_faces === 'both' ? 'وجهين (أمامي وخلفي)' :
@@ -1256,12 +1394,6 @@ export function BillboardTaskCard({
                   <span>تم احتساب الطباعة</span>
                 </Badge>
               )}
-              <Badge className="text-[9px] px-2 py-0.5 font-extrabold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1 rounded-full">
-                <DollarSign className="h-3 w-3" />
-                <span>
-                  الزبون: {((item.reinstall_count || 0) > 0 ? (customerOriginalInstallCost + customerReinstallCost) : customerInstallationCost).toLocaleString('en-US')} د.ل ({item.pricing_type === 'meter' ? `بالمتر ${item.price_per_meter || 0} د.ل/م²` : 'بالقطعة'})
-                </span>
-              </Badge>
               {onUncomplete && (
                 <Button
                   variant="ghost"
@@ -1328,14 +1460,14 @@ export function BillboardTaskCard({
             )}
 
             {/* Quick Actions Row */}
-            <div className="flex items-center gap-1.5 pt-1.5 pb-2 border-b border-border/30" onClick={e => e.stopPropagation()}>
+            <div className="grid grid-cols-2 gap-2 border-t border-border/50 pt-3 sm:grid-cols-4" onClick={e => e.stopPropagation()}>
               {/* Camera - Add Installed Image */}
               {onAddInstalledImage && (
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={onAddInstalledImage}
-                  className="h-8 flex-1 rounded-xl text-[10px] font-bold gap-1 hover:bg-green-500/10 hover:text-green-600 hover:border-green-500/30 border-green-500/20"
+                  className="h-10 w-full rounded-xl text-[10px] font-bold gap-1 border-emerald-500/25 hover:bg-emerald-500/10 hover:text-emerald-600 hover:border-emerald-500/40 transition-all duration-200 cursor-pointer"
                 >
                   <Camera className="h-3.5 w-3.5 text-green-500" />
                   <span>صور التركيب</span>
@@ -1348,9 +1480,9 @@ export function BillboardTaskCard({
                   variant="outline"
                   size="sm"
                   onClick={onEditDesign}
-                  className="h-8 flex-1 rounded-xl text-[10px] font-bold gap-1 hover:bg-violet-500/10 hover:text-violet-500 hover:border-violet-500/30 border-violet-500/20"
+                  className="h-10 w-full rounded-xl text-[10px] font-bold gap-1 border-primary/25 hover:bg-primary/10 hover:text-primary hover:border-primary/40 transition-all duration-200 cursor-pointer"
                 >
-                  <PaintBucket className="h-3.5 w-3.5 text-violet-500" />
+                  <PaintBucket className="h-3.5 w-3.5 text-primary" />
                   <span>التصاميم</span>
                 </Button>
               )}
@@ -1361,7 +1493,7 @@ export function BillboardTaskCard({
                   variant="outline"
                   size="sm"
                   onClick={onPrint}
-                  className="h-8 flex-1 rounded-xl text-[10px] font-bold gap-1 hover:bg-blue-500/10 hover:text-blue-500 hover:border-blue-500/30 border-blue-500/20"
+                  className="h-10 w-full rounded-xl text-[10px] font-bold gap-1 border-blue-500/25 hover:bg-blue-500/10 hover:text-blue-500 hover:border-blue-500/40 transition-all duration-200 cursor-pointer"
                 >
                   <Printer className="h-3.5 w-3.5 text-blue-500" />
                   <span>طباعة</span>
@@ -1373,7 +1505,7 @@ export function BillboardTaskCard({
                 variant="outline"
                 size="sm"
                 onClick={() => setReplaceDialogOpen(true)}
-                className="h-8 flex-1 rounded-xl text-[10px] font-bold gap-1 hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/30 border-amber-500/20"
+                className="h-10 w-full rounded-xl text-[10px] font-bold gap-1 border-amber-500/25 hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/40 transition-all duration-200 cursor-pointer"
               >
                 <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
                 <span>إعادة تركيب</span>
@@ -1385,7 +1517,7 @@ export function BillboardTaskCard({
                   <Button
                     variant="outline"
                     size="icon"
-                    className="h-8 w-8 rounded-xl border-border/80 hover:bg-muted text-muted-foreground shrink-0"
+                    className="col-span-2 h-10 w-full rounded-xl border-border/80 hover:bg-muted text-muted-foreground transition-all duration-200 cursor-pointer sm:col-span-1"
                     title="المزيد"
                   >
                     <MoreVertical className="h-3.5 w-3.5" />
@@ -1414,6 +1546,9 @@ export function BillboardTaskCard({
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
+
+            {/* The applied design remains visible without expanding the card. */}
+            {renderDesignSelector()}
 
             {/* Reinstall history button */}
             {(item.replacement_status === 'reinstalled' || item.replacement_status === 'replaced') && (
@@ -1462,70 +1597,12 @@ export function BillboardTaskCard({
                   </div>
                 )}
 
-                {/* Design Face Selector */}
-                {taskDesigns.length > 0 && (
-                  <div className="pt-2.5 border-t border-border/40 space-y-2" onClick={(e) => e.stopPropagation()}>
-                    <label className="text-xs font-bold text-foreground flex items-center gap-1">
-                      <Palette className="h-3.5 w-3.5 text-primary" />
-                      التصميم المعتمد
-                    </label>
-                    <Select 
-                      value={selectedDesignId} 
-                      onValueChange={handleDesignChange}
-                      disabled={saving}
-                    >
-                      <SelectTrigger className="h-8.5 text-xs bg-muted/40 border-border/50 rounded-xl focus:ring-1 focus:ring-primary cursor-pointer">
-                        <SelectValue placeholder="-- اختر التصميم --" />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-xl border-border/60 shadow-lg">
-                        <SelectItem value="none">-- بدون تصميم --</SelectItem>
-                        {taskDesigns.map((design) => (
-                          <SelectItem key={design.id} value={design.id} className="cursor-pointer">{design.design_name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
+                {renderDesignPreview()}
+                {renderInstalledPhotosPreview()}
 
-                {/* Installed photos display */}
-                {(item.installed_image_face_a_url || item.installed_image_face_b_url) && (
-                  <div className="pt-2.5 border-t border-border/40 space-y-1.5" onClick={e => e.stopPropagation()}>
-                    <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                      <ImageIcon className="h-3.5 w-3.5 text-green-500" />
-                      إثبات صور التركيب المنفذ
-                    </span>
-                    <div className="grid grid-cols-2 gap-2">
-                      {item.installed_image_face_a_url && (
-                        <div className="space-y-1">
-                          <div className="text-[9px] text-center text-muted-foreground font-bold">صورة الوجه الأمامي</div>
-                          <div 
-                            className="relative aspect-[16/10] rounded-xl overflow-hidden bg-background border border-border/60 cursor-pointer hover:ring-2 hover:ring-primary/40 transition-all shadow-sm"
-                            onClick={() => setLightboxImage(item.installed_image_face_a_url)}
-                          >
-                            <img src={item.installed_image_face_a_url} alt="إثبات أمامي" className="w-full h-full object-contain" />
-                          </div>
-                        </div>
-                      )}
-                      {item.installed_image_face_b_url && (
-                        <div className="space-y-1">
-                          <div className="text-[9px] text-center text-muted-foreground font-bold">صورة الوجه الخلفي</div>
-                          <div 
-                            className="relative aspect-[16/10] rounded-xl overflow-hidden bg-background border border-border/60 cursor-pointer hover:ring-2 hover:ring-primary/40 transition-all shadow-sm"
-                            onClick={() => setLightboxImage(item.installed_image_face_b_url)}
-                          >
-                            <img src={item.installed_image_face_b_url} alt="إثبات خلفي" className="w-full h-full object-contain" />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
               </motion.div>
             )}
           </AnimatePresence>
-
-          {/* Design Face Preview (Always Visible directly on card) */}
-          {renderDesignPreview()}
 
           <Button
             variant="ghost"
@@ -1534,7 +1611,7 @@ export function BillboardTaskCard({
               e.stopPropagation();
               setIsExpanded(!isExpanded);
             }}
-            className="w-full mt-2.5 h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-xl transition-all cursor-pointer"
+            className="mt-1 h-10 w-full cursor-pointer gap-1.5 rounded-xl border border-border/40 bg-muted/25 text-xs font-bold text-muted-foreground transition-all duration-200 hover:border-primary/30 hover:bg-primary/8 hover:text-primary active:scale-[0.99]"
           >
             {isExpanded ? (
               <>
@@ -1544,7 +1621,7 @@ export function BillboardTaskCard({
             ) : (
               <>
                 <ChevronDown className="h-4 w-4" />
-                <span>تفاصيل اللوحة واللوكيشن</span>
+                <span>التاريخ والصور والتصميم</span>
               </>
             )}
           </Button>
@@ -1594,19 +1671,19 @@ export function BillboardTaskCard({
   return (
     <div
       className={cn(
-        "group relative min-w-0 w-full overflow-hidden bg-card border transition-all duration-300 rounded-[28px] p-3.5",
+        "group relative min-w-0 w-full self-start overflow-hidden rounded-2xl bg-card border shadow-sm transition-all duration-200 motion-reduce:transform-none",
         isSelected 
-          ? "border-2 border-primary shadow-2xl shadow-primary/10 ring-4 ring-primary/10 bg-primary/[0.02] scale-[1.01]" 
+          ? "border-primary shadow-lg shadow-primary/10 ring-2 ring-primary/15 bg-primary/[0.02]" 
           : isDelayed
-          ? "border-red-200 dark:border-red-950/60 hover:shadow-lg hover:-translate-y-1"
-          : "border-border/60 hover:shadow-lg hover:-translate-y-1"
+          ? "border-red-500/30 hover:shadow-lg hover:-translate-y-0.5"
+          : "border-border/60 hover:border-primary/35 hover:shadow-lg hover:-translate-y-0.5"
       )}
     >
-      <div className="space-y-3.5">
+      <div className="space-y-0">
         
         {/* Main image preview */}
         <div 
-          className="relative aspect-[16/10] overflow-hidden rounded-[18px] cursor-pointer shadow-sm"
+          className="relative aspect-[16/9] overflow-hidden cursor-pointer shadow-sm"
           onClick={() => billboard?.Image_URL && setLightboxImage(billboard.Image_URL)}
         >
           {billboard?.Image_URL ? (
@@ -1623,6 +1700,7 @@ export function BillboardTaskCard({
               <ImageIcon className="h-12 w-12 text-muted-foreground/30" />
             </div>
           )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
           
           {/* Action Checkbox overlay */}
           <div 
@@ -1634,6 +1712,16 @@ export function BillboardTaskCard({
               onCheckedChange={(checked) => onSelectionChange(checked as boolean)}
               className="h-5 w-5 rounded-lg border-2 border-white/40 bg-black/40 backdrop-blur-sm data-[state=checked]:!bg-primary data-[state=checked]:!border-primary cursor-pointer transition-all [&_svg]:!text-white [&_svg]:stroke-[3.5px]"
             />
+          </div>
+
+          <div className="absolute right-3 bottom-3 z-10 flex items-center gap-2 text-white">
+            <span className="rounded-lg border border-white/20 bg-black/45 px-2.5 py-1 text-xs font-black backdrop-blur-sm" dir="ltr">
+              #{billboard?.ID || item.billboard_id}
+            </span>
+            <span className="inline-flex items-center gap-1 rounded-lg bg-amber-500/90 px-2 py-1 text-[10px] font-bold shadow-sm">
+              <Clock className="h-3.5 w-3.5" />
+              قيد التنفيذ
+            </span>
           </div>
 
           {/* Badges Overlay */}
@@ -1662,22 +1750,16 @@ export function BillboardTaskCard({
         </div>
 
         {/* Details and tags */}
-        <div className="space-y-2.5">
+        <div className="space-y-3 p-3.5">
           <div className="flex items-start justify-between gap-2.5">
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 border-b border-border/30 pb-2 mb-2">
-                <Checkbox
-                  id={`select-pending-${item.id}`}
-                  checked={isSelected}
-                  onCheckedChange={(checked) => onSelectionChange(checked as boolean)}
-                  className="h-4.5 w-4.5 rounded border-border"
-                />
-                <label 
-                  htmlFor={`select-pending-${item.id}`}
-                  className="font-extrabold text-sm line-clamp-1 text-foreground leading-tight cursor-pointer flex-1"
-                >
+              <div className="flex items-center gap-2 border-b border-border/40 pb-2.5 mb-2.5">
+                <h3 className="flex-1 line-clamp-1 text-base font-black leading-tight text-foreground">
                   {billboard?.Billboard_Name || 'لوحة إعلانية'}
-                </label>
+                </h3>
+                <span className="rounded-lg border border-border/50 bg-muted/40 px-2 py-1 font-mono text-[10px] font-black text-muted-foreground">
+                  {billboard?.Size || 'غير محدد'}
+                </span>
               </div>
               
               <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -1691,8 +1773,8 @@ export function BillboardTaskCard({
                     <span>المقاس: {billboard.Size}</span>
                   </Badge>
                 )}
-                <Badge variant="secondary" className="text-[9px] px-2 py-0.5 font-extrabold bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/30 flex items-center gap-1 rounded-full">
-                  <Layers className="h-3 w-3 text-purple-500" />
+                <Badge variant="secondary" className="text-[9px] px-2 py-0.5 font-extrabold bg-primary/10 text-primary border border-primary/30 flex items-center gap-1 rounded-full">
+                  <Layers className="h-3 w-3 text-primary" />
                   <span>
                     الوجوه: {
                       item.reinstalled_faces === 'both' ? 'وجهين (أمامي وخلفي)' :
@@ -1707,12 +1789,6 @@ export function BillboardTaskCard({
                     <span>تم تفعيل الطباعة</span>
                   </Badge>
                 )}
-                <Badge className="text-[9px] px-2 py-0.5 font-extrabold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1 rounded-full">
-                  <DollarSign className="h-3 w-3" />
-                  <span>
-                    الزبون: {((item.reinstall_count || 0) > 0 ? (customerOriginalInstallCost + customerReinstallCost) : customerInstallationCost).toLocaleString('en-US')} د.ل ({item.pricing_type === 'meter' ? `بالمتر ${item.price_per_meter || 0} د.ل/م²` : 'بالقطعة'})
-                  </span>
-                </Badge>
                 {billboard?.friend_companies?.name && (
                   <div className="flex items-center gap-1 text-[9px] text-muted-foreground font-bold">
                     <Building2 className="h-3 w-3.5 shrink-0" />
@@ -1753,16 +1829,27 @@ export function BillboardTaskCard({
               )}
 
               {/* Quick Actions Row */}
-              <div className="flex items-center gap-1.5 pt-1.5 pb-2 border-b border-border/30" onClick={e => e.stopPropagation()}>
+              <div className="grid grid-cols-2 gap-2 border-t border-border/40 pt-3 sm:grid-cols-5" onClick={e => e.stopPropagation()}>
+                {onAddInstalledImage && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={onAddInstalledImage}
+                    className="h-10 w-full cursor-pointer gap-1 rounded-xl bg-primary px-2 text-[10px] font-black text-primary-foreground transition-all duration-200 hover:bg-primary/90 active:scale-95"
+                  >
+                    <Camera className="h-3.5 w-3.5" />
+                    <span>صورة التركيب</span>
+                  </Button>
+                )}
                 {/* Manage Designs */}
                 {onEditDesign && (
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={onEditDesign}
-                    className="h-8 flex-1 rounded-xl text-[10px] font-bold gap-1 hover:bg-violet-500/10 hover:text-violet-500 hover:border-violet-500/30 border-violet-500/20"
+                    className="h-10 w-full rounded-xl text-[10px] font-bold gap-1 border-primary/25 hover:bg-primary/10 hover:text-primary hover:border-primary/40 transition-all duration-200 cursor-pointer"
                   >
-                    <PaintBucket className="h-3.5 w-3.5 text-violet-500" />
+                    <PaintBucket className="h-3.5 w-3.5 text-primary" />
                     <span>التصاميم</span>
                   </Button>
                 )}
@@ -1773,7 +1860,7 @@ export function BillboardTaskCard({
                     variant="outline"
                     size="sm"
                     onClick={onPrint}
-                    className="h-8 flex-1 rounded-xl text-[10px] font-bold gap-1 hover:bg-blue-500/10 hover:text-blue-500 hover:border-blue-500/30 border-blue-500/20"
+                    className="h-10 w-full rounded-xl text-[10px] font-bold gap-1 border-blue-500/25 hover:bg-blue-500/10 hover:text-blue-500 hover:border-blue-500/40 transition-all duration-200 cursor-pointer"
                   >
                     <Printer className="h-3.5 w-3.5 text-blue-500" />
                     <span>طباعة</span>
@@ -1786,7 +1873,7 @@ export function BillboardTaskCard({
                     variant="outline"
                     size="sm"
                     onClick={() => setReplaceDialogOpen(true)}
-                    className="h-8 flex-1 rounded-xl text-[10px] font-bold gap-1 hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/30 border-amber-500/20"
+                    className="h-10 w-full rounded-xl text-[10px] font-bold gap-1 border-amber-500/25 hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/40 transition-all duration-200 cursor-pointer"
                   >
                     <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
                     <span>إعادة تركيب</span>
@@ -1803,26 +1890,18 @@ export function BillboardTaskCard({
                         onDelete();
                       }
                     }}
-                    className="h-8 w-8 rounded-xl border-red-500/20 text-red-500 hover:bg-red-500/10 hover:border-red-500/50 shrink-0"
+                    className="h-10 w-full rounded-xl border-red-500/20 text-red-500 hover:bg-red-500/10 hover:border-red-500/50 transition-all duration-200 cursor-pointer"
                     title="إزالة اللوحة"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 )}
               </div>
+
+              {/* The applied design remains visible without expanding the card. */}
+              {renderDesignSelector()}
             </div>
             
-            {/* Dimensions and faces badges */}
-            <div className="flex items-center gap-1.5 shrink-0">
-              <Badge className="text-[9px] px-2 py-0.5 font-bold bg-primary text-primary-foreground border-none">
-                {billboard?.Size}
-              </Badge>
-              {billboard?.Faces_Count && (
-                <Badge variant="outline" className="text-[9px] px-1.5 py-0.5 border-border">
-                  {billboard.Faces_Count} وجه
-                </Badge>
-              )}
-            </div>
           </div>
 
           {/* Replacement banner info */}
@@ -1921,31 +2000,6 @@ export function BillboardTaskCard({
                   </button>
                 </div>
 
-                {/* Design Face Select Dropdown */}
-                {taskDesigns.length > 0 && (
-                  <div className="pt-2.5 border-t border-border/40 space-y-2" onClick={(e) => e.stopPropagation()}>
-                    <label className="text-xs font-bold text-foreground flex items-center gap-1">
-                      <Palette className="h-3.5 w-3.5 text-primary" />
-                      تخصيص تصميم اللوحة
-                    </label>
-                    <Select 
-                      value={selectedDesignId} 
-                      onValueChange={handleDesignChange}
-                      disabled={saving}
-                    >
-                      <SelectTrigger className="h-8.5 text-xs bg-muted/40 border-border/50 rounded-xl focus:ring-1 focus:ring-primary cursor-pointer">
-                        <SelectValue placeholder="-- اختر التصميم --" />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-xl border-border/60 shadow-lg">
-                        <SelectItem value="none">-- بدون تصميم --</SelectItem>
-                        {taskDesigns.map((design) => (
-                          <SelectItem key={design.id} value={design.id} className="cursor-pointer">{design.design_name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
                 {/* Faces to install selection */}
                 {availableFacesCount >= 1 && (
                   <div className="pt-2 border-t border-border/40 space-y-1.5" onClick={(e) => e.stopPropagation()}>
@@ -2010,14 +2064,13 @@ export function BillboardTaskCard({
                   </button>
                 </div>
 
-                {/* Pricing hub calculator display */}
-                {renderFinancialCalculator()}
+                {/* Visual and design controls stay inside the optional details area. */}
+                {renderDesignPreview()}
+                {renderInstalledPhotosPreview()}
+
               </motion.div>
             )}
           </AnimatePresence>
-
-          {/* Design Face Preview (Always Visible directly on card) */}
-          {renderDesignPreview()}
 
           <Button
             variant="ghost"
@@ -2026,7 +2079,7 @@ export function BillboardTaskCard({
               e.stopPropagation();
               setIsExpanded(!isExpanded);
             }}
-            className="w-full mt-2.5 h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-xl transition-all cursor-pointer"
+            className="mt-1 h-10 w-full cursor-pointer gap-1.5 rounded-xl border border-border/40 bg-muted/25 text-xs font-bold text-muted-foreground transition-all duration-200 hover:border-primary/30 hover:bg-primary/8 hover:text-primary active:scale-[0.99]"
           >
             {isExpanded ? (
               <>
@@ -2036,7 +2089,7 @@ export function BillboardTaskCard({
             ) : (
               <>
                 <ChevronDown className="h-4 w-4" />
-                <span>تفاصيل اللوحة واللوكيشن</span>
+                <span>التاريخ والوجوه والتصميم</span>
               </>
             )}
           </Button>

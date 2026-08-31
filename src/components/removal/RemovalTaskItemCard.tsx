@@ -2,17 +2,15 @@ import { useState } from 'react';
 import { normalizeGoogleImageUrl } from '@/utils/imageUtils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { 
   MapPin, 
-  Navigation, 
   CheckCircle2, 
   Clock, 
   ExternalLink,
   Layers,
-  Ruler,
   Sparkles,
-  X
+  X,
+  Camera,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
@@ -40,8 +38,11 @@ export function RemovalTaskItemCard({
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const isCompleted = item.status === 'completed';
 
-  // Get the best available image
-  const heroImage = normalizeGoogleImageUrl(billboard.Image_URL) || item.design_face_a || item.design_face_b;
+  // صورة التركيب هي المرجع الأهم لمهمة الإزالة، ثم صورة اللوحة، ثم التصميم.
+  const installedImage = normalizeGoogleImageUrl(
+    item.installed_image_face_a_url || item.installed_image_url || item.installed_image_face_b_url
+  );
+  const heroImage = installedImage || normalizeGoogleImageUrl(billboard.Image_URL) || item.design_face_a || item.design_face_b;
   const designImage = item.design_face_a || item.design_face_b;
 
   const handleOpenMap = () => {
@@ -59,22 +60,22 @@ export function RemovalTaskItemCard({
         className="group"
       >
         <div className={`
-          relative overflow-hidden rounded-xl transition-all duration-300 p-1.5
+          relative overflow-hidden rounded-2xl border p-3 transition-all duration-200
           ${isCompleted 
-            ? 'bg-gradient-to-br from-emerald-50 via-emerald-50/80 to-emerald-50/50 dark:from-emerald-950/30 dark:via-emerald-950/20 dark:to-emerald-950/10 border-2 border-emerald-300 dark:border-emerald-800 shadow-md' 
+            ? 'border-emerald-500/25 bg-emerald-500/[0.06] shadow-sm'
             : isSelected
-              ? 'bg-gradient-to-br from-primary/10 to-primary/5 border-2 border-primary shadow-lg shadow-primary/10'
-              : 'bg-card border-2 border-border/50 hover:border-primary/40 hover:shadow-lg hover:shadow-black/5'
+              ? 'border-primary bg-primary/[0.07] shadow-md shadow-primary/10'
+              : 'border-border/45 bg-card/80 shadow-sm hover:border-primary/35 hover:shadow-md'
           }
         `}>
-          <div className="space-y-1.5">
+          <div className="space-y-3">
             {/* الصورة في الأعلى مثل مهام التركيب */}
-            <div className="relative aspect-[16/10] rounded-lg overflow-hidden bg-muted ring-1 ring-border/30 shadow-sm">
+            <div className="relative aspect-[16/9] overflow-hidden rounded-xl bg-muted ring-1 ring-border/30">
               {heroImage ? (
                 <img
                   src={heroImage}
                   alt={billboard.Billboard_Name || `لوحة #${billboard.ID}`}
-                  className="w-full h-full object-cover cursor-pointer transition-transform duration-300 group-hover:scale-105"
+                  className="h-full w-full cursor-pointer object-cover transition-transform duration-300 group-hover:scale-[1.02]"
                   onClick={() => setPreviewImage(heroImage)}
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
@@ -88,14 +89,14 @@ export function RemovalTaskItemCard({
               )}
               
               {/* التدرج السفلي */}
-              <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent pointer-events-none" />
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-black/10" />
               
               {/* شارة الحالة */}
               <div className={`
-                absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full flex items-center gap-1 shadow-lg text-white text-[9px] font-bold
+                absolute left-2 top-2 flex h-7 items-center gap-1 rounded-lg border px-2 text-[10px] font-bold text-white shadow-sm backdrop-blur-md
                 ${isCompleted 
-                  ? 'bg-gradient-to-r from-emerald-500 to-green-500' 
-                  : 'bg-gradient-to-r from-amber-500 to-orange-500'
+                  ? 'border-emerald-300/30 bg-emerald-600/90'
+                  : 'border-amber-300/30 bg-amber-600/90'
                 }
               `}>
                 {isCompleted ? (
@@ -106,33 +107,42 @@ export function RemovalTaskItemCard({
               </div>
               
               {/* رقم اللوحة */}
-              <div className="absolute bottom-1.5 right-1.5 bg-gradient-to-r from-primary to-accent backdrop-blur-md px-1.5 py-0.5 rounded-full shadow-lg ring-1 ring-white/20">
-                <span className="font-extrabold text-[10px] text-white">#{billboard.ID}</span>
+              <div className="absolute bottom-2 right-2 rounded-lg border border-primary/30 bg-primary/90 px-2 py-1 shadow-sm backdrop-blur-md">
+                <span className="font-mono text-[11px] font-extrabold text-primary-foreground">#{billboard.ID || item.billboard_id}</span>
               </div>
+
+              {installedImage && (
+                <div className="absolute bottom-2 left-2 flex h-7 items-center gap-1 rounded-lg border border-white/15 bg-black/60 px-2 text-[9px] font-bold text-white backdrop-blur-md">
+                  <Camera className="h-3 w-3" />
+                  صورة التركيب
+                </div>
+              )}
               
               {/* Checkbox للتحديد */}
               {!isCompleted && (
-                <div 
+                <button
+                  type="button"
                   className={`
-                    absolute top-1.5 right-1.5 w-5 h-5 rounded-full flex items-center justify-center cursor-pointer transition-all border-2 shadow-md
+                    absolute right-2 top-2 flex h-10 w-10 cursor-pointer items-center justify-center rounded-xl border-2 shadow-md backdrop-blur-md transition-all duration-200 active:scale-95
                     ${isSelected 
-                      ? 'bg-primary border-primary text-primary-foreground scale-105' 
-                      : 'bg-white/90 border-white/50 hover:border-primary/70'
+                      ? 'scale-105 border-primary bg-primary text-primary-foreground'
+                      : 'border-white/50 bg-black/45 text-white hover:border-primary/70 hover:bg-black/65'
                     }
                   `}
                   onClick={(e) => {
                     e.stopPropagation();
                     onSelectChange(!isSelected);
                   }}
+                  aria-label={isSelected ? 'إلغاء تحديد اللوحة' : 'تحديد اللوحة'}
                 >
-                  {isSelected && <CheckCircle2 className="h-3 w-3" />}
-                </div>
+                  <CheckCircle2 className={`h-4 w-4 ${isSelected ? 'opacity-100' : 'opacity-55'}`} />
+                </button>
               )}
               
               {/* صورة التصميم الصغيرة */}
-              {designImage && designImage !== heroImage && (
+              {designImage && designImage !== heroImage && !installedImage && (
                 <div 
-                  className="absolute bottom-1.5 left-1.5 w-8 h-8 rounded overflow-hidden ring-2 ring-white/60 cursor-pointer hover:ring-white transition-all shadow-xl"
+                  className="absolute bottom-2 left-2 h-10 w-10 cursor-pointer overflow-hidden rounded-lg ring-2 ring-white/60 shadow-xl transition-all hover:ring-white"
                   onClick={(e) => {
                     e.stopPropagation();
                     setPreviewImage(designImage);
@@ -150,32 +160,32 @@ export function RemovalTaskItemCard({
             </div>
 
             {/* معلومات اللوحة */}
-            <div className="space-y-1">
-              <p className={`font-bold text-xs line-clamp-1 ${isCompleted ? 'text-emerald-800 dark:text-emerald-300' : ''}`}>
-                {billboard.Billboard_Name || `لوحة #${billboard.ID}`}
+            <div className="space-y-2">
+              <p className={`line-clamp-1 text-sm font-black ${isCompleted ? 'text-emerald-400' : 'text-foreground'}`}>
+                {billboard.Billboard_Name || `لوحة #${billboard.ID || item.billboard_id}`}
               </p>
               
               {/* الشارات */}
-              <div className="flex items-center gap-1 flex-wrap">
-                <Badge className={`text-[9px] px-1 py-0.5 font-bold ${isCompleted ? 'bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700' : 'bg-muted text-foreground'}`}>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Badge className={`h-6 rounded-lg px-2 py-0 text-[10px] font-bold ${isCompleted ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-400' : 'bg-muted text-foreground'}`}>
                   {billboard.Size || 'غير محدد'}
                 </Badge>
                 {billboard.Faces_Count && (
-                  <Badge variant="outline" className={`text-[9px] px-1 py-0.5 font-medium ${isCompleted ? 'border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300' : ''}`}>
+                  <Badge variant="outline" className={`h-6 rounded-lg px-2 py-0 text-[10px] font-medium ${isCompleted ? 'border-emerald-500/25 text-emerald-400' : ''}`}>
                     {billboard.Faces_Count === 1 ? 'وجه واحد' : `${billboard.Faces_Count} أوجه`}
                   </Badge>
                 )}
               </div>
               
               {/* الموقع */}
-              <div className={`flex items-start gap-1 text-[9px] p-1 rounded border ${isCompleted ? 'bg-emerald-100/50 dark:bg-emerald-900/30 border-emerald-200 dark:border-emerald-800' : 'bg-muted/50 border-border/50'}`}>
-                <MapPin className={`h-3 w-3 mt-0.5 flex-shrink-0 ${isCompleted ? 'text-emerald-600 dark:text-emerald-400' : 'text-primary'}`} />
+              <div className={`flex min-h-10 items-start gap-1.5 rounded-xl border p-2 text-[10px] ${isCompleted ? 'border-emerald-500/20 bg-emerald-500/[0.06]' : 'border-border/40 bg-muted/35'}`}>
+                <MapPin className={`mt-0.5 h-3.5 w-3.5 flex-shrink-0 ${isCompleted ? 'text-emerald-400' : 'text-primary'}`} />
                 <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                  <span className={`font-semibold truncate text-[9px] ${isCompleted ? 'text-emerald-800 dark:text-emerald-300' : ''}`}>
+                  <span className={`truncate text-[10px] font-semibold ${isCompleted ? 'text-emerald-300' : ''}`}>
                     {billboard.City} - {billboard.Municipality || 'غير محدد'}
                   </span>
                   {billboard.Nearest_Landmark && (
-                    <span className={`text-[9px] truncate ${isCompleted ? 'text-emerald-700 dark:text-emerald-400' : 'text-muted-foreground'}`}>
+                    <span className={`truncate text-[10px] ${isCompleted ? 'text-emerald-400' : 'text-muted-foreground'}`}>
                       {billboard.Nearest_Landmark}
                     </span>
                   )}
@@ -184,7 +194,7 @@ export function RemovalTaskItemCard({
 
               {/* تاريخ الإزالة للمكتملة */}
               {isCompleted && item.removal_date && (
-                <div className="flex items-center gap-1 text-[9px] font-semibold text-emerald-700 dark:text-emerald-400 p-1 bg-emerald-100/50 dark:bg-emerald-900/30 rounded border border-emerald-200 dark:border-emerald-800">
+                <div className="flex min-h-9 items-center gap-1.5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-2 text-[10px] font-semibold text-emerald-400">
                   <CheckCircle2 className="h-3 w-3 flex-shrink-0" />
                   <span className="truncate">
                     تم الإزالة: {format(new Date(item.removal_date), 'dd/MM/yyyy', { locale: ar })}
@@ -193,13 +203,13 @@ export function RemovalTaskItemCard({
               )}
 
               {/* أزرار العمليات جنباً إلى جنب لتقليص الارتفاع */}
-              <div className="flex gap-1.5 mt-1">
+              <div className="mt-1 flex gap-2">
                 {billboard.GPS_Coordinates && (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={handleOpenMap}
-                    className={`flex-1 gap-1 h-7 rounded-lg text-[9px] font-medium transition-all duration-300 ${isCompleted ? 'hover:bg-emerald-500 hover:text-white hover:border-emerald-500' : 'hover:bg-primary hover:text-primary-foreground hover:border-primary'}`}
+                    onClick={(event) => { event.stopPropagation(); handleOpenMap(); }}
+                    className={`h-10 flex-1 cursor-pointer gap-1 rounded-xl text-[10px] font-bold transition-all duration-200 active:scale-95 ${isCompleted ? 'hover:border-emerald-500 hover:bg-emerald-500 hover:text-white' : 'hover:border-primary hover:bg-primary hover:text-primary-foreground'}`}
                   >
                     <ExternalLink className="h-3 w-3" />
                     الموقع
@@ -211,7 +221,7 @@ export function RemovalTaskItemCard({
                     size="sm"
                     variant="outline"
                     onClick={(e) => { e.stopPropagation(); onComplete(); }}
-                    className="flex-1 gap-1 h-7 rounded-lg text-[9px] font-bold transition-all duration-300 border border-emerald-500/30 text-emerald-500 hover:bg-emerald-500/10"
+                    className="h-10 flex-1 cursor-pointer gap-1 rounded-xl border border-emerald-500/30 text-[10px] font-bold text-emerald-500 transition-all duration-200 hover:bg-emerald-500/10 active:scale-95"
                   >
                     <CheckCircle2 className="h-3 w-3" />
                     إكمال
@@ -238,7 +248,8 @@ export function RemovalTaskItemCard({
                   size="icon"
                   variant="ghost"
                   onClick={() => setPreviewImage(null)}
-                  className="absolute top-4 left-4 z-10 rounded-full bg-white/10 hover:bg-white/20 text-white h-10 w-10"
+                  className="absolute left-4 top-4 z-10 h-11 w-11 cursor-pointer rounded-xl bg-white/10 text-white transition-all duration-200 hover:bg-white/20 active:scale-95"
+                  aria-label="إغلاق المعاينة"
                 >
                   <X className="h-5 w-5" />
                 </Button>

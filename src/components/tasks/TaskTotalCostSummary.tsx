@@ -116,7 +116,7 @@ const BILLBOARD_TYPE_ICONS: Record<string, any> = {
   'عادية': LayoutGrid,
 };
 
-function calculateAreaFromSizeData(sizeName: string, sizesMap: Record<string, SizeData>): number {
+function calculateTaskSummaryAreaFromSize(sizeName: string, sizesMap: Record<string, SizeData>): number {
   if (!sizeName) return 0;
   
   const sizeData = sizesMap[sizeName] || sizesMap[sizeName.toLowerCase()];
@@ -246,7 +246,7 @@ export function TaskTotalCostSummary({
       taskItems.forEach(item => {
         const billboard = billboards[item.billboard_id];
         const sizeName = billboard?.Size || '';
-        const area = calculateAreaFromSizeData(sizeName, sizesMap);
+        const area = calculateTaskSummaryAreaFromSize(sizeName, sizesMap);
         const faces = item.faces_to_install ?? billboard?.Faces_Count ?? 1;
         totalArea += area * faces;
       });
@@ -359,7 +359,7 @@ export function TaskTotalCostSummary({
       const billboard = billboards[item.billboard_id];
       const billboardType = billboard?.billboard_type || 'عادية';
       const sizeName = billboard?.Size || 'غير محدد';
-      const area = calculateAreaFromSizeData(sizeName, sizesMap);
+      const area = calculateTaskSummaryAreaFromSize(sizeName, sizesMap);
       const totalFaces = billboard?.Faces_Count || 1;
       const facesToInstall = item.faces_to_install ?? totalFaces;
       // المساحة الفعلية = مساحة الوجه الواحد × عدد الأوجه المراد تركيبها
@@ -452,7 +452,7 @@ export function TaskTotalCostSummary({
 
   // حساب السعر المتوقع بناءً على سعر المتر (للعرض الفوري)
   const calculateExpectedPrice = useCallback((sizeName: string, hasCutout: boolean, pricePerMeter: number) => {
-    const area = calculateAreaFromSizeData(sizeName, sizesMap);
+    const area = calculateTaskSummaryAreaFromSize(sizeName, sizesMap);
     const billboard = Object.values(billboards).find(b => b.Size === sizeName);
     const faces = billboard?.Faces_Count || 2;
     return Math.round(pricePerMeter * area * faces * 100) / 100;
@@ -631,7 +631,7 @@ export function TaskTotalCostSummary({
       const updates = itemsToUpdate.map(item => {
         const billboard = billboards[item.billboard_id];
         const hasCutout = item.has_cutout || false;
-        const area = calculateAreaFromSizeData(sizeName, sizesMap);
+        const area = calculateTaskSummaryAreaFromSize(sizeName, sizesMap);
         const totalFaces = billboard?.Faces_Count || 1;
         const facesToInstall = item.faces_to_install ?? totalFaces;
         
@@ -680,7 +680,7 @@ export function TaskTotalCostSummary({
         const billboard = billboards[item.billboard_id];
         const hasCutout = item.has_cutout || false;
         const sizeName = billboard?.Size || '';
-        const area = calculateAreaFromSizeData(sizeName, sizesMap);
+        const area = calculateTaskSummaryAreaFromSize(sizeName, sizesMap);
         const totalFaces = billboard?.Faces_Count || 1;
         const facesToInstall = item.faces_to_install ?? totalFaces;
         

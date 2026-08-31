@@ -25,6 +25,7 @@ import {
   ContractLookup
 } from '@/services/printTaskResolutionService';
 import { executeCreatePrintTask } from '@/services/printTaskCreationService';
+import { resolveInstallationFacesCount } from '@/lib/installationFaces';
 
 interface DesignGroup {
   design: string;
@@ -184,6 +185,10 @@ export function CreatePrintTaskFromInstallation({
       if (billboardsResult && !billboardsResult.error && billboardsResult.data) {
         billboardsResult.data.forEach((b: any) => {
           const facesFromItem = facesToInstallMap[b.ID];
+          const actualFacesCount = resolveInstallationFacesCount(
+            { faces_to_install: facesFromItem },
+            b,
+          );
           const cNo = b.Contract_Number ? Number(b.Contract_Number) : null;
           if (cNo && Number.isFinite(cNo) && cNo > 0) {
             contractIdsSet.add(cNo);
@@ -193,14 +198,14 @@ export function CreatePrintTaskFromInstallation({
             ID: b.ID,
             Size: b.Size || '3x4',
             has_cutout: b.has_cutout || false,
-            Faces_Count: facesFromItem || b.Faces_Count || 1
+            Faces_Count: Number(b.Faces_Count) || actualFacesCount
           };
 
           billboardsLookupMap[b.ID] = {
             id: b.ID,
             size: b.Size || '3x4',
             contractNumber: cNo,
-            facesCount: facesFromItem || b.Faces_Count || 1,
+            facesCount: Number(b.Faces_Count) || actualFacesCount,
             hasCutout: Boolean(b.has_cutout),
             designFaceA: b.design_face_a,
             designFaceB: b.design_face_b,
@@ -249,6 +254,11 @@ export function CreatePrintTaskFromInstallation({
       const updatedItems = taskItems.map(item => {
         const billboard = billboardsLookupMap[item.billboard_id];
         const resolved = resolveItemDesign(item, billboard, taskDesignsMap, contractDesignDataMap);
+        const physicalBillboard = bMap[item.billboard_id];
+        const actualFacesCount = resolveInstallationFacesCount(
+          { faces_to_install: facesToInstallMap[item.billboard_id] ?? item.faces_to_install },
+          physicalBillboard,
+        );
 
         if (resolved.cutoutImageUrl && item.has_cutout) {
           const key = `${resolved.faceA || resolved.faceB || 'item'}-${item.billboard_id}`;
@@ -258,7 +268,8 @@ export function CreatePrintTaskFromInstallation({
         return {
           ...item,
           design_face_a: resolved.faceA,
-          design_face_b: resolved.faceB
+          design_face_b: actualFacesCount > 1 ? resolved.faceB : null,
+          faces_to_install: actualFacesCount,
         };
       });
 
@@ -295,7 +306,7 @@ export function CreatePrintTaskFromInstallation({
       
       const size = billboard.Size || '3x4';
       const hasCutout = item.has_cutout || billboard.has_cutout || false;
-      const facesCount = item.faces_to_install || billboard.Faces_Count || 1;
+      const facesCount = resolveInstallationFacesCount(item, billboard);
       
       // Face A
       const designA = item.design_face_a || '';
@@ -615,7 +626,10 @@ export function CreatePrintTaskFromInstallation({
           id: b.ID,
           size: b.Size || '3x4',
           contractNumber: cNo,
-          facesCount: facesToInstallMap[b.ID] || b.Faces_Count || 1,
+          facesCount: Number(b.Faces_Count) || resolveInstallationFacesCount(
+            { faces_to_install: facesToInstallMap[b.ID] },
+            b,
+          ),
           hasCutout: Boolean(b.has_cutout),
           designFaceA: b.design_face_a,
           designFaceB: b.design_face_b,

@@ -1,7 +1,8 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Upload, Link as LinkIcon, ImageIcon, CheckCircle2, CloudUpload } from 'lucide-react';
+import { Upload, Link as LinkIcon, ImageIcon, CheckCircle2, CloudUpload, Trash2, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { uploadToImgbb } from '@/services/imgbbService';
 
@@ -10,6 +11,8 @@ interface ImageUploadZoneProps {
   value?: string;
   /** Called with the uploaded/pasted image URL */
   onChange: (url: string) => void;
+  /** Called when the image is cleared / removed (optional, defaults to calling onChange('')) */
+  onClear?: () => void;
   /** Name used for upload naming */
   imageName?: string;
   /** Folder path for organized uploads (e.g. 'billboard-photos', 'contract-designs/C123') */
@@ -35,6 +38,7 @@ interface ImageUploadZoneProps {
 export function ImageUploadZone({
   value,
   onChange,
+  onClear,
   imageName = 'image',
   folder,
   showUrlInput = true,
@@ -183,7 +187,24 @@ export function ImageUploadZone({
     <div className={`space-y-3 ${className}`} onPaste={handlePaste} tabIndex={0}>
       {/* Drop zone */}
       <div>
-        {label && <Label className="text-xs text-muted-foreground mb-1.5 block">{label}</Label>}
+        <div className="flex items-center justify-between mb-1.5">
+          {label && <Label className="text-xs text-muted-foreground block">{label}</Label>}
+          {value && !disabled && (
+            <button
+              type="button"
+              onClick={() => {
+                if (onClear) onClear();
+                else onChange('');
+                toast.info('تمت إزالة الصورة');
+              }}
+              className="text-xs text-destructive hover:text-destructive/80 flex items-center gap-1 transition-colors px-1 py-0.5 rounded hover:bg-destructive/10"
+              title="حذف الصورة"
+            >
+              <Trash2 className="h-3 w-3" />
+              <span>إزالة الصورة</span>
+            </button>
+          )}
+        </div>
         <input
           ref={fileInputRef}
           type="file"
@@ -261,10 +282,24 @@ export function ImageUploadZone({
               placeholder={urlPlaceholder}
               value={value || ''}
               onChange={(e) => onChange(e.target.value)}
-              className="text-sm h-9 font-mono pr-8"
+              className="text-sm h-9 font-mono pr-8 pl-8"
               dir="ltr"
               disabled={disabled || uploading}
             />
+            {value && !disabled && !uploading && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (onClear) onClear();
+                  else onChange('');
+                  toast.info('تم مسح الرابط');
+                }}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-destructive p-1"
+                title="مسح الرابط"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -273,13 +308,59 @@ export function ImageUploadZone({
       {showPreview && (
         <div className="flex items-center justify-center">
           {value ? (
-            <div className={`w-full ${previewHeight} bg-muted rounded-lg overflow-hidden border border-border`}>
+            <div className={`relative group w-full ${previewHeight} bg-muted rounded-lg overflow-hidden border border-border`}>
               <img
                 src={value}
                 alt="معاينة"
                 className="w-full h-full object-cover"
                 onError={(e) => { (e.target as HTMLImageElement).src = '/placeholder.svg'; }}
               />
+              {/* Overlay with Delete and View controls */}
+              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 p-2 z-10">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onClear) onClear();
+                    else onChange('');
+                    toast.info('تم حذف الصورة');
+                  }}
+                  disabled={disabled || uploading}
+                  className="h-8 px-2.5 bg-destructive hover:bg-destructive/90 text-white shadow font-medium text-xs gap-1"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  حذف الصورة
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.open(value, '_blank');
+                  }}
+                  className="h-8 px-2.5 bg-background/90 hover:bg-background text-foreground shadow text-xs"
+                >
+                  عرض
+                </Button>
+              </div>
+              {/* Corner badge delete button for touch devices */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onClear) onClear();
+                  else onChange('');
+                  toast.info('تم حذف الصورة');
+                }}
+                disabled={disabled || uploading}
+                title="حذف الصورة"
+                className="absolute top-1.5 left-1.5 p-1.5 rounded-full bg-destructive text-white hover:bg-destructive/90 transition-colors shadow-md z-20"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
             </div>
           ) : (
             <div className={`w-full ${previewHeight} bg-muted/30 rounded-lg border-2 border-dashed border-border flex items-center justify-center`}>

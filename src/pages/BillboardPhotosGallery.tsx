@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { Search, Download, Loader2, Image as ImageIcon, ChevronLeft, ChevronRight, Filter, Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import { Search, Download, Loader2, Image as ImageIcon, ChevronLeft, ChevronRight, Filter, Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, XCircle, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import JSZip from 'jszip';
 import {

@@ -39,6 +39,8 @@ export default function PrintedInvoicesPage() {
   const [distributeDialogOpen, setDistributeDialogOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<PrintedInvoice | null>(null);
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>('');
   const [selectedInvoiceForPrint, setSelectedInvoiceForPrint] = useState<any | null>(null);
   const [printOpenToPreview, setPrintOpenToPreview] = useState(true);
   const [printAuto, setPrintAuto] = useState(false);
@@ -150,10 +152,8 @@ export default function PrintedInvoicesPage() {
   };
 
   const handleEditInvoice = (invoice: any) => {
-    setSelectedInvoiceForPrint(invoice);
-    setPrintOpenToPreview(false);
-    setPrintAuto(false);
-    setPrintDialogOpen(true);
+    setSelectedInvoiceId(invoice.id);
+    setEditDialogOpen(true);
   };
 
   const handleDistributePayment = (invoice: PrintedInvoice) => {

@@ -6,15 +6,15 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { CompositeTaskWithDetails, UpdateCompositeTaskCostsInput } from '@/types/composite-task';
-import { 
-  Wrench, Printer, Scissors, DollarSign, Package, 
-  TrendingUp, TrendingDown, Calculator, Ruler, ChevronDown, ChevronUp, 
+import {
+  Wrench, Printer, Scissors, DollarSign,
+  Calculator, Ruler, ChevronDown, ChevronUp,
   Building2, Landmark, LayoutGrid, Check, Square, Zap, Gift, Pencil, X, Save,
-  Loader2, AlertCircle, AlertTriangle, CheckCircle2
+  Loader2, AlertCircle, AlertTriangle, CheckCircle2, Search, CheckSquare, Plus, Minus,
+  Sparkles, Layers, FileText, MapPin
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
@@ -23,12 +23,16 @@ import { CostAllocationSection, CostAllocationData, createDefaultCostAllocation 
 import { CutoutPerBillboardEditor } from './CutoutPerBillboardEditor';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Checkbox } from '@/components/ui/checkbox';
+import { getSharedOperationCostsForTask } from '@/lib/compositeTaskOperation';
+import { resolveInstallationFacesCount } from '@/lib/installationFaces';
 
 interface EnhancedEditCompositeTaskCostsDialogProps {
   task: CompositeTaskWithDetails | null;
+  tasks?: CompositeTaskWithDetails[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSave: (input: UpdateCompositeTaskCostsInput) => void;
+  onSave: (input: UpdateCompositeTaskCostsInput) => void | Promise<void>;
   isSaving?: boolean;
 }
 
@@ -43,6 +47,9 @@ interface SizeData {
 interface TaskItem {
   id: string;
   billboard_id: number;
+  task_id?: string;
+  teamName?: string;
+  teamId?: string;
   customer_installation_cost: number;
   company_installation_cost: number | null;
   has_cutout?: boolean;
@@ -53,6 +60,9 @@ interface TaskItem {
   pricing_type?: 'piece' | 'meter';
   price_per_meter?: number;
   faces_to_install?: number;
+  reinstall_count?: number;
+  customer_original_install_cost?: number;
+  customer_reinstall_cost?: number;
   cutout_workshop_id?: string | null;
   cutout_company_cost?: number | null;
   cutout_customer_cost?: number | null;
@@ -81,15 +91,15 @@ interface Billboard {
   billboard_type?: string;
   Nearest_Landmark?: string;
   Image_URL?: string;
+  District?: string;
+  City?: string;
+  Municipality?: string;
 }
 
-const BILLBOARD_TYPE_ICONS: Record<string, any> = {
-  'تيبول': Landmark,
-  'برجية': Building2,
-  'عادية': LayoutGrid,
-};
+const isEnabledContractFlag = (value: unknown): boolean =>
+  value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
 
-function calculateAreaFromSizeData(sizeName: string, sizesMap: Record<string, SizeData>): number {
+function calculateEnhancedCompositeAreaFromSize(sizeName: string, sizesMap: Record<string, SizeData>): number {
   if (!sizeName) return 0;
   const sizeData = sizesMap[sizeName] || sizesMap[sizeName.toLowerCase()];
   if (sizeData && sizeData.width && sizeData.height) {
@@ -97,216 +107,116 @@ function calculateAreaFromSizeData(sizeName: string, sizesMap: Record<string, Si
   }
   const parts = sizeName.toLowerCase().split(/[x×*]/);
   if (parts.length === 2) {
-    const width = parseFloat(parts[0]) || 0;
-    const height = parseFloat(parts[1]) || 0;
-    return width * height;
+    const w = parseFloat(parts[0]);
+    const h = parseFloat(parts[1]);
+    if (!isNaN(w) && !isNaN(h)) {
+      return w * h;
+    }
   }
   return 0;
 }
 
-// ════════════ Reusable Inline Price Input with Controls ════════════
-const InlinePriceInput = ({ value, onChange, label, step = 1, showLabel = true, className }: {
+
+
+
+// Modern Stepper Input
+const QuickNumberStepper = ({
+  value,
+  onChange,
+  label,
+  step = 10,
+  unit = 'د.ل',
+  disabled = false,
+  colorClass = 'text-foreground',
+  className
+}: {
   value: number;
   onChange: (val: number) => void;
-  label: string;
+  label?: string;
   step?: number;
-  showLabel?: boolean;
+  unit?: string;
+  disabled?: boolean;
+  colorClass?: string;
   className?: string;
 }) => (
-  <div dir="rtl" className={cn("flex items-center justify-start gap-3 bg-background border border-border/15 rounded-xl p-1.5 shadow-sm shrink-0 min-w-0 transition-all focus-within:border-primary/30 text-right", className)}>
-    {showLabel && <span className="text-sm font-semibold text-muted-foreground/80 px-2 shrink-0 text-right whitespace-nowrap">{label}</span>}
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className="h-9 w-9 hover:bg-muted text-lg font-bold shrink-0 p-0 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
-      onClick={() => onChange(value + step)}
-      aria-label="زيادة"
-    >
-      +
-    </Button>
-    <div dir="ltr" className="flex-1 flex items-center gap-1.5 bg-muted/30 rounded-lg px-2.5 h-10 min-w-[9.5rem] border border-border/10">
-      <Input
-        type="number"
-        inputMode="numeric"
-        value={value}
-        onChange={e => onChange(Number(e.target.value) || 0)}
-        className="h-9 flex-1 min-w-0 text-center border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 font-bold font-mono text-base text-foreground px-1"
-      />
-      <span className="text-xs font-semibold text-muted-foreground/70 pointer-events-none shrink-0 px-1 whitespace-nowrap">د.ل</span>
-    </div>
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className="h-9 w-9 hover:bg-muted text-lg font-bold shrink-0 p-0 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer"
-      onClick={() => onChange(Math.max(0, value - step))}
-      aria-label="نقصان"
-    >
-      −
-    </Button>
-  </div>
-);
-
-// ════════════ Dashboard Stat Card (legacy — kept for in-tab tiles) ════════════
-const StatCard = ({ label, value, icon: Icon, colorClass, borderClass, iconClass, suffix }: {
-  label: string; value: string | number; icon: any; colorClass: string; borderClass: string; iconClass: string; suffix?: string;
-}) => (
-  <div dir="rtl" className={cn("flex items-center justify-between p-5 rounded-2xl border bg-card/85 backdrop-blur-md transition-all duration-300 hover:scale-[1.01] shadow-sm text-right", borderClass)}>
-    <div className="space-y-1.5 min-w-0 pl-2 pr-1 text-right">
-      <div className="text-[13px] font-semibold text-muted-foreground/90 leading-relaxed truncate">{label}</div>
-      <div className={cn("text-lg sm:text-xl font-bold font-mono leading-normal truncate", colorClass)}>
-        {typeof value === 'number' ? value.toLocaleString('ar-LY') : value}
-        {suffix && <span className="text-[13px] font-semibold text-muted-foreground/60 mr-1">{suffix}</span>}
-      </div>
-    </div>
-    <div className={cn("h-10 w-10 rounded-xl flex items-center justify-center shrink-0 shadow-inner", iconClass)}>
-      <Icon className="h-5 w-5" />
-    </div>
-  </div>
-);
-
-// ════════════ Compact Header KPI ════════════
-const HeaderKpi = ({ label, value, suffix, valueClass, divider }: {
-  label: string; value: string | number; suffix?: string; valueClass?: string; divider?: boolean;
-}) => (
-  <div dir="rtl" className={cn("flex-1 min-w-0 px-5 py-2.5 relative text-right", divider && "border-r border-border/15")}>
-    <div className="text-[11px] sm:text-xs font-semibold text-muted-foreground/80 uppercase tracking-wide leading-tight truncate text-right">{label}</div>
-    <div className={cn("mt-1 text-lg sm:text-2xl font-black font-mono leading-tight truncate", valueClass || "text-foreground")}>
-      {typeof value === 'number' ? value.toLocaleString('ar-LY') : value}
-      {suffix && <span className="text-[11px] sm:text-xs font-semibold text-muted-foreground/60 mr-1">{suffix}</span>}
-    </div>
-  </div>
-);
-
-// ════════════ Price Input with Controls (Large cards) ════════════
-const PriceInputWithControls = ({ value, onChange, label, totalLabel, totalValue, colorClass, step = 1 }: {
-  value: number;
-  onChange: (val: number) => void;
-  label: string;
-  totalLabel: string;
-  totalValue: number;
-  colorClass: string;
-  step?: number;
-}) => (
-  <div dir="rtl" className="space-y-2.5 text-right">
-    <Label className="text-sm font-semibold block text-foreground/80 leading-relaxed text-right">{label}</Label>
-    <div dir="rtl" className="flex items-center bg-background border border-border/15 rounded-xl overflow-hidden shadow-sm focus-within:ring-2 focus-within:ring-primary/20 transition-all duration-300">
-      <Button
+  <div dir="rtl" className={cn("space-y-2 text-right", className)}>
+    {label && <span className="text-sm font-extrabold text-foreground/90 block leading-tight">{label}</span>}
+    <div className={cn(
+      "flex items-center bg-background/80 border border-border/35 rounded-xl overflow-hidden shadow-sm transition-all duration-200 focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/15",
+      disabled && "opacity-50 pointer-events-none"
+    )}>
+      <button
         type="button"
-        variant="ghost"
-        className="h-11 px-4 hover:bg-muted text-lg font-bold shrink-0 rounded-none border-l border-border/15 cursor-pointer"
+        disabled={disabled}
         onClick={() => onChange(value + step)}
+        className="h-10 w-10 flex items-center justify-center bg-muted/40 hover:bg-primary/15 text-muted-foreground hover:text-primary font-bold shrink-0 transition-colors border-l border-border/20 cursor-pointer"
         aria-label="زيادة"
       >
-        +
-      </Button>
-      <div dir="ltr" className="flex-1 flex items-center justify-center gap-3 px-4 bg-muted/20 min-w-0">
-        <Input
+        <Plus className="h-3.5 w-3.5" />
+      </button>
+      <div dir="ltr" className="flex-1 flex items-center justify-center gap-1 px-1.5 bg-transparent min-w-0">
+        <input
           type="number"
           inputMode="numeric"
-          value={value}
+          disabled={disabled}
+          value={value === 0 ? '' : value}
+          placeholder="0"
           onChange={e => onChange(Number(e.target.value) || 0)}
-          className={cn("h-12 w-full min-w-0 text-center border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 font-bold font-mono text-lg px-2", colorClass)}
+          className={cn(
+            "h-10 w-full min-w-0 text-center border-0 bg-transparent focus:outline-none font-black font-mono text-base px-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+            colorClass
+          )}
         />
-        <span className="text-xs sm:text-sm font-semibold text-muted-foreground/70 pointer-events-none shrink-0 whitespace-nowrap">د.ل / م²</span>
+        <span className="text-[10px] font-bold text-muted-foreground/60 pointer-events-none shrink-0">{unit}</span>
       </div>
-      <Button
+      <button
         type="button"
-        variant="ghost"
-        className="h-11 px-4 hover:bg-muted text-lg font-bold shrink-0 rounded-none border-r border-border/15 cursor-pointer"
+        disabled={disabled}
         onClick={() => onChange(Math.max(0, value - step))}
+        className="h-10 w-10 flex items-center justify-center bg-muted/40 hover:bg-primary/15 text-muted-foreground hover:text-primary font-bold shrink-0 transition-colors border-r border-border/20 cursor-pointer"
         aria-label="نقصان"
       >
-        −
-      </Button>
-    </div>
-    <div dir="rtl" className={cn("text-sm sm:text-base font-semibold p-5 rounded-xl bg-card border border-border/10 flex justify-between items-center gap-3 font-mono leading-relaxed text-right", colorClass)}>
-      <span className="text-muted-foreground font-sans text-sm sm:text-base">{totalLabel}</span>
-      <span className="text-base sm:text-lg font-bold">{totalValue.toLocaleString('ar-LY')} د.ل</span>
+        <Minus className="h-3.5 w-3.5" />
+      </button>
     </div>
   </div>
 );
 
 export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditCompositeTaskCostsDialogProps> = ({
   task,
+  tasks,
   open,
   onOpenChange,
   onSave,
   isSaving = false
 }) => {
-  // DB states
+  const allTasks = useMemo(() => {
+    if (tasks && tasks.length > 0) return tasks;
+    return task ? [task] : [];
+  }, [tasks, task]);
+  const primaryTask = allTasks[0] || task;
+  const isMultiTask = allTasks.length > 1;
+
+  // DB Data
   const [taskItems, setTaskItems] = useState<TaskItem[]>([]);
-  const hasCutoutBillboards = useMemo(() => taskItems.some(i => i.has_cutout), [taskItems]);
   const [billboards, setBillboards] = useState<Record<number, Billboard>>({});
   const [sizesMap, setSizesMap] = useState<Record<string, SizeData>>({});
   const [installationPrices, setInstallationPrices] = useState<Record<number, number>>({});
-  const [pricingType, setPricingType] = useState<'piece' | 'meter'>('piece');
-  
-  // Quick prices
-  const [quickPrices, setQuickPrices] = useState<Record<string, { normal: number; cutout: number }>>({});
-  const [meterPrices, setMeterPrices] = useState<Record<string, { normal: number; cutout: number }>>({});
-  const [typeMeterPrices, setTypeMeterPrices] = useState<Record<string, { normal: number; cutout: number }>>({});
-  
-  // Collapsible states
-  const [collapsedSizes, setCollapsedSizes] = useState<Set<string>>(new Set());
-  const [collapsedTypes, setCollapsedTypes] = useState<Set<string>>(new Set());
-  
-  // Edit items
-  const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  const [editValues, setEditValues] = useState<{
-    companyCost: number; customerCost: number; additionalCost: number;
-    additionalNotes: string; companyAdditionalCost: number; companyAdditionalNotes: string;
-    hasCutout: boolean;
-    hasPrint: boolean;
-    customerOriginalInstallCost: number;
-    customerReinstallCost: number;
-  }>({ 
-    companyCost: 0, 
-    customerCost: 0, 
-    additionalCost: 0, 
-    additionalNotes: '', 
-    companyAdditionalCost: 0, 
-    companyAdditionalNotes: '', 
-    hasCutout: false,
-    hasPrint: false,
-    customerOriginalInstallCost: 0,
-    customerReinstallCost: 0
-  });
-  
-  const [customCompanyCosts, setCustomCompanyCosts] = useState<Record<string, number>>({});
-  
-  // Print details
-  const [printBillboardIds, setPrintBillboardIds] = useState<number[]>([]);
-  const [totalPrintArea, setTotalPrintArea] = useState(0);
-  const [customerPrintPerMeter, setCustomerPrintPerMeter] = useState(0);
-  const [companyPrintPerMeter, setCompanyPrintPerMeter] = useState(0);
-  
-  // Cutout items
-  const [cutoutItems, setCutoutItems] = useState<CutoutItem[]>([]);
-  const [cutoutBillboards, setCutoutBillboards] = useState<Record<number, Billboard>>({});
-  
-  // Discounts and general values
-  const [discountAmount, setDiscountAmount] = useState(0);
-  const [discountReason, setDiscountReason] = useState('');
-  const [notes, setNotes] = useState('');
-  
-  // Cost allocation
-  const [costAllocation, setCostAllocation] = useState<CostAllocationData>(createDefaultCostAllocation());
   const [printers, setPrinters] = useState<PrinterOption[]>([]);
-  const [selectedPrinterId, setSelectedPrinterId] = useState<string | null>(null);
   const [designImagesByBillboard, setDesignImagesByBillboard] = useState<Record<number, string>>({});
-  
-  const [loading, setLoading] = useState(false);
-  const [distributing, setDistributing] = useState(false);
-  const [activeTab, setActiveTab] = useState('summary');
 
-  // Service switches (Smart toggles)
+  // Active Service Controls
   const [isInstallationActive, setIsInstallationActive] = useState<boolean>(true);
   const [isPrintActive, setIsPrintActive] = useState<boolean>(false);
   const [isCutoutActive, setIsCutoutActive] = useState<boolean>(false);
 
-  // Manual inputs
+  // Printing Configuration
+  const [selectedPrinterId, setSelectedPrinterId] = useState<string | null>(null);
+  const [customerPrintPerMeter, setCustomerPrintPerMeter] = useState<number>(20);
+  const [companyPrintPerMeter, setCompanyPrintPerMeter] = useState<number>(10);
+  const [printBillboardIds, setPrintBillboardIds] = useState<number[]>([]);
+
+  // Manual fallback costs
   const [manualCustomerInstallationCost, setManualCustomerInstallationCost] = useState<number>(0);
   const [manualCompanyInstallationCost, setManualCompanyInstallationCost] = useState<number>(0);
   const [manualCustomerPrintCost, setManualCustomerPrintCost] = useState<number>(0);
@@ -314,1802 +224,1633 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
   const [manualCustomerCutoutCost, setManualCustomerCutoutCost] = useState<number>(0);
   const [manualCompanyCutoutCost, setManualCompanyCutoutCost] = useState<number>(0);
 
-  // Initialize values when dialog opens
-  useEffect(() => {
-    if (task && open) {
-      setIsInstallationActive(!!task.installation_task_id || (task.customer_installation_cost || 0) > 0 || (task.company_installation_cost || 0) > 0);
-      setIsPrintActive(!!task.print_task_id || (task.customer_print_cost || 0) > 0 || (task.company_print_cost || 0) > 0);
-      setIsCutoutActive(!!task.cutout_task_id);
+  // General discounts & notes
+  const [discountAmount, setDiscountAmount] = useState(0);
+  const [discountReason, setDiscountReason] = useState('');
+  const [notes, setNotes] = useState('');
+  const [costAllocation, setCostAllocation] = useState<CostAllocationData>(createDefaultCostAllocation());
 
-      setManualCustomerInstallationCost(task.customer_installation_cost || 0);
-      setManualCompanyInstallationCost(task.company_installation_cost || 0);
-      setManualCustomerPrintCost(task.customer_print_cost || 0);
-      setManualCompanyPrintCost(task.company_print_cost || 0);
-      setManualCustomerCutoutCost(task.customer_cutout_cost || 0);
-      setManualCompanyCutoutCost(task.company_cutout_cost || 0);
+  // Cutout Items
+  const [cutoutItems, setCutoutItems] = useState<CutoutItem[]>([]);
+
+  // Filtering & UI States
+  const [activeTab, setActiveTab] = useState<'installation' | 'print' | 'cutout' | 'summary'>('installation');
+  const [selectedTeamFilter, setSelectedTeamFilter] = useState<string>('all');
+  const [searchBillboardQuery, setSearchBillboardQuery] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [distributing, setDistributing] = useState(false);
+  const [expandedItemDetails, setExpandedItemDetails] = useState<Set<string>>(new Set());
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>('cards');
+  const [contractInclusion, setContractInclusion] = useState<{
+    includeInstallation: boolean;
+    includePrint: boolean;
+    loaded: boolean;
+  }>({
+    includeInstallation: true,
+    includePrint: false,
+    loaded: false,
+  });
+
+  // Batch pricing helpers
+  const [batchPriceValue, setBatchPriceValue] = useState<number>(0);
+  const [batchPricingMode, setBatchPricingMode] = useState<'piece' | 'meter'>('piece');
+
+  // Load all Data on Open
+  useEffect(() => {
+    if (allTasks.length > 0 && open) {
+      const anyInstall = allTasks.some(t => !!t.installation_task_id || (t.customer_installation_cost || 0) > 0 || (t.company_installation_cost || 0) > 0);
+      const anyPrint = allTasks.some(t => !!t.print_task_id || (t.customer_print_cost || 0) > 0 || (t.company_print_cost || 0) > 0);
+      const anyCutout = allTasks.some(t => !!t.cutout_task_id || (t.customer_cutout_cost || 0) > 0);
+
+      setIsInstallationActive(anyInstall || true);
+      setIsPrintActive(anyPrint);
+      setIsCutoutActive(anyCutout);
+
+      setManualCustomerInstallationCost(allTasks.reduce((s, t) => s + (t.customer_installation_cost || 0), 0));
+      setManualCompanyInstallationCost(allTasks.reduce((s, t) => s + (t.company_installation_cost || 0), 0));
+      setManualCustomerPrintCost(allTasks.reduce((s, t) => s + (t.customer_print_cost || 0), 0));
+      setManualCompanyPrintCost(allTasks.reduce((s, t) => s + (t.company_print_cost || 0), 0));
+      setManualCustomerCutoutCost(allTasks.reduce((s, t) => s + (t.customer_cutout_cost || 0), 0));
+      setManualCompanyCutoutCost(allTasks.reduce((s, t) => s + (t.company_cutout_cost || 0), 0));
 
       loadAllData();
     }
-  }, [task, open]);
+  }, [task, tasks, open]);
 
-  // Handle smart defaults for active tabs
-  useEffect(() => {
-    if (!task || !open || loading) return;
-    const hasInstallTab = isInstallationActive;
-    const hasPrintTab = isPrintActive;
-    const hasCutoutTab = isCutoutActive;
-
-    if (hasInstallTab) setActiveTab('installation');
-    else if (hasPrintTab) setActiveTab('print');
-    else if (hasCutoutTab) setActiveTab('cutout');
-    else setActiveTab('summary');
-  }, [loading, task, open, isInstallationActive, isPrintActive, isCutoutActive]);
-
-  // Recalculate print area reactively when printBillboardIds or billboards change
-  useEffect(() => {
-    if (!task?.print_task_id) return;
-    let areaSum = 0;
-    const uniquePrintBillboardIds = Array.from(new Set(printBillboardIds));
-    uniquePrintBillboardIds.forEach(bbId => {
-      const item = taskItems.find(i => i.billboard_id === bbId);
-      if (!item) return; // Skip if this billboard is not part of this team's installation task
-
-      const billboard = billboards[bbId];
-      if (billboard) {
-        const sizeName = billboard.Size || 'غير محدد';
-        const area = calculateAreaFromSizeData(sizeName, sizesMap);
-        const faces = item.faces_to_install || billboard.Faces_Count || 2;
-        areaSum += area * faces;
-      }
-    });
-    setTotalPrintArea(areaSum);
-  }, [printBillboardIds, taskItems, billboards, sizesMap, task?.print_task_id]);
-
-  // Load all DB elements
   const loadAllData = async () => {
-    if (!task) return;
+    if (allTasks.length === 0) return;
     setLoading(true);
-    let hasAnyCutoutBillboard = false;
-    let hasAnyCutoutItem = false;
     try {
-      const { data: sizesData } = await supabase.from('sizes').select('id, name, width, height, installation_price');
-      if (sizesData) {
-        const map: Record<string, SizeData> = {};
-        sizesData.forEach((s: any) => { map[s.name] = s; map[s.name.toLowerCase()] = s; });
-        setSizesMap(map);
+      // 0. Fetch Contract inclusion settings (شامل تركيب / طباعة)
+      if (primaryTask?.contract_id) {
+        const { data: contractData } = await supabase
+          .from('Contract')
+          .select('"Contract_Number", include_installation_in_price, include_print_in_billboard_price')
+          .eq('Contract_Number', primaryTask.contract_id)
+          .maybeSingle();
+
+        if (contractData) {
+          const incInstall = isEnabledContractFlag(contractData.include_installation_in_price);
+          const incPrint = isEnabledContractFlag(contractData.include_print_in_billboard_price);
+          setContractInclusion({
+            includeInstallation: incInstall,
+            includePrint: incPrint,
+            loaded: true,
+          });
+
+          // If print is included in contract and it is first installation, set customer print per meter to 0
+          if (incPrint && primaryTask.task_type === 'new_installation') {
+            setIsPrintActive(true);
+            if ((primaryTask.customer_print_cost || 0) === 0) {
+              setCustomerPrintPerMeter(0);
+            }
+          }
+        }
       }
 
-      if (task.installation_task_id) {
-        const { data: installItems } = await (supabase
-          .from('installation_task_items') as any)
-          .select('id, billboard_id, customer_installation_cost, company_installation_cost, has_cutout, additional_cost, additional_cost_notes, company_additional_cost, company_additional_cost_notes, pricing_type, price_per_meter, faces_to_install, reinstall_count, customer_original_install_cost, customer_reinstall_cost, cutout_workshop_id, cutout_company_cost, cutout_customer_cost, cutout_count, cutout_image_url, cutout_notes')
-          .eq('task_id', task.installation_task_id);
-        
+      // 1. Fetch Sizes
+      const { data: sizesData } = await supabase.from('sizes').select('id, name, width, height, installation_price');
+      const sizeMap: Record<string, SizeData> = {};
+      if (sizesData) {
+        sizesData.forEach((s: any) => { sizeMap[s.name] = s; sizeMap[s.name.toLowerCase()] = s; });
+        setSizesMap(sizeMap);
+      }
+
+      // 2. Fetch Active Printers
+      const { data: printersList } = await supabase.from('printers').select('id, name').eq('is_active', true).order('name');
+      if (printersList) setPrinters(printersList as any);
+
+      const allInstallIds = allTasks.map(t => t.installation_task_id).filter(Boolean) as string[];
+      const allPrintIds = allTasks.map(t => t.print_task_id).filter(Boolean) as string[];
+      const allCutoutIds = allTasks.map(t => t.cutout_task_id).filter(Boolean) as string[];
+
+      const teamNameByTaskId = new Map<string, string>();
+      allTasks.forEach(t => {
+        if (t.installation_task_id) teamNameByTaskId.set(t.installation_task_id, t.teamName || 'غير محدد');
+      });
+
+      // 3. Fetch Installation Items
+      let loadedBillboardIds: number[] = [];
+      if (allInstallIds.length > 0) {
+        const { data: installItems } = await supabase
+          .from('installation_task_items')
+          .select('id, task_id, billboard_id, customer_installation_cost, company_installation_cost, has_cutout, additional_cost, additional_cost_notes, company_additional_cost, company_additional_cost_notes, pricing_type, price_per_meter, faces_to_install, reinstall_count, customer_original_install_cost, customer_reinstall_cost, cutout_workshop_id, cutout_company_cost, cutout_customer_cost, cutout_count, cutout_image_url, cutout_notes, design_face_a, design_face_b, installed_image_face_a_url, installed_image_face_b_url')
+          .in('task_id', allInstallIds)
+          .neq('status', 'replaced');
+
         if (installItems?.length) {
-          setTaskItems(installItems as TaskItem[]);
-          hasAnyCutoutBillboard = installItems.some(i => i.has_cutout);
-          const savedCompanyCosts: Record<string, number> = {};
-          const billboardIds = installItems.map(i => i.billboard_id);
-          const { data: billboardsDataForCosts } = await supabase
-            .from('billboards').select('"ID", "Size", "Faces_Count"').in('ID', billboardIds);
-          
-          installItems.forEach(item => {
-            if (item.company_installation_cost !== null && item.company_installation_cost !== undefined) {
-              savedCompanyCosts[item.id] = item.company_installation_cost;
-            } else {
-              const bb = billboardsDataForCosts?.find((b: any) => b.ID === item.billboard_id);
-              if (bb) {
-                const sizeInfo = sizesData?.find(s => s.name === bb.Size);
-                const basePrice = sizeInfo?.installation_price || 0;
-                const totalReinstalledFaces = (item as any).total_reinstalled_faces || 0;
-                let calculatedCost = basePrice;
-                if (totalReinstalledFaces > 0) {
-                  calculatedCost = basePrice * (totalReinstalledFaces * 0.5);
-                }
-                if (calculatedCost > 0) savedCompanyCosts[item.id] = calculatedCost;
-              }
+          const itemsWithTeams: TaskItem[] = (installItems as any[]).map(item => ({
+            ...item,
+            teamName: teamNameByTaskId.get(item.task_id) || 'غير محدد',
+          }));
+          setTaskItems(itemsWithTeams);
+          loadedBillboardIds = Array.from(new Set(installItems.map(i => i.billboard_id)));
+          const installationVisuals: Record<number, string> = {};
+          (installItems as any[]).forEach(item => {
+            const image = item.installed_image_face_a_url
+              || item.installed_image_face_b_url
+              || item.design_face_a
+              || item.design_face_b;
+            if (image && !installationVisuals[item.billboard_id]) {
+              installationVisuals[item.billboard_id] = image;
             }
           });
-          setCustomCompanyCosts(savedCompanyCosts);
-          
-          const hasMeterPricing = installItems.some(item => item.pricing_type === 'meter');
-          if (hasMeterPricing) setPricingType('meter');
-          
+          setDesignImagesByBillboard(installationVisuals);
+
+          // Fetch Billboards info
           const { data: billboardsData } = await supabase
             .from('billboards')
-            .select('"ID", "Size", "Faces_Count", "Billboard_Name", "billboard_type", "Nearest_Landmark", "Image_URL"')
-            .in('ID', billboardIds);
-          
+            .select('"ID", "Size", "Faces_Count", "Billboard_Name", "billboard_type", "Nearest_Landmark", "Image_URL", "District", "City", "Municipality"')
+            .in('ID', loadedBillboardIds);
+
           if (billboardsData) {
-            const billboardMap: Record<number, Billboard> = {};
-            const pricesMap: Record<number, number> = {};
+            const bMap: Record<number, Billboard> = {};
+            const pMap: Record<number, number> = {};
             billboardsData.forEach((b: any) => {
-              billboardMap[b.ID] = b;
-              const sizeInfo = sizesData?.find(s => s.name === b.Size);
+              bMap[b.ID] = b;
+              const sizeInfo = sizeMap[b.Size];
               const basePrice = sizeInfo?.installation_price || 0;
               const itemForBillboard = installItems?.find(i => i.billboard_id === b.ID);
-              const totalReinstalledFaces = (itemForBillboard as any)?.total_reinstalled_faces || 0;
-              let itemPrice = basePrice;
-              if (totalReinstalledFaces > 0) {
-                itemPrice = basePrice * (totalReinstalledFaces * 0.5);
-              }
-              pricesMap[b.ID] = itemPrice;
+              const faces = resolveInstallationFacesCount({
+                faces_to_install: itemForBillboard?.faces_to_install,
+                billboard: b,
+              });
+              pMap[b.ID] = faces === 1 ? basePrice * 0.5 : basePrice;
             });
-            setBillboards(billboardMap);
-            setInstallationPrices(pricesMap);
+            setBillboards(bMap);
+            setInstallationPrices(pMap);
           }
-          
-          const allSizeKeys = new Set<string>();
-          installItems.forEach(item => {
-            const billboard = billboardsData?.find(b => b.ID === item.billboard_id);
-            const billboardType = billboard?.billboard_type || 'عادية';
-            const sizeName = billboard?.Size || 'غير محدد';
-            allSizeKeys.add(`${billboardType}-${sizeName}`);
-          });
-          setCollapsedSizes(allSizeKeys);
         }
       }
 
-      if (task.print_task_id) {
-        const { data: printTaskData } = await supabase
-          .from('print_tasks').select('total_area, total_cost, price_per_meter, customer_price_per_meter')
-          .eq('id', task.print_task_id).single();
-        if (printTaskData) {
-          const area = printTaskData.total_area || 0;
-          setTotalPrintArea(area);
-          if (area > 0) {
-            const storedCustomerPerMeter = (printTaskData as any).customer_price_per_meter || 0;
-            setCustomerPrintPerMeter(storedCustomerPerMeter > 0 ? storedCustomerPerMeter : (task.customer_print_cost || 0) / area);
-            const actualCompanyPerMeter = printTaskData.price_per_meter || (printTaskData.total_cost ? printTaskData.total_cost / area : 0);
-            setCompanyPrintPerMeter(actualCompanyPerMeter);
+      // 4. Fetch Print Tasks & Items
+      if (allPrintIds.length > 0) {
+        const { data: printTasksData } = await supabase
+          .from('print_tasks')
+          .select('id, printer_id, total_area, total_cost, price_per_meter, customer_price_per_meter, customer_total_amount')
+          .in('id', allPrintIds);
+
+        if (printTasksData && printTasksData.length > 0) {
+          const firstPt = printTasksData[0];
+          if (firstPt.printer_id) setSelectedPrinterId(firstPt.printer_id);
+          if (firstPt.customer_price_per_meter && firstPt.customer_price_per_meter > 0) {
+            setCustomerPrintPerMeter(firstPt.customer_price_per_meter);
+          }
+          if (firstPt.price_per_meter && firstPt.price_per_meter > 0) {
+            setCompanyPrintPerMeter(firstPt.price_per_meter);
           }
         }
+
         const { data: ptItems } = await supabase
           .from('print_task_items')
           .select('billboard_id, design_face_a, design_face_b')
-          .eq('task_id', task.print_task_id);
-        if (ptItems) {
-          setPrintBillboardIds(Array.from(new Set((ptItems as any[]).map(r => r.billboard_id).filter(Boolean))));
+          .in('task_id', allPrintIds);
+
+        if (ptItems && ptItems.length > 0) {
+          const pbIds = Array.from(new Set((ptItems as any[]).map(r => r.billboard_id).filter(Boolean)));
+          setPrintBillboardIds(pbIds);
           const m: Record<number, string> = {};
           (ptItems as any[]).forEach(r => {
             const img = r.design_face_a || r.design_face_b;
             if (img && !m[r.billboard_id]) m[r.billboard_id] = img;
           });
-          setDesignImagesByBillboard(m);
+          setDesignImagesByBillboard(previous => ({ ...m, ...previous }));
         }
+      } else if (loadedBillboardIds.length > 0) {
+        // Default print selection to all billboards if printing is enabled from scratch
+        setPrintBillboardIds(loadedBillboardIds);
       }
 
-      if (task.cutout_task_id) {
+      // 5. Fetch Cutouts
+      if (allCutoutIds.length > 0) {
         const { data: cutoutItemsData } = await supabase
           .from('cutout_task_items')
           .select('id, billboard_id, quantity, unit_cost, total_cost, description, notes')
-          .eq('task_id', task.cutout_task_id);
+          .in('task_id', allCutoutIds);
         if (cutoutItemsData?.length) {
-          hasAnyCutoutItem = true;
           setCutoutItems(cutoutItemsData as unknown as CutoutItem[]);
-          const cutoutBillboardIds = (cutoutItemsData as any[]).map(i => i.billboard_id).filter(Boolean);
-          if (cutoutBillboardIds.length > 0) {
-            const { data: cutoutBillboardsDataResult } = await supabase
-              .from('billboards')
-              .select('"ID", "Size", "Faces_Count", "Billboard_Name", "billboard_type", "Nearest_Landmark", "Image_URL"')
-              .in('ID', cutoutBillboardIds);
-            if (cutoutBillboardsDataResult) {
-              const cutoutBillboardMap: Record<number, Billboard> = {};
-              cutoutBillboardsDataResult.forEach((b: any) => { cutoutBillboardMap[b.ID] = b; });
-              setCutoutBillboards(cutoutBillboardMap);
-            }
-          }
         }
       }
 
-      setDiscountAmount(task.discount_amount || 0);
-      setDiscountReason(task.discount_reason || '');
-      setNotes(task.notes || '');
-      const savedAllocation = (task as any).cost_allocation;
-      if (savedAllocation) {
-        setCostAllocation({ ...createDefaultCostAllocation(), ...savedAllocation });
-      } else {
-        setCostAllocation(createDefaultCostAllocation());
+      // 6. Discounts and allocation
+      setDiscountAmount(allTasks.reduce((s, t) => s + (t.discount_amount || 0), 0));
+      setDiscountReason(primaryTask?.discount_reason || '');
+      setNotes(primaryTask?.notes || '');
+      if ((primaryTask as any)?.cost_allocation) {
+        setCostAllocation({ ...createDefaultCostAllocation(), ...(primaryTask as any).cost_allocation });
       }
 
-      const { data: printersList } = await supabase
-        .from('printers').select('id, name').eq('is_active', true).order('name');
-      if (printersList) setPrinters(printersList as any);
-      if (task.print_task_id) {
-        const { data: ptRow } = await supabase
-          .from('print_tasks').select('printer_id').eq('id', task.print_task_id).single();
-        if (ptRow) setSelectedPrinterId((ptRow as any).printer_id || null);
-      }
-
-      // Automatically override cutout active state if no cutouts are configured on the billboards or tasks
-      setIsCutoutActive(!!task.cutout_task_id || hasAnyCutoutBillboard || hasAnyCutoutItem);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Error loading task costs data:', error);
+      toast.error('حدث خطأ أثناء تحميل بيانات التكاليف');
     } finally {
       setLoading(false);
     }
   };
 
-  // Memoized computations
-  const { totals, groupedData } = useMemo(() => {
-    let companyCost = 0, customerCost = 0, additionalCost = 0, totalArea = 0;
-    const grouped: Record<string, {
-      type: string;
-      sizes: Record<string, {
-        size: string;
-        items: Array<TaskItem & { billboard: Billboard; area: number }>;
-        normalCount: number; cutoutCount: number; totalArea: number;
-        companyCost: number; customerCost: number; avgAreaPerItem: number;
-      }>;
-      totalItems: number; totalArea: number; companyCost: number; customerCost: number;
-    }> = {};
-
+  // Teams list
+  const teamsList = useMemo(() => {
+    const teams = new Map<string, { id: string; name: string; count: number }>();
     taskItems.forEach(item => {
-      const billboard = billboards[item.billboard_id];
-      const billboardType = billboard?.billboard_type || 'عادية';
-      const sizeName = billboard?.Size || 'غير محدد';
-      const area = calculateAreaFromSizeData(sizeName, sizesMap);
-      const faces = item.faces_to_install || billboard?.Faces_Count || 2;
-      const itemArea = area * faces;
-      const itemCompanyCost = customCompanyCosts[item.id] ?? installationPrices[item.billboard_id] ?? 0;
-      const itemCompanyAdditional = item.company_additional_cost || 0;
-      const isReinstalled = (item.reinstall_count || 0) > 0;
-      const itemCustomerCost = isReinstalled
-        ? (item.customer_original_install_cost || 0) + (item.customer_reinstall_cost || item.customer_installation_cost || 0)
-        : (item.customer_installation_cost || 0);
-
-      companyCost += itemCompanyCost + itemCompanyAdditional;
-      customerCost += itemCustomerCost;
-      additionalCost += item.additional_cost || 0;
-      totalArea += itemArea;
-
-      if (!grouped[billboardType]) {
-        grouped[billboardType] = { type: billboardType, sizes: {}, totalItems: 0, totalArea: 0, companyCost: 0, customerCost: 0 };
-      }
-      if (!grouped[billboardType].sizes[sizeName]) {
-        grouped[billboardType].sizes[sizeName] = { size: sizeName, items: [], normalCount: 0, cutoutCount: 0, totalArea: 0, companyCost: 0, customerCost: 0, avgAreaPerItem: 0 };
-      }
-
-      grouped[billboardType].sizes[sizeName].items.push({ ...item, billboard: billboard || { ID: item.billboard_id, Size: sizeName }, area: itemArea });
-      grouped[billboardType].sizes[sizeName].totalArea += itemArea;
-      grouped[billboardType].sizes[sizeName].companyCost += itemCompanyCost + itemCompanyAdditional;
-      grouped[billboardType].sizes[sizeName].customerCost += itemCustomerCost;
-      if (item.has_cutout) grouped[billboardType].sizes[sizeName].cutoutCount++;
-      else grouped[billboardType].sizes[sizeName].normalCount++;
-      grouped[billboardType].totalItems++;
-      grouped[billboardType].totalArea += itemArea;
-      grouped[billboardType].companyCost += itemCompanyCost + itemCompanyAdditional;
-      grouped[billboardType].customerCost += itemCustomerCost;
+      const tId = item.task_id || 'default';
+      const tName = item.teamName || 'غير محدد';
+      if (!teams.has(tId)) teams.set(tId, { id: tId, name: tName, count: 0 });
+      teams.get(tId)!.count++;
     });
+    return Array.from(teams.values());
+  }, [taskItems]);
 
-    Object.values(grouped).forEach(typeData => {
-      Object.values(typeData.sizes).forEach(sizeData => {
-        sizeData.avgAreaPerItem = sizeData.items.length > 0 ? sizeData.totalArea / sizeData.items.length : 0;
+  // Derived Installation calculations
+  const { totalInstallationCustomer, totalInstallationCompany, totalBillboardArea, enrichedItems } = useMemo(() => {
+    let custSum = 0;
+    let compSum = 0;
+    let areaSum = 0;
+
+    const enriched = taskItems.map(item => {
+      const bb = billboards[item.billboard_id] || { ID: item.billboard_id, Size: 'غير محدد' };
+      const sizeName = bb.Size || 'غير محدد';
+      const singleFaceArea = calculateEnhancedCompositeAreaFromSize(sizeName, sizesMap);
+      const faces = resolveInstallationFacesCount({
+        faces_to_install: item.faces_to_install,
+        billboard: bb,
       });
+      const itemTotalArea = singleFaceArea * faces;
+
+      const isReinstalled = (item.reinstall_count || 0) > 0;
+      const itemCustPrice = isReinstalled
+        ? (Number(item.customer_original_install_cost) || 0) + (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
+        : (Number(item.customer_installation_cost) || 0);
+
+      const baseCompCost = item.company_installation_cost !== null && item.company_installation_cost !== undefined
+        ? Number(item.company_installation_cost)
+        : (installationPrices[item.billboard_id] || 0);
+      const itemCompCost = baseCompCost + (Number(item.company_additional_cost) || 0);
+
+      custSum += itemCustPrice + (Number(item.additional_cost) || 0);
+      compSum += itemCompCost;
+      areaSum += itemTotalArea;
+
+      return {
+        ...item,
+        billboard: bb,
+        singleFaceArea,
+        itemTotalArea,
+        itemCustPrice,
+        itemCompCost,
+        faces,
+      };
     });
 
-    return { totals: { companyCost, customerCost, additionalCost, totalArea, profit: customerCost - companyCost }, groupedData: grouped };
-  }, [taskItems, installationPrices, billboards, sizesMap, customCompanyCosts]);
+    return {
+      totalInstallationCustomer: custSum,
+      totalInstallationCompany: compSum,
+      totalBillboardArea: areaSum,
+      enrichedItems: enriched
+    };
+  }, [taskItems, billboards, sizesMap, installationPrices]);
 
-  // Derived cutout totals
-  const { customerCutoutTotal: derivedCustomerCutoutTotal, companyCutoutTotal: derivedCompanyCutoutTotal, totalCutouts } = useMemo(() => {
-    let customer = 0, company = 0, count = 0;
-    taskItems.forEach((item) => {
-      if (!item.has_cutout) return;
-      const c = Number(item.cutout_count) || 1;
-      count += c;
-      company += (Number(item.cutout_company_cost) || 0) * c;
-      customer += (Number(item.cutout_customer_cost) || 0) * c;
+  // Filtered Billboard Items
+  const filteredBillboardItems = useMemo(() => {
+    return enrichedItems.filter(item => {
+      if (selectedTeamFilter !== 'all' && item.task_id !== selectedTeamFilter && item.teamName !== selectedTeamFilter) {
+        return false;
+      }
+      if (searchBillboardQuery.trim()) {
+        const q = searchBillboardQuery.toLowerCase();
+        const name = (item.billboard.Billboard_Name || '').toLowerCase();
+        const code = String(item.billboard_id);
+        const size = (item.billboard.Size || '').toLowerCase();
+        const landmark = (item.billboard.Nearest_Landmark || '').toLowerCase();
+        return name.includes(q) || code.includes(q) || size.includes(q) || landmark.includes(q);
+      }
+      return true;
     });
-    if (customer === 0 && company === 0 && count === 0 && cutoutItems.length > 0) {
-      cutoutItems.forEach(item => {
-        const itemCustomerCost = (item.total_cost ?? (item.unit_cost * item.quantity)) || 0;
-        const itemCompanyCost = (item.unit_cost * item.quantity) || 0;
-        customer += itemCustomerCost;
-        company += itemCompanyCost;
-        count += item.quantity;
+  }, [enrichedItems, selectedTeamFilter, searchBillboardQuery]);
+
+  // Print Area & Amounts
+  const { calculatedPrintArea, calculatedCustomerPrint, calculatedCompanyPrint } = useMemo(() => {
+    if (!isPrintActive) {
+      return { calculatedPrintArea: 0, calculatedCustomerPrint: 0, calculatedCompanyPrint: 0 };
+    }
+    let pArea = 0;
+    printBillboardIds.forEach(bbId => {
+      const item = enrichedItems.find(i => i.billboard_id === bbId);
+      if (item) pArea += item.itemTotalArea;
+    });
+
+    const custPrint = (allTasks.some(t => !!t.print_task_id) || printBillboardIds.length > 0) && pArea > 0
+      ? pArea * customerPrintPerMeter
+      : manualCustomerPrintCost;
+    const compPrint = (allTasks.some(t => !!t.print_task_id) || printBillboardIds.length > 0) && pArea > 0
+      ? pArea * companyPrintPerMeter
+      : manualCompanyPrintCost;
+
+    return {
+      calculatedPrintArea: pArea,
+      calculatedCustomerPrint: custPrint,
+      calculatedCompanyPrint: compPrint
+    };
+  }, [isPrintActive, printBillboardIds, enrichedItems, customerPrintPerMeter, companyPrintPerMeter, manualCustomerPrintCost, manualCompanyPrintCost, allTasks]);
+
+  // Cutout Totals
+  const { calculatedCustomerCutout, calculatedCompanyCutout, totalCutoutsCount } = useMemo(() => {
+    if (!isCutoutActive) {
+      return { calculatedCustomerCutout: 0, calculatedCompanyCutout: 0, totalCutoutsCount: 0 };
+    }
+    let cust = 0;
+    let comp = 0;
+    let count = 0;
+    taskItems.forEach(i => {
+      if (i.has_cutout) {
+        const c = Number(i.cutout_count) || 1;
+        count += c;
+        comp += (Number(i.cutout_company_cost) || 0) * c;
+        cust += (Number(i.cutout_customer_cost) || 0) * c;
+      }
+    });
+    if (cust === 0 && comp === 0 && cutoutItems.length > 0) {
+      cutoutItems.forEach(ci => {
+        const itemComp = (ci.unit_cost * ci.quantity) || 0;
+        const itemCust = ci.total_cost ?? itemComp;
+        cust += itemCust;
+        comp += itemComp;
+        count += ci.quantity;
       });
     }
-    return { customerCutoutTotal: customer, companyCutoutTotal: company, totalCutouts: count };
-  }, [taskItems, cutoutItems]);
+    return {
+      calculatedCustomerCutout: cust > 0 ? cust : manualCustomerCutoutCost,
+      calculatedCompanyCutout: comp > 0 ? comp : manualCompanyCutoutCost,
+      totalCutoutsCount: count
+    };
+  }, [isCutoutActive, taskItems, cutoutItems, manualCustomerCutoutCost, manualCompanyCutoutCost]);
 
-  const customerInstallationTotal = isInstallationActive
-    ? (task?.installation_task_id ? totals.customerCost : manualCustomerInstallationCost)
-    : 0;
-  const companyInstallationTotal = isInstallationActive
-    ? (task?.installation_task_id ? totals.companyCost : manualCompanyInstallationCost)
-    : 0;
+  // Grand Totals & Net Profit
+  const finalCustomerInstall = isInstallationActive ? (allTasks.some(t => !!t.installation_task_id) ? totalInstallationCustomer : manualCustomerInstallationCost) : 0;
+  const finalCompanyInstall = isInstallationActive ? (allTasks.some(t => !!t.installation_task_id) ? totalInstallationCompany : manualCompanyInstallationCost) : 0;
 
-  const customerPrintTotal = isPrintActive
-    ? (task?.print_task_id && totalPrintArea > 0 ? (customerPrintPerMeter * totalPrintArea) : manualCustomerPrintCost)
-    : 0;
-  const companyPrintTotal = isPrintActive
-    ? (task?.print_task_id && totalPrintArea > 0 ? (companyPrintPerMeter * totalPrintArea) : manualCompanyPrintCost)
-    : 0;
-
-  const customerCutoutTotal = isCutoutActive
-    ? (task?.cutout_task_id || taskItems.some(i => i.has_cutout) ? derivedCustomerCutoutTotal : manualCustomerCutoutCost)
-    : 0;
-  const companyCutoutTotal = isCutoutActive
-    ? (task?.cutout_task_id || taskItems.some(i => i.has_cutout) ? derivedCompanyCutoutTotal : manualCompanyCutoutCost)
-    : 0;
-
-  const customerSubtotal = customerInstallationTotal + customerPrintTotal + customerCutoutTotal;
-  const customerTotal = customerSubtotal - discountAmount;
-  const companyTotal = companyInstallationTotal + companyPrintTotal + companyCutoutTotal;
+  const customerSubtotal = finalCustomerInstall + calculatedCustomerPrint + calculatedCustomerCutout;
+  const customerTotal = Math.max(0, customerSubtotal - discountAmount);
+  const companyTotal = finalCompanyInstall + calculatedCompanyPrint + calculatedCompanyCutout;
   const netProfit = customerTotal - companyTotal;
   const profitPercentage = customerTotal > 0 ? (netProfit / customerTotal) * 100 : 0;
 
-  // Single Item Handlers
-  const startEditingItem = (item: TaskItem & { billboard: Billboard; area: number }) => {
-    setEditingItemId(item.id);
-    const existingCompanyCost = customCompanyCosts[item.id] ?? installationPrices[item.billboard_id] ?? 0;
-    setEditValues({
-      companyCost: existingCompanyCost, 
-      customerCost: item.customer_installation_cost || 0,
-      customerOriginalInstallCost: item.customer_original_install_cost || 0,
-      customerReinstallCost: item.customer_reinstall_cost || 0,
-      additionalCost: item.additional_cost || 0, additionalNotes: item.additional_cost_notes || '',
-      companyAdditionalCost: item.company_additional_cost || 0, companyAdditionalNotes: item.company_additional_cost_notes || '',
-      hasCutout: !!item.has_cutout,
-      hasPrint: printBillboardIds.includes(item.billboard_id),
-      facesToInstall: item.faces_to_install || item.billboard?.Faces_Count || 2
-    });
-  };
-
-  const updateCompositeTaskInstallationCosts = async (newCustomerTotal: number, newCompanyTotal: number) => {
-    if (!task) return;
-    try {
-      const discountAmt = discountAmount || 0;
-      const customerSubtotalCalc = newCustomerTotal + customerPrintTotal + customerCutoutTotal;
-      const customerTotalCalc = customerSubtotalCalc - discountAmt;
-      const companyTotalCalc = newCompanyTotal + companyPrintTotal + companyCutoutTotal;
-      const netProfitCalc = customerTotalCalc - companyTotalCalc;
-      const profitPercentageCalc = customerTotalCalc > 0 ? (netProfitCalc / customerTotalCalc) * 100 : 0;
-
-      await supabase.from('composite_tasks').update({
-        customer_installation_cost: newCustomerTotal, company_installation_cost: newCompanyTotal,
-        customer_total: customerTotalCalc, company_total: companyTotalCalc,
-        net_profit: netProfitCalc, profit_percentage: profitPercentageCalc, updated_at: new Date().toISOString()
-      }).eq('id', task.id);
-
-      if (task.combined_invoice_id) {
-         await supabase.from('printed_invoices').update({ total_amount: customerTotalCalc, updated_at: new Date().toISOString() }).eq('id', task.combined_invoice_id);
-         await supabase.from('customer_payments').update({ amount: -customerTotalCalc }).eq('printed_invoice_id', task.combined_invoice_id).eq('entry_type', 'invoice');
-      }
-    } catch (error) {
-      console.error('Error updating composite task costs:', error);
-    }
-  };
-
-  const handleSaveItemEdit = async () => {
-    if (!editingItemId) return;
-    setDistributing(true);
-    try {
-      const editingItem = taskItems.find(item => item.id === editingItemId);
-      if (!editingItem) throw new Error('Item not found');
-
-      const isReinstalled = (editingItem.reinstall_count || 0) > 0;
-      setCustomCompanyCosts(prev => ({ ...prev, [editingItemId]: editValues.companyCost }));
-      const { error } = await supabase.from('installation_task_items').update({
-        customer_installation_cost: isReinstalled ? editValues.customerReinstallCost : editValues.customerCost,
-        customer_original_install_cost: editValues.customerOriginalInstallCost,
-        customer_reinstall_cost: editValues.customerReinstallCost,
-        company_installation_cost: editValues.companyCost,
-        additional_cost: editValues.additionalCost || null, additional_cost_notes: editValues.additionalNotes || null,
-        company_additional_cost: editValues.companyAdditionalCost || null, company_additional_cost_notes: editValues.companyAdditionalNotes || null,
-        has_cutout: editValues.hasCutout,
-        faces_to_install: editValues.facesToInstall
-      }).eq('id', editingItemId);
-      if (error) throw error;
-
-      // Handle print status change
-      if (task.print_task_id) {
-        const wasPrint = printBillboardIds.includes(editingItem.billboard_id);
-        const isPrint = editValues.hasPrint;
-        if (wasPrint !== isPrint) {
-          if (isPrint) {
-            const billboard = billboards[editingItem.billboard_id];
-            if (billboard) {
-              const sizeName = billboard.Size || 'غير محدد';
-              const area = calculateAreaFromSizeData(sizeName, sizesMap);
-              const faces = editValues.facesToInstall || editingItem.faces_to_install || billboard.Faces_Count || 2;
-              const totalItemArea = area * faces;
-              
-              const { data: existing } = await supabase
-                .from('print_task_items')
-                .select('id')
-                .eq('task_id', task.print_task_id)
-                .eq('billboard_id', editingItem.billboard_id)
-                .maybeSingle();
-
-              if (!existing) {
-                await supabase.from('print_task_items').insert({
-                  task_id: task.print_task_id,
-                  billboard_id: editingItem.billboard_id,
-                  description: `${sizeName} - ${faces === 1 ? 'وجه واحد' : 'وجهين'}`,
-                  width: sizesMap[sizeName]?.width || null,
-                  height: sizesMap[sizeName]?.height || null,
-                  area: totalItemArea,
-                  quantity: 1,
-                  faces_count: faces,
-                  unit_cost: companyPrintPerMeter * totalItemArea,
-                  printer_unit_cost: companyPrintPerMeter * totalItemArea,
-                  customer_unit_cost: customerPrintPerMeter * totalItemArea,
-                  total_cost: companyPrintPerMeter * totalItemArea,
-                  status: 'pending'
-                });
-              }
-            }
-            setPrintBillboardIds(prev => Array.from(new Set([...prev, editingItem.billboard_id])));
-          } else {
-            await supabase
-              .from('print_task_items')
-              .delete()
-              .eq('task_id', task.print_task_id)
-              .eq('billboard_id', editingItem.billboard_id);
-            setPrintBillboardIds(prev => prev.filter(id => id !== editingItem.billboard_id));
-          }
-        }
-      }
-      
-      const newItems = taskItems.map(item => 
-        item.id === editingItemId ? { 
-          ...item, 
-          customer_installation_cost: isReinstalled ? editValues.customerReinstallCost : editValues.customerCost,
-          customer_original_install_cost: editValues.customerOriginalInstallCost,
-          customer_reinstall_cost: editValues.customerReinstallCost,
-          company_installation_cost: editValues.companyCost,
-          additional_cost: editValues.additionalCost, additional_cost_notes: editValues.additionalNotes,
-          company_additional_cost: editValues.companyAdditionalCost, company_additional_cost_notes: editValues.companyAdditionalNotes,
-          has_cutout: editValues.hasCutout,
-          faces_to_install: editValues.facesToInstall
-        } : item
-      );
-      setTaskItems(newItems);
-      
-      let newCustomerTotal = 0, newCompanyTotal = 0;
-      newItems.forEach(item => {
-        const companyPrice = item.id === editingItemId ? editValues.companyCost : (customCompanyCosts[item.id] ?? installationPrices[item.billboard_id] ?? 0);
-        const companyExtra = item.id === editingItemId ? editValues.companyAdditionalCost : (item.company_additional_cost || 0);
-        const isItemReinstalled = (item.reinstall_count || 0) > 0;
-        const itemCustCost = isItemReinstalled
-          ? (item.customer_original_install_cost || 0) + (item.customer_reinstall_cost || item.customer_installation_cost || 0)
-          : (item.customer_installation_cost || 0);
-        newCustomerTotal += itemCustCost;
-        newCompanyTotal += companyPrice + companyExtra;
-      });
-      await updateCompositeTaskInstallationCosts(newCustomerTotal, newCompanyTotal);
-      toast.success('تم حفظ التغييرات على اللوحة بنجاح');
-      setEditingItemId(null);
-    } catch (error) { 
-      console.error(error);
-      toast.error('فشل في حفظ تعديلات اللوحة'); 
-    }
-    finally { setDistributing(false); }
-  };
-
-  const handleTogglePrintStatus = async (billboardId: number, isChecked: boolean) => {
-    if (!task?.print_task_id) return;
-    setDistributing(true);
-    try {
-      if (isChecked) {
-        const billboard = billboards[billboardId];
-        const item = taskItems.find(i => i.billboard_id === billboardId);
-        if (billboard) {
-          const sizeName = billboard.Size || 'غير محدد';
-          const area = calculateAreaFromSizeData(sizeName, sizesMap);
-          const faces = item?.faces_to_install || billboard.Faces_Count || 2;
-          const totalItemArea = area * faces;
-
-          const { data: existing } = await supabase
-            .from('print_task_items')
-            .select('id')
-            .eq('task_id', task.print_task_id)
-            .eq('billboard_id', billboardId)
-            .maybeSingle();
-
-          if (!existing) {
-            await supabase.from('print_task_items').insert({
-              task_id: task.print_task_id,
-              billboard_id: billboardId,
-              description: `${sizeName} - ${faces === 1 ? 'وجه واحد' : 'وجهين'}`,
-              width: sizesMap[sizeName]?.width || null,
-              height: sizesMap[sizeName]?.height || null,
-              area: totalItemArea,
-              quantity: 1,
-              faces_count: faces,
-              unit_cost: companyPrintPerMeter * totalItemArea,
-              printer_unit_cost: companyPrintPerMeter * totalItemArea,
-              customer_unit_cost: customerPrintPerMeter * totalItemArea,
-              total_cost: companyPrintPerMeter * totalItemArea,
-              status: 'pending'
-            });
-          }
-        }
-        setPrintBillboardIds(prev => Array.from(new Set([...prev, billboardId])));
+  // Single Item Updates
+  const handleUpdateItemPrice = (itemId: string, field: 'customerCost' | 'companyCost', value: number) => {
+    setTaskItems(prev => prev.map(item => {
+      if (item.id !== itemId) return item;
+      const isRe = (item.reinstall_count || 0) > 0;
+      if (field === 'customerCost') {
+        return isRe
+          ? { ...item, customer_reinstall_cost: value }
+          : { ...item, customer_installation_cost: value };
       } else {
-        await supabase
-          .from('print_task_items')
-          .delete()
-          .eq('task_id', task.print_task_id)
-          .eq('billboard_id', billboardId);
-        setPrintBillboardIds(prev => prev.filter(id => id !== billboardId));
+        return { ...item, company_installation_cost: value };
       }
-      toast.success(isChecked ? 'تم إضافة اللوحة للطباعة بنجاح' : 'تم استثناء اللوحة من الطباعة بنجاح');
-    } catch (error) {
-      console.error('Error toggling print status:', error);
-      toast.error('حدث خطأ أثناء تعديل حالة الطباعة');
+    }));
+  };
+
+  const handleToggleItemFree = (itemId: string) => {
+    setTaskItems(prev => prev.map(item => {
+      if (item.id !== itemId) return item;
+      return {
+        ...item,
+        customer_installation_cost: 0,
+        customer_reinstall_cost: 0,
+        additional_cost: 0
+      };
+    }));
+    toast.success('تم تحويل سعر اللوحة إلى مجاني');
+  };
+
+  const handleToggleItemCutout = (itemId: string, checked: boolean) => {
+    setTaskItems(prev => prev.map(item => {
+      if (item.id !== itemId) return item;
+      return { ...item, has_cutout: checked };
+    }));
+    if (checked && !isCutoutActive) setIsCutoutActive(true);
+  };
+
+  const handleToggleItemPrint = (billboardId: number, checked: boolean) => {
+    setPrintBillboardIds(prev => {
+      const next = checked ? Array.from(new Set([...prev, billboardId])) : prev.filter(id => id !== billboardId);
+      return next;
+    });
+    if (checked && !isPrintActive) setIsPrintActive(true);
+  };
+
+  // Batch Pricing Handlers
+  const handleApplyBatchPricing = () => {
+    if (batchPriceValue <= 0) {
+      toast.error('الرجاء إدخال قيمة سعر صالحة');
+      return;
+    }
+    setTaskItems(prev => prev.map(item => {
+      const isRe = (item.reinstall_count || 0) > 0;
+      let newPrice = batchPriceValue;
+      if (batchPricingMode === 'meter') {
+        const bb = billboards[item.billboard_id];
+        const sizeName = bb?.Size || 'غير محدد';
+        const area = calculateEnhancedCompositeAreaFromSize(sizeName, sizesMap);
+        const faces = resolveInstallationFacesCount({
+          faces_to_install: item.faces_to_install,
+          billboard: bb,
+        });
+        newPrice = Math.round(batchPriceValue * area * faces);
+      }
+      return isRe
+        ? { ...item, customer_reinstall_cost: newPrice }
+        : { ...item, customer_installation_cost: newPrice };
+    }));
+    toast.success(`تم تطبيق السعر (${batchPriceValue} ${batchPricingMode === 'meter' ? 'د.ل/م²' : 'د.ل'}) على جميع اللوحات`);
+  };
+
+  const handleSetAllBillboardsFree = () => {
+    setTaskItems(prev => prev.map(item => ({
+      ...item,
+      customer_installation_cost: 0,
+      customer_reinstall_cost: 0,
+      additional_cost: 0
+    })));
+    toast.success('تم تحويل جميع اللوحات لمجانية بالكامل');
+  };
+
+  const handleSelectAllPrintBillboards = () => {
+    setPrintBillboardIds(enrichedItems.map(i => i.billboard_id));
+    toast.success('تم تحديد جميع اللوحات للطباعة');
+  };
+
+  const handleDeselectAllPrintBillboards = () => {
+    setPrintBillboardIds([]);
+    toast.info('تم إلغاء تحديد جميع اللوحات من الطباعة');
+  };
+
+  // Main Save Handler (Atomic & Complete)
+  const handleSaveAll = async () => {
+    if (!primaryTask) return;
+    setDistributing(true);
+    const saveToastId = toast.loading('جاري حفظ التكاليف والبيانات...');
+
+    try {
+      // 1. Update installation_task_items in database
+      if (taskItems.length > 0) {
+        for (const item of taskItems) {
+          const isRe = (item.reinstall_count || 0) > 0;
+          await supabase.from('installation_task_items').update({
+            customer_installation_cost: isRe ? item.customer_reinstall_cost : item.customer_installation_cost,
+            customer_original_install_cost: item.customer_original_install_cost || 0,
+            customer_reinstall_cost: item.customer_reinstall_cost || 0,
+            company_installation_cost: item.company_installation_cost,
+            additional_cost: item.additional_cost || null,
+            additional_cost_notes: item.additional_cost_notes || null,
+            company_additional_cost: item.company_additional_cost || null,
+            company_additional_cost_notes: item.company_additional_cost_notes || null,
+            has_cutout: Boolean(item.has_cutout),
+            faces_to_install: resolveInstallationFacesCount({
+              faces_to_install: item.faces_to_install,
+              billboard: billboards[item.billboard_id],
+            }),
+            cutout_count: item.cutout_count || null,
+            cutout_company_cost: item.cutout_company_cost || null,
+            cutout_customer_cost: item.cutout_customer_cost || null,
+            cutout_workshop_id: item.cutout_workshop_id || null,
+            cutout_notes: item.cutout_notes || null
+          }).eq('id', item.id);
+        }
+      }
+
+      // 2. Handle Print Task Creation / Updating
+      let effectivePrintTaskId: string | null = primaryTask.print_task_id || null;
+
+      if (isPrintActive) {
+        if (!effectivePrintTaskId) {
+          // Create NEW print task
+          const { data: newPt, error: ptCreateError } = await supabase.from('print_tasks').insert({
+            contract_id: primaryTask.contract_id,
+            customer_id: primaryTask.customer_id,
+            customer_name: primaryTask.customer_name,
+            installation_task_id: primaryTask.installation_task_id || null,
+            composite_task_id: primaryTask.id,
+            printer_id: selectedPrinterId || null,
+            price_per_meter: companyPrintPerMeter,
+            customer_price_per_meter: customerPrintPerMeter,
+            total_area: calculatedPrintArea,
+            total_cost: calculatedCompanyPrint,
+            customer_total_amount: calculatedCustomerPrint,
+            printer_total_cost: calculatedCompanyPrint,
+            status: 'pending'
+          } as any).select('id').single();
+
+          if (ptCreateError) throw ptCreateError;
+          if (newPt) {
+            effectivePrintTaskId = newPt.id;
+            // Link to composite task & installation task
+            await supabase.from('composite_tasks').update({ print_task_id: newPt.id }).eq('id', primaryTask.id);
+            if (primaryTask.installation_task_id) {
+              await supabase.from('installation_tasks').update({ print_task_id: newPt.id }).eq('id', primaryTask.installation_task_id);
+            }
+          }
+        } else {
+          // Update EXISTING print task
+          await supabase.from('print_tasks').update({
+            printer_id: selectedPrinterId || null,
+            price_per_meter: companyPrintPerMeter,
+            customer_price_per_meter: customerPrintPerMeter,
+            total_area: calculatedPrintArea,
+            total_cost: calculatedCompanyPrint,
+            customer_total_amount: calculatedCustomerPrint,
+            printer_total_cost: calculatedCompanyPrint,
+            updated_at: new Date().toISOString()
+          } as any).eq('id', effectivePrintTaskId);
+        }
+
+        // Synchronize print_task_items
+        if (effectivePrintTaskId) {
+          // Delete old items and insert selected
+          await supabase.from('print_task_items').delete().eq('task_id', effectivePrintTaskId);
+
+          if (printBillboardIds.length > 0) {
+            const printItemsToInsert = printBillboardIds.map(bbId => {
+              const item = enrichedItems.find(i => i.billboard_id === bbId);
+              const bb = billboards[bbId];
+              const sizeName = bb?.Size || 'غير محدد';
+              const area = item?.itemTotalArea || 0;
+              const faces = item?.faces || 1;
+              return {
+                task_id: effectivePrintTaskId!,
+                billboard_id: bbId,
+                description: `${sizeName} - ${faces === 1 ? 'وجه واحد' : 'وجهين'}`,
+                width: sizesMap[sizeName]?.width || null,
+                height: sizesMap[sizeName]?.height || null,
+                area: area,
+                quantity: 1,
+                faces_count: faces,
+                unit_cost: companyPrintPerMeter * area,
+                printer_unit_cost: companyPrintPerMeter * area,
+                customer_unit_cost: customerPrintPerMeter * area,
+                total_cost: companyPrintPerMeter * area,
+                status: 'pending'
+              };
+            });
+            await supabase.from('print_task_items').insert(printItemsToInsert as any);
+          }
+        }
+      }
+
+      // 3. Multi-task Synchronization
+      // Installation remains owned by its team task. Shared operation costs are
+      // stored once on the primary task so the operation total is not duplicated.
+      let primaryCustomerInstall = finalCustomerInstall;
+      let primaryCompanyInstall = finalCompanyInstall;
+      if (allTasks.length > 1) {
+        for (const t of allTasks) {
+          const tItems = taskItems.filter(i => i.task_id === t.installation_task_id);
+          let tCustInstall = 0;
+          let tCompInstall = 0;
+          tItems.forEach(i => {
+            const isRe = (i.reinstall_count || 0) > 0;
+            tCustInstall += isRe ? ((i.customer_original_install_cost || 0) + (i.customer_reinstall_cost || i.customer_installation_cost || 0)) : (i.customer_installation_cost || 0);
+            tCompInstall += (i.company_installation_cost ?? installationPrices[i.billboard_id] ?? 0) + (i.company_additional_cost || 0);
+          });
+          const isPrimaryOperationTask = t.id === primaryTask.id;
+          const sharedCosts = getSharedOperationCostsForTask(t.id, primaryTask.id, {
+            customerPrint: calculatedCustomerPrint,
+            companyPrint: calculatedCompanyPrint,
+            customerCutout: calculatedCustomerCutout,
+            companyCutout: calculatedCompanyCutout,
+            discount: discountAmount,
+          });
+          const tCustPrint = sharedCosts.customerPrint;
+          const tCompPrint = sharedCosts.companyPrint;
+          const tCustCutout = sharedCosts.customerCutout;
+          const tCompCutout = sharedCosts.companyCutout;
+          const tDiscount = sharedCosts.discount;
+
+          if (isPrimaryOperationTask) {
+            primaryCustomerInstall = tCustInstall;
+            primaryCompanyInstall = tCompInstall;
+          }
+
+          const tCustTot = tCustInstall + tCustPrint + tCustCutout - tDiscount;
+          const tCompTot = tCompInstall + tCompPrint + tCompCutout;
+          const tNet = tCustTot - tCompTot;
+          const tProfPct = tCustTot > 0 ? (tNet / tCustTot) * 100 : 0;
+
+          await supabase.from('composite_tasks').update({
+            customer_installation_cost: tCustInstall,
+            company_installation_cost: tCompInstall,
+            customer_print_cost: tCustPrint,
+            company_print_cost: tCompPrint,
+            customer_cutout_cost: tCustCutout,
+            company_cutout_cost: tCompCutout,
+            discount_amount: tDiscount,
+            discount_reason: isPrimaryOperationTask ? (discountReason.trim() || null) : null,
+            customer_total: tCustTot,
+            company_total: tCompTot,
+            net_profit: tNet,
+            profit_percentage: tProfPct,
+            updated_at: new Date().toISOString()
+          }).eq('id', t.id);
+
+          if (t.combined_invoice_id) {
+            await supabase.from('printed_invoices').update({
+              total_amount: tCustTot,
+              updated_at: new Date().toISOString()
+            }).eq('id', t.combined_invoice_id);
+            await supabase.from('customer_payments').update({ amount: -tCustTot }).eq('printed_invoice_id', t.combined_invoice_id).eq('entry_type', 'invoice');
+          }
+        }
+      }
+
+      // 4. Update Primary Task Costs
+      await onSave({
+        id: primaryTask.id,
+        customer_installation_cost: primaryCustomerInstall,
+        company_installation_cost: primaryCompanyInstall,
+        customer_print_cost: calculatedCustomerPrint,
+        company_print_cost: calculatedCompanyPrint,
+        customer_cutout_cost: calculatedCustomerCutout,
+        company_cutout_cost: calculatedCompanyCutout,
+        discount_amount: discountAmount,
+        discount_reason: discountReason.trim() || undefined,
+        notes: notes.trim() || undefined,
+        cost_allocation: costAllocation
+      });
+
+      toast.dismiss(saveToastId);
+      toast.success('تم حفظ وتحديث كافة التكاليف والطباعة بنجاح');
+      onOpenChange(false);
+
+    } catch (err: any) {
+      toast.dismiss(saveToastId);
+      console.error('Save error:', err);
+      toast.error(err?.message || 'فشل حفظ التعديلات');
     } finally {
       setDistributing(false);
     }
   };
 
-  const handleSetFree = async (itemId: string) => {
-    setDistributing(true);
-    try {
-      await supabase.from('installation_task_items').update({ customer_installation_cost: 0, customer_reinstall_cost: 0 }).eq('id', itemId);
-      const newItems = taskItems.map(item => item.id === itemId ? { ...item, customer_installation_cost: 0, customer_reinstall_cost: 0 } : item);
-      setTaskItems(newItems);
-      let newCustomerTotal = 0, newCompanyTotal = 0;
-      newItems.forEach(item => {
-        const isReinstalled = (item.reinstall_count || 0) > 0;
-        const itemCost = isReinstalled
-          ? (Number(item.customer_original_install_cost) || 0) + (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
-          : (Number(item.customer_installation_cost) || 0);
-        newCustomerTotal += itemCost;
-        newCompanyTotal += customCompanyCosts[item.id] ?? installationPrices[item.billboard_id] ?? 0;
-      });
-      await updateCompositeTaskInstallationCosts(newCustomerTotal, newCompanyTotal);
-      toast.success('تم تحويل تكلفة التركيب للوحة إلى مجانية');
-    } catch { toast.error('فشل تحويل اللوحة لمجانية'); }
-    finally { setDistributing(false); }
-  };
-
-  const handleSetAllFree = async () => {
-    if (taskItems.length === 0) return;
-    setDistributing(true);
-    try {
-      await Promise.all(taskItems.map(item => supabase.from('installation_task_items').update({ customer_installation_cost: 0 }).eq('id', item.id)));
-      setTaskItems(prev => prev.map(item => ({ ...item, customer_installation_cost: 0 })));
-      let newCompanyTotal = 0;
-      taskItems.forEach(item => { newCompanyTotal += customCompanyCosts[item.id] ?? installationPrices[item.billboard_id] ?? 0; });
-      await updateCompositeTaskInstallationCosts(0, newCompanyTotal);
-      toast.success(`تم تحويل ${taskItems.length} لوحة لمجانية بالكامل`);
-    } catch { toast.error('فشل تحويل اللوحات لمجانية'); }
-    finally { setDistributing(false); }
-  };
-
-  // Quick batch adjustments
-  const handleApplyQuickPricing = async () => {
-    const hasAnyPrice = Object.values(quickPrices).some(p => p.normal > 0 || p.cutout > 0);
-    if (!hasAnyPrice) { toast.error('الرجاء إدخال سعر واحد على الأقل للتطبيق'); return; }
-    setDistributing(true);
-    try {
-      const newItems = [...taskItems];
-      let newCustomerTotal = 0, newCompanyTotal = 0;
-      for (let idx = 0; idx < taskItems.length; idx++) {
-        const item = taskItems[idx];
-        const billboard = billboards[item.billboard_id];
-        const sizeName = billboard?.Size || '';
-        const pricing = quickPrices[sizeName];
-        if (pricing) {
-          const newCost = item.has_cutout ? pricing.cutout : pricing.normal;
-          if (newCost > 0) {
-            newItems[idx] = { ...item, customer_installation_cost: newCost };
-            await supabase.from('installation_task_items').update({ customer_installation_cost: newCost, pricing_type: 'piece', price_per_meter: 0 }).eq('id', item.id);
-          }
-        }
-        const isReinstalled = (newItems[idx].reinstall_count || 0) > 0;
-        const itemCost = isReinstalled
-          ? (Number(newItems[idx].customer_original_install_cost) || 0) + (Number(newItems[idx].customer_reinstall_cost) || Number(newItems[idx].customer_installation_cost) || 0)
-          : (Number(newItems[idx].customer_installation_cost) || 0);
-        newCustomerTotal += itemCost;
-        newCompanyTotal += installationPrices[newItems[idx].billboard_id] || 0;
-      }
-      setTaskItems(newItems);
-      await updateCompositeTaskInstallationCosts(newCustomerTotal, newCompanyTotal);
-      toast.success('تم تطبيق الأسعار السريعة بنجاح');
-      setQuickPrices({});
-    } catch { toast.error('فشل تطبيق الأسعار بالقطعة'); }
-    finally { setDistributing(false); }
-  };
-
-  const handleApplyMeterToSize = async (sizeName: string) => {
-    const meterPrice = meterPrices[sizeName];
-    if (!meterPrice || (meterPrice.normal <= 0 && meterPrice.cutout <= 0)) { toast.error('الرجاء إدخال سعر المتر أولاً للتطبيق'); return; }
-    setDistributing(true);
-    try {
-      const newItems = [...taskItems];
-      let newCustomerTotal = 0, newCompanyTotal = 0;
-      for (let idx = 0; idx < taskItems.length; idx++) {
-        const item = taskItems[idx];
-        const billboard = billboards[item.billboard_id];
-        if (billboard?.Size === sizeName) {
-          const area = calculateAreaFromSizeData(sizeName, sizesMap);
-          const faces = item.faces_to_install || billboard?.Faces_Count || 2;
-          const pricePerMeter = item.has_cutout ? meterPrice.cutout : meterPrice.normal;
-          if (pricePerMeter > 0) {
-            const cost = Math.round(pricePerMeter * area * faces * 100) / 100;
-            newItems[idx] = { ...item, customer_installation_cost: cost, pricing_type: 'meter', price_per_meter: pricePerMeter };
-            await supabase.from('installation_task_items').update({ customer_installation_cost: cost, pricing_type: 'meter', price_per_meter: pricePerMeter }).eq('id', item.id);
-          }
-        }
-        const isReinstalled = (newItems[idx].reinstall_count || 0) > 0;
-        const itemCost = isReinstalled
-          ? (Number(newItems[idx].customer_original_install_cost) || 0) + (Number(newItems[idx].customer_reinstall_cost) || Number(newItems[idx].customer_installation_cost) || 0)
-          : (Number(newItems[idx].customer_installation_cost) || 0);
-        newCustomerTotal += itemCost;
-        newCompanyTotal += installationPrices[newItems[idx].billboard_id] || 0;
-      }
-      setTaskItems(newItems);
-      await updateCompositeTaskInstallationCosts(newCustomerTotal, newCompanyTotal);
-      toast.success(`تم تطبيق سعر المتر على مقاس ${sizeName} بنجاح`);
-    } catch { toast.error('حدث خطأ أثناء تطبيق سعر المتر'); }
-    finally { setDistributing(false); }
-  };
-
-  const handleApplyMeterToType = async (billboardType: string) => {
-    const meterPrice = typeMeterPrices[billboardType];
-    if (!meterPrice || (meterPrice.normal <= 0 && meterPrice.cutout <= 0)) { toast.error('الرجاء إدخال سعر المتر أولاً للتطبيق'); return; }
-    setDistributing(true);
-    try {
-      const newItems = [...taskItems];
-      let newCustomerTotal = 0, newCompanyTotal = 0;
-      for (let idx = 0; idx < taskItems.length; idx++) {
-        const item = taskItems[idx];
-        const billboard = billboards[item.billboard_id];
-        if (billboard?.billboard_type === billboardType) {
-          const sizeName = billboard?.Size || '';
-          const area = calculateAreaFromSizeData(sizeName, sizesMap);
-          const faces = item.faces_to_install || billboard?.Faces_Count || 2;
-          const pricePerMeter = item.has_cutout ? meterPrice.cutout : meterPrice.normal;
-          if (pricePerMeter > 0) {
-            const cost = Math.round(pricePerMeter * area * faces * 100) / 100;
-            newItems[idx] = { ...item, customer_installation_cost: cost, pricing_type: 'meter', price_per_meter: pricePerMeter };
-            await supabase.from('installation_task_items').update({ customer_installation_cost: cost, pricing_type: 'meter', price_per_meter: pricePerMeter }).eq('id', item.id);
-          }
-        }
-        const isReinstalled = (newItems[idx].reinstall_count || 0) > 0;
-        const itemCost = isReinstalled
-          ? (Number(newItems[idx].customer_original_install_cost) || 0) + (Number(newItems[idx].customer_reinstall_cost) || Number(newItems[idx].customer_installation_cost) || 0)
-          : (Number(newItems[idx].customer_installation_cost) || 0);
-        newCustomerTotal += itemCost;
-        newCompanyTotal += installationPrices[newItems[idx].billboard_id] || 0;
-      }
-      setTaskItems(newItems);
-      await updateCompositeTaskInstallationCosts(newCustomerTotal, newCompanyTotal);
-      toast.success(`تم تطبيق سعر المتر على نوع اللوحات ${billboardType} بنجاح`);
-      setTypeMeterPrices(prev => { const u = { ...prev }; delete u[billboardType]; return u; });
-    } catch { toast.error('حدث خطأ أثناء تطبيق السعر'); }
-    finally { setDistributing(false); }
-  };
-
-  const toggleSizeCollapse = (sizeKey: string) => {
-    setCollapsedSizes(prev => { const u = new Set(prev); u.has(sizeKey) ? u.delete(sizeKey) : u.add(sizeKey); return u; });
-  };
-  const toggleTypeCollapse = (typeKey: string) => {
-    setCollapsedTypes(prev => { const u = new Set(prev); u.has(typeKey) ? u.delete(typeKey) : u.add(typeKey); return u; });
-  };
-
-  // Main save action
-  const handleSave = async () => {
-    if (!task) return;
-    const totalServiceDiscounts =
-      (costAllocation.print.enabled ? costAllocation.print.discount : 0) +
-      (costAllocation.cutout.enabled ? costAllocation.cutout.discount : 0) +
-      (costAllocation.installation.enabled ? costAllocation.installation.discount : 0);
-    const hasAnyAllocation = costAllocation.print.enabled || costAllocation.cutout.enabled || costAllocation.installation.enabled;
-    const allocationToSave: any = hasAnyAllocation ? { ...costAllocation } : undefined;
-
-    // Sync printer with database print task
-    try {
-      if (task.print_task_id) {
-        const { data: updatedPrintTask, error: ptUpdateError } = await (supabase.from('print_tasks') as any).update({
-          printer_id: selectedPrinterId || null,
-          customer_price_per_meter: customerPrintPerMeter || 0,
-          price_per_meter: companyPrintPerMeter || 0,
-          total_area: totalPrintArea,
-          customer_total_amount: customerPrintTotal,
-          total_cost: companyPrintTotal,
-          printer_total_cost: companyPrintTotal,
-        }).eq('id', task.print_task_id).select('invoice_id').maybeSingle();
-
-        if (ptUpdateError) throw ptUpdateError;
-
-        if (updatedPrintTask?.invoice_id) {
-          await supabase.from('printed_invoices').update({
-            total_amount: customerPrintTotal,
-            printer_cost: companyPrintTotal,
-            updated_at: new Date().toISOString()
-          }).eq('id', updatedPrintTask.invoice_id);
-        }
-
-        const { data: currentItems } = await supabase
-          .from('print_task_items')
-          .select('id, area')
-          .eq('task_id', task.print_task_id);
-
-        if (currentItems) {
-          await Promise.all(
-            currentItems.map(item => {
-              const itemArea = item.area || 0;
-              return supabase
-                .from('print_task_items')
-                .update({
-                  unit_cost: companyPrintPerMeter * itemArea,
-                  printer_unit_cost: companyPrintPerMeter * itemArea,
-                  customer_unit_cost: customerPrintPerMeter * itemArea,
-                  total_cost: companyPrintPerMeter * itemArea,
-                })
-                .eq('id', item.id);
-            })
-          );
-        }
-      }
-    } catch (e) { console.error('printer sync error', e); }
-
-    // Sync cutout indicators
-    try {
-      const anyCutout = taskItems.some(i => i.has_cutout);
-      if (task.print_task_id && anyCutout) {
-        await (supabase.from('print_tasks') as any).update({
-          has_cutouts: true,
-          cutout_quantity: totalCutouts,
-        }).eq('id', task.print_task_id);
-      }
-      if (task.cutout_task_id) {
-        const workshopCounts: Record<string, number> = {};
-        taskItems.forEach(i => {
-          if (i.has_cutout && i.cutout_workshop_id) {
-            workshopCounts[i.cutout_workshop_id] = (workshopCounts[i.cutout_workshop_id] || 0) + 1;
-          }
-        });
-        const primaryWorkshop = Object.entries(workshopCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
-        await (supabase.from('cutout_tasks') as any).update({
-          cutout_printer_id: primaryWorkshop,
-          cutout_quantity: totalCutouts,
-          cutout_cost: companyCutoutTotal,
-          customer_cutout_total: customerCutoutTotal,
-        }).eq('id', task.cutout_task_id);
-      }
-    } catch (e) { console.error('cutout sync error', e); }
-
-    onSave({
-      id: task.id,
-      customer_installation_cost: customerInstallationTotal, company_installation_cost: companyInstallationTotal,
-      customer_print_cost: customerPrintTotal, company_print_cost: companyPrintTotal,
-      customer_cutout_cost: customerCutoutTotal, company_cutout_cost: companyCutoutTotal,
-      discount_amount: discountAmount + totalServiceDiscounts, discount_reason: discountReason.trim() || undefined,
-      notes: notes.trim() || undefined, cost_allocation: allocationToSave,
-      print_discount: costAllocation.print.enabled ? costAllocation.print.discount : 0,
-      print_discount_reason: costAllocation.print.enabled ? costAllocation.print.discount_reason : undefined,
-      cutout_discount: costAllocation.cutout.enabled ? costAllocation.cutout.discount : 0,
-      cutout_discount_reason: costAllocation.cutout.enabled ? costAllocation.cutout.discount_reason : undefined,
-      installation_discount: costAllocation.installation.enabled ? costAllocation.installation.discount : 0,
-      installation_discount_reason: costAllocation.installation.enabled ? costAllocation.installation.discount_reason : undefined,
-    });
-  };
-
-  if (!task) return null;
-
-  // تحديد ما إذا كانت هذه التركيبة الأولى (لا يمكن تعديل تكلفة التركيب للعميل)
-  const isFirstInstallation = task.task_type === 'new_installation';
-
-  const billboardTypes = Object.keys(groupedData);
-  const cutoutItemCount = taskItems.filter(i => i.has_cutout).length || cutoutItems.length;
+  if (!primaryTask) return null;
+  const isFirstInstallation = primaryTask.task_type === 'new_installation';
+  const isInstallFreeByContract = isFirstInstallation && (contractInclusion.loaded ? contractInclusion.includeInstallation : true);
+  const isPrintFreeByContract = isFirstInstallation && (contractInclusion.loaded ? contractInclusion.includePrint : false);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent 
-        side="right" 
+      <SheetContent
+        side="right"
         dir="rtl"
-        className="w-full sm:max-w-3xl lg:max-w-4xl p-0 flex flex-col gap-0 overflow-hidden bg-background/98 backdrop-blur-md border-l border-border/15 text-right"
+        className="w-full p-0 sm:max-w-[96vw] xl:max-w-6xl flex flex-col gap-0 overflow-hidden bg-background border-l border-primary/25 text-right font-tajawal [&_button]:cursor-pointer"
       >
-        {/* ═══════ HEADER SECTION ═══════ */}
-        <div className="shrink-0 border-b border-border/15 bg-card/45 backdrop-blur-md px-5 sm:px-6 py-4">
-          <SheetHeader className="pb-4">
-            <div className="flex items-center justify-between gap-4 text-right">
-              <SheetTitle className="flex items-center gap-3 text-xl font-bold text-foreground leading-relaxed text-right">
-                <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center shrink-0 shadow-inner">
-                  <Package className="h-5 w-5 text-primary" />
+        <div className="shrink-0 border-b border-primary/20 bg-gradient-to-l from-primary/10 via-card/70 to-background px-5 py-4 sm:px-6">
+          <SheetHeader className="text-right">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-5">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-primary/35 bg-primary/15 text-primary shadow-sm">
+                  <Calculator className="h-6 w-6" />
                 </div>
-                <span>تعديل تكاليف المهمة</span>
-              </SheetTitle>
-              <Badge variant={task.task_type === 'new_installation' ? 'default' : 'secondary'} className="text-xs px-3.5 py-1.5 font-semibold rounded-lg shadow-sm border border-border/10 bg-muted/80 text-foreground leading-normal">
-                {task.task_type === 'new_installation' ? 'تركيب جديد' : 'إعادة تركيب'}
-              </Badge>
-            </div>
-            <SheetDescription className="flex items-center justify-start gap-2 text-sm mt-3 text-muted-foreground leading-relaxed text-right">
-              <span className="font-semibold text-foreground text-sm">{task.customer_name}</span>
-              <span className="text-muted-foreground/30">•</span>
-              <span className="text-xs font-semibold bg-muted/65 border border-border/15 px-2.5 py-0.5 rounded-lg text-foreground">عقد #{task.contract_id}</span>
-            </SheetDescription>
-          </SheetHeader>
+                <div className="min-w-0">
+                  <SheetTitle className="text-xl font-black tracking-tight text-foreground sm:text-2xl">
+                    مركز تكاليف العملية
+                  </SheetTitle>
+                  <SheetDescription className="mt-1 text-xs font-bold leading-5 text-muted-foreground">
+                    تعديل موحّد للتكاليف مع صورة كل لوحة وحالة شمول خدمات العقد
+                  </SheetDescription>
+                </div>
+              </div>
 
-          {/* Compact KPI Strip */}
-          <div dir="rtl" className="rounded-2xl border border-border/15 bg-background/40 backdrop-blur-md shadow-sm overflow-hidden flex divide-x-reverse divide-x divide-border/15 text-right">
-            <HeaderKpi label="مستحق العميل" value={customerTotal} suffix="د.ل" valueClass="text-emerald-500" />
-            <HeaderKpi label="تكلفة الشركة" value={companyTotal} suffix="د.ل" valueClass="text-orange-500" divider />
-            <HeaderKpi label="صافي الربح" value={netProfit} suffix="د.ل" valueClass={netProfit >= 0 ? "text-emerald-500" : "text-rose-500"} divider />
-            <HeaderKpi label="نسبة الربح" value={`${profitPercentage.toFixed(0)}%`} valueClass={netProfit >= 0 ? "text-indigo-400" : "text-rose-500"} divider />
-          </div>
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                <span className="inline-flex min-h-8 items-center rounded-lg border border-primary/30 bg-primary/10 px-3 font-mono text-xs font-black text-primary">
+                  عقد #{primaryTask.contract_id}
+                </span>
+                <span className="inline-flex min-h-8 items-center rounded-lg border border-border/35 bg-card/65 px-3 text-xs font-black text-foreground">
+                  {primaryTask.customer_name || 'زبون غير محدد'}
+                </span>
+                <span className={cn(
+                  "inline-flex min-h-8 items-center gap-1.5 rounded-lg border px-3 text-[11px] font-black",
+                  isFirstInstallation
+                    ? "border-blue-500/30 bg-blue-500/10 text-blue-300"
+                    : "border-orange-500/30 bg-orange-500/10 text-orange-300"
+                )}>
+                  {isFirstInstallation && (isInstallFreeByContract || isPrintFreeByContract) && <Gift className="h-3.5 w-3.5" />}
+                  {!isFirstInstallation
+                    ? 'إعادة تركيب'
+                    : isInstallFreeByContract && isPrintFreeByContract
+                      ? 'الطباعة والتركيب مشمولان'
+                      : isInstallFreeByContract
+                        ? 'التركيب مشمول بالعقد'
+                        : isPrintFreeByContract
+                          ? 'الطباعة مشمولة بالعقد'
+                          : 'تركيب جديد غير شامل'}
+                </span>
+                {isMultiTask && (
+                  <span className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 text-[11px] font-black text-amber-300">
+                    <Layers className="h-3.5 w-3.5" />
+                    {allTasks.length} فرق
+                  </span>
+                )}
+              </div>
+            </div>
+          </SheetHeader>
         </div>
 
-        {/* ═══════ TABS SECTION ═══════ */}
+        {/* ════════════ TABS NAVIGATION ════════════ */}
         {loading ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground/70 text-sm font-semibold gap-3 py-20 bg-muted/5 leading-relaxed">
-            <div className="relative flex items-center justify-center">
-              <div className="absolute inset-0 bg-primary/10 rounded-full blur-md animate-pulse h-10 w-10"></div>
-              <Loader2 className="h-7 w-7 animate-spin text-primary relative" />
-            </div>
-            <span>جاري تحميل التكاليف والتفاصيل...</span>
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 py-24 text-muted-foreground text-sm font-bold">
+            <Loader2 className="h-8 w-8 animate-spin text-amber-400" />
+            <span>جاري تحميل بيانات التكاليف واللوحات...</span>
           </div>
         ) : (
-          <Tabs value={activeTab} onValueChange={setActiveTab} dir="rtl" className="flex-1 flex flex-col overflow-hidden text-right">
-            <div className="shrink-0 px-8 pt-3 border-b border-border/15 bg-card/25 backdrop-blur-sm">
-              <TabsList dir="rtl" className="w-full justify-start bg-transparent gap-3 h-auto p-0 border-b-0 overflow-x-auto scrollbar-none flex-nowrap">
-                {isInstallationActive && (
-                  <TabsTrigger 
-                    value="installation" 
-                    className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary rounded-t-xl rounded-b-none border-b-2 data-[state=active]:border-primary border-transparent px-6 py-4 text-sm font-semibold gap-2 transition-all duration-300 shadow-none hover:text-foreground shrink-0 leading-normal"
+          <Tabs
+            value={activeTab}
+            onValueChange={(v: any) => setActiveTab(v)}
+            className="flex min-h-0 flex-1 flex-col overflow-hidden lg:grid lg:grid-cols-[18rem_minmax(0,1fr)]"
+            dir="rtl"
+          >
+            <aside className="shrink-0 border-b border-border/25 bg-card/25 lg:h-full lg:overflow-y-auto lg:border-b-0 lg:border-l">
+              <div className="p-3 sm:px-5 lg:p-4 space-y-4">
+                <div className="hidden lg:block pb-1">
+                  <p className="text-sm font-black text-foreground">أقسام التكلفة</p>
+                  <p className="mt-1 text-[11px] font-bold leading-5 text-muted-foreground">انتقل بين البنود، ثم راجع الملخص قبل الحفظ.</p>
+                </div>
+                <TabsList className="!h-auto !flex flex-col h-auto sm:h-auto lg:h-auto w-full gap-2 bg-transparent p-0 shrink-0" dir="rtl">
+                  <TabsTrigger
+                    value="installation"
+                    className="w-full min-h-12 justify-start gap-2.5 rounded-xl border border-transparent px-3 text-xs font-black text-muted-foreground transition-all data-[state=active]:border-primary/40 data-[state=active]:bg-primary/15 data-[state=active]:text-primary shrink-0 cursor-pointer"
                   >
-                    <Wrench className="h-4.5 w-4.5 shrink-0" />
-                    <span>التركيب</span>
-                    {task.installation_task_id && (
-                      <Badge variant="secondary" className="text-xs font-semibold bg-muted/65 text-muted-foreground border border-border/20 px-2.5 py-0.5 rounded-full">{taskItems.length}</Badge>
-                    )}
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-amber-500/25 bg-amber-500/10 text-amber-300">
+                      <Wrench className="h-4 w-4" />
+                    </span>
+                    <span className="flex-1 text-right font-bold">التركيب واللوحات</span>
+                    <span className="rounded-md bg-muted/60 px-2 py-0.5 text-[10px] font-mono font-bold text-foreground/80">{taskItems.length}</span>
                   </TabsTrigger>
-                )}
 
-                {isPrintActive && (
-                  <TabsTrigger 
-                    value="print" 
-                    className="data-[state=active]:bg-blue-500/10 data-[state=active]:text-blue-500 rounded-t-xl rounded-b-none border-b-2 data-[state=active]:border-blue-500 border-transparent px-6 py-4 text-sm font-semibold gap-2 transition-all duration-300 shadow-none hover:text-foreground shrink-0 leading-normal"
+                  <TabsTrigger
+                    value="print"
+                    className="w-full min-h-12 justify-start gap-2.5 rounded-xl border border-transparent px-3 text-xs font-black text-muted-foreground transition-all data-[state=active]:border-primary/40 data-[state=active]:bg-primary/15 data-[state=active]:text-primary shrink-0 cursor-pointer"
                   >
-                    <Printer className="h-4.5 w-4.5 shrink-0" />
-                    <span>الطباعة</span>
-                    {totalPrintArea > 0 && (
-                      <Badge variant="secondary" className="text-xs font-semibold bg-muted/65 text-muted-foreground border border-border/20 px-2.5 py-0.5 rounded-full">{totalPrintArea.toFixed(1)} م²</Badge>
-                    )}
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-blue-500/25 bg-blue-500/10 text-blue-300">
+                      <Printer className="h-4 w-4" />
+                    </span>
+                    <span className="flex-1 text-right font-bold">الطباعة والإنتاج</span>
+                    <span className="rounded-md bg-muted/60 px-2 py-0.5 text-[10px] font-mono font-bold text-foreground/80">
+                      {isPrintActive ? `${calculatedPrintArea.toFixed(1)}م²` : 'متوقفة'}
+                    </span>
                   </TabsTrigger>
-                )}
 
-                {isCutoutActive && (hasCutoutBillboards || !!task.cutout_task_id || cutoutItemCount > 0) && (
-                  <TabsTrigger 
-                    value="cutout" 
-                    className="data-[state=active]:bg-purple-500/10 data-[state=active]:text-purple-650 rounded-t-xl rounded-b-none border-b-2 data-[state=active]:border-purple-500 border-transparent px-6 py-4 text-sm font-semibold gap-2 transition-all duration-300 shadow-none hover:text-foreground shrink-0 leading-normal"
+                  <TabsTrigger
+                    value="cutout"
+                    className="w-full min-h-12 justify-start gap-2.5 rounded-xl border border-transparent px-3 text-xs font-black text-muted-foreground transition-all data-[state=active]:border-primary/40 data-[state=active]:bg-primary/15 data-[state=active]:text-primary shrink-0 cursor-pointer"
                   >
-                    <Scissors className="h-4.5 w-4.5 shrink-0" />
-                    <span>المجسمات</span>
-                    {cutoutItemCount > 0 && (
-                      <Badge variant="secondary" className="text-xs font-semibold bg-muted/65 text-muted-foreground border border-border/20 px-2.5 py-0.5 rounded-full">{cutoutItemCount}</Badge>
-                    )}
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-purple-500/25 bg-purple-500/10 text-purple-300">
+                      <Scissors className="h-4 w-4" />
+                    </span>
+                    <span className="flex-1 text-right font-bold">المجسمات والقص</span>
+                    <span className="rounded-md bg-muted/60 px-2 py-0.5 text-[10px] font-mono font-bold text-foreground/80">{totalCutoutsCount}</span>
                   </TabsTrigger>
-                )}
 
-                <TabsTrigger 
-                  value="summary" 
-                  className="data-[state=active]:bg-emerald-500/10 data-[state=active]:text-emerald-600 rounded-t-xl rounded-b-none border-b-2 data-[state=active]:border-emerald-500 border-transparent px-6 py-4 text-sm font-semibold gap-2 transition-all duration-300 shadow-none hover:text-foreground shrink-0 leading-normal"
-                >
-                  <Calculator className="h-4.5 w-4.5 shrink-0" />
-                  <span>الملخص المالي</span>
-                </TabsTrigger>
-              </TabsList>
-            </div>
+                  <TabsTrigger
+                    value="summary"
+                    className="w-full min-h-12 justify-start gap-2.5 rounded-xl border border-transparent px-3 text-xs font-black text-muted-foreground transition-all data-[state=active]:border-primary/40 data-[state=active]:bg-primary/15 data-[state=active]:text-primary shrink-0 cursor-pointer"
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-emerald-500/25 bg-emerald-500/10 text-emerald-300">
+                      <Calculator className="h-4 w-4" />
+                    </span>
+                    <span className="flex-1 text-right font-bold">الخصم والملخص</span>
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                  </TabsTrigger>
+                </TabsList>
 
-            <ScrollArea className="flex-1 bg-muted/[0.03]">
-              
-              {/* ═══════ TAB: التركيب واللوحات ═══════ */}
-              {isInstallationActive && (
-                <TabsContent value="installation" className="mt-0 p-5 sm:p-6 space-y-6">
-                  {task.installation_task_id ? (
-                    <>
-                      {/* تنبيه: التركيبة الأولى لا يمكن تعديل تكلفتها للعميل */}
-                      {isFirstInstallation && (
-                        <div className="flex items-start gap-3 p-4 rounded-xl bg-blue-500/8 border border-blue-500/20 text-blue-800 dark:text-blue-300 mb-2">
-                          <div className="p-2 rounded-lg bg-blue-500/15 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5">
-                            <AlertCircle className="h-5 w-5" />
-                          </div>
-                          <div className="space-y-1">
-                            <h5 className="font-bold text-sm">تركيبة أولى - تكلفة التركيب غير قابلة للتعديل</h5>
-                            <p className="text-xs leading-relaxed text-blue-700/85 dark:text-blue-400/85">
-                              هذه مهمة تركيب أولى (جديدة). تكلفة التركيب على العميل مقفلة ولا يمكن تعديلها. يمكنك فقط تعديل تكلفة الشركة والتكاليف الإضافية.
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                      {/* Segmented pricing-mode control + Set free */}
-                      <div className="flex items-center justify-between gap-3 flex-wrap text-right">
-                        <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-muted/40 border border-border/15 shadow-inner">
-                          <button
-                            type="button"
-                            onClick={() => setPricingType('piece')}
-                            className={cn(
-                              "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer",
-                              pricingType === 'piece' ? 'bg-background text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                            )}
-                          >
-                            <Square className="h-3.5 w-3.5" />
-                            <span>بالقطعة</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPricingType('meter')}
-                            className={cn(
-                              "flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-150 cursor-pointer",
-                              pricingType === 'meter' ? 'bg-background text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground'
-                            )}
-                          >
-                            <Ruler className="h-3.5 w-3.5" />
-                            <span>بالمتر المربع</span>
-                          </button>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={handleSetAllFree}
-                          disabled={distributing || totals.customerCost === 0 || isFirstInstallation}
-                          className="gap-1.5 text-xs h-8 text-rose-600 hover:bg-rose-500/10 hover:text-rose-700 rounded-lg px-3"
-                          title={isFirstInstallation ? 'غير متاح للتركيبة الأولى' : ''}
-                        >
-                          <Gift className="h-3.5 w-3.5" />
-                          <span>جعل الكل مجاني</span>
-                        </Button>
+                {/* Direct Live Summary Card */}
+                <div className="mt-4 rounded-2xl border border-border/30 bg-background/45 p-3.5 space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-black text-foreground">
+                    <DollarSign className="h-4 w-4 text-primary" />
+                    <span>ملخص مباشر</span>
+                  </div>
+                  <div className="space-y-2.5">
+                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/8 p-3">
+                      <div className="text-[10px] font-bold text-muted-foreground">قيمة العملية للزبون</div>
+                      <div className="mt-1 font-mono text-lg font-black text-emerald-300">{customerTotal.toLocaleString('ar-LY')} <span className="text-[10px]">د.ل</span></div>
+                    </div>
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/8 p-3">
+                      <div className="text-[10px] font-bold text-muted-foreground">تكلفة الشركة</div>
+                      <div className="mt-1 font-mono text-lg font-black text-amber-300">{companyTotal.toLocaleString('ar-LY')} <span className="text-[10px]">د.ل</span></div>
+                    </div>
+                    <div className={cn(
+                      "rounded-xl border p-3",
+                      netProfit >= 0 ? "border-emerald-500/20 bg-emerald-500/8" : "border-rose-500/25 bg-rose-500/10"
+                    )}>
+                      <div className="flex items-center justify-between gap-2 text-[10px] font-bold text-muted-foreground">
+                        <span>صافي الربح</span>
+                        <span>{profitPercentage.toFixed(1)}%</span>
                       </div>
-
-                      {/* Inline summary strip for installation totals */}
-                       <div dir="rtl" className="flex items-center divide-x-reverse divide-x divide-border/15 rounded-xl border border-border/15 bg-card/40 overflow-hidden text-right">
-                         <div className="flex-1 px-5 py-3 min-w-0">
-                           <div className="text-[11px] sm:text-xs font-semibold text-muted-foreground/80 uppercase">المساحة</div>
-                           <div className="text-base sm:text-lg font-bold font-mono text-primary mt-1">{totals.totalArea.toFixed(1)} <span className="text-[11px] text-muted-foreground/60">م²</span></div>
-                         </div>
-                         <div className="flex-1 px-5 py-3 min-w-0 border-r border-border/15">
-                           <div className="text-[11px] sm:text-xs font-semibold text-muted-foreground/80 uppercase">تكلفة الشركة</div>
-                           <div className="text-base sm:text-lg font-bold font-mono text-amber-600 mt-1">{totals.companyCost.toLocaleString('ar-LY')} <span className="text-[11px] text-muted-foreground/60">د.ل</span></div>
-                         </div>
-                         <div className="flex-1 px-5 py-3 min-w-0 border-r border-border/15">
-                           <div className="text-[11px] sm:text-xs font-semibold text-muted-foreground/80 uppercase">مبيعات العميل</div>
-                           <div className="text-base sm:text-lg font-bold font-mono text-emerald-600 mt-1">{totals.customerCost.toLocaleString('ar-LY')} <span className="text-[11px] text-muted-foreground/60">د.ل</span></div>
-                         </div>
-                       </div>
-
-                      {/* Section header */}
-                      <div className="flex items-center justify-between mt-2 text-right">
-                        <h3 className="font-bold text-base flex items-center gap-2.5 text-foreground">
-                          <LayoutGrid className="h-5 w-5 text-muted-foreground" /> 
-                          <span>تفاصيل لوحات التركيب</span>
-                        </h3>
+                      <div className={cn("mt-1 font-mono text-lg font-black", netProfit >= 0 ? "text-emerald-300" : "text-rose-300")}>
+                        {netProfit.toLocaleString('ar-LY')} <span className="text-[10px]">د.ل</span>
                       </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </aside>
 
-                      {/* Grouped billboard items by type and size */}
-                      <div className="space-y-6">
-                        {billboardTypes.map(type => {
-                          const typeData = groupedData[type];
-                          const Icon = BILLBOARD_TYPE_ICONS[type] || LayoutGrid;
-                          const isTypeCollapsed = collapsedTypes.has(type);
-                          
-                          // Check if this billboard type has any billboards with cutouts
-                          const typeHasCutouts = Object.values(typeData.sizes).some(s => s.cutoutCount > 0);
+            <ScrollArea className="min-h-0 flex-1 bg-background/30 [&_button]:min-h-10">
+
+              {/* ════════════ TAB 1: INSTALLATION & BILLBOARDS ════════════ */}
+              <TabsContent value="installation" className="mt-0 p-5 sm:p-6 space-y-5">
+
+                {/* Notice for new installation and contract inclusion */}
+                {isFirstInstallation && (
+                  isInstallFreeByContract && isPrintFreeByContract ? (
+                    <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-right" dir="rtl">
+                      <Sparkles className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
+                      <div className="text-xs space-y-0.5">
+                        <div className="font-black text-sm">العقد شامل طباعة وتركيب مجاناً للزبون (0 د.ل)</div>
+                        <div className="text-muted-foreground/90">تكاليف التركيب والطباعة للزبون مشمولة بالكامل ضمن قيمة العقد. يمكنك تعديل تكلفة الشركة (الفرقة والمطبعة) والتكاليف الإضافية فقط.</div>
+                      </div>
+                    </div>
+                  ) : isInstallFreeByContract ? (
+                    <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-blue-500/10 border border-blue-500/30 text-blue-300 text-right" dir="rtl">
+                      <AlertCircle className="h-5 w-5 text-blue-400 shrink-0 mt-0.5" />
+                      <div className="text-xs space-y-0.5">
+                        <div className="font-black text-sm">العقد شامل تركيب فقط مجاناً للزبون (0 د.ل)</div>
+                        <div className="text-muted-foreground/90">تكلفة التركيب للزبون مقفلة ومشمولة بالعقد، بينما تكلفة الطباعة غير مشمولة وتُحسب على الزبون من تبويب الطباعة.</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-right" dir="rtl">
+                      <AlertCircle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+                      <div className="text-xs space-y-0.5">
+                        <div className="font-black text-sm">تركيب جديد غير مشمول بالعقد</div>
+                        <div className="text-muted-foreground/90">يتم احتساب تكلفة التركيب والطباعة على الزبون.</div>
+                      </div>
+                    </div>
+                  )
+                )}
+
+                {/* Batch Control Toolbar */}
+                <div className="p-4 rounded-2xl bg-card/40 border border-border/25 space-y-3 shadow-xs" dir="rtl">
+                  <div className="flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-amber-400 shrink-0" />
+                      <span className="text-xs font-black text-foreground">التسعير السريع والتطبيق الجماعي</span>
+                    </div>
+
+                    {/* Team Filter */}
+                    {isMultiTask && teamsList.length > 1 && (
+                      <div className="flex items-center gap-1.5">
+                        <Select value={selectedTeamFilter} onValueChange={setSelectedTeamFilter}>
+                          <SelectTrigger className="h-8.5 text-xs font-bold bg-background min-w-[160px] rounded-xl border-border/30">
+                            <SelectValue placeholder="جميع الفرق" />
+                          </SelectTrigger>
+                          <SelectContent className="font-tajawal" dir="rtl">
+                            <SelectItem value="all">جميع الفرق ({taskItems.length} لوحة)</SelectItem>
+                            {teamsList.map(team => (
+                              <SelectItem key={team.id} value={team.id}>
+                                {team.name} ({team.count} لوحة)
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3" dir="rtl">
+                    <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-muted/30 border border-border/20 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setBatchPricingMode('piece')}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
+                          batchPricingMode === 'piece' ? "bg-amber-500/20 text-amber-300 border border-amber-500/30" : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        سعر بالقطعة
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBatchPricingMode('meter')}
+                        className={cn(
+                          "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
+                          batchPricingMode === 'meter' ? "bg-amber-500/20 text-amber-300 border border-amber-500/30" : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        سعر بالمتر المربع
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-1 min-w-[220px]" dir="rtl">
+                      <Input
+                        type="number"
+                        placeholder={batchPricingMode === 'meter' ? "سعر المتر د.ل/م²..." : "سعر القطعة د.ل..."}
+                        value={batchPriceValue === 0 ? '' : batchPriceValue}
+                        onChange={e => setBatchPriceValue(Number(e.target.value) || 0)}
+                        className="h-9 text-xs font-bold bg-background/60 border-border/30 rounded-xl text-right font-mono flex-1"
+                      />
+                      <Button
+                        size="sm"
+                        onClick={handleApplyBatchPricing}
+                        disabled={batchPriceValue <= 0 || isFirstInstallation}
+                        className="h-9 px-4 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black rounded-xl gap-1.5 shrink-0 cursor-pointer whitespace-nowrap shadow-sm"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                        تطبيق على الكل
+                      </Button>
+                    </div>
+
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={handleSetAllBillboardsFree}
+                      disabled={isFirstInstallation}
+                      className="h-9 px-3 text-xs font-bold text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 rounded-xl gap-1.5 shrink-0 cursor-pointer whitespace-nowrap"
+                    >
+                      <Gift className="h-3.5 w-3.5" />
+                      جعل الكل مجاني
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Billboards Search Bar & View Mode Switcher */}
+                <div className="flex items-center justify-between gap-3 flex-wrap" dir="rtl">
+                  <div className="relative flex-1 min-w-[220px]">
+                    <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50 pointer-events-none" />
+                    <Input
+                      placeholder="بحث في اللوحات بالاسم، الكود، المقاس..."
+                      value={searchBillboardQuery}
+                      onChange={e => setSearchBillboardQuery(e.target.value)}
+                      className="pr-9 pl-3 h-9 text-xs font-bold bg-background/50 border-border/25 rounded-xl text-right"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* Table / Cards View Switcher */}
+                    <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-card/60 border border-border/25">
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('table')}
+                        className={cn(
+                          "px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
+                          viewMode === 'table' ? "bg-amber-500 text-black shadow-xs" : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        <Layers className="h-3.5 w-3.5" />
+                        <span>جدول (RTL)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('cards')}
+                        className={cn(
+                          "px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
+                          viewMode === 'cards' ? "bg-amber-500 text-black shadow-xs" : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        <LayoutGrid className="h-3.5 w-3.5" />
+                        <span>بطاقات</span>
+                      </button>
+                    </div>
+
+                    <Badge variant="outline" className="text-xs font-mono font-bold bg-card/40 border-border/20 px-3 py-1.5 rounded-xl shrink-0">
+                      {filteredBillboardItems.length} من {enrichedItems.length} لوحة
+                    </Badge>
+                  </div>
+                </div>
+                {viewMode === 'table' ? (
+                  <div className="overflow-x-auto rounded-2xl border border-border/20 bg-card/30 shadow-sm" dir="rtl">
+                    <table className="w-full text-right text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-muted/35 border-b border-border/25 text-muted-foreground text-[11px] font-black">
+                          <th className="py-3 px-3 text-right min-w-[200px]">اللوحة والموقع والمعالم</th>
+                          <th className="py-3 px-2.5 text-right whitespace-nowrap">المقاس والمساحة</th>
+                          <th className="py-3 px-2.5 text-right whitespace-nowrap">الفريق</th>
+                          <th className="py-3 px-2 text-center min-w-[130px]">سعر الزبون</th>
+                          <th className="py-3 px-2 text-center min-w-[130px]">تكلفة الشركة</th>
+                          <th className="py-3 px-2 text-center min-w-[110px]">الخدمات</th>
+                          <th className="py-3 px-1.5 text-center w-14">مجاني</th>
+                          <th className="py-3 px-1.5 text-center w-12">تفاصيل</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/15">
+                        {filteredBillboardItems.map((item) => {
+                          const bb = item.billboard;
+                          const isExpanded = expandedItemDetails.has(item.id);
+                          const isItemPrintSelected = printBillboardIds.includes(item.billboard_id);
 
                           return (
-                            <div key={type} className="border border-border/15 rounded-2xl overflow-hidden bg-card/45 backdrop-blur-md shadow-sm transition-all duration-300">
-                              <div 
-                                dir="rtl"
-                                className="flex items-center justify-between p-5 bg-muted/10 cursor-pointer hover:bg-muted/15 transition-all select-none border-b border-border/10 gap-4 text-right"
-                                onClick={() => toggleTypeCollapse(type)}
-                              >
-                                 <div className="flex items-center gap-3.5 min-w-0 text-right">
-                                   <div className={cn("transition-transform duration-300 shrink-0", isTypeCollapsed ? "rotate-0" : "-rotate-90")}>
-                                    <ChevronDown className="h-4.5 w-4.5 text-muted-foreground" />
-                                  </div>
-                                  <div className="h-9 w-9 rounded-lg bg-muted flex items-center justify-center shrink-0 border border-border/10">
-                                    <Icon className="h-5 w-5 text-muted-foreground" />
-                                  </div>
-                                   <div className="min-w-0 text-right">
-                                    <span className="font-bold text-base block leading-normal text-foreground">{type}</span>
-                                    <span className="text-[13px] text-muted-foreground/80 block mt-0.5">{typeData.totalItems} لوحة في هذه المهمة</span>
-                                  </div>
-                                </div>
-                                 <div className="flex items-center gap-5 text-sm font-semibold shrink-0 text-left pl-2">
-                                  <span className="text-[13px] text-muted-foreground bg-muted border border-border/10 px-3 py-1 rounded-lg whitespace-nowrap">{typeData.totalArea.toFixed(1)} م²</span>
-                                  <div className="hidden sm:flex flex-col text-right">
-                                    <span className="text-[12px] text-muted-foreground/60 mb-1">الشركة</span>
-                                    <span className="font-semibold text-amber-600 font-mono leading-none text-sm">{typeData.companyCost.toLocaleString('ar-LY')} د.ل</span>
-                                  </div>
-                                  <div className="flex flex-col text-right">
-                                    <span className="text-[12px] text-muted-foreground/60 mb-1">الزبون</span>
-                                    <span className="font-bold text-emerald-600 font-mono leading-none text-sm">{typeData.customerCost.toLocaleString('ar-LY')} د.ل</span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* Bulk pricing section per billboard type (Meter pricing only) */}
-                              {!isTypeCollapsed && pricingType === 'meter' && (
-                                 <div className="p-5 border-b border-border/10 bg-primary/[0.01] flex flex-wrap items-center justify-between gap-4 shadow-inner text-right">
-                                  <div className="flex items-center gap-2 text-primary">
-                                    <Zap className="h-4 w-4 shrink-0 text-primary/70 animate-pulse" />
-                                    <span className="text-xs font-bold">تسعير سريع بالمتر المربع لنوع {type}:</span>
-                                  </div>
-                                   <div className="flex flex-wrap items-center justify-start gap-4">
-                                    <InlinePriceInput 
-                                      value={typeMeterPrices[type]?.normal || 0}
-                                      onChange={val => setTypeMeterPrices(prev => ({
-                                        ...prev,
-                                        [type]: {
-                                          ...prev[type],
-                                          normal: val,
-                                          cutout: prev[type]?.cutout || 0
-                                        }
-                                      }))}
-                                      label="عادي / م²:"
-                                    />
-                                    
-                                    {/* Smart: Hide cutout price input if this type has no billboards with cutout */}
-                                    {typeHasCutouts && (
-                                      <InlinePriceInput 
-                                        value={typeMeterPrices[type]?.cutout || 0}
-                                        onChange={val => setTypeMeterPrices(prev => ({
-                                          ...prev,
-                                          [type]: {
-                                            ...prev[type],
-                                            normal: prev[type]?.normal || 0,
-                                            cutout: val
-                                          }
-                                        }))}
-                                        label="مجسم / م²:"
-                                        className="border-purple-200"
-                                      />
-                                    )}
-
-                                    <Button 
-                                      size="sm" 
-                                      className="h-8.5 text-xs font-semibold gap-1.5 rounded-lg px-4 shadow-sm" 
-                                      onClick={() => handleApplyMeterToType(type)}
-                                      disabled={distributing || (!typeMeterPrices[type]?.normal && !typeMeterPrices[type]?.cutout)}
-                                    >
-                                      <Check className="h-3.5 w-3.5" /> 
-                                      <span>تطبيق السعر</span>
-                                    </Button>
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Accordion sizes under the billboard type */}
-                              {!isTypeCollapsed && (
-                                <div className="divide-y divide-border/10">
-                                  {Object.values(typeData.sizes).map(sizeData => {
-                                    const sizeKey = `${type}-${sizeData.size}`;
-                                    const isCollapsed = collapsedSizes.has(sizeKey);
-
-                                    return (
-                                      <div key={sizeKey} className="bg-card/20">
-                                        {/* Size Accordion Header */}
-                                        <div 
-                                          dir="rtl"
-                                          className="flex items-center justify-between px-6 py-4.5 bg-muted/[0.04] cursor-pointer hover:bg-muted/[0.08] transition-all select-none border-b border-border/5 gap-4 text-right"
-                                          onClick={() => toggleSizeCollapse(sizeKey)}
-                                        >
-                                          <div className="flex items-center gap-3 flex-wrap min-w-0 text-right">
-                                            <div className={cn("transition-transform duration-200 shrink-0", isCollapsed ? "rotate-0" : "-rotate-90")}>
-                                              <ChevronDown className="h-4 w-4 text-muted-foreground/60" />
-                                            </div>
-                                            <Badge variant="outline" className="text-[13px] font-semibold bg-background border-border/15 py-1 px-3 rounded-md text-foreground">{sizeData.size}</Badge>
-                                            <span className="text-[13px] text-muted-foreground font-medium">{sizeData.items.length} لوحة • {sizeData.totalArea.toFixed(1)} م²</span>
-                                            {sizeData.cutoutCount > 0 && (
-                                              <Badge variant="outline" className="text-[13px] bg-purple-500/10 text-purple-650 border-purple-200/50 rounded-md py-1 px-3 font-semibold">{sizeData.cutoutCount} مجسم</Badge>
-                                            )}
-                                          </div>
-                                          <div className="flex items-center gap-4 text-[13px] sm:text-sm font-semibold text-foreground/80 shrink-0 text-left pl-2">
-                                            <span className="text-muted-foreground/85 whitespace-nowrap">الشركة: {sizeData.companyCost.toLocaleString('ar-LY')}</span>
-                                            <span className="text-primary font-semibold whitespace-nowrap">الزبون: {sizeData.customerCost.toLocaleString('ar-LY')} د.ل</span>
-                                          </div>
-                                        </div>
-
-                                        {/* Piece Batch Inputs */}
-                                        {!isCollapsed && pricingType === 'piece' && (
-                                          <div className="px-6 py-4 border-b border-border/10 bg-muted/[0.02] flex items-center justify-between flex-wrap gap-4 shadow-inner text-right">
-                                            <div className="flex items-center gap-2 text-muted-foreground text-xs font-semibold">
-                                              <Calculator className="h-4 w-4 text-muted-foreground/75" />
-                                              <span>تحديد سعر القطعة مقاس {sizeData.size}:</span>
-                                            </div>
-                                            <div className="flex items-center justify-start gap-3 flex-wrap">
-                                              <InlinePriceInput 
-                                                value={quickPrices[sizeData.size]?.normal || 0}
-                                                onChange={val => setQuickPrices(prev => ({
-                                                  ...prev,
-                                                  [sizeData.size]: {
-                                                    ...prev[sizeData.size],
-                                                    normal: val,
-                                                    cutout: prev[sizeData.size]?.cutout || 0
-                                                  }
-                                                }))}
-                                                label="لوحة عادية:"
-                                                step={10}
-                                              />
-                                              
-                                              {/* Smart: Hide cutout price input if no cutouts are present for this size */}
-                                              {sizeData.cutoutCount > 0 && (
-                                                <InlinePriceInput 
-                                                  value={quickPrices[sizeData.size]?.cutout || 0}
-                                                  onChange={val => setQuickPrices(prev => ({
-                                                    ...prev,
-                                                    [sizeData.size]: {
-                                                      ...prev[sizeData.size],
-                                                      normal: prev[sizeData.size]?.normal || 0,
-                                                      cutout: val
-                                                    }
-                                                  }))}
-                                                  label="لوحة مجسم:"
-                                                  step={10}
-                                                  className="border-purple-250 text-purple-650"
-                                                />
-                                              )}
-                                              
-                                              <Button 
-                                                size="sm" 
-                                                className="h-9 text-xs font-semibold gap-1.5 rounded-lg shadow-sm" 
-                                                onClick={handleApplyQuickPricing}
-                                                disabled={distributing || (!quickPrices[sizeData.size]?.normal && !quickPrices[sizeData.size]?.cutout)}
-                                              >
-                                                <Check className="h-3.5 w-3.5" /> 
-                                                <span>تطبيق</span>
-                                              </Button>
-                                            </div>
-                                          </div>
-                                        )}
-
-                                        {/* Meter Batch Inputs */}
-                                        {!isCollapsed && pricingType === 'meter' && (
-                                          <div className="px-6 py-4 border-b border-border/10 bg-muted/[0.02] flex items-center justify-between flex-wrap gap-4 shadow-inner text-right">
-                                            <div className="flex items-center gap-2 text-muted-foreground text-xs font-semibold">
-                                              <Ruler className="h-4 w-4 text-muted-foreground/75" />
-                                              <span>تحديد سعر المتر مقاس {sizeData.size}:</span>
-                                            </div>
-                                            <div className="flex items-center justify-start gap-3 flex-wrap">
-                                              <InlinePriceInput 
-                                                value={meterPrices[sizeData.size]?.normal || 0}
-                                                onChange={val => setMeterPrices(prev => ({
-                                                  ...prev,
-                                                  [sizeData.size]: {
-                                                    ...prev[sizeData.size],
-                                                    normal: val,
-                                                    cutout: prev[sizeData.size]?.cutout || 0
-                                                  }
-                                                }))}
-                                                label="متر عادي:"
-                                                step={1}
-                                              />
-                                              
-                                              {/* Smart: Hide cutout price input if no cutouts are present for this size */}
-                                              {sizeData.cutoutCount > 0 && (
-                                                <InlinePriceInput 
-                                                  value={meterPrices[sizeData.size]?.cutout || 0}
-                                                  onChange={val => setMeterPrices(prev => ({
-                                                    ...prev,
-                                                    [sizeData.size]: {
-                                                      ...prev[sizeData.size],
-                                                      normal: prev[sizeData.size]?.normal || 0,
-                                                      cutout: val
-                                                    }
-                                                  }))}
-                                                  label="متر مجسم:"
-                                                  step={1}
-                                                  className="border-purple-250 text-purple-650"
-                                                />
-                                              )}
-                                              <Button 
-                                                size="sm" 
-                                                className="h-9 text-xs font-semibold gap-1.5 rounded-lg shadow-sm" 
-                                                onClick={() => handleApplyMeterToSize(sizeData.size)}
-                                                disabled={distributing || (!meterPrices[sizeData.size]?.normal && !meterPrices[sizeData.size]?.cutout)}
-                                              >
-                                                <Check className="h-3.5 w-3.5" /> 
-                                                <span>تطبيق</span>
-                                              </Button>
-                                            </div>
-                                          </div>
-                                        )}
-
-                                        {/* Individual Cards Container */}
-                                        {!isCollapsed && (
-                                          <div className="p-6 space-y-4">
-                                            {sizeData.items.map((item, idx) => {
-                                              const itemCompanyCost = (customCompanyCosts[item.id] ?? installationPrices[item.billboard_id] ?? 0) + (item.company_additional_cost || 0);
-                                              const faces = item.faces_to_install || item.billboard.Faces_Count || 2;
-                                              const itemArea = item.area;
-                                              const itemPrintCostCustomer = customerPrintPerMeter * itemArea;
-                                              const itemPrintCostCompany = companyPrintPerMeter * itemArea;
-                                              
-                                              const isItemReinstalled = (item.reinstall_count || 0) > 0;
-                                              // Inline editing panel inside the list
-                                              if (editingItemId === item.id) {
-                                                return (
-                                                  <div key={item.id} className="rounded-2xl border-2 border-primary/35 bg-primary/[0.01] p-5 space-y-4.5 shadow-sm animate-in fade-in zoom-in-95 duration-200">
-                                                    <div className="flex items-center justify-between pb-3 border-b border-border/10 gap-4 text-right">
-                                                      <div className="flex items-center gap-3.5">
-                                                        {item.billboard.Image_URL ? (
-                                                          <img src={item.billboard.Image_URL} alt="" className="w-14 h-14 rounded-xl object-cover border border-primary/20 shadow-sm" />
-                                                        ) : (
-                                                          <div className="w-14 h-14 rounded-xl bg-muted flex items-center justify-center border border-border/15">
-                                                            <LayoutGrid className="h-6 w-6 text-muted-foreground/45" />
-                                                          </div>
-                                                        )}
-                                                        <div>
-                                                          <span className="font-semibold text-sm block text-foreground">{item.billboard.Billboard_Name || `لوحة رمز #${String(item.billboard_id).padStart(4, '0')}`}</span>
-                                                          <span className="text-xs text-muted-foreground block mt-0.5">{faces} أوجه • {itemArea.toFixed(1)} م²</span>
-                                                        </div>
-                                                      </div>
-                                                      <div className="flex gap-2">
-                                                        <Button size="sm" className="h-9 text-xs font-semibold gap-1.5 rounded-lg" onClick={handleSaveItemEdit} disabled={distributing}>
-                                                          <Save className="h-3.5 w-3.5" /> 
-                                                          <span>حفظ</span>
-                                                        </Button>
-                                                        <Button size="sm" variant="outline" className="h-9 w-9 p-0 rounded-lg" onClick={() => setEditingItemId(null)}>
-                                                          <X className="h-4 w-4" />
-                                                        </Button>
-                                                      </div>
-                                                    </div>
-                                                    
-                                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 text-right">
-                                                      <div className="space-y-2">
-                                                        <Label className="text-sm font-semibold text-amber-600 block leading-relaxed text-right">تكلفة الشركة (التركيب الأساسي)</Label>
-                                                        <InlinePriceInput 
-                                                          value={editValues.companyCost}
-                                                          onChange={val => setEditValues(prev => ({...prev, companyCost: val}))}
-                                                          label=""
-                                                          showLabel={false}
-                                                          className="w-full"
-                                                        />
-                                                      </div>
-                                                      {isItemReinstalled ? (
-                                                        <>
-                                                          <div className="space-y-2">
-                                                            <Label className="text-sm font-semibold text-primary block leading-relaxed text-right">سعر الزبون (التركيب الأصلي)</Label>
-                                                            <div className="flex gap-2 items-center">
-                                                              <InlinePriceInput 
-                                                                value={editValues.customerOriginalInstallCost}
-                                                                onChange={val => setEditValues(prev => ({...prev, customerOriginalInstallCost: val}))}
-                                                                label=""
-                                                                showLabel={false}
-                                                                className="flex-1"
-                                                              />
-                                                              <Button 
-                                                                size="sm" 
-                                                                variant="outline" 
-                                                                className="h-11 w-11 p-0 shrink-0 rounded-xl text-purple-600 border-purple-250 hover:bg-purple-50/50 transition-colors" 
-                                                                onClick={() => setEditValues(prev => ({ ...prev, customerOriginalInstallCost: 0 }))} 
-                                                                title="مجاني"
-                                                              >
-                                                                <Gift className="h-5 w-5" />
-                                                              </Button>
-                                                            </div>
-                                                          </div>
-                                                          <div className="space-y-2">
-                                                            <Label className="text-sm font-semibold text-orange-600 block leading-relaxed text-right">سعر الزبون (إعادة التركيب)</Label>
-                                                            <div className="flex gap-2 items-center">
-                                                              <InlinePriceInput 
-                                                                value={editValues.customerReinstallCost}
-                                                                onChange={val => setEditValues(prev => ({...prev, customerReinstallCost: val}))}
-                                                                label=""
-                                                                showLabel={false}
-                                                                className="flex-1"
-                                                              />
-                                                              <Button 
-                                                                size="sm" 
-                                                                variant="outline" 
-                                                                className="h-11 w-11 p-0 shrink-0 rounded-xl text-purple-600 border-purple-250 hover:bg-purple-50/50 transition-colors" 
-                                                                onClick={() => setEditValues(prev => ({ ...prev, customerReinstallCost: 0 }))} 
-                                                                title="مجاني"
-                                                              >
-                                                                <Gift className="h-5 w-5" />
-                                                              </Button>
-                                                            </div>
-                                                          </div>
-                                                        </>
-                                                      ) : (
-                                                        <div className="space-y-2">
-                                                          <Label className={cn("text-sm font-semibold block leading-relaxed text-right", isFirstInstallation ? 'text-muted-foreground' : 'text-primary')}>سعر الزبون (التركيب الأساسي){isFirstInstallation && <span className="text-[10px] text-blue-500 mr-1">(مقفل)</span>}</Label>
-                                                          <div className="flex gap-2 items-center">
-                                                            {isFirstInstallation ? (
-                                                              <div className="flex-1 flex items-center gap-1.5 bg-muted/40 rounded-xl px-4 h-11 border border-border/15 opacity-60 cursor-not-allowed">
-                                                                <span className="text-base font-bold font-mono text-foreground/60">{editValues.customerCost.toLocaleString('ar-LY')}</span>
-                                                                <span className="text-xs text-muted-foreground/50 mr-1">د.ل</span>
-                                                              </div>
-                                                            ) : (
-                                                              <InlinePriceInput 
-                                                                value={editValues.customerCost}
-                                                                onChange={val => setEditValues(prev => ({...prev, customerCost: val}))}
-                                                                label=""
-                                                                showLabel={false}
-                                                                className="flex-1"
-                                                              />
-                                                            )}
-                                                            <Button 
-                                                              size="sm" 
-                                                              variant="outline" 
-                                                              className="h-11 w-11 p-0 shrink-0 rounded-xl text-purple-600 border-purple-250 hover:bg-purple-50/50 transition-colors" 
-                                                              onClick={() => setEditValues(prev => ({ ...prev, customerCost: 0 }))} 
-                                                              title="مجاني"
-                                                              disabled={isFirstInstallation}
-                                                            >
-                                                              <Gift className="h-5 w-5" />
-                                                            </Button>
-                                                          </div>
-                                                        </div>
-                                                      )}
-                                                      <div className="space-y-2">
-                                                        <Label className="text-sm font-semibold text-muted-foreground block leading-relaxed text-right">مصاريف إضافية على الشركة</Label>
-                                                        <InlinePriceInput 
-                                                          value={editValues.companyAdditionalCost}
-                                                          onChange={val => setEditValues(prev => ({...prev, companyAdditionalCost: val}))}
-                                                          label=""
-                                                          showLabel={false}
-                                                          className="w-full"
-                                                        />
-                                                      </div>
-                                                      <div className="space-y-2">
-                                                        <Label className="text-sm font-semibold text-muted-foreground block leading-relaxed text-right">مصاريف إضافية على العميل</Label>
-                                                        <InlinePriceInput 
-                                                          value={editValues.additionalCost}
-                                                          onChange={val => setEditValues(prev => ({...prev, additionalCost: val}))}
-                                                          label=""
-                                                          showLabel={false}
-                                                          className="w-full"
-                                                        />
-                                                      </div>
-                                                      <div className="space-y-2">
-                                                         <Label className="text-sm font-semibold text-muted-foreground block leading-relaxed">ملاحظات وسبب إضافية العميل</Label>
-                                                         <Input dir="rtl" value={editValues.additionalNotes} onChange={e => setEditValues(prev => ({...prev, additionalNotes: e.target.value}))} placeholder="تجهيزات معينة للموقع، عمل ليلي..." className="h-11 text-xs rounded-xl text-right" />
-                                                       </div>
-
-                                                       {/* الزبون سدد التكاليف */}
-                                                       <div className="col-span-1 sm:col-span-2 flex items-center justify-between gap-3 bg-amber-500/[0.03] border border-amber-500/10 p-3 rounded-xl shadow-sm mt-1 text-right">
-                                                         <div className="flex flex-col">
-                                                           <span className="text-xs font-bold text-amber-700 dark:text-amber-400">حالة سداد التكاليف للزبون</span>
-                                                           <span className="text-[10px] text-muted-foreground mt-0.5">تصفير التكاليف للشركة وللزبون (بدون تكاليف)</span>
-                                                         </div>
-                                                         <Button
-                                                           size="sm"
-                                                           variant={editValues.customerCost === 0 && editValues.companyCost === 0 ? "default" : "outline"}
-                                                           className={cn(
-                                                             "h-9 px-4 text-xs font-bold gap-2 rounded-xl transition-all cursor-pointer",
-                                                             editValues.customerCost === 0 && editValues.companyCost === 0
-                                                               ? "bg-amber-500 hover:bg-amber-600 text-black border-0 shadow-sm animate-pulse"
-                                                               : "border-amber-500/20 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
-                                                           )}
-                                                           onClick={() => setEditValues(prev => ({ ...prev, customerCost: 0, companyCost: 0 }))}
-                                                           disabled={isFirstInstallation}
-                                                           type="button"
-                                                         >
-                                                           <CheckCircle2 className="h-4 w-4" />
-                                                           <span>{editValues.customerCost === 0 && editValues.companyCost === 0 ? "تم السداد والتصفير" : "سدد التكاليف / بدون تكاليف"}</span>
-                                                         </Button>
-                                                       </div>
-
-                                                       <div className="space-y-2">
-                                                         <Label className="text-sm font-semibold text-muted-foreground block leading-relaxed text-right">ملاحظات وسبب إضافية الشركة</Label>
-                                                         <Input dir="rtl" value={editValues.companyAdditionalNotes} onChange={e => setEditValues(prev => ({...prev, companyAdditionalNotes: e.target.value}))} placeholder="تراخيص، رافعة تلسكوبية..." className="h-11 text-xs rounded-xl text-right" />
-                                                       </div>
-
-                                                      <div className="space-y-2 col-span-2 border-t border-border/10 pt-4 mt-2">
-                                                        <Label className="text-sm font-semibold text-purple-600 block leading-relaxed">هل تحتوي هذه اللوحة على مجسم؟</Label>
-                                                        <div className="flex items-center gap-3.5 h-11 px-4 bg-background border border-border/15 rounded-xl">
-                                                          <Switch 
-                                                            checked={editValues.hasCutout} 
-                                                            onCheckedChange={val => setEditValues(prev => ({...prev, hasCutout: val}))} 
-                                                          />
-                                                          <span className="text-xs sm:text-sm text-muted-foreground font-semibold leading-relaxed">نعم، تفعيل خيارات ومواصفات المجسمات لهذه اللوحة</span>
-                                                        </div>
-                                                      </div>
-
-                                                      {task.print_task_id && (
-                                                        <div className="space-y-2 col-span-2 border-t border-border/10 pt-4 mt-2">
-                                                          <Label className="text-sm font-semibold text-blue-600 block leading-relaxed">هل تتطلب هذه اللوحة طباعة؟</Label>
-                                                          <div className="flex items-center gap-3.5 h-11 px-4 bg-background border border-border/15 rounded-xl">
-                                                            <Switch 
-                                                              checked={editValues.hasPrint} 
-                                                              onCheckedChange={val => setEditValues(prev => ({...prev, hasPrint: val}))} 
-                                                            />
-                                                            <span className="text-xs sm:text-sm text-muted-foreground font-semibold leading-relaxed">نعم، تتطلب طباعة فلكس لهذه اللوحة ومزامنتها في جدول مهمة الطباعة</span>
-                                                          </div>
-                                                        </div>
-                                                      )}
-                                                    </div>
-                                                  </div>
-                                                );
-                                              }
-                                              
-                                              // Normal Item Card View
-                                              return (
-                                                <div key={item.id} dir="rtl" className="group rounded-2xl border border-border/15 hover:border-primary/25 bg-card/45 hover:bg-card/90 transition-all duration-300 overflow-hidden shadow-sm hover:shadow-md text-right">
-                                                  <div className="flex flex-col sm:flex-row items-stretch">
-                                                    
-                                                    {/* Image Thumbnail */}
-                                                    <div className="w-full sm:w-28 shrink-0 relative bg-muted/30 flex items-center justify-center min-h-[90px] sm:min-h-0 border-b sm:border-b-0 sm:border-l border-border/10 sm:order-first">
-                                                      {item.billboard.Image_URL ? (
-                                                        <img src={item.billboard.Image_URL} alt="" className="w-full h-full object-cover absolute inset-0" />
-                                                      ) : (
-                                                        <LayoutGrid className="h-7 w-7 text-muted-foreground/20" />
-                                                      )}
-                                                      <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-md rounded-md px-2.5 py-1 text-[13px] font-semibold text-white font-mono">
-                                                        #{idx + 1}
-                                                      </div>
-                                                      {item.has_cutout && (
-                                                        <div className="absolute bottom-2 right-2 bg-purple-600/90 backdrop-blur-sm text-white rounded-md px-3 py-1 text-[13px] font-semibold flex items-center gap-1.5 shadow-sm">
-                                                          <Scissors className="h-3 w-3 shrink-0" />
-                                                          <span>قص مجسم</span>
-                                                        </div>
-                                                      )}
-                                                    </div>
-
-                                                    {/* Card Content details */}
-                                                    <div className="flex-1 p-5 min-w-0">
-                                                      <div className="flex items-start justify-between gap-3 text-right">
-                                                        <div className="min-w-0">
-                                                          <div className="font-bold text-[15px] truncate text-foreground group-hover:text-primary transition-colors">
-                                                            {item.billboard.Billboard_Name || `لوحة رمز #${String(item.billboard_id).padStart(4, '0')}`}
-                                                          </div>
-                                                          {item.billboard.Nearest_Landmark && (
-                                                            <div className="text-[13px] text-muted-foreground flex items-center gap-1.5 mt-1.5 truncate text-right">
-                                                              <Landmark className="h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
-                                                              <span className="truncate">{item.billboard.Nearest_Landmark}</span>
-                                                            </div>
-                                                          )}
-                                                        </div>
-
-                                                        {/* Actions */}
-                                                        <div className="flex items-center gap-1 shrink-0 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all duration-300">
-                                                          <Button 
-                                                            size="sm" 
-                                                            variant="ghost" 
-                                                            className="h-8.5 w-8.5 p-0 rounded-lg hover:bg-primary/10 hover:text-primary" 
-                                                            onClick={() => startEditingItem(item)}
-                                                            title="تعديل تفاصيل وأسعار هذه اللوحة"
-                                                          >
-                                                            <Pencil className="h-4.5 w-4.5" />
-                                                          </Button>
-                                                          {item.customer_installation_cost > 0 && (
-                                                            <Button 
-                                                              size="sm" 
-                                                              variant="ghost" 
-                                                              className="h-8.5 w-8.5 p-0 rounded-lg text-purple-600 hover:bg-purple-50 hover:text-purple-755" 
-                                                              onClick={() => handleSetFree(item.id)} 
-                                                              disabled={distributing}
-                                                              title="إلغاء التكلفة وجعل التركيب مجانياً"
-                                                            >
-                                                              <Gift className="h-4.5 w-4.5" />
-                                                            </Button>
-                                                          )}
-                                                        </div>
-                                                      </div>
-
-                                                      {/* Badges details */}
-                                                      <div className="flex items-center gap-2 mt-2.5 flex-wrap">
-                                                        <Badge variant="secondary" className="text-[13px] font-semibold px-3 py-1 rounded-md bg-muted border border-border/10 text-foreground">{itemArea.toFixed(1)} م²</Badge>
-                                                        <Badge variant="secondary" className="text-[13px] font-semibold px-3 py-1 rounded-md bg-muted border border-border/10 text-foreground">{faces} أوجه</Badge>
-                                                        {pricingType === 'piece' && item.pricing_type === 'meter' && (
-                                                          <Badge variant="outline" className="text-[13px] px-3 py-1 rounded-md bg-amber-500/[0.02] text-amber-600 border-amber-200/40 font-medium">مُسعّر بالمتر</Badge>
-                                                        )}
-                                                        {pricingType === 'meter' && item.pricing_type && item.pricing_type !== 'meter' && (
-                                                          <Badge variant="outline" className="text-[13px] px-3 py-1 rounded-md bg-amber-500/[0.02] text-amber-600 border-amber-200/40 font-medium">مُسعّر بالقطعة</Badge>
-                                                        )}
-                                                      </div>
-
-                                                      {/* Pricing table for this item */}
-                                                      <div className="mt-4 pt-3.5 border-t border-border/10 grid grid-cols-1 sm:grid-cols-2 gap-y-2.5 gap-x-4 text-right">
-                                                        <div className="flex items-center justify-between gap-3 text-xs font-semibold">
-                                                          <span className="text-muted-foreground/80 flex items-center gap-1.5">
-                                                            <Wrench className="h-3.5 w-3.5 text-muted-foreground/50" /> 
-                                                            <span>التركيب:</span>
-                                                          </span>
-                                                          <div className="flex items-center gap-2 flex-wrap justify-end text-left">
-                                                            <span className="text-amber-600 font-medium font-mono text-xs">{itemCompanyCost.toLocaleString('ar-LY')} د.ل (شركة)</span>
-                                                            <span className="text-muted-foreground/30">•</span>
-                                                            {isItemReinstalled ? (
-                                                              <div className="flex flex-col gap-1 font-mono text-xs">
-                                                                <div className="flex items-center gap-1.5">
-                                                                  <span className="font-bold text-primary">{(item.customer_original_install_cost || 0).toLocaleString('ar-LY')} د.ل</span>
-                                                                  <span className="text-[10px] text-muted-foreground/60">(أصلي)</span>
-                                                                </div>
-                                                                <div className="flex items-center gap-1.5">
-                                                                  <span className="font-bold text-orange-600">{(item.customer_reinstall_cost || item.customer_installation_cost || 0).toLocaleString('ar-LY')} د.ل</span>
-                                                                  <span className="text-[10px] text-muted-foreground/60">(إعادة تركيب)</span>
-                                                                </div>
-                                                                <div className="flex items-center gap-1 border-t border-border/10 pt-1 mt-0.5">
-                                                                  <span className="font-bold text-emerald-600">{((item.customer_original_install_cost || 0) + (item.customer_reinstall_cost || item.customer_installation_cost || 0)).toLocaleString('ar-LY')} د.ل</span>
-                                                                  <span className="text-[10px] text-muted-foreground/60">(إجمالي زبون)</span>
-                                                                </div>
-                                                              </div>
-                                                            ) : item.customer_installation_cost === 0 ? (
-                                                              <Badge className="bg-purple-100 text-purple-750 dark:bg-purple-950/30 dark:text-purple-300 text-xs px-2 py-0.5 font-bold rounded-lg border-none shadow-none">
-                                                                <Gift className="h-3 w-3 me-1 inline" />مجاني
-                                                              </Badge>
-                                                            ) : (
-                                                              <div className="flex items-center gap-1 font-mono text-xs">
-                                                                <span className="font-bold text-primary">{item.customer_installation_cost.toLocaleString('ar-LY')} د.ل (زبون)</span>
-                                                                {pricingType === 'piece' && itemArea > 0 && (
-                                                                  <span className="text-xs text-muted-foreground/60 font-semibold">≈{(item.customer_installation_cost / itemArea).toFixed(0)}/م²</span>
-                                                                )}
-                                                              </div>
-                                                            )}
-                                                          </div>
-                                                        </div>
-                                                        
-                                                        {task.print_task_id && (
-                                                           <div className="flex items-center justify-between gap-3 text-xs font-semibold border-t sm:border-t-0 pt-2.5 sm:pt-0 border-border/10">
-                                                            <span className="text-muted-foreground/80 flex items-center gap-1.5">
-                                                              <Printer className="h-3.5 w-3.5 text-blue-500/70" /> 
-                                                              <span>الطباعة المقابلة:</span>
-                                                            </span>
-                                                             {printBillboardIds.includes(item.billboard_id) ? (
-                                                               <div className="flex items-center gap-2 flex-wrap justify-end font-mono text-xs text-left">
-                                                                 <span className="text-blue-600 font-medium">{itemPrintCostCompany.toLocaleString('ar-LY', { maximumFractionDigits: 0 })} د.ل (شركة)</span>
-                                                                 <span className="text-muted-foreground/30">•</span>
-                                                                 <span className="font-bold text-blue-600">{itemPrintCostCustomer.toLocaleString('ar-LY', { maximumFractionDigits: 0 })} د.ل (زبون)</span>
-                                                               </div>
-                                                             ) : (
-                                                               <Badge variant="outline" className="text-xs bg-muted text-muted-foreground border-border/10 font-bold px-2 py-0.5 rounded-lg shadow-none">
-                                                                 مستثناة من الطباعة
-                                                               </Badge>
-                                                             )}
-                                                          </div>
-                                                        )}
-                                                      </div>
-
-                                                    </div>
-                                                    
-                                                    {/* Side Print Toggle Column */}
-                                                    {task.print_task_id && (
-                                                      <div className={cn(
-                                                        "w-full sm:w-44 shrink-0 flex flex-col items-center justify-center gap-2.5 p-5 border-t sm:border-t-0 sm:border-r border-border/10 transition-all duration-300 text-center select-none",
-                                                        printBillboardIds.includes(item.billboard_id) 
-                                                          ? "bg-blue-500/[0.03] text-blue-600 dark:text-blue-400" 
-                                                          : "bg-muted/[0.05] text-muted-foreground/50"
-                                                      )}>
-                                                        <div className="flex items-center gap-2">
-                                                          <Printer className={cn(
-                                                            "h-5 w-5 transition-all duration-300",
-                                                            printBillboardIds.includes(item.billboard_id) ? "text-blue-500 scale-110 drop-shadow-[0_0_8px_rgba(59,130,246,0.3)] animate-pulse" : "text-muted-foreground/30"
-                                                          )} />
-                                                          <span className="text-xs font-bold">حالة الطباعة</span>
-                                                        </div>
-                                                        <div className={cn(
-                                                          "flex items-center gap-2.5 bg-background border rounded-xl px-3 py-1.5 shadow-sm transition-all",
-                                                          printBillboardIds.includes(item.billboard_id) ? "border-blue-500/30" : "border-border/15"
-                                                        )}>
-                                                          <span className={cn("text-xs font-bold", printBillboardIds.includes(item.billboard_id) ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground/60")}>
-                                                            {printBillboardIds.includes(item.billboard_id) ? "تتطلب طباعة" : "مستثناة"}
-                                                          </span>
-                                                          <Switch 
-                                                            checked={printBillboardIds.includes(item.billboard_id)} 
-                                                            onCheckedChange={(checked) => handleTogglePrintStatus(item.billboard_id, checked)}
-                                                            disabled={distributing}
-                                                            className="scale-90 origin-center data-[state=checked]:bg-blue-500"
-                                                          />
-                                                        </div>
-                                                      </div>
-                                                    )}
-                                                  </div>
-                                                </div>
-                                              );
-                                            })}
-                                          </div>
-                                        )}
+                            <React.Fragment key={item.id}>
+                              <tr className={cn(
+                                "hover:bg-card/60 transition-colors",
+                                isExpanded && "bg-muted/15"
+                              )}>
+                                {/* Column 1: Image & Code & Name & Landmark & District & Municipality */}
+                                <td className="py-2.5 px-3">
+                                  <div className="flex items-start gap-2.5">
+                                    <div className="w-10 h-10 rounded-xl overflow-hidden bg-muted/40 border border-border/20 shrink-0 flex items-center justify-center relative shadow-xs mt-0.5">
+                                      {bb.Image_URL || designImagesByBillboard[item.billboard_id] ? (
+                                        <img
+                                          src={designImagesByBillboard[item.billboard_id] || bb.Image_URL}
+                                          alt=""
+                                          className="w-full h-full object-cover"
+                                        />
+                                      ) : (
+                                        <LayoutGrid className="h-5 w-5 text-muted-foreground/40" />
+                                      )}
+                                    </div>
+                                    <div className="min-w-0 space-y-0.5 text-right flex-1">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="font-black text-foreground hover:text-amber-300 transition-colors truncate">
+                                          {bb.Billboard_Name || `لوحة #${item.billboard_id}`}
+                                        </span>
+                                        <span className="text-[10px] font-mono text-amber-300 font-bold bg-amber-500/10 border border-amber-500/20 px-1 py-0.2 rounded">
+                                          #{item.billboard_id}
+                                        </span>
                                       </div>
-                                    );
-                                  })}
-                                </div>
+
+                                      {/* Nearest Landmark (أقرب نقطة دالة) */}
+                                      {bb.Nearest_Landmark && (
+                                        <div className="text-[11px] font-bold text-amber-200/90 flex items-center gap-1">
+                                          <Landmark className="h-3 w-3 text-amber-400 shrink-0" />
+                                          <span className="truncate">{bb.Nearest_Landmark}</span>
+                                        </div>
+                                      )}
+
+                                      {/* District, Municipality, City (المنطقة والبلدية والمدينة) */}
+                                      {(bb.District || bb.Municipality || bb.City) && (
+                                        <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                          <MapPin className="h-3 w-3 text-blue-400 shrink-0" />
+                                          <span className="truncate">
+                                            {[bb.City, bb.Municipality ? `بلدية ${bb.Municipality}` : null, bb.District].filter(Boolean).join(' • ')}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </td>
+
+                                {/* Column 2: Size & Area */}
+                                <td className="py-2.5 px-3 whitespace-nowrap">
+                                  <div className="font-bold text-foreground">
+                                    <span className="bg-amber-500/10 text-amber-300 border border-amber-500/20 px-1.5 py-0.5 rounded font-mono text-[10px]">
+                                      {bb.Size}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                                    {item.faces === 1 ? 'وجه واحد' : 'وجهين'} ({item.itemTotalArea.toFixed(1)} م²)
+                                  </div>
+                                </td>
+
+                                {/* Column 3: Team */}
+                                <td className="py-2.5 px-3 whitespace-nowrap">
+                                  {item.teamName && item.teamName !== 'غير محدد' ? (
+                                    <span className="text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded">
+                                      {item.teamName}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-muted-foreground/60">—</span>
+                                  )}
+                                </td>
+
+                                {/* Column 4: Customer Price Stepper */}
+                                <td className="py-2 px-3">
+                                  <QuickNumberStepper
+                                    value={item.itemCustPrice}
+                                    onChange={v => handleUpdateItemPrice(item.id, 'customerCost', v)}
+                                    disabled={isFirstInstallation}
+                                    colorClass="text-emerald-400"
+                                    step={10}
+                                  />
+                                </td>
+
+                                {/* Column 5: Company Cost Stepper */}
+                                <td className="py-2 px-3">
+                                  <QuickNumberStepper
+                                    value={item.itemCompCost}
+                                    onChange={v => handleUpdateItemPrice(item.id, 'companyCost', v)}
+                                    colorClass="text-amber-300"
+                                    step={10}
+                                  />
+                                </td>
+
+                                {/* Column 6: Print & Cutout Services */}
+                                <td className="py-2 px-3">
+                                  <div className="flex flex-col gap-1 items-start text-[10px]">
+                                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                      <Checkbox
+                                        checked={isItemPrintSelected}
+                                        onCheckedChange={(c: any) => handleToggleItemPrint(item.billboard_id, Boolean(c))}
+                                        className="h-3.5 w-3.5"
+                                      />
+                                      <span className={cn(isItemPrintSelected ? "text-blue-400 font-bold" : "text-muted-foreground")}>
+                                        طباعة فلكس
+                                      </span>
+                                    </label>
+                                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                      <Checkbox
+                                        checked={Boolean(item.has_cutout)}
+                                        onCheckedChange={(c: any) => handleToggleItemCutout(item.id, Boolean(c))}
+                                        className="h-3.5 w-3.5"
+                                      />
+                                      <span className={cn(item.has_cutout ? "text-purple-400 font-bold" : "text-muted-foreground")}>
+                                        مجسم / قص
+                                      </span>
+                                    </label>
+                                  </div>
+                                </td>
+
+                                {/* Column 7: Free Button */}
+                                <td className="py-2 px-2 text-center">
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => handleToggleItemFree(item.id)}
+                                    disabled={isFirstInstallation || item.itemCustPrice === 0}
+                                    className="h-7 px-2 text-[10px] font-bold text-rose-400 hover:bg-rose-500/10 rounded-lg"
+                                    title="جعل هذه اللوحة مجانية"
+                                  >
+                                    مجاني
+                                  </Button>
+                                </td>
+
+                                {/* Column 8: Toggle Details */}
+                                <td className="py-2 px-2 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleItemDetails(item.id)}
+                                    className={cn(
+                                      "h-7 w-7 rounded-lg inline-flex items-center justify-center transition-colors border",
+                                      (item.additional_cost || 0) > 0 || (item.company_additional_cost || 0) > 0
+                                        ? "bg-amber-500/15 border-amber-500/30 text-amber-300"
+                                        : "bg-muted/20 border-border/20 text-muted-foreground hover:text-foreground"
+                                    )}
+                                    title="تكاليف إضافية وملاحظات"
+                                  >
+                                    {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                                  </button>
+                                </td>
+                              </tr>
+
+                              {/* Expanded Drawer for Additional Costs */}
+                              {isExpanded && (
+                                <tr className="bg-muted/20">
+                                  <td colSpan={8} className="p-3 border-b border-border/20">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-2xl mr-auto ml-0" dir="rtl">
+                                      <div className="p-2.5 rounded-xl bg-background/70 border border-emerald-500/20 space-y-1.5 text-right">
+                                        <Label className="text-[10px] font-bold text-emerald-400 block text-right">تكلفة إضافية على الزبون (د.ل):</Label>
+                                        <div className="flex gap-1.5">
+                                          <Input
+                                            type="number"
+                                            value={item.additional_cost === 0 ? '' : item.additional_cost}
+                                            onChange={e => handleUpdateItemPrice(item.id, 'additional_cost', Math.max(0, parseFloat(e.target.value) || 0))}
+                                            placeholder="0"
+                                            className="h-8 text-xs font-mono font-bold bg-background text-right"
+                                          />
+                                          <Input
+                                            type="text"
+                                            value={item.additional_cost_notes || ''}
+                                            onChange={e => handleUpdateItemPrice(item.id, 'additional_cost_notes', e.target.value)}
+                                            placeholder="بيان التكلفة..."
+                                            className="h-8 text-xs bg-background text-right flex-1"
+                                          />
+                                        </div>
+                                      </div>
+
+                                      <div className="p-2.5 rounded-xl bg-background/70 border border-amber-500/20 space-y-1.5 text-right">
+                                        <Label className="text-[10px] font-bold text-amber-300 block text-right">تكلفة إضافية على الشركة (د.ل):</Label>
+                                        <div className="flex gap-1.5">
+                                          <Input
+                                            type="number"
+                                            value={item.company_additional_cost === 0 ? '' : item.company_additional_cost}
+                                            onChange={e => handleUpdateItemPrice(item.id, 'company_additional_cost', Math.max(0, parseFloat(e.target.value) || 0))}
+                                            placeholder="0"
+                                            className="h-8 text-xs font-mono font-bold bg-background text-right"
+                                          />
+                                          <Input
+                                            type="text"
+                                            value={item.company_additional_cost_notes || ''}
+                                            onChange={e => handleUpdateItemPrice(item.id, 'company_additional_cost_notes', e.target.value)}
+                                            placeholder="بيان التكلفة..."
+                                            className="h-8 text-xs bg-background text-right flex-1"
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
                               )}
-                            </div>
+                            </React.Fragment>
                           );
                         })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                <div className="space-y-3.5" dir="rtl">
+                  {filteredBillboardItems.map((item) => {
+                    const bb = item.billboard;
+                    const isExpanded = expandedItemDetails.has(item.id);
+                    const isItemPrintSelected = printBillboardIds.includes(item.billboard_id);
+
+                    return (
+                      <div
+                        key={item.id}
+                        className="rounded-2xl border border-border/35 bg-card/55 p-4 shadow-sm transition-all duration-200 hover:border-primary/35 hover:bg-card/75"
+                      >
+                        {/* Billboard Top Row */}
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex min-w-0 flex-1 items-start gap-4">
+                            {/* Billboard Image / Thumbnail */}
+                            <div className="h-[88px] w-[128px] overflow-hidden rounded-xl border border-primary/25 bg-muted/40 shadow-sm shrink-0 flex items-center justify-center relative">
+                              {bb.Image_URL || designImagesByBillboard[item.billboard_id] ? (
+                                <img
+                                  src={designImagesByBillboard[item.billboard_id] || bb.Image_URL}
+                                  alt={`تصميم لوحة ${bb.Billboard_Name || item.billboard_id}`}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <LayoutGrid className="h-7 w-7 text-muted-foreground/40" />
+                              )}
+                              <span className="absolute right-1 top-1 rounded bg-black/80 px-1.5 py-0.5 text-[9px] font-bold text-primary">
+                                {designImagesByBillboard[item.billboard_id] ? 'تصميم آخر مهمة' : 'صورة اللوحة'}
+                              </span>
+                              <span className="absolute bottom-1 left-1 rounded bg-black/80 px-1.5 py-0.5 text-[9px] font-mono font-black text-amber-300">
+                                #{item.billboard_id}
+                              </span>
+                            </div>
+
+                            {/* Billboard Specs & Code */}
+                            <div className="space-y-1 min-w-0 text-right">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-base font-black text-foreground hover:text-primary transition-colors truncate">
+                                  {bb.Billboard_Name || `لوحة #${String(item.billboard_id).padStart(4, '0')}`}
+                                </span>
+                                <span className="text-[10px] font-black bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-md font-mono">
+                                  {bb.Size}
+                                </span>
+                                <span className="text-[10px] font-bold bg-muted/60 text-muted-foreground border border-border/20 px-2 py-0.5 rounded-md">
+                                  {item.faces === 1 ? 'وجه واحد' : 'وجهين'} ({item.itemTotalArea.toFixed(1)} م²)
+                                </span>
+                                {item.teamName && item.teamName !== 'غير محدد' && (
+                                  <span className="text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-md">
+                                    {item.teamName}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="space-y-1 text-right pt-1">
+                                {bb.Nearest_Landmark && (
+                                  <div className="text-xs font-bold text-amber-200/90 flex items-center gap-1.5">
+                                    <Landmark className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                                    <span>أقرب نقطة دالة: {bb.Nearest_Landmark}</span>
+                                  </div>
+                                )}
+                                {(bb.District || bb.Municipality || bb.City) && (
+                                  <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                                    <MapPin className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+                                    <span>{[bb.City, bb.Municipality ? `بلدية ${bb.Municipality}` : null, bb.District].filter(Boolean).join(' • ')}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Quick Free Button */}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleToggleItemFree(item.id)}
+                            disabled={isFirstInstallation || item.itemCustPrice === 0}
+                            className="h-8 text-xs font-bold gap-1 rounded-xl border-border/30 hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-400 text-muted-foreground shrink-0 cursor-pointer"
+                          >
+                            <Gift className="h-3.5 w-3.5 text-rose-400" />
+                            <span>مجاني</span>
+                          </Button>
+                        </div>
+
+                        {/* Direct Pricing Steppers Row */}
+                        <div className="mt-4 grid grid-cols-1 gap-3 border-t border-border/25 pt-4 sm:grid-cols-2">
+                          <QuickNumberStepper
+                            label={isFirstInstallation ? "سعر الزبون (مقفل - تركيب جديد)" : "سعر الزبون للوحة (د.ل)"}
+                            value={item.itemCustPrice}
+                            onChange={v => handleUpdateItemPrice(item.id, 'customerCost', v)}
+                            disabled={isFirstInstallation}
+                            colorClass="text-emerald-400"
+                            step={10}
+                            className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3"
+                          />
+                          <QuickNumberStepper
+                            label="تكلفة الشركة للوحة (د.ل)"
+                            value={item.itemCompCost}
+                            onChange={v => handleUpdateItemPrice(item.id, 'companyCost', v)}
+                            colorClass="text-amber-300"
+                            step={10}
+                            className="rounded-xl border border-primary/25 bg-primary/5 p-3"
+                          />
+                        </div>
+
+                        {/* Quick Services Switches per Billboard */}
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-background/35 px-3 py-2.5 text-xs font-bold text-muted-foreground">
+                          <div className="flex items-center gap-4">
+                            {/* Print toggle for this billboard */}
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                              <Checkbox
+                                checked={isItemPrintSelected}
+                                onCheckedChange={(c: any) => handleToggleItemPrint(item.billboard_id, Boolean(c))}
+                              />
+                              <span className={cn(isItemPrintSelected ? "text-blue-400 font-black" : "text-muted-foreground")}>
+                                طباعة فلكس ({item.itemTotalArea.toFixed(1)} م²)
+                              </span>
+                            </label>
+
+                            {/* Cutout toggle */}
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                              <Checkbox
+                                checked={Boolean(item.has_cutout)}
+                                onCheckedChange={(c: any) => handleToggleItemCutout(item.id, Boolean(c))}
+                              />
+                              <span className={cn(item.has_cutout ? "text-purple-400 font-black" : "text-muted-foreground")}>
+                                مجسم / قص
+                              </span>
+                            </label>
+                          </div>
+
+                          {/* Expand details for additional costs */}
+                          <button
+                            type="button"
+                            onClick={() => setExpandedItemDetails(prev => {
+                              const next = new Set(prev);
+                              next.has(item.id) ? next.delete(item.id) : next.add(item.id);
+                              return next;
+                            })}
+                            className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-extrabold text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary cursor-pointer"
+                          >
+                            <span>تكاليف وملاحظات إضافية</span>
+                            <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-180")} />
+                          </button>
+                        </div>
+
+                        {/* Expanded additional cost panel */}
+                        {isExpanded && (
+                          <div className="mt-3 space-y-3 rounded-xl border border-border/30 bg-background/45 p-4 animate-in fade-in duration-200">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="space-y-1.5">
+                                <Label className="text-xs font-bold text-muted-foreground">تكلفة إضافية على الزبون (د.ل)</Label>
+                                <Input
+                                  type="number"
+                                  value={item.additional_cost || ''}
+                                  placeholder="0"
+                                  onChange={e => {
+                                    const val = Number(e.target.value) || 0;
+                                    setTaskItems(prev => prev.map(i => i.id === item.id ? { ...i, additional_cost: val } : i));
+                                  }}
+                                  className="h-8.5 text-xs font-bold bg-background/80"
+                                />
+                                <Input
+                                  placeholder="ملاحظات التكلفة الإضافية للزبون..."
+                                  value={item.additional_cost_notes || ''}
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    setTaskItems(prev => prev.map(i => i.id === item.id ? { ...i, additional_cost_notes: val } : i));
+                                  }}
+                                  className="h-8.5 text-xs bg-background/80"
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label className="text-xs font-bold text-muted-foreground">تكلفة إضافية على الشركة (د.ل)</Label>
+                                <Input
+                                  type="number"
+                                  value={item.company_additional_cost || ''}
+                                  placeholder="0"
+                                  onChange={e => {
+                                    const val = Number(e.target.value) || 0;
+                                    setTaskItems(prev => prev.map(i => i.id === item.id ? { ...i, company_additional_cost: val } : i));
+                                  }}
+                                  className="h-8.5 text-xs font-bold bg-background/80"
+                                />
+                                <Input
+                                  placeholder="ملاحظات التكلفة الإضافية للشركة..."
+                                  value={item.company_additional_cost_notes || ''}
+                                  onChange={e => {
+                                    const val = e.target.value;
+                                    setTaskItems(prev => prev.map(i => i.id === item.id ? { ...i, company_additional_cost_notes: val } : i));
+                                  }}
+                                  className="h-8.5 text-xs bg-background/80"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </>
-                  ) : (
-                    /* Manual installation input form */
-                    <Card dir="rtl" className="border-border/15 bg-card/45 backdrop-blur-md rounded-2xl shadow-sm text-right">
-                      <CardHeader className="p-4.5 border-b border-border/10 bg-muted/10">
-                        <CardTitle className="text-xs font-bold flex items-center gap-2 text-foreground text-right">
-                          <Wrench className="h-4.5 w-4.5 text-muted-foreground" />
-                          <span>بيانات تكاليف التركيب اليدوية (لا توجد مهمة تركيب بقاعدة البيانات)</span>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="p-5 space-y-4">
-                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-right">
-                          <div className="space-y-2">
-                             <Label className="text-xs font-semibold text-emerald-600 block text-right">سعر الخدمة النهائي للزبون</Label>
-                            <InlinePriceInput 
-                              value={manualCustomerInstallationCost} 
-                              onChange={setManualCustomerInstallationCost} 
-                              label="" 
-                              showLabel={false}
-                              className="w-full"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                             <Label className="text-xs font-semibold text-amber-600 block text-right">تكلفة الخدمة على الشركة</Label>
-                            <InlinePriceInput 
-                              value={manualCompanyInstallationCost} 
-                              onChange={setManualCompanyInstallationCost} 
-                              label="" 
-                              showLabel={false}
-                              className="w-full"
-                            />
-                          </div>
+                    );
+                  })}
+                </div>
+                )}
+              </TabsContent>
+
+              {/* ════════════ TAB 2: FULL PRINTING MANAGEMENT & ACTIVATION ════════════ */}
+              <TabsContent value="print" className="mt-0 p-5 sm:p-6 space-y-6">
+
+                {/* Print Master Switch Banner */}
+                <div className="p-4.5 rounded-2xl border border-blue-500/30 bg-blue-500/10 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    <div className="h-10 w-10 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center shrink-0">
+                      <Printer className="h-5 w-5 text-blue-400" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-foreground">تفعيل خدمة الطباعة والإنتاج لهذه العملية</h4>
+                      <p className="text-xs text-muted-foreground/80 mt-0.5">
+                        عند التفعيل، سيتم احتساب مبيعات وتكلفة المتر وإنشاء أو مزامنة مهمة الطباعة تلقائياً في قاعدة البيانات.
+                      </p>
+                    </div>
+                  </div>
+                  <Switch checked={isPrintActive} onCheckedChange={setIsPrintActive} />
+                </div>
+
+                {isPrintActive && (
+                  <div className="space-y-6 animate-in fade-in duration-200">
+                    {/* Contract Print Inclusion Banner */}
+                    {isFirstInstallation && isPrintFreeByContract ? (
+                      <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-right" dir="rtl">
+                        <Sparkles className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
+                        <div className="text-xs space-y-0.5">
+                          <div className="font-black text-sm">الطباعة مشمولة مع العقد (مجانية للزبون)</div>
+                          <div className="text-muted-foreground/90">تكلفة طباعة الفلكس للزبون متضمنة في قيمة إيجار العقد (سعر المتر للزبون = 0 د.ل). يتم احتساب تكلفة المطبعة (الشركة) فقط.</div>
                         </div>
-                        <div className="flex items-center gap-2 p-3.5 rounded-xl bg-amber-500/[0.02] border border-amber-500/10 text-xs text-amber-655 leading-relaxed font-semibold">
-                          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-                          <span>تنبيه: سيتم حفظ المبالغ المدخلة يدوياً وتطبيقها مباشرة على فاتورة العميل وإجمالي التكاليف العامة.</span>
+                      </div>
+                    ) : isFirstInstallation && !isPrintFreeByContract ? (
+                      <div className="flex items-start gap-3 p-3.5 rounded-2xl bg-blue-500/10 border border-blue-500/30 text-blue-300 text-right" dir="rtl">
+                        <Printer className="h-5 w-5 text-blue-400 shrink-0 mt-0.5" />
+                        <div className="text-xs space-y-0.5">
+                          <div className="font-black text-sm">الطباعة غير مشمولة بالعقد (تُحسب على الزبون)</div>
+                          <div className="text-muted-foreground/90">العقد يشمل التركيب فقط، وتكلفة الطباعة تُحسب على الزبون بسعر المتر الموضح أدناه.</div>
                         </div>
+                      </div>
+                    ) : null}
+
+                    {/* Printer Selection Card */}
+                    <Card className="border-border/20 bg-card/40 rounded-2xl shadow-sm">
+                      <CardContent className="p-4.5 space-y-2">
+                        <Label className="text-xs font-black text-blue-400 flex items-center gap-2">
+                          <Printer className="h-4 w-4" />
+                          المطبعة المسؤولة عن التنفيذ:
+                        </Label>
+                        <Select
+                          value={selectedPrinterId || 'none'}
+                          onValueChange={(v) => setSelectedPrinterId(v === 'none' ? null : v)}
+                        >
+                          <SelectTrigger dir="rtl" className="h-11 rounded-xl bg-background border-border/30 text-xs font-bold px-3 text-right">
+                            <SelectValue placeholder="اختر مطبعة من قائمة المطابع النشطة..." />
+                          </SelectTrigger>
+                          <SelectContent className="font-tajawal text-xs" dir="rtl">
+                            <SelectItem value="none">-- غير محددة بعد --</SelectItem>
+                            {printers.map(p => (
+                              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </CardContent>
                     </Card>
-                  )}
-                </TabsContent>
-              )}
 
-              {/* ═══════ TAB: الطباعة ═══════ */}
-              {isPrintActive && (
-                <TabsContent value="print" className="mt-0 p-5 sm:p-6 space-y-6">
-                  {task.print_task_id && totalPrintArea > 0 ? (
-                    <>
-                      <div className="flex items-center justify-between gap-3 flex-wrap">
-                        <h3 className="font-bold text-base flex items-center gap-2.5 text-foreground">
-                          <Printer className="h-5 w-5 text-blue-600" />
-                          <span>تسعير الطباعة</span>
-                        </h3>
-                        <Badge variant="outline" className="text-xs font-semibold bg-blue-500/10 text-blue-600 border-blue-500/20 px-3 py-1 rounded-full">
-                          المساحة {totalPrintArea.toFixed(1)} م²
-                        </Badge>
-                      </div>
-
-                      {/* Printer selection */}
-                       <Card className="border-blue-200/40 bg-blue-500/[0.01] rounded-2xl shadow-sm">
-                         <CardContent className="p-5 sm:p-6 space-y-3.5" dir="rtl">
-                           <Label className="text-sm font-semibold flex items-center gap-2 text-blue-600">
-                             <Printer className="h-4 w-4" />
-                             <span>المطبعة المسؤولة عن الطباعة</span>
-                           </Label>
-                           <Select
-                             value={selectedPrinterId || 'none'}
-                             onValueChange={(v) => setSelectedPrinterId(v === 'none' ? null : v)}
-                           >
-                             <SelectTrigger dir="rtl" className="h-11 sm:h-12 rounded-xl bg-background border-border/20 text-sm px-3.5 text-right">
-                               <SelectValue placeholder="اختر مطبعة من قائمة المطابع النشطة" />
-                             </SelectTrigger>
-                             <SelectContent className="text-sm">
-                               <SelectItem value="none">-- غير محدد --</SelectItem>
-                               {printers.map(p => (
-                                 <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                               ))}
-                             </SelectContent>
-                           </Select>
-                           <p className="text-[13px] text-muted-foreground/80 block leading-relaxed">ملاحظة: سيتم مزامنة اسم وتكلفة المطبعة تلقائياً مع تفاصيل مهمة الطباعة الحالية.</p>
-                         </CardContent>
-                       </Card>
-
-                      {/* Controls input fields */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                        <PriceInputWithControls
-                          value={customerPrintPerMeter}
-                          onChange={setCustomerPrintPerMeter}
-                          label="سعر المتر المربع (فاتورة الزبون)"
-                          totalLabel="إجمالي مبيعات الطباعة:"
-                          totalValue={customerPrintTotal}
-                          colorClass="text-emerald-600"
-                        />
-
-                        <PriceInputWithControls
-                          value={companyPrintPerMeter}
-                          onChange={setCompanyPrintPerMeter}
-                          label="سعر المتر المربع (تكلفة الشركة)"
-                          totalLabel="إجمالي تكلفة الطباعة:"
-                          totalValue={companyPrintTotal}
-                          colorClass="text-blue-600"
-                        />
-                      </div>
-
-                      {/* Estimated total meter price breakdown */}
-                      <Card className="border-primary/20 bg-primary/[0.01] rounded-2xl shadow-sm">
-                        <CardContent className="p-5 space-y-4">
-                          <div className="flex items-center gap-2.5">
-                            <div className="h-9 w-9 rounded-xl bg-primary/10 border border-primary/15 flex items-center justify-center text-primary shadow-inner">
-                              <Calculator className="h-4.5 w-4.5" />
-                            </div>
-                            <div>
-                              <h4 className="text-sm font-bold text-foreground">سعر المتر المربع الإجمالي التقديري</h4>
-                              <p className="text-xs text-muted-foreground mt-0.5 leading-normal">يشمل (الطباعة + التركيب) لتقييم كفاءة التسعير</p>
-                            </div>
+                    {/* Per-Meter Pricing Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <Card className="border-emerald-500/25 bg-emerald-500/5 rounded-2xl">
+                        <CardContent className="p-4.5 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-black text-emerald-400">سعر بيع المتر للزبون</span>
+                            <span className="text-[10px] font-bold text-muted-foreground">د.ل / م²</span>
                           </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="p-4 rounded-xl bg-card border border-border/10 shadow-sm text-center space-y-1">
-                              <div className="text-xs text-muted-foreground font-semibold">متوسط بيع المتر للزبون</div>
-                              <div className="text-xl font-bold text-primary font-mono text-base">
-                                {(customerPrintPerMeter + (totals.totalArea > 0 ? totals.customerCost / totals.totalArea : 0)).toFixed(1)}
-                                <span className="text-xs font-semibold text-muted-foreground/60 mr-1">د.ل/م²</span>
-                              </div>
-                              <div className="text-xs text-muted-foreground/80 font-medium leading-normal">
-                                (طباعة + {(totals.totalArea > 0 ? totals.customerCost / totals.totalArea : 0).toFixed(1)} تركيب {customerPrintPerMeter.toFixed(1)})
-                              </div>
-                            </div>
-                            <div className="p-4 rounded-xl bg-card border border-border/10 shadow-sm text-center space-y-1">
-                              <div className="text-xs text-muted-foreground font-semibold">متوسط تكلفة المتر للشركة</div>
-                              <div className="text-xl font-bold text-amber-600 font-mono text-base">
-                                {(companyPrintPerMeter + (totals.totalArea > 0 ? totals.companyCost / totals.totalArea : 0)).toFixed(1)}
-                                <span className="text-xs font-semibold text-muted-foreground/60 mr-1">د.ل/م²</span>
-                              </div>
-                              <div className="text-xs text-muted-foreground/80 font-medium leading-normal">
-                                (طباعة + {(totals.totalArea > 0 ? totals.companyCost / totals.totalArea : 0).toFixed(1)} تركيب {companyPrintPerMeter.toFixed(1)})
-                              </div>
-                            </div>
-                          </div>
-                          <div className="text-center p-3.5 rounded-xl bg-muted/15 border border-border/10 text-xs font-bold font-mono">
-                            <span className="text-muted-foreground font-sans text-xs">إجمالي (الطباعة + التركيب): </span>
-                            <span className="text-primary font-bold text-xs">{(customerPrintTotal + totals.customerCost).toLocaleString('ar-LY')} د.ل (بيع)</span>
-                            <span className="text-muted-foreground/35 mx-2 font-light">/</span>
-                            <span className="text-amber-600 font-bold text-xs">{(companyPrintTotal + totals.companyCost).toLocaleString('ar-LY')} د.ل (تكلفة)</span>
+                          <QuickNumberStepper
+                            value={customerPrintPerMeter}
+                            onChange={setCustomerPrintPerMeter}
+                            unit="د.ل/م²"
+                            colorClass="text-emerald-300"
+                            step={1}
+                          />
+                          <div className="flex items-center justify-between text-xs font-bold pt-2 border-t border-emerald-500/15">
+                            <span className="text-muted-foreground">إجمالي بيع الطباعة:</span>
+                            <span className="font-mono text-emerald-300 font-black text-base">{calculatedCustomerPrint.toLocaleString('ar-LY')} د.ل</span>
                           </div>
                         </CardContent>
                       </Card>
 
-                      {/* Profit summary for Print */}
-                      <div className={cn("p-4.5 rounded-2xl border text-center shadow-sm backdrop-blur-md", 
-                        customerPrintTotal - companyPrintTotal >= 0 
-                          ? "border-emerald-500/15 bg-emerald-500/[0.02] text-emerald-650" 
-                          : "border-rose-500/15 bg-rose-500/[0.02] text-rose-655")}>
-                        <div className="text-xs font-semibold text-muted-foreground/80 mb-1.5 leading-normal">صافي ربح الطباعة المتوقع</div>
-                        <div className="text-2xl font-bold font-mono">
-                          {(customerPrintTotal - companyPrintTotal).toLocaleString('ar-LY')}
-                          <span className="text-xs font-bold mr-1">د.ل</span>
+                      <Card className="border-blue-500/25 bg-blue-500/5 rounded-2xl">
+                        <CardContent className="p-4.5 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-black text-blue-400">تكلفة المتر على الشركة (المطبعة)</span>
+                            <span className="text-[10px] font-bold text-muted-foreground">د.ل / م²</span>
+                          </div>
+                          <QuickNumberStepper
+                            value={companyPrintPerMeter}
+                            onChange={setCompanyPrintPerMeter}
+                            unit="د.ل/م²"
+                            colorClass="text-blue-300"
+                            step={1}
+                          />
+                          <div className="flex items-center justify-between text-xs font-bold pt-2 border-t border-blue-500/15">
+                            <span className="text-muted-foreground">إجمالي تكلفة الطباعة:</span>
+                            <span className="font-mono text-blue-300 font-black text-base">{calculatedCompanyPrint.toLocaleString('ar-LY')} د.ل</span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Print Billboard Selector */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <CheckSquare className="h-4 w-4 text-blue-400" />
+                          <span className="text-xs font-black text-foreground">اللوحات المختارة للطباعة ({printBillboardIds.length} من {enrichedItems.length}):</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleSelectAllPrintBillboards}
+                            className="h-7.5 text-[11px] font-bold rounded-lg border-border/30 cursor-pointer"
+                          >
+                            تحديد الكل
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={handleDeselectAllPrintBillboards}
+                            className="h-7.5 text-[11px] font-bold text-rose-400 rounded-lg cursor-pointer"
+                          >
+                            إلغاء التحديد
+                          </Button>
                         </div>
                       </div>
-                    </>
-                  ) : (
-                    /* Manual print cost form */
-                    <Card dir="rtl" className="border-border/15 bg-card/40 backdrop-blur-md rounded-2xl shadow-sm text-right">
-                      <CardHeader className="p-4.5 border-b border-border/10 bg-muted/10">
-                        <CardTitle className="text-xs font-bold flex items-center gap-2 text-foreground text-right">
-                          <Printer className="h-4.5 w-4.5 text-muted-foreground" />
-                          <span>بيانات تكاليف الطباعة اليدوية (لا توجد مهمة طباعة بقاعدة البيانات)</span>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="p-5 space-y-4">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-right">
-                          <div className="space-y-2">
-                            <Label className="text-xs font-semibold text-emerald-600 block text-right">سعر مبيعات الطباعة للزبون</Label>
-                            <InlinePriceInput 
-                              value={manualCustomerPrintCost} 
-                              onChange={setManualCustomerPrintCost} 
-                              label="" 
-                              showLabel={false}
-                              className="w-full"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-xs font-semibold text-amber-600 block text-right">تكلفة الطباعة على الشركة</Label>
-                            <InlinePriceInput 
-                              value={manualCompanyPrintCost} 
-                              onChange={setManualCompanyPrintCost} 
-                              label="" 
-                              showLabel={false}
-                              className="w-full"
-                            />
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 p-3.5 rounded-xl bg-amber-500/[0.02] border border-amber-500/10 text-xs text-amber-655 leading-relaxed font-semibold">
-                          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-                          <span>تنبيه: سيتم حفظ المبالغ المدخلة يدوياً وتطبيقها مباشرة على فاتورة العميل وإجمالي التكاليف العامة.</span>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
-                </TabsContent>
-              )}
 
-              {/* ═══════ TAB: المجسمات والقص ═══════ */}
-              {isCutoutActive && (
-                <TabsContent value="cutout" className="mt-0 p-5 sm:p-6 space-y-6">
-                  {task.cutout_task_id || taskItems.some(i => i.has_cutout) ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[280px] overflow-y-auto p-1">
+                        {enrichedItems.map(item => {
+                          const isSelected = printBillboardIds.includes(item.billboard_id);
+                          return (
+                            <div
+                              key={item.id}
+                              onClick={() => handleToggleItemPrint(item.billboard_id, !isSelected)}
+                              className={cn(
+                                "flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer select-none",
+                                isSelected
+                                  ? "border-blue-500/40 bg-blue-500/10 text-blue-300 shadow-sm"
+                                  : "border-border/15 bg-card/20 text-muted-foreground hover:bg-card/40"
+                              )}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <Checkbox checked={isSelected} onCheckedChange={() => {}} />
+                                <div className="space-y-0.5 min-w-0 text-right">
+                                  <div className="text-xs font-black text-foreground truncate">
+                                    {item.billboard.Billboard_Name || `لوحة #${item.billboard_id}`}
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground/75 font-mono">
+                                    {item.billboard.Size} • {item.faces === 1 ? 'وجه' : 'وجهين'} ({item.itemTotalArea.toFixed(1)} م²)
+                                  </div>
+                                </div>
+                              </div>
+                              <span className="text-xs font-mono font-bold">
+                                {(item.itemTotalArea * customerPrintPerMeter).toLocaleString('ar-LY')} د.ل
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Real-time Print Margin Banner */}
+                    <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-500/10 via-card/50 to-emerald-500/10 border border-blue-500/20 flex items-center justify-between gap-4">
+                      <div className="space-y-0.5">
+                        <div className="text-xs font-bold text-muted-foreground">صافي ربح الطباعة المتوقع:</div>
+                        <div className="text-xl font-black font-mono text-emerald-300">
+                          {(calculatedCustomerPrint - calculatedCompanyPrint).toLocaleString('ar-LY')} د.ل
+                        </div>
+                      </div>
+                      <div className="text-right text-xs font-bold text-muted-foreground space-y-0.5">
+                        <div>إجمالي المساحة: <span className="font-mono text-foreground font-black">{calculatedPrintArea.toFixed(1)} م²</span></div>
+                        <div>هامش ربح المتر: <span className="font-mono text-emerald-400 font-black">{(customerPrintPerMeter - companyPrintPerMeter).toFixed(1)} د.ل/م²</span></div>
+                      </div>
+                    </div>
+
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* ════════════ TAB 3: CUTOUTS ════════════ */}
+              <TabsContent value="cutout" className="mt-0 p-5 sm:p-6 space-y-6">
+
+                {/* Cutouts Master Switch Banner */}
+                <div className="p-4.5 rounded-2xl border border-purple-500/30 bg-purple-500/10 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5">
+                    <div className="h-10 w-10 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center shrink-0">
+                      <Scissors className="h-5 w-5 text-purple-400" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-foreground">خدمة صناعة وقص المجسمات (3D Cutouts)</h4>
+                      <p className="text-xs text-muted-foreground/80 mt-0.5">
+                        تحديد اللوحات التي تحتوي على مجسمات، والورشة المنفذة، وتكاليف القص.
+                      </p>
+                    </div>
+                  </div>
+                  <Switch checked={isCutoutActive} onCheckedChange={setIsCutoutActive} />
+                </div>
+
+                {isCutoutActive && (
+                  <div className="space-y-6 animate-in fade-in duration-200">
                     <CutoutPerBillboardEditor
                       items={taskItems.map(it => ({
                         id: it.id,
@@ -2131,409 +1872,126 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                         }));
                       }}
                     />
-                  ) : (
-                    /* Manual cutout cost form */
-                    <Card dir="rtl" className="border-border/15 bg-card/40 backdrop-blur-md rounded-2xl shadow-sm text-right">
-                      <CardHeader className="p-4.5 border-b border-border/10 bg-muted/10">
-                        <CardTitle className="text-xs font-bold flex items-center gap-2 text-foreground text-right">
-                          <Scissors className="h-4.5 w-4.5 text-muted-foreground" />
-                          <span>بيانات تكاليف المجسمات والقص اليدوية</span>
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="p-5 space-y-4">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-right">
-                          <div className="space-y-2">
-                            <Label className="text-xs font-semibold text-emerald-600 block text-right">سعر مبيعات المجسمات للزبون</Label>
-                            <InlinePriceInput 
-                              value={manualCustomerCutoutCost} 
-                              onChange={setManualCustomerCutoutCost} 
-                              label="" 
-                              showLabel={false}
-                              className="w-full"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-xs font-semibold text-amber-600 block text-right">تكلفة المجسمات على الشركة</Label>
-                            <InlinePriceInput 
-                              value={manualCompanyCutoutCost} 
-                              onChange={setManualCompanyCutoutCost} 
-                              label="" 
-                              showLabel={false}
-                              className="w-full"
-                            />
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 p-3.5 rounded-xl bg-amber-500/[0.02] border border-amber-500/10 text-xs text-amber-655 leading-relaxed font-semibold">
-                          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
-                          <span>تنبيه: سيتم حفظ المبالغ المدخلة يدوياً وتطبيقها مباشرة على فاتورة العميل وإجمالي التكاليف العامة.</span>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
-                </TabsContent>
-              )}
+                  </div>
+                )}
+              </TabsContent>
 
-              {/* ═══════ TAB: الملخص المالي ═══════ */}
+              {/* ════════════ TAB 4: DISCOUNTS & SUMMARY ════════════ */}
               <TabsContent value="summary" className="mt-0 p-5 sm:p-6 space-y-6">
-                
-                {/* Active Services Controllers */}
-                <Card dir="rtl" className="border-border/15 bg-card/50 backdrop-blur-md rounded-2xl shadow-sm text-right">
-                  <CardHeader className="p-4.5 border-b border-border/10 bg-muted/10">
-                    <CardTitle className="text-xs font-bold flex items-center gap-2 text-foreground text-right">
-                      <LayoutGrid className="h-4 w-4 text-muted-foreground" />
-                      <span>إدارة تفعيل خدمات المهمة المجمعة</span>
+
+                {/* General Discount Card */}
+                <Card className="border-border/20 bg-card/40 rounded-2xl shadow-sm">
+                  <CardHeader className="p-4.5 border-b border-border/15 pb-3">
+                    <CardTitle className="text-xs font-black flex items-center gap-2 text-foreground">
+                      <Gift className="h-4 w-4 text-rose-400" />
+                      خصم الفاتورة الإجمالي (على الزبون)
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className="p-5 space-y-5">
-                    
-                    {/* Installation Switch */}
-                    <div className="flex flex-col gap-3.5 p-4 rounded-xl border border-border/10 bg-background/25">
-                      <div className="flex items-center justify-between gap-4 text-right">
-                        <div className="flex items-center gap-3 min-w-0 text-right">
-                          <div className={cn("h-9.5 w-9.5 rounded-lg flex items-center justify-center shrink-0 border border-border/5 shadow-inner", isInstallationActive ? "bg-orange-500/10 text-orange-600" : "bg-muted text-muted-foreground/60")}>
-                            <Wrench className="h-4.5 w-4.5" />
-                          </div>
-                          <div>
-                            <span className="text-xs font-bold block text-foreground">خدمة التركيب واللوحات</span>
-                            <span className="text-xs text-muted-foreground/80 block mt-0.5 leading-normal">
-                              {task.installation_task_id ? "مهمة تركيب مفعّلة تلقائياً من قاعدة البيانات" : "إضافة/تعديل تكاليف تركيب يدوية"}
-                            </span>
-                          </div>
-                        </div>
-                        <Switch checked={isInstallationActive} onCheckedChange={setIsInstallationActive} disabled={!!task.installation_task_id} />
+                  <CardContent className="p-4.5 space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <QuickNumberStepper
+                        label="قيمة الخصم (د.ل)"
+                        value={discountAmount}
+                        onChange={setDiscountAmount}
+                        colorClass="text-rose-400"
+                        step={50}
+                      />
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-bold text-muted-foreground">سبب وملاحظات الخصم</Label>
+                        <Input
+                          placeholder="مثال: خصم خاص بالعميل، عرض ترويجي..."
+                          value={discountReason}
+                          onChange={e => setDiscountReason(e.target.value)}
+                          className="h-10 text-xs font-bold bg-background/60 border-border/30 rounded-xl"
+                        />
                       </div>
-                      {isInstallationActive && !task.installation_task_id && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-border/10 text-right">
-                          <div className="space-y-2">
-                            <Label className="text-xs font-semibold text-emerald-650 block text-right">سعر التركيب للزبون</Label>
-                            <InlinePriceInput 
-                              value={manualCustomerInstallationCost} 
-                              onChange={setManualCustomerInstallationCost} 
-                              label="" 
-                              showLabel={false}
-                              className="w-full"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-xs font-semibold text-amber-655 block text-right">تكلفة التركيب للشركة</Label>
-                            <InlinePriceInput 
-                              value={manualCompanyInstallationCost} 
-                              onChange={setManualCompanyInstallationCost} 
-                              label="" 
-                              showLabel={false}
-                              className="w-full"
-                            />
-                          </div>
-                        </div>
-                      )}
                     </div>
-
-                    {/* Print Switch */}
-                    <div className="flex flex-col gap-3.5 p-4 rounded-xl border border-border/10 bg-background/25">
-                      <div className="flex items-center justify-between gap-4 text-right">
-                        <div className="flex items-center gap-3 min-w-0 text-right">
-                          <div className={cn("h-9.5 w-9.5 rounded-lg flex items-center justify-center shrink-0 border border-border/5 shadow-inner", isPrintActive ? "bg-blue-500/10 text-blue-600" : "bg-muted text-muted-foreground/60")}>
-                            <Printer className="h-4.5 w-4.5" />
-                          </div>
-                          <div>
-                            <span className="text-xs font-bold block text-foreground">خدمة الطباعة والفلكس</span>
-                            <span className="text-xs text-muted-foreground/80 block mt-0.5 leading-normal">
-                              {task.print_task_id ? "مهمة طباعة مفعّلة تلقائياً من قاعدة البيانات" : "تفعيل وإضافة تكلفة طباعة مخصصة"}
-                            </span>
-                          </div>
-                        </div>
-                        <Switch checked={isPrintActive} onCheckedChange={setIsPrintActive} disabled={!!task.print_task_id} />
-                      </div>
-                      {isPrintActive && !task.print_task_id && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-border/10 text-right">
-                          <div className="space-y-2">
-                            <Label className="text-xs font-semibold text-emerald-650 block text-right">سعر الطباعة للعميل</Label>
-                            <InlinePriceInput 
-                              value={manualCustomerPrintCost} 
-                              onChange={setManualCustomerPrintCost} 
-                              label="" 
-                              showLabel={false}
-                              className="w-full"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-xs font-semibold text-amber-655 block text-right">تكلفة الطباعة للشركة</Label>
-                            <InlinePriceInput 
-                              value={manualCompanyPrintCost} 
-                              onChange={setManualCompanyPrintCost} 
-                              label="" 
-                              showLabel={false}
-                              className="w-full"
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Cutout Switch */}
-                    <div className="flex flex-col gap-3.5 p-4 rounded-xl border border-border/10 bg-background/25">
-                      <div className="flex items-center justify-between gap-4 text-right">
-                        <div className="flex items-center gap-3 min-w-0 text-right">
-                          <div className={cn("h-9.5 w-9.5 rounded-lg flex items-center justify-center shrink-0 border border-border/5 shadow-inner", isCutoutActive ? "bg-purple-500/10 text-purple-650" : "bg-muted text-muted-foreground/60")}>
-                            <Scissors className="h-4.5 w-4.5" />
-                          </div>
-                          <div>
-                            <span className="text-xs font-bold block text-foreground">خدمة صناعة وقص المجسمات</span>
-                            <span className="text-xs text-muted-foreground/80 block mt-0.5 leading-normal">
-                              {task.cutout_task_id || taskItems.some(i => i.has_cutout) ? "مهمة مجسمات مفعّلة تلقائياً من تفاصيل اللوحات" : "تفعيل وإضافة تكلفة مجسمات يدوية"}
-                            </span>
-                          </div>
-                        </div>
-                        <Switch checked={isCutoutActive} onCheckedChange={setIsCutoutActive} disabled={!!task.cutout_task_id || taskItems.some(i => i.has_cutout)} />
-                      </div>
-                      {isCutoutActive && !task.cutout_task_id && !taskItems.some(i => i.has_cutout) && (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-border/10 text-right">
-                          <div className="space-y-2">
-                            <Label className="text-xs font-semibold text-emerald-650 block text-right">سعر المجسمات للعميل</Label>
-                            <InlinePriceInput 
-                              value={manualCustomerCutoutCost} 
-                              onChange={setManualCustomerCutoutCost} 
-                              label="" 
-                              showLabel={false}
-                              className="w-full"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-xs font-semibold text-amber-655 block text-right">تكلفة المجسمات للشركة</Label>
-                            <InlinePriceInput 
-                              value={manualCompanyCutoutCost} 
-                              onChange={setManualCompanyCutoutCost} 
-                              label="" 
-                              showLabel={false}
-                              className="w-full"
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
                   </CardContent>
                 </Card>
 
-                {/* Review Table */}
-                <Card className={cn("border-2 rounded-2xl overflow-hidden shadow-sm backdrop-blur-md", 
-                  netProfit >= 0 ? "border-emerald-500/15" : "border-rose-500/15")}>
-                  <div className="p-4 bg-muted/15 border-b border-border/10 flex items-center justify-between gap-4 text-right">
-                    <CardTitle className="text-xs font-bold flex items-center gap-2 text-right">
-                      <Calculator className="h-4 w-4 text-muted-foreground" />
-                      <span>جدول مراجعة وتحليل ربحية المهمة</span>
+                {/* Notes */}
+                <Card className="border-border/20 bg-card/40 rounded-2xl shadow-sm">
+                  <CardHeader className="p-4.5 border-b border-border/15 pb-3">
+                    <CardTitle className="text-xs font-black flex items-center gap-2 text-foreground">
+                      <FileText className="h-4 w-4 text-amber-400" />
+                      ملاحظات وتفاصيل إضافية على المهمة
                     </CardTitle>
-                    <Badge variant={netProfit >= 0 ? "default" : "destructive"} className="text-xs font-semibold py-0.5 rounded-md px-2 border-none">
-                      {netProfit >= 0 ? 'رابحة' : 'خسارة'}
-                    </Badge>
-                  </div>
-                  <CardContent className="p-0">
-                    <div className="overflow-x-auto">
-                      <table dir="rtl" className="w-full text-xs text-right">
-                        <thead>
-                          <tr className="bg-muted/20 border-b border-border/10">
-                            <th className="text-right p-3.5 font-bold text-muted-foreground">بند الخدمة</th>
-                            <th className="text-center p-3.5 font-bold text-emerald-600">فاتورة العميل</th>
-                            <th className="text-center p-3.5 font-bold text-amber-600">تكلفة الشركة</th>
-                            <th className="text-center p-3.5 font-bold text-foreground">صافي الربح</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border/10 font-semibold font-mono">
-                          {isInstallationActive && (
-                            <tr className="hover:bg-muted/[0.04] transition-colors">
-                              <td className="p-3.5 flex items-center gap-2.5 text-foreground font-semibold font-sans">
-                                <div className="h-8 w-8 rounded-lg bg-orange-500/10 flex items-center justify-center text-orange-600 border border-orange-500/10"><Wrench className="h-4 w-4" /></div>
-                                <span>التركيب واللوحات</span>
-                              </td>
-                              <td className="p-3.5 text-center text-emerald-600">{customerInstallationTotal.toLocaleString('ar-LY')} د.ل</td>
-                              <td className="p-3.5 text-center text-amber-600">{companyInstallationTotal.toLocaleString('ar-LY')} د.ل</td>
-                              <td className={cn("p-3.5 text-center font-bold", customerInstallationTotal - companyInstallationTotal >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                                {(customerInstallationTotal - companyInstallationTotal).toLocaleString('ar-LY')} د.ل
-                              </td>
-                            </tr>
-                          )}
-                          
-                          {isPrintActive && (
-                            <tr className="hover:bg-muted/[0.04] transition-colors">
-                              <td className="p-3.5 flex items-center gap-2.5 text-foreground font-semibold font-sans">
-                                <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600 border border-blue-500/10"><Printer className="h-4 w-4" /></div>
-                                <span>الطباعة والفلكس</span>
-                              </td>
-                              <td className="p-3.5 text-center text-emerald-600">{customerPrintTotal.toLocaleString('ar-LY')} د.ل</td>
-                              <td className="p-3.5 text-center text-amber-600">{companyPrintTotal.toLocaleString('ar-LY')} د.ل</td>
-                              <td className={cn("p-3.5 text-center font-bold", customerPrintTotal - companyPrintTotal >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                                {(customerPrintTotal - companyPrintTotal).toLocaleString('ar-LY')} د.ل
-                              </td>
-                            </tr>
-                          )}
-
-                          {isCutoutActive && (
-                            <tr className="hover:bg-muted/[0.04] transition-colors">
-                              <td className="p-3.5 flex items-center gap-2.5 text-foreground font-semibold font-sans">
-                                <div className="h-8 w-8 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-600 border border-purple-500/10"><Scissors className="h-4 w-4" /></div>
-                                <span>صناعة وقص المجسمات</span>
-                              </td>
-                              <td className="p-3.5 text-center text-emerald-600">{customerCutoutTotal.toLocaleString('ar-LY')} د.ل</td>
-                              <td className="p-3.5 text-center text-amber-600">{companyCutoutTotal.toLocaleString('ar-LY')} د.ل</td>
-                              <td className={cn("p-3.5 text-center font-bold", customerCutoutTotal - companyCutoutTotal >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                                {(customerCutoutTotal - companyCutoutTotal).toLocaleString('ar-LY')} د.ل
-                              </td>
-                            </tr>
-                          )}
-
-                          {discountAmount > 0 && (
-                            <tr className="bg-rose-500/[0.01] border-t border-border/10">
-                              <td className="p-3.5 flex items-center gap-2.5 text-rose-650 font-semibold font-sans">
-                                <div className="h-8 w-8 rounded-lg bg-rose-500/10 flex items-center justify-center text-rose-600 border border-rose-500/10"><DollarSign className="h-4 w-4" /></div>
-                                <span>تخفيض إضافي عام للمهمة</span>
-                              </td>
-                              <td className="p-3.5 text-center text-rose-600 font-bold">-{discountAmount.toLocaleString('ar-LY')} د.ل</td>
-                              <td className="p-3.5 text-center text-muted-foreground/40 font-light font-sans">—</td>
-                              <td className="p-3.5 text-center text-rose-600 font-bold">-{discountAmount.toLocaleString('ar-LY')} د.ل</td>
-                            </tr>
-                          )}
-                        </tbody>
-                        <tfoot className="bg-muted/15 font-bold border-t-2 border-border/15">
-                          <tr>
-                            <td className="p-4 text-sm font-bold text-foreground font-sans">المجموع الكلي للمهمة</td>
-                            <td className="p-4 text-center text-emerald-600 text-sm font-bold font-mono">{customerTotal.toLocaleString('ar-LY')} د.ل</td>
-                            <td className="p-4 text-center text-amber-600 text-sm font-bold font-mono">{companyTotal.toLocaleString('ar-LY')} د.ل</td>
-                            <td className={cn("p-4 text-center text-sm font-bold flex items-center justify-center gap-1 font-mono",
-                              netProfit >= 0 ? "text-emerald-600" : "text-rose-650")}>
-                              {netProfit >= 0 ? <TrendingUp className="h-4 w-4 shrink-0" /> : <TrendingDown className="h-4 w-4 shrink-0" />}
-                              <span>{netProfit.toLocaleString('ar-LY')} د.ل</span>
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                    <div className="text-center py-3.5 border-t border-border/10 bg-muted/5 font-semibold text-xs text-muted-foreground">
-                      <span>معدل العائد على المبيعات للمهمة (ROS): </span>
-                      <span className={cn("text-sm font-bold font-mono mr-1", profitPercentage >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                        {profitPercentage.toFixed(1)}%
-                      </span>
-                    </div>
+                  </CardHeader>
+                  <CardContent className="p-4.5">
+                    <Textarea
+                      placeholder="أدخل أي ملاحظات مالية أو تنفيذية خاصة بهذه المهمة..."
+                      value={notes}
+                      onChange={e => setNotes(e.target.value)}
+                      className="min-h-[90px] text-xs font-bold bg-background/60 border-border/30 rounded-xl resize-none"
+                    />
                   </CardContent>
                 </Card>
 
-                {/* Cost allocation section */}
+                {/* Breakdown Allocation Section */}
                 <CostAllocationSection
                   allocation={costAllocation}
                   onChange={setCostAllocation}
-                  hasPrint={isPrintActive && customerPrintTotal > 0}
-                  hasCutout={isCutoutActive && customerCutoutTotal > 0}
-                  hasInstallation={isInstallationActive && customerInstallationTotal > 0}
-                  originalCosts={{
-                    customerPrint: customerPrintTotal, companyPrint: companyPrintTotal,
-                    customerCutout: customerCutoutTotal, companyCutout: companyCutoutTotal,
-                    customerInstallation: customerInstallationTotal, companyInstallation: companyInstallationTotal,
-                  }}
+                  customerInstallCost={finalCustomerInstall}
+                  customerPrintCost={calculatedCustomerPrint}
+                  customerCutoutCost={calculatedCustomerCutout}
+                  totalDiscount={discountAmount}
                 />
-
-                {/* General adjustments form */}
-                  <div dir="rtl" className="space-y-4 rounded-2xl border border-border/15 p-4.5 bg-card/50 backdrop-blur-md shadow-sm text-right">
-                  <h4 className="text-xs font-bold text-foreground flex items-center gap-2 text-right">
-                    <DollarSign className="h-4 w-4 text-muted-foreground" />
-                    <span>الخصومات الإضافية والملاحظات الإدارية</span>
-                  </h4>
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label className="text-xs font-semibold text-rose-600 block text-right">قيمة الخصم العام (على الفاتورة)</Label>
-                        <InlinePriceInput 
-                          value={discountAmount}
-                          onChange={setDiscountAmount}
-                          label=""
-                          showLabel={false}
-                          className="w-full border-rose-150 text-rose-600"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs text-muted-foreground block leading-relaxed text-right">ملاحظات وسبب منح الخصم</Label>
-                        <Input 
-                          dir="rtl"
-                          value={discountReason}
-                          onChange={(e) => setDiscountReason(e.target.value)}
-                          placeholder="مثال: خصم تعاقدي، تسوية مالية..." 
-                          className="h-10 text-xs rounded-lg text-right"
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-muted-foreground block leading-relaxed text-right">ملاحظات الفاتورة والتكاليف العامة</Label>
-                      <Textarea 
-                        dir="rtl"
-                        value={notes} 
-                        onChange={(e) => setNotes(e.target.value)}
-                        placeholder="اكتب أي ملاحظات إدارية تود إظهارها على كشف حساب مراجعة الأرباح أو الفاتورة..." 
-                        rows={3} 
-                        className="text-xs rounded-lg resize-none leading-relaxed text-right"
-                      />
-                    </div>
-                  </div>
-                </div>
-
               </TabsContent>
+
             </ScrollArea>
           </Tabs>
         )}
 
-        {/* ═══════ STICKY FOOTER ═══════ */}
-        <div dir="rtl" className="shrink-0 border-t border-border/15 bg-card/95 backdrop-blur-md px-5 sm:px-6 py-4 flex items-center justify-between gap-4 shadow-[0_-4px_20px_rgba(0,0,0,0.03)] text-right">
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={isSaving}
-            className="rounded-xl px-5 text-xs sm:text-sm font-semibold border-border/20 h-11 hover:bg-muted/50 transition-colors shrink-0"
-          >
-            إلغاء
-          </Button>
-
-          <div className="hidden sm:flex items-center gap-4 px-4 py-1.5 rounded-xl bg-muted/30 border border-border/15">
-            <div className="text-center">
-              <div className="text-[10px] font-semibold text-muted-foreground/80 uppercase">العميل</div>
-              <div className="text-sm font-bold font-mono text-emerald-600 leading-tight">{customerTotal.toLocaleString('ar-LY')} <span className="text-[10px] text-muted-foreground/60">د.ل</span></div>
-            </div>
-            <div className="h-8 w-px bg-border/20" />
-            <div className="text-center">
-              <div className="text-[10px] font-semibold text-muted-foreground/80 uppercase">التكلفة</div>
-              <div className="text-sm font-bold font-mono text-amber-600 leading-tight">{companyTotal.toLocaleString('ar-LY')} <span className="text-[10px] text-muted-foreground/60">د.ل</span></div>
-            </div>
-            <div className="h-8 w-px bg-border/20" />
-            <div className="text-center">
-              <div className="text-[10px] font-semibold text-muted-foreground/80 uppercase">صافي الربح</div>
-              <div className={cn("text-sm font-bold font-mono leading-tight flex items-center gap-1 justify-center", netProfit >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                {netProfit >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
-                <span>{netProfit.toLocaleString('ar-LY')}</span>
-                <span className="text-[10px] text-muted-foreground/60">د.ل · {profitPercentage.toFixed(0)}%</span>
+        <div className="shrink-0 border-t border-primary/20 bg-card/95 px-4 py-3 sm:px-6" dir="rtl">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center sm:gap-5">
+              <div>
+                <div className="text-[9px] font-bold text-muted-foreground">قيمة العملية</div>
+                <div className="mt-0.5 font-mono text-sm font-black text-emerald-300">{customerTotal.toLocaleString('ar-LY')} د.ل</div>
+              </div>
+              <div>
+                <div className="text-[9px] font-bold text-muted-foreground">تكلفة الشركة</div>
+                <div className="mt-0.5 font-mono text-sm font-black text-amber-300">{companyTotal.toLocaleString('ar-LY')} د.ل</div>
+              </div>
+              <div>
+                <div className="text-[9px] font-bold text-muted-foreground">صافي الربح</div>
+                <div className={cn("mt-0.5 font-mono text-sm font-black", netProfit >= 0 ? "text-emerald-300" : "text-rose-300")}>
+                  {netProfit.toLocaleString('ar-LY')} د.ل
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Mobile compact total */}
-          <div className="flex sm:hidden flex-col text-center px-2 min-w-0">
-            <span className="text-[10px] text-muted-foreground/80 font-semibold uppercase">المستحق</span>
-            <span className="text-base font-bold font-mono text-emerald-600 leading-none">{customerTotal.toLocaleString('ar-LY')} <span className="text-[10px] text-muted-foreground/60">د.ل</span></span>
-          </div>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:flex sm:items-center">
+              <Button
+                onClick={handleSaveAll}
+                disabled={distributing || isSaving || loading}
+                className="h-11 min-w-0 rounded-xl bg-primary px-5 text-sm font-black text-primary-foreground shadow-sm transition-all duration-200 hover:bg-primary/90 sm:min-w-64"
+              >
+                {distributing || isSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>جاري الحفظ والمزامنة...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" />
+                    <span>حفظ العملية وتحديث الفاتورة</span>
+                  </>
+                )}
+              </Button>
 
-          <Button
-            onClick={handleSave}
-            disabled={isSaving || loading}
-            className="rounded-xl px-6 text-sm font-bold h-11 shadow-md shadow-primary/15 transition-transform duration-200 active:scale-[0.98] shrink-0 gap-2"
-          >
-            {isSaving ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                <span>جاري الحفظ...</span>
-              </>
-            ) : (
-              <>
-                <Save className="h-4 w-4 shrink-0" />
-                <span>حفظ التعديلات</span>
-              </>
-            )}
-          </Button>
+              <Button
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={distributing || isSaving}
+                className="h-11 rounded-xl border-border/40 px-5 text-xs font-black"
+              >
+                إلغاء
+              </Button>
+            </div>
+          </div>
         </div>
+
       </SheetContent>
     </Sheet>
   );

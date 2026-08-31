@@ -23,6 +23,7 @@ import { TablePrintSettingsDialog } from '@/components/tasks/TablePrintSettingsD
 import { createPinSvgUrl, getBillboardStatus } from '@/hooks/useMapMarkers';
 import { formatFacesCountArabic } from '@/lib/utils';
 import { preparePrintWindow, writePrintWindow } from '@/utils/printWindowHelper';
+import { resolveInstallationFacesCount } from '@/lib/installationFaces';
 
 export type PrintContextType = 'installation' | 'removal' | 'contract' | 'offer';
 
@@ -41,7 +42,11 @@ export interface BillboardPrintItem {
   overlay_config?: any;
   previous_ad?: string | null;
   previous_ad_type?: string | null;
+  faces_to_install?: number | null;
 }
+
+const resolveFacesCount = (item: BillboardPrintItem, billboard: any): number =>
+  resolveInstallationFacesCount(item, billboard);
 
 export interface UnifiedPrintAllDialogProps {
   open: boolean;
@@ -616,9 +621,13 @@ export function UnifiedPrintAllDialog({
       if (!billboard) continue;
 
       const bIdKey = String(item.billboard_id);
+      const facesCount = resolveFacesCount(item, billboard);
+      const supportsBackFace = facesCount > 1;
       const dynDesign = freshDesigns[bIdKey] || dynamicDesignsMap[item.billboard_id] || dynamicDesignsMap[Number(item.billboard_id)];
       const designFaceA = item.design_face_a || billboard.design_face_a || billboard.installed_design_face_a || dynDesign?.design_face_a || null;
-      const designFaceB = item.design_face_b || billboard.design_face_b || billboard.installed_design_face_b || dynDesign?.design_face_b || null;
+      const designFaceB = supportsBackFace
+        ? item.design_face_b || billboard.design_face_b || billboard.installed_design_face_b || dynDesign?.design_face_b || null
+        : null;
       const itemPreviousAd = (item as any).previous_ad || (item as any).previous_ad_type || 
                              freshPrevAds[bIdKey] || 
                              previousAdsData[item.billboard_id] || previousAdsData[bIdKey] || previousAdsData[Number(item.billboard_id)] || 
@@ -627,7 +636,9 @@ export function UnifiedPrintAllDialog({
       // إذا كان خيار صور التركيب مفعّل، نجلبها من البيانات المحملة
       const fetchedInstalled = showInstalledImages ? installedImagesData[item.billboard_id] : null;
       const installedImageFaceA = item.installed_image_face_a_url || fetchedInstalled?.face_a || null;
-      const installedImageFaceB = item.installed_image_face_b_url || fetchedInstalled?.face_b || null;
+      const installedImageFaceB = supportsBackFace
+        ? item.installed_image_face_b_url || fetchedInstalled?.face_b || null
+        : null;
       
       const mainImage = installedImageFaceA && !installedImageFaceB 
         ? installedImageFaceA 
@@ -666,7 +677,6 @@ export function UnifiedPrintAllDialog({
       const district = billboard.District || '';
       const landmark = billboard.Nearest_Landmark || '';
       const size = billboard.Size || '';
-      const facesCount = billboard.Faces_Count || 1;
       const municipalityDistrict = [municipality, district].filter(Boolean).join(' - ') || '—';
 
       const installationDate = (!hideInstallDate && item.installation_date)
@@ -1138,19 +1148,21 @@ export function UnifiedPrintAllDialog({
     sortedItems.forEach(item => {
       const billboard = billboards[item.billboard_id];
       if (!billboard) return;
+      const facesCount = resolveFacesCount(item, billboard);
+      const supportsBackFace = facesCount > 1;
       enabledColumns.forEach(col => {
         switch (col.id) {
           case 'row_number': columnHasData[col.id] = true; break;
           case 'billboard_image': if (billboard.Image_URL) columnHasData[col.id] = true; break;
           case 'billboard_name': if (billboard.Billboard_Name) columnHasData[col.id] = true; break;
           case 'size': if (billboard.Size) columnHasData[col.id] = true; break;
-          case 'faces_count': if (billboard.Faces_Count) columnHasData[col.id] = true; break;
+          case 'faces_count': columnHasData[col.id] = true; break;
           case 'location': if ((printCityInsteadOfMunicipality ? billboard.City : billboard.Municipality) || billboard.District) columnHasData[col.id] = true; break;
           case 'landmark': if (billboard.Nearest_Landmark) columnHasData[col.id] = true; break;
           case 'contract_number': if (item.contract_number || contextNumber) columnHasData[col.id] = true; break;
           case 'installation_date': if (!hideInstallDate && item.installation_date) columnHasData[col.id] = true; break;
-          case 'design_images': if (item.design_face_a || item.design_face_b) columnHasData[col.id] = true; break;
-          case 'installed_images': if (item.installed_image_face_a_url || item.installed_image_face_b_url) columnHasData[col.id] = true; break;
+          case 'design_images': if (item.design_face_a || (supportsBackFace && item.design_face_b)) columnHasData[col.id] = true; break;
+          case 'installed_images': if (item.installed_image_face_a_url || (supportsBackFace && item.installed_image_face_b_url)) columnHasData[col.id] = true; break;
           case 'qr_code': if (billboard.GPS_Coordinates) columnHasData[col.id] = true; break;
         }
       });
@@ -1173,7 +1185,8 @@ export function UnifiedPrintAllDialog({
         const globalIndex = pageIndex * rowsPerPage + index + 1;
         const name = billboard.Billboard_Name || `لوحة ${item.billboard_id}`;
         const size = billboard.Size || '';
-        const facesCount = billboard.Faces_Count || 1;
+        const facesCount = resolveFacesCount(item, billboard);
+        const supportsBackFace = facesCount > 1;
         const municipality = printCityInsteadOfMunicipality ? (billboard.City || '') : (billboard.Municipality || '');
         const itemContractNumber = item.contract_number || contextNumber;
         const itemAdType = item.ad_type || adType || '';
@@ -1195,7 +1208,9 @@ export function UnifiedPrintAllDialog({
         const bIdKey = String(item.billboard_id);
         const dynDesign = freshDesigns[bIdKey] || dynamicDesignsMap[item.billboard_id] || dynamicDesignsMap[Number(item.billboard_id)];
         const tblDesignFaceA = item.design_face_a || billboard.design_face_a || billboard.installed_design_face_a || dynDesign?.design_face_a || null;
-        const tblDesignFaceB = item.design_face_b || billboard.design_face_b || billboard.installed_design_face_b || dynDesign?.design_face_b || null;
+        const tblDesignFaceB = supportsBackFace
+          ? item.design_face_b || billboard.design_face_b || billboard.installed_design_face_b || dynDesign?.design_face_b || null
+          : null;
         const tblPreviousAd = (item as any).previous_ad || (item as any).previous_ad_type || 
                               freshPrevAds[bIdKey] || 
                               previousAdsData[item.billboard_id] || previousAdsData[bIdKey] || previousAdsData[Number(item.billboard_id)] || 
@@ -1235,7 +1250,9 @@ export function UnifiedPrintAllDialog({
             case 'installed_images':
               const fetchedInst = showInstalledImages ? installedImagesData[item.billboard_id] : null;
               const instA = item.installed_image_face_a_url || fetchedInst?.face_a || null;
-              const instB = item.installed_image_face_b_url || fetchedInst?.face_b || null;
+              const instB = supportsBackFace
+                ? item.installed_image_face_b_url || fetchedInst?.face_b || null
+                : null;
               return `<td class="image-cell"><div class="img-group">
                 ${instA ? `<img src="${instA}" class="installed-img" />` : ''}
                 ${instB ? `<img src="${instB}" class="installed-img" />` : ''}

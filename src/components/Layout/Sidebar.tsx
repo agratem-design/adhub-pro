@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
-import { Home, MapPin, Trash2, Wrench, FileText, Users, Merge, TrendingUp, TrendingDown, CreditCard, DollarSign, Calculator, Calendar, BarChart3, Settings, LogOut, Printer, Database, AlertCircle, MessageSquare, Moon, Sun, Hammer, Scissors, Building2, Link, Briefcase, FileSpreadsheet, AlertTriangle, CalendarPlus, Percent, Palette, Shield, Images, Image, ChevronDown, Send, Camera, Activity, Bot, Upload, CloudUpload, Download, Receipt, Type } from 'lucide-react';
+import { Home, MapPin, Trash2, Wrench, FileText, Users, Merge, TrendingUp, TrendingDown, CreditCard, DollarSign, Calculator, Calendar, BarChart3, Settings, LogOut, Printer, Database, AlertCircle, MessageSquare, Moon, Sun, FolderKanban, Building2, Link, Briefcase, FileSpreadsheet, AlertTriangle, CalendarPlus, Percent, Palette, Shield, Images, Image, ChevronDown, Send, Camera, Activity, Bot, Upload, CloudUpload, Download, Receipt, Type } from 'lucide-react';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -14,6 +14,7 @@ interface SidebarItem {
   path: string;
   icon: LucideIcon;
   permission?: string;
+  permissions?: string[];
 }
 
 interface SidebarSection {
@@ -54,11 +55,14 @@ const sidebarSections: SidebarSection[] = [
     icon: Calendar,
     items: [
       { id: 'tasks', label: 'المهمات اليومية', icon: Calendar, path: '/admin/tasks' },
-      { id: 'installation_tasks', label: 'التركيب', icon: Hammer, path: '/admin/installation-tasks' },
+      {
+        id: 'comprehensive_installation_tasks',
+        label: 'مهام التركيب الشاملة',
+        icon: FolderKanban,
+        path: '/admin/composite-tasks',
+        permissions: ['installation_tasks', 'print_tasks', 'cutout_tasks', 'composite_tasks'],
+      },
       { id: 'removal_tasks', label: 'الإزالة', icon: Trash2, path: '/admin/removal-tasks' },
-      { id: 'print_tasks', label: 'الطباعة', icon: Printer, path: '/admin/print-tasks' },
-      { id: 'cutout_tasks', label: 'المجسمات', icon: Scissors, path: '/admin/cutout-tasks' },
-      { id: 'composite_tasks', label: 'المهام المجمعة', icon: FileText, path: '/admin/composite-tasks' },
       { id: 'design_studio', label: 'استوديو التصميم', icon: Palette, path: '/admin/design-studio', permission: 'tasks' },
       { id: 'image_gallery', label: 'معرض الصور', icon: Images, path: '/admin/image-gallery' },
       { id: 'drive_uploader', label: 'رافع ملفات Google Drive', icon: CloudUpload, path: '/admin/drive-uploader' },
@@ -187,33 +191,42 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
   const navigate = useNavigate();
   const { profile, user, signOut, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const canViewItem = useCallback((item: SidebarItem) => (
+    item.permissions?.length
+      ? item.permissions.some(permission => hasPermission(permission))
+      : hasPermission(item.permission || item.id)
+  ), [hasPermission]);
 
   const filteredCoreItems = useMemo(
-    () => coreItems.filter(item => hasPermission(item.permission || item.id)),
-    [hasPermission]
+    () => coreItems.filter(canViewItem),
+    [canViewItem]
   );
 
   const filteredSections = useMemo(
     () => sidebarSections
       .map(section => ({
         ...section,
-        items: section.items.filter(item => hasPermission(item.permission || item.id))
+        items: section.items.filter(canViewItem)
       }))
       .filter(section => section.items.length > 0),
-    [hasPermission]
+    [canViewItem]
   );
 
   const isActive = useCallback((path: string) => {
     if (path === '/admin') return location.pathname === '/admin';
+    if (path === '/admin/composite-tasks') {
+      return ['/admin/composite-tasks', '/admin/installation-tasks', '/admin/print-tasks', '/admin/cutout-tasks']
+        .some(alias => location.pathname.startsWith(alias));
+    }
     return location.pathname.startsWith(path);
   }, [location.pathname]);
 
   const activeSectionIds = useMemo(
     () =>
       filteredSections
-        .filter((section) => section.items.some((item) => location.pathname.startsWith(item.path)))
+        .filter((section) => section.items.some((item) => isActive(item.path)))
         .map((section) => section.id),
-    [location.pathname, filteredSections],
+    [filteredSections, isActive],
   );
 
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());

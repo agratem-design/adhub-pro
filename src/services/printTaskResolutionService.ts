@@ -1,10 +1,12 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════
- * 📁 Print Task Resolution Service
+ * Print Task Resolution Service
  * ═══════════════════════════════════════════════════════════════════════════
  * Pure, deterministic business logic service for resolving, validating,
  * and pricing print tasks from installation items with zero cross-contamination.
  */
+
+import { resolveInstallationFacesCount } from '@/lib/installationFaces';
 
 export interface InstallationItemInput {
   id: string;
@@ -395,7 +397,12 @@ export function resolveAndValidatePrintItems(params: {
 
     const { width, height } = dimRes;
     const area = width * height;
-    const facesToInstall = item.faces_to_install || billboard.facesCount || 1;
+    // عدد أوجه المهمة لا يجوز أن يتجاوز عدد الأوجه الفعلي للوحة.
+    // هذا يمنع إنشاء وجه خلفي من تصميم قديم للوحة ذات وجه واحد.
+    const facesToInstall = resolveInstallationFacesCount(
+      item,
+      { Faces_Count: billboard.facesCount },
+    );
 
     // Design resolution
     const designRes = resolveItemDesign(item, billboard, taskDesignsMap, contractDesignDataMap);

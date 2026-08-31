@@ -14,6 +14,7 @@ import { Separator } from '@/components/ui/separator';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
+import { findOptimalTeamForRemoval, sortTeamsByPriority } from '@/utils/teamAssignment';
 import { 
   Search, 
   MapPin,
@@ -252,22 +253,12 @@ export function ManualRemovalTaskDialog({
         let teamId = selectedTeamId;
 
         if (!teamId) {
-          // توزيع تلقائي حسب المقاس والمدينة
-          let matchedTeam = teams.find(team => {
-            const hasSize = team.sizes && team.sizes.length > 0 && team.sizes.some((s: string) => s.trim() === billboardSize.trim());
-            const hasCities = team.cities && team.cities.length > 0;
-            const hasCity = hasCities && team.cities.some((c: string) => c.trim() === billboardCity.trim());
-            return hasSize && (!hasCities || hasCity);
-          });
-
-          if (!matchedTeam) {
-            matchedTeam = teams.find(team => {
-              return team.sizes && team.sizes.length > 0 && team.sizes.some((s: string) => s.trim() === billboardSize.trim());
-            });
-          }
-
-          teamId = matchedTeam?.id || (teams.length > 0 ? teams[0].id : '');
+          // توزيع تلقائي ذكي حسب الرتبة والأولوية وتخصص الفرقة والشركة الصديقة
+          const optimalTeam = findOptimalTeamForRemoval(teams, billboard?.Size, billboard?.City, billboard?.friend_company_id);
+          teamId = optimalTeam?.id || (teams.length > 0 ? sortTeamsByPriority(teams)[0]?.id : '');
         }
+
+        if (!teamId) continue;
 
         if (!teamBillboardsMap.has(teamId)) {
           teamBillboardsMap.set(teamId, []);
@@ -766,15 +757,20 @@ export function ManualRemovalTaskDialog({
                     <Label className="text-base font-medium">اختر فريق الإزالة</Label>
                     <Select value={selectedTeamId || 'auto'} onValueChange={(v) => setSelectedTeamId(v === 'auto' ? '' : v)}>
                       <SelectTrigger className="h-11">
-                        <SelectValue placeholder="تحديد تلقائي حسب المقاس والمدينة" />
+                        <SelectValue placeholder="توزيع تلقائي ذكي حسب الرتبة والأولوية" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="auto">تحديد تلقائي حسب المقاس والمدينة</SelectItem>
-                        {teams.filter(team => team.id && team.id.trim() !== '').map(team => (
+                        <SelectItem value="auto">توزيع تلقائي ذكي (حسب الرتبة والأولوية والمقاس والمدينة)</SelectItem>
+                        {sortTeamsByPriority(teams.filter(team => team.id && team.id.trim() !== '')).map((team, idx) => (
                           <SelectItem key={team.id} value={team.id} className="py-2.5">
-                            <div className="flex items-center gap-2">
-                              <Users className="h-4 w-4" />
-                              {team.team_name}
+                            <div className="flex items-center justify-between w-full gap-2">
+                              <div className="flex items-center gap-2">
+                                <Users className="h-4 w-4 text-primary" />
+                                <span>{team.team_name}</span>
+                              </div>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold">
+                                رتبة #{idx + 1} (أولوية: {team.priority || 0})
+                              </span>
                             </div>
                           </SelectItem>
                         ))}

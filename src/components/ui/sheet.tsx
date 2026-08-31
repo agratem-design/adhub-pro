@@ -4,8 +4,26 @@ import { X } from "lucide-react";
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
+import { scheduleModalInteractionRecovery } from "@/lib/modalInteractionRecovery";
 
-const Sheet = SheetPrimitive.Root;
+const Sheet = ({ open, onOpenChange, ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) => {
+  React.useEffect(() => {
+    if (open === false) scheduleModalInteractionRecovery();
+    return scheduleModalInteractionRecovery;
+  }, [open]);
+
+  return (
+    <SheetPrimitive.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        onOpenChange?.(nextOpen);
+        if (!nextOpen) scheduleModalInteractionRecovery();
+      }}
+      {...props}
+    />
+  );
+};
+Sheet.displayName = SheetPrimitive.Root.displayName;
 
 const SheetTrigger = SheetPrimitive.Trigger;
 
@@ -59,9 +77,8 @@ const SheetContent = React.forwardRef<React.ElementRef<typeof SheetPrimitive.Con
         ref={ref}
         className={cn(sheetVariants({ side }), className)}
         onCloseAutoFocus={(e) => {
-          // ✅ إصلاح التجميد: إعادة pointer-events على body عند إغلاق الـ Sheet
           e.preventDefault();
-          document.body.style.pointerEvents = '';
+          scheduleModalInteractionRecovery();
           onCloseAutoFocus?.(e);
         }}
         {...props}

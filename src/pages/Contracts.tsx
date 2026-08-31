@@ -1378,8 +1378,8 @@ export default function Contracts() {
       <DoubleBillboardDetector />
 
       {/* البحث والفلاتر المحسّنة */}
-      <Card className="border-0 shadow-sm bg-gradient-to-l from-muted/30 to-background">
-        <CardContent className="p-4">
+      <Card className="rounded-2xl border border-border/60 bg-card/80 shadow-[0_18px_50px_-38px_hsl(var(--primary)/0.55)] backdrop-blur-xl">
+        <CardContent className="p-3 sm:p-4">
           <div className="flex flex-col gap-3">
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1 min-w-0">
@@ -1388,13 +1388,13 @@ export default function Contracts() {
                   placeholder="ابحث برقم العقد، اسم العميل، أو نوع الإعلان..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pr-10 bg-background border-border/50"
+                  className="h-10 rounded-xl pr-10 bg-background/80 border-border/60 focus-visible:ring-primary/40"
                 />
               </div>
             
               <div className="flex gap-2 flex-wrap">
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-40 bg-background">
+                <SelectTrigger className="h-10 w-40 rounded-xl bg-background/80">
                   <SelectValue placeholder="حالة العقد" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1433,7 +1433,7 @@ export default function Contracts() {
               </Select>
 
               <Select value={customerFilter} onValueChange={setCustomerFilter}>
-                <SelectTrigger className="w-44 bg-background">
+                <SelectTrigger className="h-10 w-44 rounded-xl bg-background/80">
                   <SelectValue placeholder="العميل" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1445,6 +1445,19 @@ export default function Contracts() {
                   ))}
                 </SelectContent>
               </Select>
+
+              <Button
+                type="button"
+                variant={advancedFiltersOpen ? 'secondary' : 'outline'}
+                size="sm"
+                onClick={() => setAdvancedFiltersOpen((open) => !open)}
+                aria-expanded={advancedFiltersOpen}
+                className="h-10 gap-2 rounded-xl px-3 cursor-pointer transition-all duration-200"
+              >
+                <SlidersHorizontal className="h-4 w-4 text-primary" />
+                <span>فلاتر متقدمة</span>
+                <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${advancedFiltersOpen ? 'rotate-180' : ''}`} />
+              </Button>
 
               {(searchQuery || statusFilter !== 'all' || customerFilter !== 'all' || yearFilter !== 'all' || startMonthFilter !== 'all' || endMonthFilter !== 'all') && (
                 <Button 
@@ -1466,6 +1479,8 @@ export default function Contracts() {
             </div>
             </div>
             
+            {advancedFiltersOpen && (
+            <div className="space-y-3 border-t border-border/50 pt-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-200">
             {/* أزرار السنوات السريعة */}
             <div className="flex items-center gap-2 mt-3 flex-wrap">
               <span className="text-sm text-muted-foreground">السنة:</span>
@@ -1566,8 +1581,7 @@ export default function Contracts() {
                 </SelectContent>
               </Select>
             </div>
-          </div>
-          
+
           {/* خيارات العرض الإضافية */}
           <div className="flex items-center gap-4 mt-3 pt-3 border-t border-border/50 flex-wrap">
             <label className="flex items-center gap-2 cursor-pointer">
@@ -1591,6 +1605,8 @@ export default function Contracts() {
               <span className="text-sm">فصل المنتهية</span>
             </label>
           </div>
+            </div>
+            )}
           
           {/* عداد النتائج وزر تحديد النطاق */}
           <div className="flex items-center justify-between gap-2 mt-3 text-sm text-muted-foreground">
@@ -1609,6 +1625,7 @@ export default function Contracts() {
                 onSelectRange={handleRangeSelection}
               />
             )}
+          </div>
           </div>
         </CardContent>
       </Card>
@@ -1744,7 +1761,7 @@ export default function Contracts() {
                   <CheckCircle className="h-5 w-5 text-primary" />
                   العقود النشطة ({allFilteredActiveContracts.length})
                 </h3>
-                <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))' }}>
+                <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
                   {activeContracts.map((contract) => (
                     <ContractCard
                       key={contract.id}
@@ -1868,7 +1885,7 @@ export default function Contracts() {
                     <AlertCircle className="h-5 w-5" />
                     العقود المنتهية ({allFilteredExpiredContracts.length})
                   </h3>
-                  <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))' }}>
+                  <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
                     {expiredContracts.map((contract) => (
                       <ContractCard
                         key={contract.id}
@@ -1985,7 +2002,7 @@ export default function Contracts() {
               )}
             </>
           ) : (
-            <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))' }}>
+            <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
 
               {/* Pagination أعلى */}
               {totalPages > 1 && (

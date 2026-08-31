@@ -27,8 +27,14 @@ import {
 } from '@/types/invoice-templates';
 import { getMergedInvoiceStylesAsync } from '@/hooks/useInvoiceSettingsSync';
 import { unifiedHeaderHtml, unifiedHeaderFooterCss, unifiedFooterHtml, formatDateForPrint, type UnifiedPrintStyles } from '@/lib/unifiedInvoiceBase';
+import { getCurrentOperationInstallationCost } from '@/lib/compositeTaskOperation';
+import { calculateInstallationArea, resolveInstallationFacesCount } from '@/lib/installationFaces';
 
 export type InvoiceType = 'customer' | 'print_vendor' | 'cutout_vendor' | 'installation_team';
+
+// The comprehensive hub invoices every installation operation separately.
+// Keep historical rows out of the original operation so reinstallations never overlap it.
+const INCLUDE_LEGACY_CUMULATIVE_REINSTALL_ROWS = false;
 
 interface InvoiceItem {
   designImage?: string;
@@ -122,10 +128,7 @@ export function UnifiedTaskInvoice({
             .eq('task_id', t.installation_task_id);
           if (installItems) {
             installItems.forEach(i => {
-              const isReinstalled = (i.reinstall_count || 0) > 0;
-              const itemCost = isReinstalled
-                ? (Number(i.customer_original_install_cost) || 0) + (Number(i.customer_reinstall_cost) || Number(i.customer_installation_cost) || 0)
-                : (Number(i.customer_installation_cost) || 0);
+              const itemCost = getCurrentOperationInstallationCost(i, t.task_type);
               newCustomerInstall += itemCost;
               newCompanyInstall += (Number(i.company_installation_cost) || 0) + (Number(i.additional_cost) || 0);
             });
@@ -247,6 +250,7 @@ export function UnifiedTaskInvoice({
   const [showDimensions, setShowDimensions] = useState(true);
   const [showServiceBreakdown, setShowServiceBreakdown] = useState(false);
   const [whatsAppSending, setWhatsAppSending] = useState(false);
+  const [pdfExporting, setPdfExporting] = useState(false);
   const [showWhatsAppPhoneInput, setShowWhatsAppPhoneInput] = useState(false);
   const [whatsAppManualPhone, setWhatsAppManualPhone] = useState('');
 
@@ -646,11 +650,8 @@ export function UnifiedTaskInvoice({
                 }
               }
 
-              // ✅ استخدام faces_to_install من مهمة التركيب (الأولوية) أو Faces_Count من اللوحة
-              const facesCount = item.faces_to_install || item.billboard?.Faces_Count || 1;
-
-              const areaForItem = (sizeInfo.width * sizeInfo.height) || 0;
-              totalArea += areaForItem * facesCount;
+              const linkedTask = allTasks.find(t => t.installation_task_id === item.task_id);
+              totalArea += calculateInstallationArea(sizeInfo.width, sizeInfo.height, item, item.billboard, linkedTask?.task_type);
             });
 
             // حساب سعر المتر للطباعة - استخدام القيمة من مهمة الطباعة إن وجدت
@@ -708,7 +709,7 @@ export function UnifiedTaskInvoice({
             // إضافة كل عنصر
             installItems.forEach((item: any) => {
               const billboardId = item.billboard?.ID || item.billboard_id;
-              
+
               // Skip if print vendor invoice and not printed
               if (invoiceType === 'print_vendor') {
                 const isPrinted = allPrintIds.length === 0 || printedBillboardIds.has(Number(billboardId));
@@ -731,8 +732,8 @@ export function UnifiedTaskInvoice({
               const faceAImage = designs.face_a || item.design_face_a;
               const faceBImageRaw = designs.face_b || item.design_face_b;
 
-              // ✅ استخدام faces_to_install من مهمة التركيب (الأولوية) أو Faces_Count من اللوحة
-              const actualFacesCount = item.faces_to_install || item.billboard?.Faces_Count || 1;
+              const linkedTask = allTasks.find(t => t.installation_task_id === item.task_id);
+              const actualFacesCount = resolveInstallationFacesCount(item, item.billboard, linkedTask?.task_type);
               const hasBackFace = actualFacesCount >= 2;
               const faceBImage = hasBackFace ? faceBImageRaw : undefined;
 
@@ -761,7 +762,7 @@ export function UnifiedTaskInvoice({
                 // ✅ استخدام company_installation_cost المخزن في عنصر المهمة
                 let itemCompanyCost = item.company_installation_cost || 0;
                 const additionalCostForItem = item.additional_cost || 0;
-                const facesCount = item.faces_to_install || item.billboard?.Faces_Count || 2;
+                const facesCount = actualFacesCount;
 
                 // ✅ كشف التكلفة القديمة لإعادة التركيب
                 const itemReinstallCount = item.reinstall_count || 0;
@@ -1091,30 +1092,17 @@ export function UnifiedTaskInvoice({
                 }
               }
 
-              // ✅ استخدام faces_to_install من مهمة التركيب (الأولوية) أو Faces_Count من اللوحة
-              // ✅ للوحات المُعاد تركيبها: استخدام Faces_Count الكامل (لأن التركيب الأصلي يشمل كل الأوجه)
-              const isReinstalled = (item.reinstall_count || 0) > 0;
-              const facesCount = isReinstalled
-                ? (item.billboard?.Faces_Count || 2)
-                : (item.faces_to_install || item.billboard?.Faces_Count || 1);
-
-              const areaForItem = (sizeInfo.width * sizeInfo.height) || 0;
-              const itemTotalArea = areaForItem * facesCount;
+              const linkedTask = _taskByInstallIdEarly.get(item.task_id);
+              const itemTotalArea = calculateInstallationArea(sizeInfo.width, sizeInfo.height, item, item.billboard, linkedTask?.task_type);
               totalArea += itemTotalArea;
 
               // تحقق من كون اللوحة مشمولة بالطباعة
               const billboardId = item.billboard?.ID || item.billboard_id;
               const isPrinted = allPrintIds.length === 0 || printedBillboardIds.has(Number(billboardId));
 
-              const linkedTask = _taskByInstallIdEarly.get(item.task_id);
-              const itemCustomerInstall = isReinstalled
-                ? (Number(item.customer_original_install_cost) || 0)
-                : (Number(item.customer_installation_cost) || 0);
-              const itemCustomerReinstall = isReinstalled
-                ? (Number(item.customer_reinstall_cost) || 0)
-                : 0;
+              const itemCustomerInstall = getCurrentOperationInstallationCost(item, linkedTask?.task_type);
               const taskCustomerPrint = Number(linkedTask?.customer_print_cost) || 0;
-              const isFreeItem = itemCustomerInstall === 0 && itemCustomerReinstall === 0 && taskCustomerPrint === 0;
+              const isFreeItem = itemCustomerInstall === 0 && taskCustomerPrint === 0;
               if (!isFreeItem && isPrinted) {
                 totalAreaForPriceRate += itemTotalArea;
               }
@@ -1181,12 +1169,7 @@ export function UnifiedTaskInvoice({
                     sizeInfo = { width: parseFloat(match[1]), height: parseFloat(match[2]), installationPrice: 0 };
                   }
                 }
-                const isReinstalled = (item.reinstall_count || 0) > 0;
-                const facesCount = isReinstalled
-                  ? (item.billboard?.Faces_Count || 2)
-                  : (item.faces_to_install || item.billboard?.Faces_Count || 1);
-                const areaForItem = (sizeInfo.width * sizeInfo.height) || 0;
-                const itemTotalArea = areaForItem * facesCount;
+                const itemTotalArea = calculateInstallationArea(sizeInfo.width, sizeInfo.height, item, item.billboard, compTask?.task_type);
                 taskTotalArea += itemTotalArea;
 
                 const billboardId = item.billboard?.ID || item.billboard_id;
@@ -1274,14 +1257,20 @@ export function UnifiedTaskInvoice({
               const faceAImage = designs.face_a || item.design_face_a;
               const faceBImageRaw = designs.face_b || item.design_face_b;
 
-            const billboardTotalFaces = item.billboard?.Faces_Count || 2;
-              const actualFacesCount = item.faces_to_install || billboardTotalFaces;
-              const hasBackFace = actualFacesCount >= 2;
+              const perTaskAgg = perTaskAggMap.get(item.task_id || '') || null;
+              const operationTask = perTaskAgg?.compositeTask || taskByInstallId.get(item.task_id || '') || fallbackTask;
+              const isIndependentReinstallation = operationTask?.task_type === 'reinstallation';
+              const requestedReinstalledFaces = item.reinstalled_faces as 'both' | 'face_a' | 'face_b' | undefined;
+              const actualFacesCount = resolveInstallationFacesCount(item, item.billboard, operationTask?.task_type);
+              const hasBackFace = actualFacesCount >= 2 && (
+                isIndependentReinstallation
+                  ? (requestedReinstalledFaces === 'both' || !requestedReinstalledFaces)
+                  : true
+              );
               const faceBImage = hasBackFace ? faceBImageRaw : undefined;
 
               const areaPerFace = sizeInfo.width * sizeInfo.height;
 
-              const perTaskAgg = perTaskAggMap.get(item.task_id || '') || null;
               const taskPricePerMeter = perTaskAgg ? perTaskAgg.pricePerMeter : 0;
               const taskCutoutBillboardIds = perTaskAgg ? perTaskAgg.cutoutBillboardIds : new Set<number>();
               const taskCutoutCostPerBillboard = perTaskAgg ? perTaskAgg.taskCutoutCostPerBillboard : 0;
@@ -1309,11 +1298,16 @@ export function UnifiedTaskInvoice({
               const itemPricingType = item.pricing_type || 'piece';
               const itemPricePerMeter = item.price_per_meter || 0;
 
-              const hasStoredCustomerCost = item.customer_installation_cost !== null && item.customer_installation_cost !== undefined;
+              const hasStoredCustomerCost = isIndependentReinstallation
+                ? item.customer_reinstall_cost !== null && item.customer_reinstall_cost !== undefined
+                  || item.customer_installation_cost !== null && item.customer_installation_cost !== undefined
+                : item.customer_installation_cost !== null && item.customer_installation_cost !== undefined;
               let itemCustomerInstallationCost = item.customer_installation_cost ?? null;
 
               const itemReinstallCount = item.reinstall_count || 0;
-              if (itemReinstallCount > 0) {
+              if (isIndependentReinstallation) {
+                itemCustomerInstallationCost = getCurrentOperationInstallationCost(item, 'reinstallation');
+              } else if (INCLUDE_LEGACY_CUMULATIVE_REINSTALL_ROWS && itemReinstallCount > 0) {
                 itemCustomerInstallationCost = (item.customer_original_install_cost || 0) + (item.customer_reinstall_cost || item.customer_installation_cost || 0);
               }
 
@@ -1344,8 +1338,55 @@ export function UnifiedTaskInvoice({
               const installPricePerMeterValue = isInstallByMeter ? itemPricePerMeter : undefined;
               const installCalculationType = isInstallByMeter ? 'meter' : 'piece';
 
-              // ✅ اللوحات المُعاد تركيبها: إنشاء صفوف التركيب الأصلي + صفوف إعادات التركيب بشكل منفصل ومتراتب
-              if (itemReinstallCount > 0) {
+              // عملية إعادة تركيب مستقلة: تعرض وتحاسب العملية الحالية فقط.
+              if (isIndependentReinstallation) {
+                const operationFaces: Array<'a' | 'b'> = actualFacesCount < 2
+                  ? (requestedReinstalledFaces === 'face_b' ? ['b'] : ['a'])
+                  : (requestedReinstalledFaces === 'face_b'
+                      ? ['b']
+                      : requestedReinstalledFaces === 'face_a'
+                        ? ['a']
+                        : ['a', 'b']);
+                const installCostPerFace = actualItemInstallCost / Math.max(operationFaces.length, 1);
+                const cutoutCostPerFace = hasCutout ? taskCutoutCostPerBillboard / Math.max(operationFaces.length, 1) : 0;
+                const operationNumber = Number(operationTask?.reinstallationNumber) || itemReinstallCount || 1;
+
+                operationFaces.forEach(face => {
+                  const isBackFace = face === 'b';
+                  const operationDesign = isBackFace ? (faceBImageRaw || faceAImage) : faceAImage;
+                  const operationPrintCost = printCostPerFace;
+                  items.push({
+                    designImage: operationDesign,
+                    face,
+                    sizeName: displaySizeName,
+                    width: sizeInfo.width || 0,
+                    height: sizeInfo.height || 0,
+                    quantity: 1,
+                    area: areaPerFace,
+                    printCost: operationPrintCost,
+                    installationCost: installCostPerFace,
+                    cutoutCost: cutoutCostPerFace,
+                    totalCost: operationPrintCost + installCostPerFace + cutoutCostPerFace,
+                    billboardName: item.billboard?.Billboard_Name || `لوحة #${billboardId}`,
+                    billboardImage,
+                    nearestLandmark,
+                    district,
+                    city,
+                    facesCount: actualFacesCount,
+                    billboardId,
+                    installationPricePerPiece: actualItemInstallCost,
+                    installationCalculationType: installCalculationType,
+                    billboardType,
+                    reinstallCount: operationNumber,
+                    isReinstallation: true,
+                    isOriginalInstallation: false,
+                    isReplacement: item.replaces_item_id ? true : false,
+                    reinstallInstalledImageA: item.installed_image_face_a_url || undefined,
+                    reinstallInstalledImageB: item.installed_image_face_b_url || undefined,
+                  });
+                });
+              // السجل التراكمي القديم يبقى للمهام الأصلية فقط، ولا يدخل في عملية مستقلة جديدة.
+              } else if (itemReinstallCount > 0) {
                 const origCost = Number(item.customer_original_install_cost) || (hasStoredCustomerCost ? (item.customer_installation_cost ?? 0) : actualItemInstallCost);
                 const origCostPerFace = origCost / facesCountForBillboard;
                 const origBillboardId = billboardId + 100000;
@@ -1420,9 +1461,11 @@ export function UnifiedTaskInvoice({
 
                 // 2. ========== صفوف إعادات التركيب (إعادة تركيب 1، إعادة تركيب 2...) ==========
                 const reinstallCost = Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0;
-                const reinstallFacesCount = item.reinstalled_faces === 'both' ? 2 : 1;
+                const reinstallFacesCount = (actualFacesCount >= 2 && item.reinstalled_faces === 'both') ? 2 : (actualFacesCount >= 2 && !item.reinstalled_faces ? 2 : 1);
                 const reinstallCostPerFace = reinstallCost / reinstallFacesCount;
-                const reinstalledFaces = item.reinstalled_faces || 'both';
+                const reinstalledFaces = actualFacesCount < 2
+                  ? (item.reinstalled_faces === 'face_b' ? 'face_b' : 'face_a')
+                  : (item.reinstalled_faces || 'both');
 
                 for (let r = 1; r <= itemReinstallCount; r++) {
                   const reinstallBillboardId = billboardId + 200000 + (r - 1) * 10000;
@@ -1578,16 +1621,31 @@ export function UnifiedTaskInvoice({
           }
         } else if (allPrintIds.length > 0) {
           // فولباك: من print_task_items (جميع المهام)
-          const { data: printItems } = await supabase
+          const { data: rawPrintItems } = await supabase
             .from('print_task_items')
-            .select('*')
+            .select('*, billboard:billboards!print_task_items_billboard_id_fkey(Faces_Count)')
             .in('task_id', allPrintIds);
 
-          totalArea = printItems?.reduce((sum: number, item: any) => sum + (item.area * item.quantity), 0) || 0;
+          // قد تحتوي مهام طباعة قديمة على صف وجه خلفي أُنشئ قبل تصحيح عدد الأوجه.
+          // العدد الفعلي للوحة هو المرجع النهائي، لذلك نستبعد الوجه الخلفي للوحة ذات الوجه الواحد.
+          const printItems = (rawPrintItems || []).filter((item: any) => {
+            const physicalFacesCount = resolveInstallationFacesCount(
+              { faces_to_install: item.faces_count },
+              item.billboard,
+            );
+            const isBackFaceOnly = Boolean(item.design_face_b) && !item.design_face_a;
+            return !(physicalFacesCount === 1 && isBackFaceOnly);
+          });
+
+          totalArea = printItems.reduce((sum: number, item: any) => sum + (item.area * item.quantity), 0);
           pricePerMeter = totalArea > 0 ? aggCustomerPrint / totalArea : 0;
 
-          printItems?.forEach((item: any) => {
+          printItems.forEach((item: any) => {
             const itemPrintCost = item.area * item.quantity * pricePerMeter;
+            const physicalFacesCount = resolveInstallationFacesCount(
+              { faces_to_install: item.faces_count },
+              item.billboard,
+            );
             if (item.design_face_a) {
               items.push({
                 designImage: item.design_face_a,
@@ -1603,7 +1661,7 @@ export function UnifiedTaskInvoice({
                 totalCost: itemPrintCost,
               });
             }
-            if (item.design_face_b) {
+            if (physicalFacesCount > 1 && item.design_face_b) {
               items.push({
                 designImage: item.design_face_b,
                 face: 'b',
@@ -1824,13 +1882,15 @@ export function UnifiedTaskInvoice({
         setSelectedInstallationTeam('');
       }
 
+      const finalTotalArea = finalItems.reduce((sum, item) => sum + (Number(item.area) || 0), 0);
+
       setData({
         items: finalItems,
         vendorName,
         teamName: finalTeamName,
         pricePerMeter,
         cutoutPricePerUnit,
-        totalArea,
+        totalArea: finalTotalArea,
         totalCutouts,
         totalCost: finalTotalCost,
       });
@@ -1852,6 +1912,7 @@ export function UnifiedTaskInvoice({
         ...prev,
         items: selectedBucket.items,
         teamName: selectedBucket.teamName,
+        totalArea: selectedBucket.items.reduce((sum, item) => sum + (Number(item.area) || 0), 0),
         totalCost: selectedBucket.totalCost,
       };
     });
@@ -1898,6 +1959,143 @@ export function UnifiedTaskInvoice({
     }
   };
 
+  const buildInvoiceLayoutCss = () => `
+    [data-invoice-print] {
+      --invoice-gold: ${primaryColor};
+      --invoice-gold-soft: #f6edda;
+      --invoice-ink: #1d1b17;
+      --invoice-muted: #6f685c;
+      --invoice-line: #ddd5c5;
+    }
+    [data-invoice-print] .invoice-recipient-card {
+      display: grid !important;
+      grid-template-columns: minmax(0, 1fr) auto !important;
+      align-items: center !important;
+      gap: 14px !important;
+      padding: 10px 12px !important;
+      margin-bottom: 8px !important;
+      border: 1px solid #e4dac4 !important;
+      border-right: 4px solid var(--invoice-gold) !important;
+      border-radius: 10px !important;
+      background: #fffdf8 !important;
+      box-shadow: none !important;
+    }
+    [data-invoice-print] .invoice-recipient-label {
+      color: #847a67 !important;
+      font-size: 8.5px !important;
+      font-weight: 700 !important;
+      margin-bottom: 2px !important;
+    }
+    [data-invoice-print] .invoice-recipient-name {
+      color: var(--invoice-ink) !important;
+      font-size: 17px !important;
+      font-weight: 700 !important;
+      line-height: 1.25 !important;
+    }
+    [data-invoice-print] .invoice-recipient-subtitle {
+      color: var(--invoice-muted) !important;
+      font-size: 9px !important;
+      font-weight: 600 !important;
+      margin-top: 3px !important;
+    }
+    [data-invoice-print] .invoice-overview-stats {
+      display: grid !important;
+      grid-template-columns: repeat(3, minmax(58px, auto)) !important;
+      gap: 5px !important;
+    }
+    [data-invoice-print] .invoice-overview-stat {
+      min-width: 58px !important;
+      padding: 6px 8px !important;
+      border: 1px solid #e9e0ce !important;
+      border-radius: 8px !important;
+      background: #ffffff !important;
+      text-align: center !important;
+    }
+    [data-invoice-print] .invoice-overview-stat strong {
+      display: block !important;
+      color: var(--invoice-ink) !important;
+      font-family: Manrope, sans-serif !important;
+      font-size: 13px !important;
+      line-height: 1.1 !important;
+    }
+    [data-invoice-print] .invoice-overview-stat span {
+      display: block !important;
+      color: var(--invoice-muted) !important;
+      font-size: 7.5px !important;
+      font-weight: 700 !important;
+      margin-top: 2px !important;
+    }
+    [data-invoice-print] .invoice-size-summary {
+      margin: 0 0 7px !important;
+      padding: 6px 8px !important;
+      border: 1px solid #e8dfcf !important;
+      border-radius: 9px !important;
+      background: #fbfaf7 !important;
+    }
+    [data-invoice-print] .invoice-size-summary-title {
+      color: var(--invoice-ink) !important;
+      font-size: 9px !important;
+      font-weight: 700 !important;
+    }
+    [data-invoice-print] .invoice-size-chip {
+      padding: 3px 7px !important;
+      border: 1px solid #dfd3bb !important;
+      border-radius: 999px !important;
+      background: #ffffff !important;
+      color: #463f33 !important;
+      font-size: 8.5px !important;
+      font-weight: 700 !important;
+    }
+    [data-invoice-print] .invoice-items-table {
+      border: 1px solid var(--invoice-line) !important;
+      border-top: 3px solid var(--invoice-gold) !important;
+      margin-bottom: 8px !important;
+    }
+    [data-invoice-print] .invoice-items-table thead th {
+      padding: 6px 3px !important;
+      border-color: #5c5549 !important;
+      font-size: 9px !important;
+      line-height: 1.35 !important;
+      font-weight: 700 !important;
+    }
+    [data-invoice-print] .invoice-items-table tbody td {
+      border-color: var(--invoice-line) !important;
+      line-height: 1.35 !important;
+    }
+    [data-invoice-print] .invoice-items-table tbody tr:nth-child(even) td {
+      background-color: #fbfaf7 !important;
+    }
+    [data-invoice-print] .invoice-items-table tbody tr:nth-child(odd) td {
+      background-color: #ffffff !important;
+    }
+    [data-invoice-print] .invoice-items-table td img {
+      border-radius: 5px !important;
+    }
+    [data-invoice-print] .invoice-items-table tfoot td {
+      padding: 8px 5px !important;
+      border-color: ${tableBorder} !important;
+      font-weight: 700 !important;
+    }
+    [data-invoice-print] .invoice-items-table tfoot tr:last-child td:last-child {
+      color: #f4c25a !important;
+      font-size: 12px !important;
+    }
+    [data-invoice-print] .invoice-total-section {
+      border: 1px solid #29261f !important;
+      border-top: 3px solid var(--invoice-gold) !important;
+      border-radius: 9px !important;
+      box-shadow: none !important;
+    }
+    @media print {
+      [data-invoice-print] .invoice-recipient-card,
+      [data-invoice-print] .invoice-size-summary,
+      [data-invoice-print] .invoice-items-table,
+      [data-invoice-print] .invoice-total-section {
+        break-inside: avoid !important;
+      }
+    }
+  `;
+
   const buildPrintableHtml = () => {
     if (!printRef.current) return '';
 
@@ -1914,29 +2112,61 @@ export function UnifiedTaskInvoice({
   @font-face { font-family: 'Doran'; src: url('/Doran-Bold.otf') format('opentype'); font-weight: 700; }
   @font-face { font-family: 'Manrope'; src: url('/Manrope-Regular.otf') format('opentype'); font-weight: 400; }
   @font-face { font-family: 'Manrope'; src: url('/Manrope-Bold.otf') format('opentype'); font-weight: 700; }
-  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
-  html, body { font-family: '${fontFamily}', 'Noto Sans Arabic', Arial, sans-serif; direction: rtl; background: #fff; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  .print-container { width: 210mm; min-height: 297mm; padding: 15mm; background: #fff; }
+  * { margin: 0; padding: 0; box-sizing: border-box !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+  html, body { font-family: '${fontFamily}', 'Noto Sans Arabic', Arial, sans-serif; direction: rtl; background: #fff; width: 100%; box-sizing: border-box !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  .print-container { width: 100% !important; max-width: 100% !important; min-height: auto; padding: 0 !important; margin: 0 !important; background: #fff; display: block; box-sizing: border-box !important; }
   ${unifiedHeaderFooterCss(unifiedStyles)}
   [data-invoice-print] td { border-color: ${tableBorder} !important; }
-  [data-invoice-print] tbody tr { background-color: #ffffff !important; }
-  table { page-break-inside: auto !important; }
+  ${buildInvoiceLayoutCss()}
+  table { page-break-inside: auto !important; width: 100% !important; max-width: 100% !important; border-collapse: collapse !important; margin-bottom: 8px !important; box-sizing: border-box !important; }
   tr { page-break-inside: avoid !important; break-inside: avoid !important; }
   thead { display: table-header-group; }
-  tfoot { display: table-footer-group; }
+  tfoot { display: table-row-group !important; page-break-inside: avoid !important; break-inside: avoid !important; page-break-before: avoid !important; break-before: avoid !important; }
+  tfoot tr { display: table-row !important; }
   img { page-break-inside: avoid !important; break-inside: avoid !important; }
   td img { position: relative; z-index: 1; max-width: 100% !important; height: auto !important; object-fit: contain !important; }
   td:has(img) { background-color: #fff !important; }
-  [data-no-break], tfoot, tfoot tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+
+  /* Prevent total/summary from breaking alone */
+  .total-section, .cost-section, .summary-section, .cost-summary, [data-no-break] {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    page-break-before: avoid !important;
+    break-before: avoid !important;
+  }
+  tbody tr:last-child {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+  tbody tr:nth-last-child(2) {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+  tbody tr:nth-last-child(3) {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  .u-footer { margin-top: auto; page-break-inside: avoid !important; break-inside: avoid !important; }
   @media print {
-    @page { size: A4; margin: 15mm; }
-    .print-container { width: 100%; min-height: auto; padding: 0; }
+    @page { size: A4 portrait; margin: 8mm 10mm; }
+    * { box-sizing: border-box !important; }
+    .print-container, .page, [data-print-page] { width: 100% !important; max-width: 100% !important; min-height: auto; padding: 0 !important; margin: 0 !important; display: block; box-sizing: border-box !important; }
+    .page { width: 100% !important; height: auto !important; min-height: auto !important; max-height: 297mm !important; }
+    .page:last-child { page-break-after: avoid !important; break-after: avoid !important; }
+    .u-header { width: 100% !important; max-width: 100% !important; padding-top: 2px; }
+    .u-logo { max-height: 86px; width: auto; object-fit: contain; overflow: visible; }
+    .u-footer { width: 100% !important; margin-top: 14px; page-break-inside: avoid !important; break-inside: avoid !important; }
+    .total-section, .cost-section, .summary-section, .cost-summary, [data-no-break] {
+      page-break-before: avoid !important;
+      break-before: avoid !important;
+    }
     * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   }
 </style>
 </head>
 <body>
-<div class="print-container" data-invoice-print>
+<div class="page print-container" data-print-page data-page-title="${getInvoiceTitle() || 'فاتورة المهمة'}" data-invoice-print>
   ${printContent}
 </div>
 </body>
@@ -2037,7 +2267,7 @@ export function UnifiedTaskInvoice({
     return raw || primaryColor;
   })();
   const headerSwap = mergedStyles?.headerSwap === true;
-  const logoSize = mergedStyles?.logoSize || shared.logoSize || 100;
+  const logoSize = Math.min(140, Math.max(88, mergedStyles?.logoSize || shared.logoSize || 112));
   const tableHeaderBg = mergedStyles?.tableHeaderBgColor || individual.tableHeaderBgColor || '#D4AF37';
   const tableHeaderText = mergedStyles?.tableHeaderTextColor || individual.tableHeaderTextColor || '#ffffff';
   const tableBorder = mergedStyles?.tableBorderColor || individual.tableBorderColor || '#D4AF37';
@@ -2072,7 +2302,7 @@ export function UnifiedTaskInvoice({
     showTaxId: mergedStyles?.showTaxId,
     showEmail: mergedStyles?.showEmail,
     showWebsite: mergedStyles?.showWebsite,
-    headerMarginBottom: mergedStyles?.headerMarginBottom || 20,
+    headerMarginBottom: Math.min(16, Math.max(8, mergedStyles?.headerMarginBottom || 12)),
     headerBgColor,
     headerTextColor,
     headerStyle: mergedStyles?.headerStyle || 'classic',
@@ -2080,7 +2310,7 @@ export function UnifiedTaskInvoice({
     primaryColor,
     secondaryColor,
     headerFontSize: mergedStyles?.headerFontSize || 14,
-    invoiceTitleArFontSize: mergedStyles?.invoiceTitleArFontSize || 22,
+    invoiceTitleArFontSize: Math.min(22, mergedStyles?.invoiceTitleArFontSize || 20),
     invoiceTitleEnFontSize: mergedStyles?.invoiceTitleEnFontSize || 12,
     logoContainerWidth: mergedStyles?.logoContainerWidth,
     titleContainerWidth: mergedStyles?.titleContainerWidth,
@@ -2100,9 +2330,9 @@ export function UnifiedTaskInvoice({
   const getInvoiceTitleAr = () => {
     let base = 'فاتورة';
     if (invoiceType === 'customer') {
-      const hasPrint = (task.customer_print_cost || 0) > 0;
-      const hasInstall = (task.customer_installation_cost || 0) > 0;
-      const hasCutout = (task.customer_cutout_cost || 0) > 0;
+      const hasPrint = Boolean(task.print_task_id) || (task.customer_print_cost || 0) > 0;
+      const hasInstall = Boolean(task.installation_task_id) || (task.customer_installation_cost || 0) > 0;
+      const hasCutout = Boolean(task.cutout_task_id) || (task.customer_cutout_cost || 0) > 0;
       const parts: string[] = [];
       if (hasPrint) parts.push('طباعة');
       if (hasInstall) parts.push('تركيب');
@@ -2115,7 +2345,7 @@ export function UnifiedTaskInvoice({
     } else {
       base = 'فاتورة تركيب';
     }
-    return adType ? `${base} • ${adType}` : base;
+    return base;
   };
 
   // Force dynamic title into unified styles
@@ -2147,14 +2377,14 @@ export function UnifiedTaskInvoice({
   const taskSymbolDisplay = taskSymbols.join(' , ');
 
   const metaLinesHtml = `
-    <div>التاريخ: ${formatDateForPrint(task.created_at, mergedStyles?.showHijriDate ?? false)}</div>
-    <div>${contractIds.length > 1
-      ? `أرقام العقود: ${contractIds.map(id => `#${id}`).join(', ')}`
-      : `رقم العقد: #${contractIds[0] ?? task.contract_id ?? ''}`
-    }</div>
-    <div>رمز المهمة: ${taskSymbolDisplay}</div>
-    ${adType ? `<div>نوع الإعلان: ${adType}</div>` : ''}
-    <div>نوع المهمة: ${taskTypeLabel}</div>
+    <div><span>التاريخ</span><strong>${formatDateForPrint(task.created_at, mergedStyles?.showHijriDate ?? false)}</strong></div>
+    <div><span>${contractIds.length > 1 ? 'أرقام العقود' : 'رقم العقد'}</span><strong>${contractIds.length > 1
+      ? contractIds.map(id => `#${id}`).join(', ')
+      : `#${contractIds[0] ?? task.contract_id ?? ''}`
+    }</strong></div>
+    <div><span>رمز المهمة</span><strong>${taskSymbolDisplay}</strong></div>
+    ${adType ? `<div><span>نوع الإعلان</span><strong>${adType}</strong></div>` : ''}
+    <div><span>نوع المهمة</span><strong>${taskTypeLabel}</strong></div>
   `;
 
   if (isLoading) {
@@ -2170,6 +2400,25 @@ export function UnifiedTaskInvoice({
   }
 
   const recipient = getRecipientInfo();
+  const companyName = task.customer?.company;
+  const customerName = task.customer?.name || task.customer_name;
+  const overviewItems = (data?.items || []).filter(item => !item.isReprintDeduction);
+  const overviewBillboardIds = new Set(
+    overviewItems.map(item => item.billboardId).filter((id): id is number => Boolean(id)),
+  );
+  const overviewItemsWithoutBillboard = overviewItems.filter(item => !item.billboardId).length;
+  const overviewBillboardCount = overviewBillboardIds.size + overviewItemsWithoutBillboard;
+  const overviewFaceCount = overviewItems.reduce((sum, item) => sum + (item.face === 'both' ? 2 : 1), 0);
+  const overviewStats = invoiceType === 'cutout_vendor'
+    ? [
+        { label: 'لوحة', value: overviewBillboardCount.toLocaleString('ar-LY') },
+        { label: 'مجسم', value: (data?.totalCutouts || 0).toLocaleString('ar-LY') },
+      ]
+    : [
+        { label: 'لوحة', value: overviewBillboardCount.toLocaleString('ar-LY') },
+        { label: 'وجه', value: overviewFaceCount.toLocaleString('ar-LY') },
+        { label: 'م² إجمالي', value: (data?.totalArea || 0).toFixed(2) },
+      ];
 
   // ✅ تعريف متغيرات حساب الأعمدة على مستوى المكون - تجميع من جميع المهام
   const aggPrintCost = allTasks.reduce((s, t) => s + (t.customer_print_cost || 0), 0);
@@ -2187,38 +2436,42 @@ export function UnifiedTaskInvoice({
       (hasCutoutCost ? (item.cutoutCost || 0) : 0), 0) || 0;
   };
   const dynamicTotal = calculateDynamicTotal();
+  const payableTotal = invoiceType === 'customer'
+    ? dynamicTotal
+    : (data?.items?.reduce((sum, item) => sum + (item.totalCost || 0), 0) || 0);
+  const hasZeroPayableTotal = showCosts && payableTotal <= 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl w-full max-h-[100dvh] sm:max-h-[95vh] p-0">
-        <DialogHeader className="p-4 border-b bg-gradient-to-l from-primary/5 to-background">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
+      <DialogContent className="flex h-[94dvh] w-[calc(100vw-1rem)] max-w-[96vw] flex-col overflow-hidden p-0 xl:max-w-7xl">
+        <DialogHeader className="shrink-0 border-b border-primary/15 bg-card/95 p-3 backdrop-blur-xl sm:p-4">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10">
                 {getInvoiceIcon()}
               </div>
-              <div>
-                <DialogTitle className="text-lg">{getInvoiceTitle()}</DialogTitle>
+              <div className="min-w-0 text-right">
+                <DialogTitle className="truncate text-base font-black sm:text-lg">{getInvoiceTitleAr()}</DialogTitle>
                 <VisuallyHidden>
                   <DialogDescription>
                     {contractIds.length > 1 ? `فاتورة عقود رقم ${contractIds.join(', ')}` : `فاتورة عقد رقم ${contractIds[0] ?? ''}`}
                   </DialogDescription>
                 </VisuallyHidden>
-                <p className="text-sm text-muted-foreground">
-                  {contractIds.length > 1 ? `عقود #${contractIds.join(', #')}` : `عقد #${contractIds[0] ?? ''}`}
+                <p className="mt-1 truncate text-xs font-bold text-muted-foreground">
+                  {recipient.name} · {contractIds.length > 1 ? `عقود #${contractIds.join(', #')}` : `عقد #${contractIds[0] ?? ''}`} · {data?.items?.length || 0} وجه
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
+            <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 xl:w-auto xl:flex-wrap xl:justify-end xl:overflow-visible xl:pb-0">
               {/* زر التبديل بين العرض التفصيلي والمجمّع - لفاتورة الزبون فقط */}
               {invoiceType === 'customer' && (
                 <>
-                  <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+                  <div className="flex h-10 shrink-0 items-center gap-1 rounded-xl border border-border/35 bg-muted/50 p-1">
                     <Button
                       variant={displayMode === 'detailed' ? 'default' : 'ghost'}
                       size="sm"
                       onClick={() => setDisplayMode('detailed')}
-                      className="gap-1 text-xs sm:text-sm"
+                      className="h-8 cursor-pointer gap-1 text-xs transition-all duration-200"
                     >
                       <Eye className="h-3 w-3 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">تفصيلي</span>
@@ -2227,13 +2480,13 @@ export function UnifiedTaskInvoice({
                       variant={displayMode === 'summary' ? 'default' : 'ghost'}
                       size="sm"
                       onClick={() => setDisplayMode('summary')}
-                      className="gap-1 text-xs sm:text-sm"
+                      className="h-8 cursor-pointer gap-1 text-xs transition-all duration-200"
                     >
                       <EyeOff className="h-3 w-3 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">مجمّع</span>
                     </Button>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                     <Switch
                       id="showServiceBreakdown"
                       checked={showServiceBreakdown}
@@ -2245,7 +2498,7 @@ export function UnifiedTaskInvoice({
                     </Label>
                   </div>
                   {showServiceBreakdown && (
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                       <Switch
                         id="showPriceDetails"
                         checked={showPriceDetails}
@@ -2258,7 +2511,7 @@ export function UnifiedTaskInvoice({
                     </div>
                   )}
                   {/* زر إظهار صور التركيب */}
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                     <Switch
                       id="showInstalledImages"
                       checked={showInstalledImages}
@@ -2271,7 +2524,7 @@ export function UnifiedTaskInvoice({
                   </div>
                   {/* زر إظهار صور الوجه الخلفي */}
                   {showInstalledImages && (
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                       <Switch
                         id="showBackFaceImages"
                         checked={showBackFaceImages}
@@ -2286,10 +2539,10 @@ export function UnifiedTaskInvoice({
                 </>
               )}
               {invoiceType === 'installation_team' && Object.keys(installationTeamBuckets).length > 1 && (
-                <div className="flex items-center gap-1.5">
+                <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                   <Label className="text-xs sm:text-sm">الفرقة</Label>
                   <Select value={selectedInstallationTeam} onValueChange={handleInstallationTeamChange}>
-                    <SelectTrigger className="w-[140px] sm:w-[220px] h-8 sm:h-9 text-xs sm:text-sm">
+                    <SelectTrigger className="h-8 w-[140px] cursor-pointer text-xs sm:w-[220px]">
                       <SelectValue placeholder="اختر الفرقة" />
                     </SelectTrigger>
                     <SelectContent>
@@ -2303,7 +2556,7 @@ export function UnifiedTaskInvoice({
                 </div>
               )}
               {invoiceType !== 'customer' && (
-                <div className="flex items-center gap-1.5">
+                <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                   <Switch
                     id="showCosts"
                     checked={showCosts}
@@ -2320,7 +2573,7 @@ export function UnifiedTaskInvoice({
               <Button
                 variant="outline"
                 size="sm"
-                className="gap-1 text-xs sm:text-sm text-amber-600 hover:text-amber-700 border-amber-200/60 bg-amber-500/[0.02]"
+                className="h-10 shrink-0 cursor-pointer gap-1 rounded-xl border-amber-500/25 bg-amber-500/5 text-xs text-amber-500 transition-all duration-200 hover:bg-amber-500/10 hover:text-amber-400"
                 onClick={handleRecalculateCosts}
                 disabled={isRecalculating}
               >
@@ -2336,7 +2589,7 @@ export function UnifiedTaskInvoice({
               {invoiceType === 'customer' && (
                 <Popover open={discountOpen} onOpenChange={setDiscountOpen}>
                   <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="gap-1 text-xs sm:text-sm">
+                    <Button variant="outline" size="sm" className="h-10 shrink-0 cursor-pointer gap-1 rounded-xl text-xs transition-all duration-200">
                       <Percent className="h-3 w-3 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">خصم</span>
                     </Button>
@@ -2411,7 +2664,7 @@ export function UnifiedTaskInvoice({
               )}
               {/* زر إظهار/إخفاء تفصيل المهام المجمعة */}
               {isGroupInvoice && invoiceType === 'customer' && (
-                <div className="flex items-center gap-1.5">
+                <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                   <Switch
                     id="showTasksBreakdown"
                     checked={showTasksBreakdown}
@@ -2424,7 +2677,7 @@ export function UnifiedTaskInvoice({
                 </div>
               )}
               {/* زر إظهار/إخفاء الختم والتوقيع - لجميع أنواع الفواتير */}
-              <div className="flex items-center gap-1.5">
+              <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                 <Switch
                   id="showSignatureSection"
                   checked={showSignatureSection}
@@ -2436,7 +2689,7 @@ export function UnifiedTaskInvoice({
                 </Label>
               </div>
               {/* زر إخفاء عبارات إعادة الطباعة */}
-              <div className="flex items-center gap-1.5">
+              <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                 <Switch
                   id="hideReprintLabels"
                   checked={hideReprintLabels}
@@ -2448,7 +2701,7 @@ export function UnifiedTaskInvoice({
                 </Label>
               </div>
               {/* زر إظهار/إخفاء أعمدة الأبعاد */}
-              <div className="flex items-center gap-1.5">
+              <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                 <Switch
                   id="showDimensions"
                   checked={showDimensions}
@@ -2459,33 +2712,41 @@ export function UnifiedTaskInvoice({
                   <span className="sm:hidden">أبعاد</span>
                 </Label>
               </div>
-              <Button onClick={handlePrint} className="gap-1 sm:gap-2" size="sm">
+              <Button onClick={handlePrint} className="h-10 shrink-0 cursor-pointer gap-2 rounded-xl px-4 font-black transition-all duration-200 active:scale-95" size="sm">
                 <Printer className="h-3 w-3 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">طباعة</span>
+                <span>طباعة</span>
               </Button>
               <Button
                 variant="outline"
-                className="gap-1 sm:gap-2"
+                className="h-10 shrink-0 cursor-pointer gap-2 rounded-xl px-4 font-black transition-all duration-200 active:scale-95"
                 size="sm"
+                disabled={pdfExporting}
                 onClick={async () => {
                   if (!printRef.current) return;
+                  setPdfExporting(true);
                   try {
                     const fullHtml = buildPrintableHtml();
-                    const _pdfFileName = getInvoiceTitle().split('|').map(s => s.trim()).join(' _ ') + '.pdf';
+                    const contractPart = contractIds.length > 1 ? `عقود ${contractIds.join('-')}` : `عقد ${contractIds[0] ?? task.contract_id}`;
+                    const _pdfFileName = `${getInvoiceTitleAr()} - ${recipient.name} - ${contractPart} - ${format(new Date(), 'yyyy-MM-dd')}.pdf`;
                     await saveHtmlDocAsPdf(fullHtml, _pdfFileName, {
                       marginMm: [5, 5, 5, 5],
                       waitMs: 1500,
                     });
                     toast.success('تم تحميل PDF بنجاح');
-                  } catch (e) { console.error(e); toast.error('فشل تحميل PDF'); }
+                  } catch (e) {
+                    console.error(e);
+                    toast.error('فشل تحميل PDF');
+                  } finally {
+                    setPdfExporting(false);
+                  }
                 }}
               >
-                <Download className="h-3 w-3 sm:h-4 sm:w-4" />
-                <span className="hidden sm:inline">تحميل PDF</span>
+                {pdfExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                <span>{pdfExporting ? 'جارٍ تجهيز PDF' : 'تحميل PDF'}</span>
               </Button>
               {/* زر واتساب */}
               {showWhatsAppPhoneInput ? (
-                <div className="flex items-center gap-1">
+                <div className="flex h-10 shrink-0 items-center gap-1 rounded-xl border border-border/35 bg-background/60 p-1">
                   <Input
                     className="h-8 w-32 text-xs"
                     placeholder="رقم الهاتف"
@@ -2495,7 +2756,7 @@ export function UnifiedTaskInvoice({
                   />
                   <Button
                     size="sm"
-                    className="gap-1 h-8"
+                    className="h-8 cursor-pointer gap-1 transition-all duration-200"
                     disabled={whatsAppSending || !whatsAppManualPhone.trim()}
                     onClick={async () => {
                       if (!printRef.current) return;
@@ -2521,14 +2782,14 @@ export function UnifiedTaskInvoice({
                     {whatsAppSending ? <Loader2 className="h-3 w-3 animate-spin" /> : <MessageCircle className="h-3 w-3" />}
                     إرسال
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setShowWhatsAppPhoneInput(false)}>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 cursor-pointer transition-all duration-200" onClick={() => setShowWhatsAppPhoneInput(false)}>
                     <X className="h-3 w-3" />
                   </Button>
                 </div>
               ) : (
                 <Button
                   variant="outline"
-                  className="gap-1 sm:gap-2"
+                  className="h-10 shrink-0 cursor-pointer gap-2 rounded-xl px-3 font-black transition-all duration-200 active:scale-95"
                   size="sm"
                   disabled={whatsAppSending}
                   onClick={async () => {
@@ -2557,38 +2818,50 @@ export function UnifiedTaskInvoice({
                   }}
                 >
                   <MessageCircle className="h-3 w-3 sm:h-4 sm:w-4" />
-                  <span className="hidden sm:inline">واتساب</span>
+                  <span>واتساب</span>
                 </Button>
               )}
-              <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="h-8 w-8 sm:h-10 sm:w-10">
+              <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="h-10 w-10 shrink-0 cursor-pointer rounded-xl transition-all duration-200" aria-label="إغلاق نافذة الفاتورة">
                 <X className="h-4 w-4" />
               </Button>
             </div>
           </div>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 max-h-[calc(100dvh-80px)] sm:max-h-[calc(95vh-80px)]">
-          <div className="p-2 sm:p-6 flex justify-center bg-muted/30">
+        {hasZeroPayableTotal && (
+          <div className="mx-3 mt-3 flex shrink-0 items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2.5 text-right text-xs font-bold text-amber-300 sm:mx-4">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>قيمة الفاتورة صفر. راجع تكاليف التركيب أو الطباعة قبل اعتمادها وإرسالها.</span>
+          </div>
+        )}
+
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="flex justify-center bg-muted/30 p-2 sm:p-6">
             <div
               ref={printRef}
               data-invoice-print
               className="bg-white shadow-2xl"
               style={{
                 width: '210mm',
+                maxWidth: '100%',
                 minHeight: '297mm',
                 backgroundColor: '#fff',
                 fontFamily: `${shared.fontFamily || 'Doran'}, 'Noto Sans Arabic', Arial, sans-serif`,
-                padding: '15mm',
+                padding: '8mm 10mm',
+                boxSizing: 'border-box',
                 direction: 'rtl',
                 color: tableText,
+                display: 'flex',
+                flexDirection: 'column',
               }}
             >
               {/* Unified CSS from print engine */}
               <style dangerouslySetInnerHTML={{
                 __html: `
-                ${unifiedHeaderFooterCss(unifiedStyles)}
-                [data-invoice-print] td { border-color: ${tableBorder} !important; }
-                [data-invoice-print] tbody tr { background-color: #ffffff !important; }
+                 ${unifiedHeaderFooterCss(unifiedStyles)}
+                 [data-invoice-print] td { border-color: ${tableBorder} !important; }
+                 ${buildInvoiceLayoutCss()}
+                 [data-invoice-print] .u-footer { margin-top: auto; }
               `}} />
               {/* Header - Unified Engine */}
               <div dangerouslySetInnerHTML={{
@@ -2602,47 +2875,51 @@ export function UnifiedTaskInvoice({
               }} />
 
               {/* Recipient Info */}
-              <div style={{
-                background: `linear-gradient(135deg, ${customerBg}, #ffffff)`,
-                padding: '20px',
-                marginBottom: '24px',
-                borderRadius: '12px',
-                borderRight: `5px solid ${customerSectionBorderColor}`,
-                boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ fontSize: '14px', color: customerText, marginBottom: '4px' }}>{recipient.label}</div>
-                    <div style={{ fontSize: '28px', fontWeight: 'bold', color: primaryColor }}>{recipient.name}</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '24px' }}>
-                    {(invoiceType === 'print_vendor' || invoiceType === 'customer') && (data?.totalArea || 0) > 0 && (
-                      <div style={{ textAlign: 'center' }}>
-                        <div style={{ fontSize: '24px', fontWeight: 'bold', color: primaryColor, fontFamily: 'Manrope' }}>
-                          {(data?.totalArea || 0).toFixed(2)}
-                        </div>
-                        <div style={{ fontSize: '12px', color: '#666' }}>م² إجمالي</div>
-                      </div>
-                    )}
-                    {invoiceType === 'cutout_vendor' && (
-                      <div style={{ textAlign: 'center' }}>
-                        <div style={{ fontSize: '24px', fontWeight: 'bold', color: primaryColor, fontFamily: 'Manrope' }}>
-                          {data?.totalCutouts || 0}
-                        </div>
-                        <div style={{ fontSize: '12px', color: '#666' }}>مجسم</div>
-                      </div>
-                    )}
-                    {invoiceType === 'installation_team' && (
-                      <div style={{ textAlign: 'center' }}>
-                        <div style={{ fontSize: '24px', fontWeight: 'bold', color: primaryColor, fontFamily: 'Manrope' }}>
-                          {data?.items?.length || 0}
-                        </div>
-                        <div style={{ fontSize: '12px', color: '#666' }}>لوحة</div>
-                      </div>
-                    )}
-                  </div>
+              <div
+                className="invoice-recipient-card"
+                style={{
+                  background: customerBg,
+                  borderRightColor: customerSectionBorderColor,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div className="invoice-recipient-label" style={{ color: customerText }}>{recipient.label}</div>
+                  <div className="invoice-recipient-name">{recipient.name}</div>
+                  {invoiceType === 'customer' && customerName && companyName && customerName !== companyName && (
+                    <div className="invoice-recipient-subtitle">الزبون: {customerName}</div>
+                  )}
+                </div>
+                <div className="invoice-overview-stats">
+                  {overviewStats.map(stat => (
+                    <div key={stat.label} className="invoice-overview-stat">
+                      <strong>{stat.value}</strong>
+                      <span>{stat.label}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
+
+              {hasZeroPayableTotal && (
+                <div data-no-break style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                  marginBottom: '12px',
+                  padding: '9px 12px',
+                  border: '1px solid #d6ac40',
+                  borderRadius: '8px',
+                  backgroundColor: '#fffbeb',
+                  color: '#78350f',
+                  fontSize: '11px',
+                  lineHeight: 1.6,
+                }}>
+                  <AlertTriangle style={{ width: '15px', height: '15px', flexShrink: 0, marginTop: '1px' }} />
+                  <div>
+                    <strong style={{ display: 'block' }}>قيمة الفاتورة صفر</strong>
+                    <span>لم تُسجّل قيمة مالية لهذه العملية. راجع التكاليف قبل اعتماد الفاتورة.</span>
+                  </div>
+                </div>
+              )}
 
  {/* ملخص المقاسات والمجسمات - لجميع أنواع الفواتير */}
               {data?.items && data.items.length > 0 && (() => {
@@ -2684,7 +2961,7 @@ export function UnifiedTaskInvoice({
                 });
 
                 return (
-                  <div style={{
+                  <div className="invoice-size-summary" style={{
                     background: '#f8f9fa',
                     padding: '4px 10px',
                     marginBottom: '4px',
@@ -2695,9 +2972,9 @@ export function UnifiedTaskInvoice({
                     overflow: 'visible',
                   }}>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-start' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#495057', lineHeight: '1.3' }}>ملخص:</span>
+                      <span className="invoice-size-summary-title" style={{ fontSize: '11px', fontWeight: 'bold', color: '#495057', lineHeight: '1.3' }}>تفصيل سريع</span>
                       {Object.entries(sizeCounts).map(([size, counts]) => (
-                        <span key={size} style={{
+                        <span key={size} className="invoice-size-chip" style={{
                           background: '#fff',
                           padding: '2px 6px',
                           borderRadius: '6px',
@@ -2784,425 +3061,433 @@ export function UnifiedTaskInvoice({
                 };
 
                 return (
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px', marginBottom: '24px' }}>
+                  <table className="invoice-items-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px', marginBottom: '14px' }}>
                     <thead>
                       <tr style={{ backgroundColor: tableHeaderBg }}>
-                        <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '4%' }}>#</th>
+                        <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '3.5%', fontSize: '10px', fontWeight: 'bold' }}>#</th>
                         {isCustomerLike && (
-                          <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '14%' }}>صورة اللوحة</th>
+                          <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '14%', fontSize: '10px', fontWeight: 'bold' }}>صورة اللوحة</th>
                         )}
-                        <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center' }}>اللوحة</th>
+                        <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '11%', fontSize: '10px', fontWeight: 'bold' }}>اللوحة</th>
                         {isCustomerLike && (
-                          <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '18%' }}>الموقع</th>
+                          <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '20%', fontSize: '10px', fontWeight: 'bold' }}>الموقع</th>
                         )}
-                        <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center' }}>المقاس</th>
+                        <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '10%', fontSize: '10px', fontWeight: 'bold' }}>المقاس</th>
                         {showDimensions && (
                           <>
-                            <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '5%' }}>العرض</th>
-                            <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '5%' }}>الارتفاع</th>
+                            <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '5%', fontSize: '10px', fontWeight: 'bold' }}>العرض</th>
+                            <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '5%', fontSize: '10px', fontWeight: 'bold' }}>الارتفاع</th>
                           </>
                         )}
-                        <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '10%' }}>الوجه</th>
-                        <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '12%' }}>التصميم</th>
-                        <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center' }}>المساحة</th>
+                        <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '8%', fontSize: '10px', fontWeight: 'bold' }}>الوجه</th>
+                        <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '11%', fontSize: '10px', fontWeight: 'bold' }}>التصميم</th>
+                        <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '8.5%', fontSize: '10px', fontWeight: 'bold' }}>المساحة</th>
                         {/* أعمدة التكاليف المنفصلة لفاتورة الزبون/الفرقة */}
                         {isCustomerLike && showCosts && (invoiceType !== 'customer' || showServiceBreakdown) && (
                           <>
                             {hasPrintCost && (
-                              <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', backgroundColor: tableHeaderBg }}>
+                              <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', backgroundColor: tableHeaderBg, fontSize: '10px', fontWeight: 'bold' }}>
                                 الطباعة
-                                {showPriceDetails && <div style={{ fontSize: '8px', opacity: 0.8 }}>({pricePerMeter.toFixed(2)} د.ل/م²)</div>}
+                                {showPriceDetails && <div style={{ fontSize: '7.5px', opacity: 0.85 }}>({pricePerMeter.toFixed(2)} د.ل/م²)</div>}
                               </th>
                             )}
                             {hasInstallCost && (
-                              <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', backgroundColor: tableHeaderBg }}>
+                              <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', backgroundColor: tableHeaderBg, fontSize: '10px', fontWeight: 'bold' }}>
                                 التركيب
-                                {showPriceDetails && installUnitPrice > 0 && <div style={{ fontSize: '8px', opacity: 0.8 }}>({installUnitPrice.toFixed(2)} د.ل/وجه)</div>}
+                                {showPriceDetails && installUnitPrice > 0 && <div style={{ fontSize: '7.5px', opacity: 0.85 }}>({installUnitPrice.toFixed(2)} د.ل/وجه)</div>}
                               </th>
                             )}
                             {hasCutoutCost && (
-                              <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', backgroundColor: tableHeaderBg }}>القص</th>
+                              <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', backgroundColor: tableHeaderBg, fontSize: '10px', fontWeight: 'bold' }}>القص</th>
                             )}
-                            <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', backgroundColor: tableHeaderBg }}>الإجمالي</th>
+                            <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', backgroundColor: tableHeaderBg, fontSize: '10px', fontWeight: 'bold' }}>الإجمالي</th>
                           </>
                         )}
                         {invoiceType === 'customer' && showCosts && !showServiceBreakdown && (
-                          <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', backgroundColor: tableHeaderBg }}>الإجمالي</th>
+                          <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', backgroundColor: tableHeaderBg, fontSize: '10px', fontWeight: 'bold' }}>الإجمالي</th>
                         )}
                         {/* عمود السعر لغير فواتير الزبون */}
                         {!isCustomerLike && showCosts && (
-                          <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center' }}>
+                          <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', fontSize: '10px', fontWeight: 'bold' }}>
                             الإجمالي
-                            {pricePerMeter > 0 && <div style={{ fontSize: '8px', opacity: 0.8 }}>({pricePerMeter.toFixed(2)} د.ل/م²)</div>}
+                            {pricePerMeter > 0 && <div style={{ fontSize: '7.5px', opacity: 0.85 }}>({pricePerMeter.toFixed(2)} د.ل/م²)</div>}
                           </th>
                         )}
                       </tr>
                     </thead>
-                    <tbody>
-                      {(() => {
-                        let billboardCounter = 0;
-                        const seenBillboards = new Set<number>();
+                    {(() => {
+                      // تجميع العناصر حسب اللوحة لضمان عدم انقسام أوجه اللوحة الواحدة بين الصفحات
+                      const groupedBillboards: InvoiceItem[][] = [];
+                      const billboardMap = new Map<any, InvoiceItem[]>();
 
-                        return data?.items?.map((item, idx) => {
-                          const isFirst = isFirstInGroup(item, idx);
-                          const faceCount = getFaceCount(item.billboardId, data?.items || []);
+                      (data?.items || []).forEach(item => {
+                        const key = item.billboardId ? `b_${item.billboardId}` : `item_${Math.random()}`;
+                        if (!billboardMap.has(key)) {
+                          const arr: InvoiceItem[] = [];
+                          billboardMap.set(key, arr);
+                          groupedBillboards.push(arr);
+                        }
+                        billboardMap.get(key)!.push(item);
+                      });
 
-                          // تحديث عداد اللوحات
-                          if (item.billboardId && !seenBillboards.has(item.billboardId)) {
-                            billboardCounter++;
-                            seenBillboards.add(item.billboardId);
-                          } else if (!item.billboardId) {
-                            billboardCounter++;
-                          }
+                      return groupedBillboards.map((bItems, bIdx) => {
+                        const billboardCounter = bIdx + 1;
+                        const faceCount = bItems.length;
 
-                          return (
-                            <tr key={idx} style={{ backgroundColor: '#ffffff' }}>
-                              {/* رقم اللوحة - يُدمج للوحات ذات الوجهين */}
-                              {isFirst && (
-                                <td rowSpan={faceCount} data-no-break style={{ padding: '6px 4px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle' }}>
-                                  {billboardCounter}
-                                </td>
-                              )}
-                              {/* صورة اللوحة - لفاتورة الزبون فقط */}
-                              {isCustomerLike && (() => {
-                                // ✅ للتركيب الأصلي: استخدام الصور المؤرشفة
-                                const isOriginal = item.isOriginalInstallation;
-                                const actualBillboardId = isOriginal
-                                  ? (item.billboardId ? item.billboardId - 100000 : undefined)
-                                  : (item.isReinstallation ? (item.billboardId ? item.billboardId - 200000 : undefined) : item.billboardId);
+                        return (
+                          <tbody key={bIdx} data-no-break style={{ pageBreakInside: 'avoid', breakInside: 'avoid', backgroundColor: '#ffffff' }}>
+                            {bItems.map((item, fIdx) => {
+                              const isFirst = fIdx === 0;
 
-                                const installedImageA = actualBillboardId ? installedImagesMap[actualBillboardId]?.face_a : undefined;
-                                const installedImageB = actualBillboardId ? installedImagesMap[actualBillboardId]?.face_b : undefined;
+                              return (
+                                <tr key={fIdx} style={{ backgroundColor: '#ffffff' }}>
+                                  {/* رقم اللوحة - يُدمج للوحات ذات الوجهين */}
+                                  {isFirst && (
+                                    <td rowSpan={faceCount} data-no-break style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', fontSize: '10px', fontWeight: 'bold' }}>
+                                      {billboardCounter}
+                                    </td>
+                                  )}
+                                  {/* صورة اللوحة - لفاتورة الزبون فقط */}
+                                  {isCustomerLike && (() => {
+                                    // ✅ للتركيب الأصلي: استخدام الصور المؤرشفة
+                                    const isOriginal = item.isOriginalInstallation;
+                                    const actualBillboardId = isOriginal
+                                      ? (item.billboardId ? item.billboardId - 100000 : undefined)
+                                      : (item.isReinstallation ? (item.billboardId ? item.billboardId - 200000 : undefined) : item.billboardId);
 
-                                // ✅ للتركيب الأصلي: صور من الأرشيف
-                                const originalPhotoA = isOriginal ? item.originalInstalledImageA : undefined;
-                                const originalPhotoB = isOriginal ? item.originalInstalledImageB : undefined;
+                                    const installedImageA = actualBillboardId ? installedImagesMap[actualBillboardId]?.face_a : undefined;
+                                    const installedImageB = actualBillboardId ? installedImagesMap[actualBillboardId]?.face_b : undefined;
 
-                                if (showBackFaceImages) {
-                                  let displayImage: string | undefined;
-                                  if (isOriginal && showInstalledImages) {
-                                    // صور التركيب الأصلي من الأرشيف
-                                    displayImage = item.face === 'a' ? (originalPhotoA || item.billboardImage) : (originalPhotoB || item.designImage);
-                                  } else if (item.isReinstallation && showInstalledImages) {
-                                    // صور إعادة التركيب الحالية
-                                    displayImage = item.face === 'a' ? (installedImageA || item.billboardImage) : (installedImageB || item.designImage);
-                                  } else {
-                                    displayImage = item.face === 'a'
-                                      ? (showInstalledImages && installedImageA ? installedImageA : item.billboardImage)
-                                      : (showInstalledImages && installedImageB ? installedImageB : item.designImage);
-                                  }
+                                    // ✅ للتركيب الأصلي: صور من الأرشيف
+                                    const originalPhotoA = isOriginal ? item.originalInstalledImageA : undefined;
+                                    const originalPhotoB = isOriginal ? item.originalInstalledImageB : undefined;
 
-                                  return (
-                                    <td style={{ padding: '0', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle' }}>
-                                      {displayImage ? (
-                                        <img
-                                          src={displayImage}
-                                          alt={item.face === 'a' ? "صورة الوجه الأمامي" : "صورة الوجه الخلفي"}
-                                          style={{
-                            width: '100%', maxWidth: '100%', height: 'auto',
-                            maxHeight: '80px', objectFit: 'contain', borderRadius: '0',
-                            border: 'none', outline: 'none', boxShadow: 'none', display: 'block',
-                          }}
-                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                        />
-                      ) : (
-                        <span style={{ color: '#999', fontSize: '8px' }}>-</span>
-                      )}
-                    </td>
-                  );
-                } else if (isFirst) {
-                  let displayImage: string | undefined;
-                  if (isOriginal && showInstalledImages) {
-                    displayImage = originalPhotoA || originalPhotoB || item.billboardImage;
-                  } else {
-                    displayImage = showInstalledImages && installedImageA ? installedImageA : item.billboardImage;
-                  }
+                                    if (showBackFaceImages) {
+                                      let displayImage: string | undefined;
+                                      if (isOriginal && showInstalledImages) {
+                                        displayImage = item.face === 'a' ? (originalPhotoA || item.billboardImage) : (originalPhotoB || item.designImage);
+                                      } else if (item.isReinstallation && showInstalledImages) {
+                                        displayImage = item.face === 'a' ? (installedImageA || item.billboardImage) : (installedImageB || item.designImage);
+                                      } else {
+                                        displayImage = item.face === 'a'
+                                          ? (showInstalledImages && installedImageA ? installedImageA : item.billboardImage)
+                                          : (showInstalledImages && installedImageB ? installedImageB : item.designImage);
+                                      }
 
-                  return (
-                    <td rowSpan={faceCount} data-no-break style={{ padding: '0', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle' }}>
-                      {displayImage ? (
-                        <img
-                          src={displayImage}
-                          alt={isOriginal ? "صورة التركيب الأصلي" : "صورة اللوحة"}
-                          style={{
-                            width: '100%', maxWidth: '100%', height: 'auto',
-                            maxHeight: '80px', objectFit: 'contain', borderRadius: '0',
-                            border: 'none', outline: 'none', boxShadow: 'none', display: 'block',
-                                          }}
-                                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                        />
-                                      ) : (
-                                        <span style={{ color: '#999', fontSize: '8px' }}>-</span>
+                                      return (
+                                        <td style={{ padding: '2px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', width: '14%' }}>
+                                          {displayImage ? (
+                                            <img
+                                              src={displayImage}
+                                              alt={item.face === 'a' ? "صورة الوجه الأمامي" : "صورة الوجه الخلفي"}
+                                              style={{
+                                                width: '100%', height: '42px', maxHeight: '46px',
+                                                objectFit: 'cover', borderRadius: '4px',
+                                                border: '1px solid #cbd5e1', boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+                                                display: 'block', margin: '0 auto',
+                                              }}
+                                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                            />
+                                          ) : (
+                                            <span style={{ color: '#999', fontSize: '8px' }}>-</span>
+                                          )}
+                                        </td>
+                                      );
+                                    } else if (isFirst) {
+                                      let displayImage: string | undefined;
+                                      if (isOriginal && showInstalledImages) {
+                                        displayImage = originalPhotoA || originalPhotoB || item.billboardImage;
+                                      } else {
+                                        displayImage = showInstalledImages && installedImageA ? installedImageA : item.billboardImage;
+                                      }
+
+                                      const cellH = faceCount > 1 ? '68px' : '44px';
+                                      const maxCellH = faceCount > 1 ? '72px' : '48px';
+
+                                      return (
+                                        <td rowSpan={faceCount} data-no-break style={{ padding: '2px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', width: '14%' }}>
+                                          {displayImage ? (
+                                            <img
+                                              src={displayImage}
+                                              alt={isOriginal ? "صورة التركيب الأصلي" : "صورة اللوحة"}
+                                              style={{
+                                                width: '100%', height: cellH, maxHeight: maxCellH,
+                                                objectFit: 'cover', borderRadius: '4px',
+                                                border: '1px solid #cbd5e1', boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                                                display: 'block', margin: '0 auto',
+                                              }}
+                                              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                            />
+                                          ) : (
+                                            <span style={{ color: '#999', fontSize: '8px' }}>-</span>
+                                          )}
+                                        </td>
+                                      );
+                                    }
+                                    return null;
+                                  })()}
+                                  {/* اسم اللوحة - يُدمج للوحات ذات الوجهين */}
+                                  {isFirst && (
+                                    <td rowSpan={faceCount} data-no-break style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontWeight: 'bold', fontSize: '10px', verticalAlign: 'middle', overflow: 'visible', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                                      <div>{cleanReprintLabel(item.billboardName || '-')}</div>
+                                      {/* علامة التركيب الأصلي */}
+                                      {item.isOriginalInstallation && (
+                                        <div style={{ marginTop: '3px' }}>
+                                          <span style={{
+                                            background: '#f0fdf4',
+                                            color: '#15803d',
+                                            padding: '2px 5px',
+                                            borderRadius: '3px',
+                                            fontSize: '8px',
+                                            fontWeight: 'bold',
+                                            border: '1px solid #bbf7d0',
+                                            display: 'inline-block',
+                                          }}>
+                                            تركيب أصلي
+                                          </span>
+                                        </div>
                                       )}
-                                    </td>
-                                  );
-                                }
-                                return null;
-                              })()}
-                              {/* اسم اللوحة - يُدمج للوحات ذات الوجهين */}
-                              {isFirst && (
-                                <td rowSpan={faceCount} data-no-break style={{ padding: '6px 4px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontWeight: 'bold', fontSize: '9px', verticalAlign: 'middle', overflow: 'visible', whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                                  <div>{cleanReprintLabel(item.billboardName || '-')}</div>
- {/* علامة التركيب الأصلي */}
-                                  {item.isOriginalInstallation && (
-                                    <div style={{ marginTop: '3px' }}>
-                                      <span style={{
-                                        background: '#e3f2fd',
-                                        color: '#1565c0',
-                                        padding: '1px 5px',
-                                        borderRadius: '3px',
-                                        fontSize: '7px',
-                                        fontWeight: 'bold',
-                                        border: '1px solid #90caf9',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '2px',
-                                      }}>
-                                        تركيب أصلي
-                                      </span>
-                                    </div>
-                                  )}
- {/* علامات إعادة التركيب والاستبدال */}
-                                  {item.isReinstallation && (
-                                    <div style={{ marginTop: '3px' }}>
-                                      <span style={{
-                                        background: '#fff3e0',
-                                        color: '#e65100',
-                                        padding: '1px 5px',
-                                        borderRadius: '3px',
-                                        fontSize: '7px',
-                                        fontWeight: 'bold',
-                                        border: '1px solid #ffcc80',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '2px',
-                                      }}>
-                                        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                          <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                                          <path d="M3 3v5h5" />
-                                          <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-                                          <path d="M16 16h5v5" />
-                                        </svg>
-                                        إعادة تركيب ({item.reinstallCount})
-                                      </span>
-                                    </div>
-                                  )}
-                                  {item.isReplacement && (
-                                    <div style={{ marginTop: '3px' }}>
-                                      <span style={{
-                                        background: '#e8f5e9',
-                                        color: '#2e7d32',
-                                        padding: '1px 5px',
-                                        borderRadius: '3px',
-                                        fontSize: '7px',
-                                        fontWeight: 'bold',
-                                        border: '1px solid #a5d6a7',
-                                        display: 'inline-flex',
-                                        alignItems: 'center',
-                                        gap: '2px',
-                                      }}>
-                                        ⇄ لوحة بديلة
-                                      </span>
-                                    </div>
-                                  )}
-                                </td>
-                              )}
-                              {/* الموقع (أقرب نقطة دالة + المنطقة + المدينة) - لفاتورة الزبون فقط - يُدمج للوحات ذات الوجهين */}
-                              {isCustomerLike && isFirst && (
-                                <td rowSpan={faceCount} data-no-break style={{ padding: '6px 4px', border: `1px solid ${tableBorder}`, textAlign: 'right', fontSize: '8px', color: '#333', verticalAlign: 'middle', lineHeight: '1.4', overflow: 'visible', whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                                  {item.nearestLandmark && (
-                                    <div style={{ marginBottom: '2px' }}>{item.nearestLandmark}</div>
-                                  )}
-                                  {(item.district || item.city) && (
-                                    <div style={{ fontSize: '7px', color: '#666' }}>
-                                      {[item.district, item.city].filter(Boolean).join(' - ')}
-                                    </div>
-                                  )}
-                                  {!item.nearestLandmark && !item.district && !item.city && '-'}
-                                </td>
-                              )}
-                              {/* المقاس - يُدمج للوحات ذات الوجهين */}
-                              {isFirst && (
-                                <td rowSpan={faceCount} style={{ padding: '8px 4px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', overflow: 'visible', whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                                  <div style={{ fontWeight: 'bold', fontSize: '9px', marginBottom: '6px', lineHeight: '1.3', display: 'block' }}>{cleanReprintLabel(item.sizeName).replace(' (مجسم)', '')}</div>
- {/* شارة مجسم تحت المقاس عند وجود قص */}
-                                  {item.sizeName.includes('(مجسم)') && (
-                                    <div style={{ marginBottom: '6px' }}>
-                                      <span style={{
-                                        background: '#fff3cd',
-                                        color: '#856404',
-                                        padding: '2px 6px',
-                                        borderRadius: '4px',
-                                        fontSize: '9px',
-                                        fontWeight: 'bold',
-                                        border: '1px solid #ffc107',
-                                        display: 'inline-block',
-                                      }}>مجسم</span>
-                                    </div>
-                                  )}
- {/* إظهار نوع اللوحة تحت المقاس */}
-                                  {item.billboardType && (
-                                    <div style={{ fontSize: '8px', color: '#555', marginBottom: '6px', lineHeight: '1.3', display: 'block' }}>
-                                      <span style={{
-                                        background: item.billboardType === 'تيبول' ? '#fff8e1' : '#f3e5f5',
-                                        padding: '1px 4px',
-                                        borderRadius: '3px',
-                                        color: item.billboardType === 'تيبول' ? '#f57c00' : '#7b1fa2',
-                                      }}>{item.billboardType}</span>
-                                    </div>
-                                  )}
-                                  <div style={{ fontSize: '8px', color: '#666', lineHeight: '1.3', display: 'block' }}>
-                                    <span style={{
-                                      background: '#e3f2fd',
-                                      padding: '1px 4px',
-                                      borderRadius: '3px',
-                                      color: '#1565c0',
-                                      fontWeight: 'bold'
-                                    }}>{(item.facesCount || 1) === 1 ? 'وجه واحد' : (item.facesCount || 1) === 2 ? 'وجهين' : `${item.facesCount || 1} أوجه`}</span>
-                                  </div>
-                                </td>
-                              )}
-                              {/* العرض والارتفاع - أعمدة منفصلة */}
-                              {showDimensions && isFirst && (() => {
-                                let w = item.width || 0;
-                                let h = item.height || 0;
-                                if (w === 0 && h === 0 && item.sizeName) {
-                                  const match = item.sizeName.replace(' (مجسم)', '').match(/(\d+(?:\.\d+)?)[x×X](\d+(?:\.\d+)?)/i);
-                                  if (match) { w = parseFloat(match[1]); h = parseFloat(match[2]); }
-                                }
-                                return (
-                                  <>
-                                    <td rowSpan={faceCount} style={{ padding: '6px 4px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', fontFamily: 'Manrope', fontSize: '9px', fontWeight: 'bold', overflow: 'visible', whiteSpace: 'normal' }}>
-                                      {w > 0 ? `${w} م` : '-'}
-                                    </td>
-                                    <td rowSpan={faceCount} style={{ padding: '6px 4px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', fontFamily: 'Manrope', fontSize: '9px', fontWeight: 'bold', overflow: 'visible', whiteSpace: 'normal' }}>
-                                      {h > 0 ? `${h} م` : '-'}
-                                    </td>
-                                  </>
-                                );
-                              })()}
-                              {/* الوجه - منفصل لكل صف */}
-                              <td style={{ padding: '6px 4px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontSize: '8px', overflow: 'visible', whiteSpace: 'normal' }}>
-                                {item.face === 'both' ? (
-                                  <span style={{ background: '#e3f2fd', padding: '2px 6px', borderRadius: '3px', color: '#1565c0' }}>أمامي + خلفي</span>
-                                ) : item.face === 'a' ? (
-                                  <span style={{ background: '#e8f5e9', padding: '2px 6px', borderRadius: '3px', color: '#2e7d32' }}>أمامي</span>
-                                ) : (
-                                  <span style={{ background: '#fff3e0', padding: '2px 6px', borderRadius: '3px', color: '#ef6c00' }}>خلفي</span>
-                                )}
-                              </td>
-                              {/* التصميم - منفصل لكل صف */}
-                              <td style={{ padding: '2px', border: `1px solid ${tableBorder}`, textAlign: 'center' }}>
-                                {item.designImage ? (
-                                  <img
-                                    src={item.designImage}
-                                    alt="تصميم"
-                                    style={{ width: '100%', height: '45px', objectFit: 'contain', border: 'none', outline: 'none', boxShadow: 'none' }}
-                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                  />
-                                ) : (
-                                  <span style={{ color: '#999', fontSize: '8px' }}>-</span>
-                                )}
-                              </td>
-                              {/* المساحة - منفصل لكل صف */}
-                              <td style={{ padding: '6px 4px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontSize: '9px' }}>
-                                {item.area.toFixed(2)} م²
-                              </td>
-                              {/* أعمدة التكاليف المنفصلة لفاتورة الزبون/الفرقة */}
-                              {isCustomerLike && showCosts && (invoiceType !== 'customer' || showServiceBreakdown) && (
-                                <>
-                                  {hasPrintCost && (
-                                    <td style={{ padding: '6px 4px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableText, fontSize: '9px' }}>
-                                      <div>{item.printCost > 0 ? `${item.printCost.toFixed(0)} د.ل` : '-'}</div>
-                                      {showPriceDetails && item.printCost > 0 && pricePerMeter > 0 && (
-                                        <div style={{ fontSize: '7px', color: '#666', marginTop: '2px' }}>
-                                          {item.area?.toFixed(2)} × {pricePerMeter.toFixed(2)}
+                                      {/* شارة إعادة التركيب تحت اسم اللوحة */}
+                                      {item.isReinstallation && (
+                                        <div style={{ marginTop: '3px' }}>
+                                          <span style={{
+                                            background: '#fff7ed',
+                                            color: '#c2410c',
+                                            padding: '2px 5px',
+                                            borderRadius: '3px',
+                                            fontSize: '8px',
+                                            fontWeight: 'bold',
+                                            border: '1px solid #fed7aa',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '2px',
+                                          }}>
+                                            إعادة تركيب {item.reinstallSeq ? `(${item.reinstallSeq})` : ''}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {item.isReplacement && (
+                                        <div style={{ marginTop: '3px' }}>
+                                          <span style={{
+                                            background: '#e8f5e9',
+                                            color: '#2e7d32',
+                                            padding: '2px 5px',
+                                            borderRadius: '3px',
+                                            fontSize: '8px',
+                                            fontWeight: 'bold',
+                                            border: '1px solid #a5d6a7',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '2px',
+                                          }}>
+                                            لوحة بديلة
+                                          </span>
                                         </div>
                                       )}
                                     </td>
                                   )}
-                                  {hasInstallCost && (
-                                    <td style={{ padding: '6px 4px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableText, fontSize: '9px' }}>
-                                      <div>{item.installationCost > 0 ? `${item.installationCost.toFixed(0)} د.ل` : '-'}</div>
-                                      {showPriceDetails && item.installationCost > 0 && (
-                                        <div style={{ fontSize: '7px', color: '#666', marginTop: '2px' }}>
-                                          {item.installationCalculationType === 'meter'
-                                            ? `${item.installationPricePerMeter?.toFixed(2) || 0} د.ل/م²`
-                                            : `${item.installationPricePerPiece?.toFixed(0) || ''} د.ل/قطعة`
-                                          }
+                                  {/* الموقع (أقرب نقطة دالة + المنطقة + المدينة) - لفاتورة الزبون فقط - يُدمج للوحات ذات الوجهين */}
+                                  {isCustomerLike && isFirst && (
+                                    <td rowSpan={faceCount} data-no-break style={{ padding: '4px 4px', border: `1px solid ${tableBorder}`, textAlign: 'right', fontSize: '9.5px', color: '#1e293b', verticalAlign: 'middle', lineHeight: '1.35', overflow: 'visible', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                                      {item.nearestLandmark && (
+                                        <div style={{ fontWeight: '600', marginBottom: '2px' }}>{item.nearestLandmark}</div>
+                                      )}
+                                      {(item.district || item.city) && (
+                                        <div style={{ fontSize: '8.5px', color: '#64748b' }}>
+                                          {[item.district, item.city].filter(Boolean).join(' - ')}
+                                        </div>
+                                      )}
+                                      {!item.nearestLandmark && !item.district && !item.city && '-'}
+                                    </td>
+                                  )}
+                                  {/* المقاس - يُدمج للوحات ذات الوجهين */}
+                                  {isFirst && (
+                                    <td rowSpan={faceCount} style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', overflow: 'visible', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                                      <div style={{ fontWeight: 'bold', fontSize: '10px', marginBottom: '3px', lineHeight: '1.2', display: 'block' }}>{cleanReprintLabel(item.sizeName).replace(' (مجسم)', '')}</div>
+                                      {/* شارة مجسم تحت المقاس عند وجود قص */}
+                                      {item.sizeName.includes('(مجسم)') && (
+                                        <div style={{ marginBottom: '3px' }}>
+                                          <span style={{
+                                            background: '#fff3cd',
+                                            color: '#856404',
+                                            padding: '2px 5px',
+                                            borderRadius: '3px',
+                                            fontSize: '8px',
+                                            fontWeight: 'bold',
+                                            border: '1px solid #ffc107',
+                                            display: 'inline-block',
+                                          }}>مجسم</span>
+                                        </div>
+                                      )}
+                                      {/* إظهار نوع اللوحة تحت المقاس */}
+                                      {item.billboardType && (
+                                        <div style={{ fontSize: '8px', color: '#555', marginBottom: '3px', lineHeight: '1.2', display: 'block' }}>
+                                          <span style={{
+                                            background: item.billboardType === 'تيبول' ? '#fff8e1' : '#f3e5f5',
+                                            padding: '2px 5px',
+                                            borderRadius: '3px',
+                                            border: '1px solid rgba(0,0,0,0.06)',
+                                          }}>
+                                            {item.billboardType}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {/* إظهار عدد الأوجه تحت المقاس */}
+                                      {item.billboardFaces && (
+                                        <div style={{ fontSize: '8px', color: '#666', lineHeight: '1.2', display: 'block' }}>
+                                          <span style={{
+                                            background: '#e0f2fe',
+                                            color: '#0369a1',
+                                            padding: '2px 5px',
+                                            borderRadius: '3px',
+                                            border: '1px solid #bae6fd',
+                                          }}>
+                                            {item.billboardFaces === 1 ? 'وجه واحد' : item.billboardFaces === 2 ? 'وجهين' : `${item.billboardFaces} أوجه`}
+                                          </span>
                                         </div>
                                       )}
                                     </td>
                                   )}
-                                  {hasCutoutCost && (
-                                    <td style={{ padding: '6px 4px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableText, fontSize: '9px' }}>
-                                      {item.cutoutCost > 0 ? `${item.cutoutCost.toFixed(0)} د.ل` : '-'}
-                                    </td>
-                                  )}
-                                  <td style={{ padding: '6px 4px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontWeight: 'bold', color: tableText, backgroundColor: tableRowEven, fontSize: '9px' }}>
-                                    {((hasPrintCost ? (item.printCost || 0) : 0) +
-                                      (hasInstallCost ? (item.installationCost || 0) : 0) +
-                                      (hasCutoutCost ? (item.cutoutCost || 0) : 0)).toFixed(0)} د.ل
+                                  {/* العرض والارتفاع - يُدمج للوحات ذات الوجهين */}
+                                  {showDimensions && isFirst && (() => {
+                                    let w = item.width || 0;
+                                    let h = item.height || 0;
+                                    if (w === 0 && h === 0 && item.sizeName) {
+                                      const match = item.sizeName.replace(' (مجسم)', '').match(/(\d+(?:\.\d+)?)[x×X](\d+(?:\.\d+)?)/i);
+                                      if (match) { w = parseFloat(match[1]); h = parseFloat(match[2]); }
+                                    }
+                                    return (
+                                      <>
+                                        <td rowSpan={faceCount} style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', fontFamily: 'Manrope', fontSize: '9.5px', fontWeight: 'bold', overflow: 'visible', whiteSpace: 'normal' }}>
+                                          {w > 0 ? `${w} م` : '-'}
+                                        </td>
+                                        <td rowSpan={faceCount} style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', fontFamily: 'Manrope', fontSize: '9.5px', fontWeight: 'bold', overflow: 'visible', whiteSpace: 'normal' }}>
+                                          {h > 0 ? `${h} م` : '-'}
+                                        </td>
+                                      </>
+                                    );
+                                  })()}
+                                  {/* الوجه - منفصل لكل صف */}
+                                  <td style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontSize: '9px', overflow: 'visible', whiteSpace: 'normal' }}>
+                                    {item.face === 'both' ? (
+                                      <span style={{ background: '#e3f2fd', padding: '2px 6px', borderRadius: '3px', color: '#1565c0', fontWeight: 'bold' }}>أمامي + خلفي</span>
+                                    ) : item.face === 'a' ? (
+                                      <span style={{ background: '#e8f5e9', padding: '2px 6px', borderRadius: '3px', color: '#2e7d32', fontWeight: 'bold' }}>أمامي</span>
+                                    ) : (
+                                      <span style={{ background: '#fff3e0', padding: '2px 6px', borderRadius: '3px', color: '#ef6c00', fontWeight: 'bold' }}>خلفي</span>
+                                    )}
                                   </td>
-                                </>
-                              )}
-                              {invoiceType === 'customer' && showCosts && !showServiceBreakdown && (
-                                <td style={{ padding: '6px 4px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontWeight: 'bold', color: tableText, backgroundColor: tableRowEven, fontSize: '9px' }}>
-                                  {item.totalCost.toFixed(0)} د.ل
-                                </td>
-                              )}
-                              {/* عمود الإجمالي لغير فواتير الزبون */}
-                              {!isCustomerLike && showCosts && (
-                                <td style={{ padding: '6px 4px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontWeight: 'bold', color: tableText, fontSize: '9px' }}>
-                                  {item.totalCost.toFixed(2)} د.ل
-                                </td>
-                              )}
-                            </tr>
-                          )
-                        })
-                      })()}
-                    </tbody>
+                                  {/* التصميم - منفصل لكل صف */}
+                                  <td style={{ padding: '2px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', width: '11%' }}>
+                                    {item.designImage ? (
+                                      <img
+                                        src={item.designImage}
+                                        alt="تصميم"
+                                        style={{ width: '100%', height: '36px', maxHeight: '40px', objectFit: 'contain', borderRadius: '3px', border: '1px solid #cbd5e1', background: '#fafafa', display: 'block', margin: '0 auto' }}
+                                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                      />
+                                    ) : (
+                                      <span style={{ color: '#999', fontSize: '8px' }}>-</span>
+                                    )}
+                                  </td>
+                                  {/* المساحة - منفصل لكل صف */}
+                                  <td style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontSize: '10px', fontWeight: 'bold' }}>
+                                    {item.area.toFixed(2)} م²
+                                  </td>
+                                  {/* أعمدة التكاليف المنفصلة لفاتورة الزبون/الفرقة */}
+                                  {isCustomerLike && showCosts && (invoiceType !== 'customer' || showServiceBreakdown) && (
+                                    <>
+                                      {hasPrintCost && (
+                                        <td style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableText, fontSize: '9.5px', fontWeight: 'bold' }}>
+                                          <div>{item.printCost > 0 ? `${item.printCost.toFixed(0)} د.ل` : '-'}</div>
+                                          {showPriceDetails && item.printCost > 0 && pricePerMeter > 0 && (
+                                            <div style={{ fontSize: '7.5px', color: '#666', marginTop: '1px' }}>
+                                              {item.area?.toFixed(2)} × {pricePerMeter.toFixed(2)}
+                                            </div>
+                                          )}
+                                        </td>
+                                      )}
+                                      {hasInstallCost && (
+                                        <td style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableText, fontSize: '9.5px', fontWeight: 'bold' }}>
+                                          <div>{item.installationCost > 0 ? `${item.installationCost.toFixed(0)} د.ل` : '-'}</div>
+                                          {showPriceDetails && item.installationCost > 0 && installUnitPrice > 0 && (
+                                            <div style={{ fontSize: '7.5px', color: '#666', marginTop: '1px' }}>
+                                              {installUnitPrice.toFixed(2)} د.ل
+                                            </div>
+                                          )}
+                                        </td>
+                                      )}
+                                      {hasCutoutCost && (
+                                        <td style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableText, fontSize: '9.5px', fontWeight: 'bold' }}>
+                                          {item.cutoutCost > 0 ? `${item.cutoutCost.toFixed(0)} د.ل` : '-'}
+                                        </td>
+                                      )}
+                                      <td style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontWeight: 'bold', color: tableText, backgroundColor: tableRowEven, fontSize: '10px' }}>
+                                        {((hasPrintCost ? (item.printCost || 0) : 0) +
+                                          (hasInstallCost ? (item.installationCost || 0) : 0) +
+                                          (hasCutoutCost ? (item.cutoutCost || 0) : 0)).toFixed(0)} د.ل
+                                      </td>
+                                    </>
+                                  )}
+                                  {invoiceType === 'customer' && showCosts && !showServiceBreakdown && (
+                                    <td style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontWeight: 'bold', color: tableText, backgroundColor: tableRowEven, fontSize: '10px' }}>
+                                      {item.totalCost.toFixed(0)} د.ل
+                                    </td>
+                                  )}
+                                  {/* عمود الإجمالي لغير فواتير الزبون */}
+                                  {!isCustomerLike && showCosts && (
+                                    <td style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontWeight: 'bold', color: tableText, fontSize: '10px' }}>
+                                      {item.totalCost.toFixed(2)} د.ل
+                                    </td>
+                                  )}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        );
+                      });
+                    })()}
                     {/* صف الإجمالي - لفاتورة الزبون/الفرقة مع التفصيل */}
                     {isCustomerLike && showCosts && (invoiceType !== 'customer' || showServiceBreakdown) && (
-                      <tfoot>
+                      <tfoot data-no-break style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                         <tr style={{ backgroundColor: tableHeaderBg, fontWeight: 'bold' }}>
-                          <td colSpan={7 + (showDimensions ? 2 : 0)} style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
+                          <td colSpan={7 + (showDimensions ? 2 : 0)} style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
                             الإجمالي
                           </td>
-                          <td style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10px' }}>
+                          <td style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10.5px' }}>
                             {totalArea.toFixed(2)} م²
                           </td>
                           {hasPrintCost && (
-                            <td style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10px' }}>
+                            <td style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10.5px' }}>
                               {(data?.items?.reduce((sum, item) => sum + (item.printCost || 0), 0) || 0).toFixed(0)} د.ل
                             </td>
                           )}
                           {hasInstallCost && (
-                            <td style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10px' }}>
+                            <td style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10.5px' }}>
                               {(data?.items?.reduce((sum, item) => sum + (item.installationCost || 0), 0) || 0).toFixed(0)} د.ل
                             </td>
                           )}
                           {hasCutoutCost && (
-                            <td style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10px' }}>
+                            <td style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10.5px' }}>
                               {(data?.items?.reduce((sum, item) => sum + (item.cutoutCost || 0), 0) || 0).toFixed(0)} د.ل
                             </td>
                           )}
-                          <td style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontWeight: 'bold', color: totalText, backgroundColor: totalBg, fontSize: '11px' }}>
+                          <td style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontWeight: 'bold', color: totalText, backgroundColor: totalBg, fontSize: '11.5px' }}>
                             {dynamicTotal.toLocaleString('ar-LY')} د.ل
                           </td>
                         </tr>
                       </tfoot>
                     )}
                     {invoiceType === 'customer' && showCosts && !showServiceBreakdown && (
-                      <tfoot>
+                      <tfoot data-no-break style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                         <tr style={{ backgroundColor: tableHeaderBg, fontWeight: 'bold' }}>
-                          <td colSpan={7 + (showDimensions ? 2 : 0)} style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
+                          <td colSpan={7 + (showDimensions ? 2 : 0)} style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
                             الإجمالي
                           </td>
-                          <td style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10px' }}>
+                          <td style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10.5px' }}>
                             {totalArea.toFixed(2)} م²
                           </td>
-                          <td style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontWeight: 'bold', color: totalText, backgroundColor: totalBg, fontSize: '11px' }}>
+                          <td style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontWeight: 'bold', color: totalText, backgroundColor: totalBg, fontSize: '11.5px' }}>
                             {dynamicTotal.toLocaleString('ar-LY')} د.ل
                           </td>
                         </tr>
@@ -3311,7 +3596,7 @@ export function UnifiedTaskInvoice({
                 };
 
                 return (
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px', marginBottom: '24px' }}>
+                  <table className="invoice-items-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px', marginBottom: '24px' }}>
                     <thead>
                       <tr style={{ backgroundColor: tableHeaderBg }}>
                         <th style={{ padding: '8px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '4%' }}>#</th>
@@ -3392,14 +3677,14 @@ export function UnifiedTaskInvoice({
                                   {item.isReinstallation && (
                                     <div style={{ marginTop: '2px' }}>
                                       <span style={{ background: '#fff3e0', color: '#e65100', padding: '1px 4px', borderRadius: '3px', fontSize: '7px', fontWeight: 'bold', border: '1px solid #ffcc80' }}>
-                                        ↺ إعادة تركيب ({item.reinstallCount})
+                                        إعادة تركيب ({item.reinstallCount})
                                       </span>
                                     </div>
                                   )}
                                   {item.isReplacement && (
                                     <div style={{ marginTop: '2px' }}>
                                       <span style={{ background: '#e8f5e9', color: '#2e7d32', padding: '1px 4px', borderRadius: '3px', fontSize: '7px', fontWeight: 'bold', border: '1px solid #a5d6a7' }}>
-                                        ⇄ بديلة
+                                        لوحة بديلة
                                       </span>
                                     </div>
                                   )}
@@ -3552,15 +3837,23 @@ export function UnifiedTaskInvoice({
                 </div>
               )}
 
-              {/* Total Section - يظهر فقط في العرض التفصيلي */}
+              {/* Total Section - يظهر فقط عند وجود تفاصيل خصم أو توزيع تكاليف أو مهام مجمعة لمنع التكرار */}
               {showCosts && displayMode === 'detailed' && (
-                <div data-no-break style={{
+                (invoiceType === 'customer' && (task.discount_amount || 0) > 0) ||
+                (invoiceType === 'customer' && (task as any).cost_allocation) ||
+                isGroupInvoice
+              ) && (
+                <div data-no-break className="total-section invoice-total-section" style={{
                   background: `linear-gradient(135deg, ${totalBg}, ${totalBg})`,
-                  padding: '20px',
+                  padding: '8px 12px',
                   textAlign: 'center',
-                  borderRadius: '8px',
+                  borderRadius: '6px',
                   pageBreakInside: 'avoid',
                   breakInside: 'avoid' as any,
+                  pageBreakBefore: 'avoid',
+                  breakBefore: 'avoid' as any,
+                  marginTop: '8px',
+                  marginBottom: '8px',
                 }}>
                   {/* عرض المجموع الفرعي والخصم لفاتورة الزبون */}
                   {invoiceType === 'customer' && (task.discount_amount || 0) > 0 && (
@@ -3602,10 +3895,10 @@ export function UnifiedTaskInvoice({
                       </div>
                       <div style={{ borderTop: '1px solid rgba(255,255,255,0.2)', marginTop: '8px', paddingTop: '12px' }}>
                         <div style={{ fontSize: '14px', color: totalText, opacity: 0.9, marginBottom: '6px' }}>
-                          الإجمالي المستحق{isGroupInvoice ? ` (${allTasks.length} مهام)` : ''}
+                          {hasZeroPayableTotal ? 'الإجمالي صفر - غير معتمد' : `الإجمالي المستحق${isGroupInvoice ? ` (${allTasks.length} مهام)` : ''}`}
                         </div>
                         <div style={{
-                          fontSize: '28px',
+                          fontSize: '24px',
                           fontWeight: 'bold',
                           color: totalText,
                           fontFamily: 'Manrope',
@@ -3698,10 +3991,10 @@ export function UnifiedTaskInvoice({
                   {(invoiceType !== 'customer' || !(task.discount_amount || 0)) && (
                     <>
                       <div style={{ fontSize: '14px', color: totalText, opacity: 0.9, marginBottom: '6px' }}>
-                        الإجمالي المستحق
+                        {hasZeroPayableTotal ? 'الإجمالي صفر - غير معتمد' : 'الإجمالي المستحق'}
                       </div>
                       <div style={{
-                        fontSize: '28px',
+                        fontSize: '24px',
                         fontWeight: 'bold',
                         color: totalText,
                         fontFamily: 'Manrope',

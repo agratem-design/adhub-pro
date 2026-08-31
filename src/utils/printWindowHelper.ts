@@ -157,10 +157,29 @@ export function injectPrintActionBar(
     showShare = true,
   } = options;
 
-  const displayTitle = formatCleanDisplayTitle(title);
+  const cleanTitle = formatCleanDisplayTitle(title);
+  const displayTitle = cleanTitle;
   const safeFileName = formatWindowsSafeFileName(title);
-  const escapedTitle = displayTitle.replace(/"/g, '&quot;').replace(/'/g, "\\'");
-  const escapedSafeFileName = safeFileName.replace(/"/g, '&quot;').replace(/'/g, "\\'");
+  const escapedTitle = displayTitle.replace(/"/g, '&quot;');
+  const escapedSafeFileName = safeFileName.replace(/"/g, '\\"');
+
+  const hasExplicitPageCards = /class=["'][^"']*\bpage\b[^"']*["']|data-print-page|data-contract-page|\.background/i.test(html);
+  const hasZeroMarginInHtml = /@page\s*\{[^}]*margin\s*:\s*0\s*(mm|cm|px|!|;|\})/i.test(html);
+  const explicitMarginMatch = html.match(/@page\s*\{[^}]*margin\s*:\s*([^;!}]+)/i);
+
+  let printPageMargin = '10mm 12mm';
+  if (hasZeroMarginInHtml && hasExplicitPageCards) {
+    printPageMargin = '0';
+  } else if (explicitMarginMatch && explicitMarginMatch[1].trim()) {
+    const rawVal = explicitMarginMatch[1].trim();
+    if (rawVal === '0' && !hasExplicitPageCards) {
+      printPageMargin = '10mm 12mm';
+    } else {
+      printPageMargin = rawVal;
+    }
+  }
+
+  const pageDocClass = hasExplicitPageCards ? 'has-explicit-pages' : 'is-flow-document';
 
   const actionToolbarHtml = `
     <!-- Floating Action Toolbar for Mobile & Desktop -->
@@ -174,6 +193,12 @@ export function injectPrintActionBar(
           <button type="button" class="btn btn-print" onclick="window.__triggerNativePrint()" ontouchstart="window.__triggerNativePrint()">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><path d="M6 14h12v8H6z"/></svg>
             <span>طباعة</span>
+          </button>
+
+          <button type="button" class="btn btn-pages" onclick="window.__togglePageSelector()">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            <span>تحديد الصفحات</span>
+            <span id="page-count-badge" class="page-count-badge"></span>
           </button>
           
           ${showDownloadPdf ? `
@@ -199,6 +224,17 @@ export function injectPrintActionBar(
       <div id="pdf-progress-indicator" class="pdf-progress-bar" style="display: none;">
         <div class="spinner-small"></div>
         <span>جاري إنشاء وتنزيل ملف PDF... يرجى الانتظار</span>
+      </div>
+      <!-- Page Selector Panel -->
+      <div id="page-selector-panel" class="page-selector-panel" style="display: none;">
+        <div class="page-selector-header">
+          <span class="page-selector-title">تحديد الصفحات للطباعة</span>
+          <div class="page-selector-actions">
+            <button type="button" class="ps-btn ps-select-all" onclick="window.__pageSelectAll()">تحديد الكل</button>
+            <button type="button" class="ps-btn ps-deselect-all" onclick="window.__pageDeselectAll()">إلغاء الكل</button>
+          </div>
+        </div>
+        <div id="page-selector-grid" class="page-selector-grid"></div>
       </div>
     </div>
   `;
@@ -357,7 +393,190 @@ export function injectPrintActionBar(
           animation: spin 0.6s linear infinite;
         }
 
-        /* Screen Preview Fixed A4 Card Layout - EXACT Same Dimensions as Print */
+        /* Page Selector Button */
+        .btn-pages {
+          background: rgba(168, 85, 247, 0.15);
+          color: #c084fc;
+          border: 1px solid rgba(192, 132, 252, 0.4) !important;
+          position: relative;
+        }
+        .btn-pages:active, .btn-pages:hover {
+          background: rgba(168, 85, 247, 0.25);
+        }
+        .page-count-badge {
+          display: none;
+          background: #ef4444;
+          color: #fff;
+          font-size: 9px;
+          font-weight: 800;
+          min-width: 16px;
+          height: 16px;
+          border-radius: 8px;
+          padding: 0 4px;
+          line-height: 16px;
+          text-align: center;
+          position: absolute;
+          top: -4px;
+          left: -4px;
+        }
+
+        /* Page Selector Panel */
+        .page-selector-panel {
+          margin-top: 6px;
+          padding: 10px 12px;
+          background: rgba(30, 33, 43, 0.98);
+          border: 1px solid rgba(192, 132, 252, 0.3);
+          border-radius: 10px;
+          max-height: 200px;
+          overflow-y: auto;
+        }
+        .page-selector-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 8px;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+        .page-selector-title {
+          color: #c084fc;
+          font-size: 12px;
+          font-weight: 700;
+        }
+        .page-selector-actions {
+          display: flex;
+          gap: 4px;
+        }
+        .ps-btn {
+          padding: 3px 10px;
+          border-radius: 6px;
+          font-size: 11px;
+          font-weight: 700;
+          cursor: pointer;
+          border: 1px solid rgba(255,255,255,0.15);
+          background: rgba(255,255,255,0.06);
+          color: #e5e7eb;
+          font-family: inherit;
+          transition: all 0.15s;
+        }
+        .ps-btn:hover { background: rgba(255,255,255,0.12); }
+        .ps-select-all { color: #34d399; border-color: rgba(52, 211, 153, 0.3); }
+        .ps-deselect-all { color: #f87171; border-color: rgba(248, 113, 113, 0.3); }
+
+        .page-selector-grid {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 5px;
+        }
+        .page-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 5px 10px;
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+          border: 1.5px solid rgba(255,255,255,0.15);
+          background: rgba(255,255,255,0.06);
+          color: #e5e7eb;
+          transition: all 0.15s;
+          user-select: none;
+          font-family: inherit;
+        }
+        .page-chip:hover { background: rgba(255,255,255,0.1); }
+        .page-chip.selected {
+          background: rgba(168, 85, 247, 0.2);
+          border-color: rgba(192, 132, 252, 0.5);
+          color: #c084fc;
+        }
+        .page-chip.deselected {
+          background: rgba(239, 68, 68, 0.1);
+          border-color: rgba(239, 68, 68, 0.25);
+          color: #9ca3af;
+          text-decoration: line-through;
+          opacity: 0.6;
+        }
+        .page-chip-check {
+          width: 14px;
+          height: 14px;
+          border-radius: 3px;
+          border: 1.5px solid rgba(255,255,255,0.3);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          transition: all 0.15s;
+        }
+        .page-chip.selected .page-chip-check {
+          background: #a855f7;
+          border-color: #a855f7;
+        }
+        .page-chip.selected .page-chip-check::after {
+          content: '✓';
+          color: #fff;
+          font-size: 10px;
+          font-weight: 900;
+        }
+
+        /* Hidden page on screen (dimmed with indicator) */
+        .page-scaler.page-hidden-by-selector,
+        .page.page-hidden-by-selector {
+          opacity: 0.25 !important;
+          filter: grayscale(1) !important;
+          transition: opacity 0.2s, filter 0.2s;
+        }
+
+        /* Top Page Selection Header on Screen Cards */
+        .page-top-indicator {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          background: rgba(22, 25, 33, 0.95);
+          border: 1.5px solid rgba(192, 132, 252, 0.4);
+          color: #e5e7eb;
+          padding: 8px 14px;
+          border-radius: 8px 8px 0 0;
+          font-size: 12.5px;
+          font-weight: 700;
+          cursor: pointer;
+          user-select: none;
+          box-sizing: border-box;
+          transition: all 0.2s;
+          margin-bottom: -1px;
+          z-index: 10;
+        }
+        .page-top-indicator:hover {
+          background: rgba(32, 36, 48, 0.98);
+          border-color: rgba(192, 132, 252, 0.7);
+        }
+        .page-top-indicator.deselected {
+          background: rgba(45, 20, 25, 0.95);
+          border-color: rgba(239, 68, 68, 0.5);
+          color: #f87171;
+        }
+        .page-top-label {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .page-top-label input[type="checkbox"] {
+          width: 16px;
+          height: 16px;
+          cursor: pointer;
+          accent-color: #a855f7;
+        }
+        .page-top-status {
+          font-size: 11px;
+          font-weight: 600;
+          color: #c084fc;
+        }
+        .page-top-indicator.deselected .page-top-status {
+          color: #f87171;
+        }
+
+        /* Screen Preview Fixed A4 Card Layout for explicit page documents */
         body.print-portrait .page,
         body.print-portrait [data-print-page] {
           width: 210mm !important;
@@ -369,7 +588,7 @@ export function injectPrintActionBar(
           margin: 0 !important;
           background: #ffffff !important;
           box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45) !important;
-          border-radius: 4px;
+          border-radius: 0 0 4px 4px;
           position: relative !important;
           overflow: hidden !important;
           box-sizing: border-box !important;
@@ -387,20 +606,36 @@ export function injectPrintActionBar(
           margin: 0 !important;
           background: #ffffff !important;
           box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45) !important;
-          border-radius: 4px;
+          border-radius: 0 0 4px 4px;
           position: relative !important;
           overflow: hidden !important;
           box-sizing: border-box !important;
           flex-shrink: 0 !important;
         }
 
-        /* Two-Tier Wrapper for Mobile Scaling without mutating .page */
+        /* Screen Preview for Flow Documents (invoices, tables, statements) without .page */
+        body.is-flow-document .print-container,
+        body.is-flow-document [data-invoice-print],
+        body.is-flow-document > div:not(.print-mobile-action-bar):not(#print-action-toolbar) {
+          width: ${landscape ? '297mm' : '210mm'} !important;
+          max-width: 95vw !important;
+          min-height: ${landscape ? '210mm' : '297mm'} !important;
+          background: #ffffff !important;
+          box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45) !important;
+          border-radius: 0 0 4px 4px;
+          margin: 0 auto !important;
+          padding: 12mm 14mm !important;
+          box-sizing: border-box !important;
+        }
+
+        /* Two-Tier Wrapper for Mobile Scaling and Visual Page Separation */
         .page-scale-wrapper {
           display: flex;
+          flex-direction: column;
           justify-content: center;
-          align-items: flex-start;
-          overflow: hidden;
-          margin: 16px auto;
+          align-items: center;
+          overflow: visible;
+          margin: 28px auto !important;
           position: relative;
         }
 
@@ -444,7 +679,7 @@ export function injectPrintActionBar(
       /* --- Print Layout Styling (@media print) --- */
       @media print {
         @page {
-          margin: 0;
+          margin: ${printPageMargin};
           size: ${landscape ? 'A4 landscape' : 'A4 portrait'};
         }
         * {
@@ -452,7 +687,7 @@ export function injectPrintActionBar(
           print-color-adjust: exact !important;
           color-adjust: exact !important;
         }
-        .print-mobile-action-bar, .no-print, .controls, .print-btn, .save-btn {
+        .print-mobile-action-bar, .no-print, .controls, .print-btn, .save-btn, .page-hidden-by-selector, .page-scale-wrapper.page-hidden-by-selector {
           display: none !important;
           opacity: 0 !important;
           visibility: hidden !important;
@@ -467,6 +702,22 @@ export function injectPrintActionBar(
           padding: 0 !important;
           margin: 0 !important;
         }
+        body.is-flow-document {
+          padding: 0 !important;
+          margin: 0 !important;
+        }
+        body.is-flow-document .print-container,
+        body.is-flow-document [data-invoice-print],
+        body.is-flow-document > div:not(.print-mobile-action-bar):not(#print-action-toolbar) {
+          width: 100% !important;
+          max-width: 100% !important;
+          min-height: auto !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          box-shadow: none !important;
+          border-radius: 0 !important;
+          box-sizing: border-box !important;
+        }
         .page-scale-wrapper, .page-scaler {
           display: block !important;
           width: auto !important;
@@ -479,34 +730,49 @@ export function injectPrintActionBar(
         }
         body.print-portrait .page,
         body.print-portrait [data-print-page] {
-          width: 210mm !important;
-          height: 297mm !important;
+          width: 100% !important;
+          max-width: 100% !important;
+          height: auto !important;
+          min-height: auto !important;
+          max-height: 297mm !important;
           box-shadow: none !important;
           margin: 0 !important;
+          padding: 0 !important;
           border-radius: 0 !important;
           transform: none !important;
           page-break-after: always !important;
+          break-after: page !important;
           page-break-inside: avoid !important;
-          overflow: hidden !important;
+          break-inside: avoid !important;
+          overflow: visible !important;
+          box-sizing: border-box !important;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
         body.print-landscape .page,
         body.print-landscape [data-print-page] {
-          width: 297mm !important;
-          height: 210mm !important;
+          width: 100% !important;
+          max-width: 100% !important;
+          height: auto !important;
+          min-height: auto !important;
+          max-height: 210mm !important;
           box-shadow: none !important;
           margin: 0 !important;
+          padding: 0 !important;
           border-radius: 0 !important;
           transform: none !important;
           page-break-after: always !important;
+          break-after: page !important;
           page-break-inside: avoid !important;
-          overflow: hidden !important;
+          break-inside: avoid !important;
+          overflow: visible !important;
+          box-sizing: border-box !important;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
         .page:last-child, [data-print-page]:last-child {
-          page-break-after: auto !important;
+          page-break-after: avoid !important;
+          break-after: avoid !important;
         }
         .background {
           display: block !important;
@@ -526,6 +792,37 @@ export function injectPrintActionBar(
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
+
+        /* Prevent orphan totals and summary sections from appearing alone */
+        .total-section, 
+        .cost-section, 
+        .summary-section, 
+        .cost-summary, 
+        .signature-section,
+        .invoice-summary,
+        .statement-summary-box,
+        .summary-grid,
+        [data-no-break], 
+        tfoot, 
+        tfoot tr {
+          break-inside: avoid !important;
+          page-break-inside: avoid !important;
+          break-before: avoid !important;
+          page-break-before: avoid !important;
+        }
+
+        tbody tr:last-child {
+          break-after: avoid !important;
+          page-break-after: avoid !important;
+        }
+        tbody tr:nth-last-child(2) {
+          break-after: avoid !important;
+          page-break-after: avoid !important;
+        }
+        tbody tr:nth-last-child(3) {
+          break-after: avoid !important;
+          page-break-after: avoid !important;
+        }
       }
     </style>
   `;
@@ -541,18 +838,228 @@ export function injectPrintActionBar(
         document.title = safeFileName;
 
         // Helper: Official Page Contract (Prevents selecting nested containers)
-        function getPrintPages() {
-          var rawCandidates = Array.from(document.querySelectorAll('[data-print-page], .page'));
-          return rawCandidates.filter(function(el) {
+        function getPrintPages(onlyActive) {
+          var rawCandidates = Array.from(document.querySelectorAll('[data-print-page], .page, [data-contract-page]'));
+          var pages = rawCandidates.filter(function(el) {
+            if (el.classList.contains('page-scale-wrapper') || el.classList.contains('page-scaler') || el.classList.contains('no-print')) {
+              return false;
+            }
             var parent = el.parentElement;
             while (parent && parent !== document.body) {
-              if (parent.hasAttribute('data-print-page') || parent.classList.contains('page')) {
+              if (parent.hasAttribute('data-print-page') || parent.classList.contains('page') || parent.hasAttribute('data-contract-page')) {
                 return false;
               }
               parent = parent.parentElement;
             }
             return true;
           });
+
+          // Fallback: If no explicit .page or [data-print-page] elements found, find the main document container
+          if (pages.length === 0) {
+            var container = document.querySelector('.print-container, [data-invoice-print], main, .invoice-root, .printable-area');
+            if (container && !container.classList.contains('page-scale-wrapper') && !container.classList.contains('page-scaler')) {
+              pages = [container];
+            }
+          }
+
+          if (onlyActive) {
+            return pages.filter(function(page) {
+              var scaler = page.parentElement;
+              var wrapper = (scaler && scaler.classList.contains('page-scaler')) ? scaler.parentElement : null;
+              var isHidden = page.classList.contains('page-hidden-by-selector') ||
+                             (scaler && scaler.classList.contains('page-hidden-by-selector')) ||
+                             (wrapper && wrapper.classList.contains('page-hidden-by-selector'));
+              return !isHidden;
+            });
+          }
+
+          return pages;
+        }
+
+        var pageSelectionStates = [];
+
+        function initPageSelector() {
+          var pages = getPrintPages(false);
+          if (pages.length === 0) return;
+          if (pageSelectionStates.length !== pages.length) {
+            pageSelectionStates = pages.map(function() { return true; });
+          }
+          renderPageTopBadges();
+          updatePageCountBadge();
+          renderPageSelectorGrid();
+        }
+
+        window.__togglePageSelector = function() {
+          var panel = document.getElementById('page-selector-panel');
+          if (!panel) return;
+          var isHidden = panel.style.display === 'none' || !panel.style.display;
+          panel.style.display = isHidden ? 'block' : 'none';
+          if (isHidden) {
+            renderPageSelectorGrid();
+          }
+        };
+
+        function getPageLabel(pageEl, index) {
+          var total = pageSelectionStates.length || getPrintPages(false).length || 1;
+          if (pageEl.getAttribute('data-page-title')) {
+            var rawTitle = pageEl.getAttribute('data-page-title');
+            if (total > 1) {
+              return 'صفحة ' + (index + 1) + ' من ' + total + ' • ' + rawTitle;
+            }
+            return rawTitle;
+          }
+          var codeEl = pageEl.querySelector('.billboard-code, .item-code, [data-billboard-id], h2, h3, .card-title, .title');
+          if (codeEl && codeEl.textContent && codeEl.textContent.trim().length > 0 && codeEl.textContent.trim().length < 25) {
+            return (index + 1) + '. ' + codeEl.textContent.trim();
+          }
+          if (total > 1) {
+            return 'صفحة ' + (index + 1) + ' من ' + total;
+          }
+          return 'صفحة ' + (index + 1);
+        }
+
+        function renderPageTopBadges() {
+          var pages = getPrintPages(false);
+          pages.forEach(function(page, idx) {
+            var scaler = page.parentElement;
+            var wrapper = (scaler && scaler.classList.contains('page-scaler')) ? scaler.parentElement : null;
+            if (!wrapper || !scaler) return;
+
+            var existingIndicator = wrapper.querySelector('.page-top-indicator');
+            var isSelected = pageSelectionStates[idx] !== false;
+
+            if (!existingIndicator) {
+              var indicator = document.createElement('div');
+              indicator.className = 'page-top-indicator no-print ' + (isSelected ? 'selected' : 'deselected');
+              indicator.setAttribute('data-page-index', idx);
+              indicator.onclick = function(e) {
+                if (e.target.tagName.toLowerCase() !== 'input') {
+                  window.__togglePage(idx);
+                }
+              };
+
+              var labelDiv = document.createElement('div');
+              labelDiv.className = 'page-top-label';
+
+              var chk = document.createElement('input');
+              chk.type = 'checkbox';
+              chk.className = 'page-top-checkbox';
+              chk.checked = isSelected;
+              chk.onchange = function() { window.__togglePage(idx); };
+              labelDiv.appendChild(chk);
+
+              var titleSpan = document.createElement('span');
+              titleSpan.className = 'page-top-title-text';
+              titleSpan.textContent = getPageLabel(page, idx);
+              labelDiv.appendChild(titleSpan);
+
+              indicator.appendChild(labelDiv);
+
+              var statusSpan = document.createElement('span');
+              statusSpan.className = 'page-top-status';
+              statusSpan.textContent = isSelected ? 'محددة للطباعة' : 'مستبعدة من الطباعة';
+              indicator.appendChild(statusSpan);
+
+              if (scaler.parentNode === wrapper) {
+                wrapper.insertBefore(indicator, scaler);
+              } else {
+                wrapper.prepend(indicator);
+              }
+            } else {
+              existingIndicator.className = 'page-top-indicator no-print ' + (isSelected ? 'selected' : 'deselected');
+              var chk = existingIndicator.querySelector('.page-top-checkbox');
+              if (chk) chk.checked = isSelected;
+              var titleSpan = existingIndicator.querySelector('.page-top-title-text');
+              if (titleSpan) titleSpan.textContent = getPageLabel(page, idx);
+              var statusSpan = existingIndicator.querySelector('.page-top-status');
+              if (statusSpan) statusSpan.textContent = isSelected ? 'محددة للطباعة' : 'مستبعدة من الطباعة';
+            }
+          });
+        }
+
+        function renderPageSelectorGrid() {
+          var grid = document.getElementById('page-selector-grid');
+          if (!grid) return;
+          var pages = getPrintPages(false);
+          if (pageSelectionStates.length !== pages.length) {
+            pageSelectionStates = pages.map(function() { return true; });
+          }
+
+          grid.innerHTML = '';
+          pages.forEach(function(page, idx) {
+            var isSelected = pageSelectionStates[idx] !== false;
+            var chip = document.createElement('div');
+            chip.className = 'page-chip ' + (isSelected ? 'selected' : 'deselected');
+            chip.setAttribute('data-page-index', idx);
+            chip.onclick = function() { window.__togglePage(idx); };
+
+            var check = document.createElement('span');
+            check.className = 'page-chip-check';
+            chip.appendChild(check);
+
+            var text = document.createElement('span');
+            text.textContent = getPageLabel(page, idx);
+            chip.appendChild(text);
+
+            grid.appendChild(chip);
+          });
+        }
+
+        window.__togglePage = function(idx) {
+          pageSelectionStates[idx] = !pageSelectionStates[idx];
+          applyPageVisibility();
+        };
+
+        window.__pageSelectAll = function() {
+          pageSelectionStates = pageSelectionStates.map(function() { return true; });
+          applyPageVisibility();
+        };
+
+        window.__pageDeselectAll = function() {
+          pageSelectionStates = pageSelectionStates.map(function() { return false; });
+          applyPageVisibility();
+        };
+
+        function applyPageVisibility() {
+          var pages = getPrintPages(false);
+          pages.forEach(function(page, idx) {
+            var isSelected = pageSelectionStates[idx] !== false;
+            var scaler = page.parentElement;
+            var wrapper = (scaler && scaler.classList.contains('page-scaler')) ? scaler.parentElement : null;
+
+            if (isSelected) {
+              page.classList.remove('page-hidden-by-selector');
+              if (scaler) scaler.classList.remove('page-hidden-by-selector');
+              if (wrapper) wrapper.classList.remove('page-hidden-by-selector');
+            } else {
+              page.classList.add('page-hidden-by-selector');
+              if (scaler) scaler.classList.add('page-hidden-by-selector');
+              if (wrapper) wrapper.classList.add('page-hidden-by-selector');
+            }
+          });
+
+          renderPageTopBadges();
+          renderPageSelectorGrid();
+          updatePageCountBadge();
+        }
+
+        function updatePageCountBadge() {
+          var badge = document.getElementById('page-count-badge');
+          if (!badge) return;
+          var total = pageSelectionStates.length;
+          var selected = pageSelectionStates.filter(Boolean).length;
+          if (total > 1) {
+            badge.style.display = 'inline-block';
+            if (selected < total) {
+              badge.textContent = selected + '/' + total;
+              badge.title = selected + ' من إجمالي ' + total + ' صفحات محددة';
+            } else {
+              badge.textContent = total + ' صفحات';
+              badge.title = 'جميع الصفحات (' + total + ') محددة للطباعة';
+            }
+          } else {
+            badge.style.display = 'none';
+          }
         }
 
         // Mobile Scaling on External Wrappers Only (Keeps .page untouched at native dimensions)
@@ -566,21 +1073,29 @@ export function injectPrintActionBar(
           var previewPadding = 16;
           var availW = screenW - previewPadding;
 
-          var pages = getPrintPages();
+          var pages = getPrintPages(false);
           pages.forEach(function(page) {
+            if (!page || page === document.body || page === document.documentElement || page.classList.contains('page-scale-wrapper')) {
+              return;
+            }
+
             var scaler = page.parentElement;
             var wrapper = scaler ? scaler.parentElement : null;
 
             if (!scaler || !scaler.classList.contains('page-scaler')) {
-              wrapper = document.createElement('div');
-              wrapper.className = 'page-scale-wrapper';
-              scaler = document.createElement('div');
-              scaler.className = 'page-scaler';
+              if (page.parentNode && page.parentNode !== document.documentElement) {
+                wrapper = document.createElement('div');
+                wrapper.className = 'page-scale-wrapper';
+                scaler = document.createElement('div');
+                scaler.className = 'page-scaler';
 
-              page.parentNode.insertBefore(wrapper, page);
-              scaler.appendChild(page);
-              wrapper.appendChild(scaler);
+                page.parentNode.insertBefore(wrapper, page);
+                scaler.appendChild(page);
+                wrapper.appendChild(scaler);
+              }
             }
+
+            if (!wrapper || !scaler) return;
 
             var scale = availW < pagePxW ? (availW / pagePxW) : 1;
 
@@ -590,7 +1105,7 @@ export function injectPrintActionBar(
 
               wrapper.style.width = scaledW + 'px';
               wrapper.style.height = scaledH + 'px';
-              wrapper.style.margin = '12px auto';
+              wrapper.style.margin = '16px auto';
 
               scaler.style.width = Math.round(pagePxW) + 'px';
               scaler.style.height = Math.round(pagePxH) + 'px';
@@ -599,7 +1114,7 @@ export function injectPrintActionBar(
             } else {
               wrapper.style.width = '';
               wrapper.style.height = '';
-              wrapper.style.margin = '16px auto';
+              wrapper.style.margin = '28px auto';
 
               scaler.style.width = '';
               scaler.style.height = '';
@@ -607,17 +1122,36 @@ export function injectPrintActionBar(
               scaler.style.transformOrigin = '';
             }
           });
+
+          renderPageTopBadges();
         }
 
         window.addEventListener('resize', applyMobileScale);
-        window.addEventListener('DOMContentLoaded', applyMobileScale);
-        window.addEventListener('load', applyMobileScale);
-        setTimeout(applyMobileScale, 60);
-        setTimeout(applyMobileScale, 300);
+        window.addEventListener('DOMContentLoaded', function() {
+          applyMobileScale();
+          initPageSelector();
+        });
+        window.addEventListener('load', function() {
+          applyMobileScale();
+          initPageSelector();
+        });
+        setTimeout(function() {
+          applyMobileScale();
+          initPageSelector();
+        }, 80);
+        setTimeout(function() {
+          applyMobileScale();
+          initPageSelector();
+        }, 350);
         
         // 1. Native Print Trigger with suggested document title for Windows Microsoft Print to PDF
         window.__triggerNativePrint = function() {
           try {
+            var activePages = getPrintPages(true);
+            if (activePages.length === 0) {
+              window.__pageSelectAll();
+              activePages = getPrintPages(true);
+            }
             document.title = safeFileName;
             window.focus();
             setTimeout(function() {
@@ -634,6 +1168,12 @@ export function injectPrintActionBar(
           var progress = document.getElementById('pdf-progress-indicator');
           var btnPdf = document.getElementById('btn-download-pdf');
           var bar = document.getElementById('print-action-toolbar');
+
+          var activePages = getPrintPages(true);
+          if (activePages.length === 0) {
+            alert('لا توجد صفحات محددة للتصدير. يرجى تحديد صفحة واحدة على الأقل');
+            return;
+          }
 
           // Desktop App: Use Chromium Native Vector PDF Engine
           var desktop = window.desktopAPI || (window.opener && window.opener.desktopAPI);
@@ -705,7 +1245,7 @@ export function injectPrintActionBar(
               adjustOverlayPositions();
             }
 
-            var pages = getPrintPages();
+            var pages = getPrintPages(true);
             if (pages.length === 0) {
               throw new Error('لا توجد صفحات للتصدير');
             }
@@ -812,7 +1352,7 @@ export function injectPrintActionBar(
   }
 
   // 5. Inject Orientation classes and Action Toolbar on <body>
-  const orientationClass = landscape ? 'print-landscape' : 'print-portrait';
+  const orientationClass = `${landscape ? 'print-landscape' : 'print-portrait'} ${pageDocClass}`;
   const orientationAttr = landscape ? 'landscape' : 'portrait';
 
   if (processedHtml.includes('<body')) {

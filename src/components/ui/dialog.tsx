@@ -3,8 +3,26 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { scheduleModalInteractionRecovery } from "@/lib/modalInteractionRecovery";
 
-const Dialog = DialogPrimitive.Root;
+const Dialog = ({ open, onOpenChange, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) => {
+  React.useEffect(() => {
+    if (open === false) scheduleModalInteractionRecovery();
+    return scheduleModalInteractionRecovery;
+  }, [open]);
+
+  return (
+    <DialogPrimitive.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        onOpenChange?.(nextOpen);
+        if (!nextOpen) scheduleModalInteractionRecovery();
+      }}
+      {...props}
+    />
+  );
+};
+Dialog.displayName = DialogPrimitive.Root.displayName;
 
 const DialogTrigger = DialogPrimitive.Trigger;
 
@@ -40,10 +58,8 @@ const DialogContent = React.forwardRef<
         className,
       )}
       onCloseAutoFocus={(e) => {
-        // ✅ إصلاح التجميد: منع إعادة التركيز التلقائي الذي يُبقي pointer-events معطّلة
         e.preventDefault();
-        // ✅ إعادة pointer-events على body يدوياً عند الإغلاق
-        document.body.style.pointerEvents = '';
+        scheduleModalInteractionRecovery();
         onCloseAutoFocus?.(e);
       }}
       {...props}

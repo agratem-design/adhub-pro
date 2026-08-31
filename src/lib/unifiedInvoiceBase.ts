@@ -794,30 +794,36 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
     : rawHeaderTextColor;
   const logoContainerFlex = styles.logoContainerWidth ? `flex: 0 0 ${styles.logoContainerWidth};` : 'flex: 1;';
   const titleContainerFlex = styles.titleContainerWidth ? `flex: 0 0 ${styles.titleContainerWidth};` : 'flex: 1;';
+  const resolvedHeaderBg = headerBgColor === 'transparent' ? '#fffdf8' : headerBgColor;
+  const resolvedLogoHeight = Math.min(86, Math.max(64, logoSize));
 
   return `
   .u-header {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: center;
     margin-bottom: ${headerMarginBottom}px;
-    border-bottom: 3px solid ${pc};
-    padding-bottom: 12px;
+    border: 1px solid #e8dfcc;
+    border-top: 4px solid ${pc};
+    border-radius: 12px;
+    padding: 12px 14px;
     direction: rtl;
-    gap: 20px;
-    background-color: ${headerBgColor} !important;
-    background: ${headerBgColor} !important;
+    gap: 16px;
+    background-color: ${resolvedHeaderBg} !important;
+    background: ${resolvedHeaderBg} !important;
     color: ${headerTextColor};
+    box-shadow: 0 3px 12px rgba(66, 51, 16, 0.06);
   }
   .u-invoice-info {
     direction: rtl;
     ${titleContainerFlex}
+    min-width: 0;
   }
   .u-invoice-title {
-    font-size: clamp(14px, ${titleArFontSize + 4}px, ${titleArFontSize + 4}px);
+    font-size: ${Math.min(24, Math.max(18, titleArFontSize + 1))}px;
     font-weight: bold;
     color: ${headerTextColor !== 'inherit' ? headerTextColor : pc};
-    margin-bottom: 6px;
+    margin-bottom: 7px;
     direction: rtl;
     word-wrap: break-word;
     overflow-wrap: break-word;
@@ -837,14 +843,31 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
     opacity: 0.75;
   }
   .u-invoice-details {
-    font-size: 11px;
-    color: #666;
-    line-height: 1.8;
-    margin-top: 10px;
-    opacity: 0.85;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 3px 12px;
+    font-size: 9.5px;
+    color: #5f5b52;
+    line-height: 1.45;
+    margin-top: 4px;
+    opacity: 1;
+  }
+  .u-invoice-details > div {
+    min-width: 0;
+    padding-bottom: 2px;
+    border-bottom: 1px solid #eee7d8;
+  }
+  .u-invoice-details > div > span {
+    display: block;
+    color: #8a806d;
+    font-size: 8px;
+    margin-bottom: 1px;
   }
   .u-invoice-details strong {
-    color: ${pc};
+    color: #211d15;
+    display: block;
+    font-size: 9.5px;
+    font-weight: 700;
   }
   .u-company-side {
     display: flex;
@@ -854,14 +877,16 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
     flex-shrink: 0;
   }
   .u-logo {
-    height: ${logoSize}px;
+    height: ${resolvedLogoHeight}px;
     width: auto;
-    max-width: ${Math.max(240, logoSize * 2.5)}px;
+    max-width: 230px;
     object-fit: contain;
+    overflow: visible;
+    padding: 0;
   }
   .u-company-name {
     font-weight: 700;
-    font-size: ${headerFontSize + 1}px;
+    font-size: ${headerFontSize}px;
     color: ${headerTextColor !== 'inherit' ? headerTextColor : pc};
     margin-bottom: 2px;
   }
@@ -879,8 +904,8 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
   .u-footer {
     width: 100%;
     margin-bottom: ${footerPosition}mm;
-    padding-top: 10px;
-    border-top: 2px solid ${pc};
+    padding-top: 8px;
+    border-top: 1px solid ${pc};
     background: ${styles.footerBgColor && styles.footerBgColor !== 'transparent' ? styles.footerBgColor : 'transparent'};
     color: ${styles.footerTextColor || '#666'};
     font-size: 10px;
@@ -902,6 +927,7 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
       }
     }
     .u-page-number { display: none !important; }
+    .u-header { box-shadow: none !important; }
   }
   `;
 }

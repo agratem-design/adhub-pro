@@ -16,6 +16,7 @@ interface ProtectedRouteProps {
   /** @deprecated Use requiredPermission instead */
   requireAdmin?: boolean;
   requiredPermission?: string;
+  requiredAnyPermission?: string[];
 }
 
 /**
@@ -111,7 +112,7 @@ const getRequiredPermission = (pathname: string): string | null => {
   return prefixMatch ? prefixMatch[1] : null;
 };
 
-export const ProtectedRoute = ({ children, requiredPermission }: ProtectedRouteProps) => {
+export const ProtectedRoute = ({ children, requiredPermission, requiredAnyPermission }: ProtectedRouteProps) => {
   const { user, loading, hasPermission } = useAuth();
   const location = useLocation();
 
@@ -127,6 +128,17 @@ export const ProtectedRoute = ({ children, requiredPermission }: ProtectedRouteP
   // Not logged in - redirect to auth
   if (!user) {
     return <Navigate to="/auth" replace />;
+  }
+
+  if (requiredAnyPermission?.length) {
+    if (requiredAnyPermission.some(permissionName => hasPermission(permissionName))) {
+      return (
+        <ErrorBoundary resetKeys={[location.pathname]}>
+          {children}
+        </ErrorBoundary>
+      );
+    }
+    return <Navigate to="/" replace />;
   }
 
   // Determine the required permission

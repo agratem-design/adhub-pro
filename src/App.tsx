@@ -23,28 +23,32 @@ const isDesktopEnv = typeof window !== 'undefined' && (window.location.protocol 
 const RouterComponent = isDesktopEnv ? HashRouter : BrowserRouter;
 
 
-// Retry wrapper for lazy imports — handles stale chunk errors by reloading (max 1 reload per session)
+// Retry wrapper for lazy imports — handles momentary re-optimizations and stale chunk errors
 function lazyRetry(importFn: () => Promise<any>) {
-  return lazy(() =>
-    importFn().catch((err) => {
-      const key = 'chunk_reload';
-      const reloadCount = parseInt(sessionStorage.getItem(key) || '0', 10);
-      
-      // Only allow one reload attempt to prevent infinite loops
-      if (reloadCount < 1) {
-        sessionStorage.setItem(key, String(reloadCount + 1));
-        window.location.reload();
-        // Return a never-resolving promise to prevent rendering while reloading
-        return new Promise(() => {});
+  return lazy(async () => {
+    try {
+      return await importFn();
+    } catch (err) {
+      // First try a quick in-memory retry in case dev server was briefly re-optimizing deps
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        return await importFn();
+      } catch (retryErr) {
+        const routeKey = typeof window !== 'undefined' ? `chunk_reload_${window.location.pathname}` : 'chunk_reload';
+        const reloadCount = parseInt(sessionStorage.getItem(routeKey) || '0', 10);
+        
+        // Only allow one reload attempt per route to prevent infinite loops
+        if (reloadCount < 1) {
+          sessionStorage.setItem(routeKey, String(reloadCount + 1));
+          window.location.reload();
+          return new Promise(() => {});
+        }
+        
+        sessionStorage.removeItem(routeKey);
+        throw retryErr;
       }
-      
-      // Clear the counter so future navigations can retry once again
-      sessionStorage.removeItem(key);
-      
-      // Re-throw the error to show error boundary instead of infinite loop
-      throw err;
-    })
-  );
+    }
+  });
 }
 
 // ---- Lazy-loaded pages ----
