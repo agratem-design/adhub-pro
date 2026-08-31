@@ -133,34 +133,34 @@ export function sortBillboardsStandardSync<T extends Record<string, any>>(
     const sizeA = String((a as any).Size || (a as any).size || (a as any).Size_Name || '').trim();
     const sizeB = String((b as any).Size || (b as any).size || (b as any).Size_Name || '').trim();
 
-    // 1. Size Area DESCENDING (4x12 [48m²] > 4x10 [40m²] > 3x8 [24m²] > 3x6 [18m²] > 3x4 [12m²])
+    // 1. Size Table sort_order from Settings (رتبة المقاس من الإعدادات كأولوية أولى)
+    const orderA = getSizeRankFromMap(sizeA, sizeMap);
+    const orderB = getSizeRankFromMap(sizeB, sizeMap);
+    if (orderA !== orderB) {
+      return orderA - orderB;
+    }
+
+    // 2. Size Area DESCENDING (4x12 [48m²] > 4x10 [40m²] > 3x8 [24m²] > 3x6 [18m²] > 3x4 [12m²])
     const areaA = parseSizeArea(sizeA);
     const areaB = parseSizeArea(sizeB);
     if (areaA !== areaB && (areaA > 0 || areaB > 0)) {
       return areaB - areaA;
     }
 
-    // 2. Billboard Level (A/VIP = 1 > B = 2 > C = 3 > D = 4)
+    // 3. Billboard Level (A/VIP = 1 > B = 2 > C = 3 > D = 4)
     const levelRankA = getLevelRank((a as any).Level ?? (a as any).level ?? (a as any).billboard_level);
     const levelRankB = getLevelRank((b as any).Level ?? (b as any).level ?? (b as any).billboard_level);
     if (levelRankA !== levelRankB) {
       return levelRankA - levelRankB;
     }
 
-    // 3. Municipality Rank (from DB municipalities table sort_order)
+    // 4. Municipality Rank (from DB municipalities table sort_order)
     const munA = String((a as any).Municipality || (a as any).municipality || (a as any).City || (a as any).city || '').trim();
     const munB = String((b as any).Municipality || (b as any).municipality || (b as any).City || (b as any).city || '').trim();
     const munOrderA = getMuniRankFromMap(munA, muniMap);
     const munOrderB = getMuniRankFromMap(munB, muniMap);
     if (munOrderA !== munOrderB) {
       return munOrderA - munOrderB;
-    }
-
-    // 4. Size Table sort_order
-    const orderA = getSizeRankFromMap(sizeA, sizeMap);
-    const orderB = getSizeRankFromMap(sizeB, sizeMap);
-    if (orderA !== orderB) {
-      return orderA - orderB;
     }
 
     // 5. Billboard ID

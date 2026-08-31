@@ -17,6 +17,8 @@ import { format, subDays, differenceInDays } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'framer-motion';
 import { findOptimalTeamForRemoval, sortTeamsByPriority } from '@/utils/teamAssignment';
+import { checkIsAvailableForAvailableExports } from '@/services/billboardAvailabilityService';
+import { getLocalIgnoredContracts } from './ExpiredContractsAlert';
 import { 
   Search, 
   Building2,
@@ -34,7 +36,8 @@ import {
   AlertTriangle,
   Image,
   Check,
-  X
+  X,
+  Eye
 } from 'lucide-react';
 
 interface AddRemovalTaskDialogProps {
@@ -71,7 +74,7 @@ export function AddRemovalTaskDialog({
     }
   }, [open, teams]);
 
-  // جلب العقود المنتهية - مرتبة من الأحدث
+  // جلب العقود المنتهية أو المفعلة في المتاح - مرتبة من الأحدث
   const { data: expiredContracts = [], isLoading: contractsLoading } = useQuery({
     queryKey: ['expired-contracts-dialog', open],
     enabled: open,
@@ -81,29 +84,53 @@ export function AddRemovalTaskDialog({
       
       const { data, error } = await supabase
         .from('Contract')
-        .select('Contract_Number, "Customer Name", "Ad Type", "End Date", billboard_ids, "Contract Date"')
-        .lte('End Date', today.toISOString())
-        .gte('End Date', sixMonthsAgo.toISOString())
-        .order('"End Date"', { ascending: false })
-        .limit(500);
+        .select('*')
+        .order('Contract_Number', { ascending: false });
       
       if (error) throw error;
+      const localIgnored = getLocalIgnoredContracts();
+      return (data || []).filter((c: any) => {
+        const cNum = Number(c.Contract_Number);
+        if (c.ignore_removal_alert || localIgnored.has(cNum)) return false;
+        const isExpired = c['End Date'] ? new Date(c['End Date']) <= today : true;
+        const isWithinWindow = c['End Date'] ? new Date(c['End Date']) >= sixMonthsAgo : true;
+        // العقد المنتهي: يظهر ضمن النافذة الزمنية (آخر 6 أشهر)
+        // العقد النشط: يظهر فقط إذا فُعّل يدوياً في المتاح
+        const isActiveAndVisible = !isExpired && c.is_visible_in_available === true;
+        return (isExpired && isWithinWindow) || isActiveAndVisible;
+      });
+    }
+  });
+
+  // جلب أحجام اللوحات لترتيب اللوحات حسب رتبة المقاس من الإعدادات
+  const { data: sizes = [] } = useQuery({
+    queryKey: ['sizes-order-for-add-removal'],
+    queryFn: async () => {
+      const { data } = await supabase.from('sizes').select('*').order('sort_order', { ascending: true });
       return data || [];
     }
   });
 
-  // جلب اللوحات المتاحة عند اختيار العقود (مع استثناء اللوحات المؤجرة حالياً)
+  const sizeOrderMap = useMemo(() => {
+    const map = new Map<string, number>();
+    sizes.forEach((s: any, idx: number) => {
+      const name = String(s.name || '').trim();
+      const rank = typeof s.sort_order === 'number' && s.sort_order > 0 ? s.sort_order : idx + 1;
+      map.set(name, rank);
+      map.set(name.toLowerCase(), rank);
+      map.set(name.replace(/[×*]/g, 'x').toLowerCase(), rank);
+    });
+    return map;
+  }, [sizes]);
+
+  // جلب اللوحات المتاحة عند اختيار العقود (باستخدام المنطق المركزي الموحد لتصدير المتاح)
   const { data: availableBillboards = [], isLoading: billboardsLoading } = useQuery({
-    queryKey: ['available-billboards-dialog', Array.from(selectedContracts).join(',')],
+    queryKey: ['available-billboards-dialog', Array.from(selectedContracts).join(','), sizes.length],
     enabled: selectedContracts.size > 0,
     queryFn: async () => {
-      const today = new Date();
-      const todayStr = today.toISOString().split('T')[0];
-      today.setHours(0, 0, 0, 0);
-      
       const allBillboardIds: number[] = [];
       for (const contractNumber of selectedContracts) {
-        const contract = expiredContracts.find(c => c.Contract_Number === contractNumber);
+        const contract = expiredContracts.find((c: any) => c.Contract_Number === contractNumber);
         if (contract?.billboard_ids) {
           const ids = contract.billboard_ids.split(',').map((id: string) => parseInt(id.trim())).filter(Boolean);
           allBillboardIds.push(...ids);
@@ -112,20 +139,11 @@ export function AddRemovalTaskDialog({
       
       if (allBillboardIds.length === 0) return [];
       
-      // جلب جميع العقود النشطة (غير منتهية) للتحقق من اللوحات المؤجرة
-      const { data: activeContracts } = await supabase
+      // جلب جميع العقود للتأكد من حالة الإتاحة المركزية
+      const { data: allContracts } = await supabase
         .from('Contract')
-        .select('billboard_ids')
-        .gte('End Date', todayStr);
-      
-      // استخراج معرفات اللوحات المؤجرة حالياً
-      const rentedBillboardIds = new Set<number>();
-      (activeContracts || []).forEach(contract => {
-        if (contract.billboard_ids) {
-          const ids = contract.billboard_ids.split(',').map((id: string) => parseInt(id.trim())).filter(Boolean);
-          ids.forEach((id: number) => rentedBillboardIds.add(id));
-        }
-      });
+        .select('*')
+        .order('Contract_Number', { ascending: false });
       
       const { data, error } = await supabase
         .from('billboards')
@@ -134,18 +152,25 @@ export function AddRemovalTaskDialog({
       
       if (error) throw error;
       
-      return (data || []).filter(b => {
+      const filtered = (data || []).filter((b: any) => {
         // استثناء اللوحات الموجودة في مهام إزالة
         if (existingTaskBillboardIds.has(b.ID)) return false;
-        // استثناء اللوحات المؤجرة حالياً في عقود نشطة
-        if (rentedBillboardIds.has(b.ID)) return false;
-        // التحقق من انتهاء تاريخ الإيجار
-        const rentEndDate = b.Rent_End_Date;
-        if (!rentEndDate) return false;
-        const endDate = new Date(rentEndDate);
-        endDate.setHours(0, 0, 0, 0);
-        return endDate < today;
+        
+        // تطبيق المنطق المركزي الموحد لتصدير المتاح (Single Source of Truth)
+        return checkIsAvailableForAvailableExports(b, allContracts || []);
       });
+
+      // ترتيب اللوحات حسب رتبة المقاس من الإعدادات
+      filtered.sort((a: any, b: any) => {
+        const sizeA = String(a.Size || a.size || '').trim();
+        const sizeB = String(b.Size || b.size || '').trim();
+        const rankA = sizeOrderMap.get(sizeA) ?? sizeOrderMap.get(sizeA.toLowerCase()) ?? sizeOrderMap.get(sizeA.replace(/[×*]/g, 'x').toLowerCase()) ?? 9999;
+        const rankB = sizeOrderMap.get(sizeB) ?? sizeOrderMap.get(sizeB.toLowerCase()) ?? sizeOrderMap.get(sizeB.replace(/[×*]/g, 'x').toLowerCase()) ?? 9999;
+        if (rankA !== rankB) return rankA - rankB;
+        return Number(a.ID || 0) - Number(b.ID || 0);
+      });
+
+      return filtered;
     }
   });
 
@@ -439,11 +464,15 @@ export function AddRemovalTaskDialog({
                         <p className="text-sm mt-1">جرب البحث بكلمات مختلفة</p>
                       </div>
                     ) : (
-                      filteredContracts.map((contract) => {
+                      filteredContracts.map((contract: any) => {
                         const isSelected = selectedContracts.has(contract.Contract_Number);
                         const billboardCount = contract.billboard_ids?.split(',').filter(Boolean).length || 0;
-                        const daysExpired = getDaysExpired(contract['End Date']);
-                        const expiryInfo = getExpiryBadge(daysExpired);
+                        const isContractVisibleInAvailable = contract.is_visible_in_available === true;
+                        const isExpired = contract['End Date'] ? new Date(contract['End Date']) <= new Date() : true;
+                        const daysExpired = isExpired ? getDaysExpired(contract['End Date']) : 0;
+                        const expiryInfo = isExpired 
+                          ? getExpiryBadge(daysExpired) 
+                          : { color: 'bg-emerald-600', text: 'مفعل في المتاح' };
                         
                         return (
                           <motion.div
@@ -475,8 +504,14 @@ export function AddRemovalTaskDialog({
                                 <Badge variant="outline" className="text-sm">
                                   {contract['Ad Type'] || 'غير محدد'}
                                 </Badge>
+                                {isContractVisibleInAvailable && (
+                                  <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 text-xs gap-1 font-bold">
+                                    <Eye className="h-3 w-3" />
+                                    مفعل في المتاح
+                                  </Badge>
+                                )}
                                 <Badge className={`${expiryInfo.color} text-white`}>
-                                  {expiryInfo.text} ({daysExpired} يوم)
+                                  {expiryInfo.text} {isExpired ? `(${daysExpired} يوم)` : ''}
                                 </Badge>
                               </div>
                               <div className="flex items-center gap-4 mt-2 text-muted-foreground">
@@ -494,7 +529,8 @@ export function AddRemovalTaskDialog({
                             <div className="text-left shrink-0">
                               <p className="text-sm font-medium flex items-center gap-1">
                                 <Calendar className="h-4 w-4" />
-                                انتهى: {format(new Date(contract['End Date']), 'dd MMM yyyy', { locale: ar })}
+                                {isExpired ? 'انتهى: ' : 'ينتهي: '}
+                                {contract['End Date'] ? format(new Date(contract['End Date']), 'dd MMM yyyy', { locale: ar }) : '—'}
                               </p>
                             </div>
                           </motion.div>
@@ -591,6 +627,12 @@ export function AddRemovalTaskDialog({
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-bold text-red-600">#{billboard.ID}</span>
                                   <span className="text-sm truncate">{billboard.Billboard_Name || ''}</span>
+                                  {billboard.is_visible_in_available === true && (
+                                    <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30 text-[10px] gap-0.5 font-bold">
+                                      <Eye className="h-2.5 w-2.5" />
+                                      متاح
+                                    </Badge>
+                                  )}
                                 </div>
                                 <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
                                   <p className="flex items-center gap-1">

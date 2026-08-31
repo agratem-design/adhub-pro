@@ -1,4 +1,6 @@
 import React, { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { usePersistedFilters } from '@/hooks/usePersistedFilters';
 import { Button } from '@/components/ui/button';
@@ -159,11 +161,50 @@ export const RemovalTasksBoard: React.FC<Props> = ({
     onPageChange(1);
   };
 
+  // جلب أحجام اللوحات لترتيب لوحات كل مهمة حسب رتبة المقاس من الإعدادات
+  const { data: sizes = [] } = useQuery({
+    queryKey: ['sizes-order-for-removal-board'],
+    queryFn: async () => {
+      const { data } = await supabase.from('sizes').select('*').order('sort_order', { ascending: true });
+      return data || [];
+    }
+  });
+
+  const sizeOrderMap = useMemo(() => {
+    const map = new Map<string, number>();
+    sizes.forEach((s: any, idx: number) => {
+      const name = String(s.name || '').trim();
+      const rank = typeof s.sort_order === 'number' && s.sort_order > 0 ? s.sort_order : idx + 1;
+      map.set(name, rank);
+      map.set(name.toLowerCase(), rank);
+      map.set(name.replace(/[×*]/g, 'x').toLowerCase(), rank);
+    });
+    return map;
+  }, [sizes]);
+
   const itemsByTask = useMemo(() => {
     const m: Record<string, any[]> = {};
-    allTaskItems.forEach(i => { if (!m[i.task_id]) m[i.task_id] = []; m[i.task_id].push(i); });
+    allTaskItems.forEach(i => {
+      if (!m[i.task_id]) m[i.task_id] = [];
+      m[i.task_id].push(i);
+    });
+
+    // ترتيب لوحات كل مهمة حسب رتبة المقاس من الإعدادات
+    Object.values(m).forEach(items => {
+      items.sort((a, b) => {
+        const bA = billboardById[a.billboard_id];
+        const bB = billboardById[b.billboard_id];
+        const sizeA = String(bA?.Size || bA?.size || '').trim();
+        const sizeB = String(bB?.Size || bB?.size || '').trim();
+        const rankA = sizeOrderMap.get(sizeA) ?? sizeOrderMap.get(sizeA.toLowerCase()) ?? sizeOrderMap.get(sizeA.replace(/[×*]/g, 'x').toLowerCase()) ?? 9999;
+        const rankB = sizeOrderMap.get(sizeB) ?? sizeOrderMap.get(sizeB.toLowerCase()) ?? sizeOrderMap.get(sizeB.replace(/[×*]/g, 'x').toLowerCase()) ?? 9999;
+        if (rankA !== rankB) return rankA - rankB;
+        return Number(a.billboard_id || 0) - Number(b.billboard_id || 0);
+      });
+    });
+
     return m;
-  }, [allTaskItems]);
+  }, [allTaskItems, billboardById, sizeOrderMap]);
 
   const enriched = useMemo(() => tasks.map(task => {
     const items = itemsByTask[task.id] || [];

@@ -167,25 +167,32 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
       setShowInAvailable(false);
       return;
     }
-    supabase.from('billboards').select('ID, is_visible_in_available').in('ID', ids)
-      .then(({ data }) => {
+    supabase.from('billboards').select('ID, Billboard_Name, Status, Contract_Number, Rent_End_Date, is_visible_in_available, friend_company_id').in('ID', ids)
+      .then(async ({ data }) => {
         if (data && data.length > 0) {
-          const visInfo = resolveContractMarketingVisibility(data as any);
+          // جلب العقود للتحقق الدقيق من العوائق واللوحات المحجوبة
+          const { data: allContracts } = await supabase
+            .from('Contract')
+            .select('Contract_Number, "Contract Date", "End Date", "Customer Name", "Ad Type", billboard_ids, billboard_prices, billboards_released, is_visible_in_available, Status');
+
+          const visInfo = resolveContractMarketingVisibility(data as any, allContracts || []);
 
           setTotalContractBoards(visInfo.totalCount);
-          setForceVisibleCount(visInfo.forceShowCount);
+          setForceVisibleCount(visInfo.effectiveForceShowCount);
           setForceHiddenCount(visInfo.forceHideCount);
 
-          if (!isContractActivated) {
+          if (!isContractActivated && visInfo.effectiveForceShowCount === 0) {
             setVisibilityState('ALL_OFF');
             setShowInAvailable(false);
-          } else if (visInfo.state === 'ON') {
+          } else if (visInfo.state === 'ON' && isContractActivated) {
             setVisibilityState('ALL_ON');
             setShowInAvailable(true);
-          } else {
-            // Contract is explicitly activated, but some or all boards might be blocked/hidden
+          } else if (visInfo.effectiveForceShowCount > 0) {
             setVisibilityState('MIXED');
             setShowInAvailable(true);
+          } else {
+            setVisibilityState('ALL_OFF');
+            setShowInAvailable(false);
           }
         }
       });

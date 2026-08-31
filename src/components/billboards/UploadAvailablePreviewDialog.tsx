@@ -494,7 +494,7 @@ export const UploadAvailablePreviewDialog: React.FC<UploadAvailablePreviewDialog
                             )}
 
                             <Badge variant="secondary" className="font-bold text-xs bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200">
-                              {c.eligibleBillboardsCount || c.effectiveForceShowCount} لوحة
+                              {c.eligibleBillboardsCount} لوحة
                             </Badge>
                           </div>
                         </div>

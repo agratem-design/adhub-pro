@@ -62,6 +62,11 @@ import { Progress } from '@/components/ui/progress';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SendTeamInstallationReportDialog } from '@/components/installation/SendTeamInstallationReportDialog';
 import { findOptimalTeamForRemoval, sortTeamsByPriority } from '@/utils/teamAssignment';
+import { 
+  checkIsAvailableForAvailableExports, 
+  checkIsAvailableOrUpcomingForExport, 
+  resolveBillboardAvailability 
+} from '@/services/billboardAvailabilityService';
 
 interface RemovalTask {
   id: string;
@@ -252,15 +257,15 @@ export default function RemovalTasks() {
       
       const billboardsInPendingTasks = new Set(existingTaskItems?.map(item => item.billboard_id) || []);
       
-      // ✅ جلب جميع العقود النشطة للتحقق من اللوحات المؤجرة حالياً
+      // ✅ جلب جميع العقود النشطة للتحقق من اللوحات المؤجرة حالياً (مع استثناء المفعلة في المتاح)
       const { data: activeContracts } = await supabase
         .from('Contract')
-        .select('billboard_ids')
+        .select('Contract_Number, billboard_ids, is_visible_in_available')
         .gt('"End Date"', todayStr);
       
       const billboardsInActiveContracts = new Set<number>();
-      (activeContracts || []).forEach(contract => {
-        if (contract.billboard_ids) {
+      (activeContracts || []).forEach((contract: any) => {
+        if (contract.is_visible_in_available !== true && contract.billboard_ids) {
           const ids = contract.billboard_ids.split(',').map((id: string) => parseInt(id.trim())).filter(Boolean);
           ids.forEach((id: number) => billboardsInActiveContracts.add(id));
         }
@@ -421,13 +426,9 @@ export default function RemovalTasks() {
       await cleanupRentedBillboardsFromRemovalTasks();
     };
     
-    // وظيفة تنظيف اللوحات المؤجرة من مهام الإزالة
+    // وظيفة تنظيف اللوحات المؤجرة من مهام الإزالة (باستخدام المنطق المركزي الموحد لتصدير المتاح)
     const cleanupRentedBillboardsFromRemovalTasks = async () => {
       try {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const todayStr = today.toISOString().split('T')[0];
-        
         // جلب جميع عناصر الإزالة المعلقة مع معلومات المهمة
         const { data: pendingItems } = await supabase
           .from('removal_task_items')
@@ -436,39 +437,49 @@ export default function RemovalTasks() {
         
         if (!pendingItems || pendingItems.length === 0) return;
         
-        // جلب المهام المعلقة فقط
+        // جلب المهام المعلقة أو قيد التنفيذ فقط
         const taskIds = [...new Set(pendingItems.map(item => item.task_id))];
-        const { data: tasks } = await supabase
+        const { data: activeTasks } = await supabase
           .from('removal_tasks')
           .select('id, status')
           .in('id', taskIds)
           .in('status', ['pending', 'in_progress']);
         
-        if (!tasks || tasks.length === 0) return;
+        if (!activeTasks || activeTasks.length === 0) return;
         
-        const activeTaskIds = tasks.map(t => t.id);
+        const activeTaskIds = activeTasks.map(t => t.id);
         const activeItems = pendingItems.filter(item => activeTaskIds.includes(item.task_id));
         
         if (activeItems.length === 0) return;
         
-        // جلب جميع العقود النشطة للتحقق من اللوحات المؤجرة حالياً
-        const { data: activeContracts } = await supabase
+        // جلب جميع العقود للتأكد من حالة الإتاحة المركزية (نفس منطق تصدير المتاح)
+        const { data: allContracts } = await supabase
           .from('Contract')
-          .select('billboard_ids')
-          .gt('"End Date"', todayStr);
-        
-        const rentedBillboardIds = new Set<number>();
-        (activeContracts || []).forEach(contract => {
-          if (contract.billboard_ids) {
-            const ids = contract.billboard_ids.split(',').map((id: string) => parseInt(id.trim())).filter(Boolean);
-            ids.forEach((id: number) => rentedBillboardIds.add(id));
+          .select('*')
+          .order('Contract_Number', { ascending: false });
+
+        // جلب بيانات اللوحات المعنية للتحقق
+        const billboardIds = [...new Set(activeItems.map(item => item.billboard_id))];
+        const { data: billboardsData } = await supabase
+          .from('billboards')
+          .select('*')
+          .in('ID', billboardIds);
+
+        const billboardMap = new Map<number, any>();
+        (billboardsData || []).forEach(b => billboardMap.set(b.ID, b));
+
+        // فحص كل لوحة بنظام تصدير المتاحة والقادمة الموحد
+        const itemsToDelete: string[] = [];
+        for (const item of activeItems) {
+          const billboard = billboardMap.get(item.billboard_id);
+          if (!billboard) continue;
+          
+          const isAvailableOrUpcoming = checkIsAvailableOrUpcomingForExport(billboard, allContracts || [], 4);
+          // إذا لم تكن اللوحة متاحة أو قادمة (أي مؤجرة في عقد نشط طويل الأجل غير مفعل في المتاح أو محجوبة بعقد نشط آخر) يتم حذفها من مهام الإزالة
+          if (!isAvailableOrUpcoming) {
+            itemsToDelete.push(item.id);
           }
-        });
-        
-        // حذف عناصر الإزالة للوحات المؤجرة في عقود نشطة أخرى
-        const itemsToDelete = activeItems
-          .filter(item => rentedBillboardIds.has(item.billboard_id))
-          .map(item => item.id);
+        }
         
         if (itemsToDelete.length > 0) {
           await supabase
@@ -998,13 +1009,9 @@ export default function RemovalTasks() {
     },
   });
 
-  // تنظيف اللوحات المؤجرة من مهام الإزالة
+  // تنظيف اللوحات المؤجرة من مهام الإزالة (باستخدام المنطق المركزي الموحد لتصدير المتاح)
   const cleanupRentedMutation = useMutation({
     mutationFn: async () => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayStr = today.toISOString().split('T')[0];
-      
       // جلب جميع عناصر الإزالة المعلقة
       const { data: pendingItems } = await supabase
         .from('removal_task_items')
@@ -1015,7 +1022,7 @@ export default function RemovalTasks() {
         throw new Error('لا توجد عناصر إزالة معلقة');
       }
       
-      // جلب المهام المعلقة فقط
+      // جلب المهام المعلقة أو قيد التنفيذ
       const taskIds = [...new Set(pendingItems.map(item => item.task_id))];
       const { data: activeTasks } = await supabase
         .from('removal_tasks')
@@ -1034,24 +1041,34 @@ export default function RemovalTasks() {
         throw new Error('لا توجد عناصر في مهام نشطة');
       }
       
-      // جلب جميع العقود النشطة للتحقق من اللوحات المؤجرة حالياً
-      const { data: activeContracts } = await supabase
+      // جلب جميع العقود للتأكد من حالة الإتاحة المركزية (نفس منطق تصدير المتاح)
+      const { data: allContracts } = await supabase
         .from('Contract')
-        .select('billboard_ids')
-        .gt('"End Date"', todayStr);
-      
-      const rentedBillboardIds = new Set<number>();
-      (activeContracts || []).forEach(contract => {
-        if (contract.billboard_ids) {
-          const ids = contract.billboard_ids.split(',').map((id: string) => parseInt(id.trim())).filter(Boolean);
-          ids.forEach((id: number) => rentedBillboardIds.add(id));
+        .select('*')
+        .order('Contract_Number', { ascending: false });
+
+      // جلب بيانات اللوحات المعنية للتحقق
+      const billboardIds = [...new Set(activeItems.map(item => item.billboard_id))];
+      const { data: billboardsData } = await supabase
+        .from('billboards')
+        .select('*')
+        .in('ID', billboardIds);
+
+      const billboardMap = new Map<number, any>();
+      (billboardsData || []).forEach(b => billboardMap.set(b.ID, b));
+
+      // فحص كل لوحة بنظام تصدير المتاحة والقادمة الموحد
+      const itemsToDelete: string[] = [];
+      for (const item of activeItems) {
+        const billboard = billboardMap.get(item.billboard_id);
+        if (!billboard) continue;
+        
+        const isAvailableOrUpcoming = checkIsAvailableOrUpcomingForExport(billboard, allContracts || [], 4);
+        // إذا لم تكن اللوحة متاحة أو قادمة (أي مؤجرة في عقد نشط طويل الأجل غير مفعل في المتاح أو محجوبة بعقد نشط آخر) يتم حذفها من مهام الإزالة
+        if (!isAvailableOrUpcoming) {
+          itemsToDelete.push(item.id);
         }
-      });
-      
-      // حذف عناصر الإزالة للوحات المؤجرة
-      const itemsToDelete = activeItems
-        .filter(item => rentedBillboardIds.has(item.billboard_id))
-        .map(item => item.id);
+      }
       
       if (itemsToDelete.length > 0) {
         const { error } = await supabase
@@ -1082,7 +1099,11 @@ export default function RemovalTasks() {
       return itemsToDelete.length;
     },
     onSuccess: (count) => {
-      toast.success(`تم حذف ${count} لوحة مؤجرة من مهام الإزالة`);
+      if (count > 0) {
+        toast.success(`تم حذف ${count} لوحة مؤجرة من مهام الإزالة`);
+      } else {
+        toast.info('جميع لوحات مهام الإزالة مطابقة للمتاحة والقادمة (لا توجد لوحات مؤجرة لحذفها)');
+      }
       queryClient.invalidateQueries({ queryKey: ['removal-tasks'] });
       queryClient.invalidateQueries({ queryKey: ['all-removal-task-items'] });
     },
@@ -1766,10 +1787,12 @@ export default function RemovalTasks() {
     setSelectedTasks(newSet);
   };
 
-  // حساب IDs العقود الموجودة في مهام (بما في ذلك المكتملة) - يجب أن تكون قبل أي return
+  // حساب IDs العقود الموجودة في مهام نشطة (معلقة أو قيد التنفيذ)
   const existingTaskContractIds = useMemo(() => {
     return new Set(
-      tasks.flatMap(t => t.contract_ids || [t.contract_id])
+      tasks
+        .filter(t => t.status === 'pending' || t.status === 'in_progress')
+        .flatMap(t => t.contract_ids || [t.contract_id])
     );
   }, [tasks]);
 

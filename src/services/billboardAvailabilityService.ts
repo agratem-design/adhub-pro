@@ -806,3 +806,37 @@ export function resolveContractMarketingVisibility(
     blockedBillboards,
   };
 }
+
+export function checkIsAvailableForAvailableExports(
+  billboard: any,
+  contracts: any[] = [],
+  referenceDate?: string | Date
+): boolean {
+  const res = resolveBillboardAvailability(billboard, contracts, { referenceDate });
+  return (
+    res.classification === 'AVAILABLE_WITHOUT_CONTRACT' ||
+    res.classification === 'EXPLICIT_CONTRACT_SHOW' ||
+    res.classification === 'EXPLICIT_BILLBOARD_SHOW'
+  );
+}
+
+export function checkIsAvailableOrUpcomingForExport(
+  billboard: any,
+  contracts: any[] = [],
+  monthsAhead: number = 4,
+  referenceDate?: string | Date
+): boolean {
+  const res = resolveBillboardAvailability(billboard, contracts, {
+    upcomingMonthsWindow: monthsAhead,
+    referenceDate,
+  });
+  return (
+    res.classification === 'AVAILABLE_WITHOUT_CONTRACT' ||
+    res.classification === 'EXPLICIT_CONTRACT_SHOW' ||
+    res.classification === 'EXPLICIT_BILLBOARD_SHOW' ||
+    res.classification === 'UPCOMING'
+  );
+}
+
+export const isAvailableForAvailableExports = checkIsAvailableForAvailableExports;
+export const isAvailableOrUpcomingForExport = checkIsAvailableOrUpcomingForExport;

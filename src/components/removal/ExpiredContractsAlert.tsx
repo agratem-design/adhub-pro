@@ -28,10 +28,12 @@ import {
   AlertCircle,
   Sparkles,
   Bell,
-  RefreshCw
+  RefreshCw,
+  Eye
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { findOptimalTeamForRemoval, sortTeamsByPriority } from '@/utils/teamAssignment';
+import { checkIsAvailableForAvailableExports } from '@/services/billboardAvailabilityService';
 
 interface ExpiredContract {
   Contract_Number: number;
@@ -40,6 +42,43 @@ interface ExpiredContract {
   'End Date': string;
   billboard_ids: string;
   daysExpired: number;
+  isExpired?: boolean;
+  isVisibleInAvailable?: boolean;
+  originalBillboardCount?: number;
+  availableBillboardCount?: number;
+}
+
+// قائمة العقود التي تمت إزالتها مسبقاً أو تم تجاهلها
+const DEFAULT_IGNORED_CONTRACTS = new Set<number>([
+  1220, 1217, 1204, 1188, 1186, 1175, 1171, 1169, 1164, 1160, 1157, 
+  1147, 1137, 1133, 1132, 1131, 1130, 1121, 1113, 1111, 1098, 1089, 
+  1084, 1071, 1045, 1044, 1039, 1036, 1034, 1028, 1026, 1019, 1008
+]);
+
+export function getLocalIgnoredContracts(): Set<number> {
+  const set = new Set<number>(DEFAULT_IGNORED_CONTRACTS);
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const stored = localStorage.getItem('ignored_removal_contract_ids');
+      if (stored) {
+        const arr = JSON.parse(stored);
+        if (Array.isArray(arr)) {
+          arr.forEach(id => set.add(Number(id)));
+        }
+      }
+    }
+  } catch {}
+  return set;
+}
+
+export function addLocalIgnoredContracts(ids: number[]) {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const current = getLocalIgnoredContracts();
+      ids.forEach(id => current.add(Number(id)));
+      localStorage.setItem('ignored_removal_contract_ids', JSON.stringify(Array.from(current)));
+    }
+  } catch {}
 }
 
 interface ExpiredContractsAlertProps {
@@ -58,129 +97,128 @@ export function ExpiredContractsAlert({
   const [selectedContracts, setSelectedContracts] = useState<Set<number>>(new Set());
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [selectedTeamId, setSelectedTeamId] = useState<string>('');
-  const [filterDays, setFilterDays] = useState<'all' | '7' | '30' | '60'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'available' | 'expired' | '7' | '30' | '60'>('all');
   
   const queryClient = useQueryClient();
 
-  // جلب العقود المنتهية
+  // جلب العقود المنتهية أو المفعلة في المتاح
   const { data: expiredContracts = [], isLoading, refetch } = useQuery({
     queryKey: ['expired-contracts-for-alert', Array.from(existingTaskContractIds).join(',')],
     queryFn: async () => {
       const today = new Date();
+      today.setHours(0, 0, 0, 0);
       const todayStr = today.toISOString().split('T')[0];
-      const fourMonthsAgo = subMonths(today, 4);
-      const fourMonthsAgoStr = fourMonthsAgo.toISOString().split('T')[0];
+      const localIgnored = getLocalIgnoredContracts();
       
-      const { data: contractsData, error } = await (supabase as any)
+      // 1. جلب جميع العقود
+      const { data: allContracts, error: contractsError } = await supabase
         .from('Contract')
-        .select('Contract_Number, "Customer Name", "Ad Type", "End Date", billboard_ids, ignore_removal_alert')
-        .lte('End Date', today.toISOString())
-        .gte('End Date', fourMonthsAgo.toISOString())
-        .order('"End Date"', { ascending: false });
+        .select('*')
+        .order('Contract_Number', { ascending: false });
       
-      if (error) throw error;
+      if (contractsError) {
+        console.error('Error fetching contracts for removal alert:', contractsError);
+        throw contractsError;
+      }
 
-      // 2. جلب جميع العقود النشطة (غير منتهية) للتحقق من اللوحات المؤجرة حالياً
-      const { data: activeContracts } = await supabase
-        .from('Contract')
-        .select('Contract_Number, billboard_ids')
-        .gt('End Date', todayStr);
-      
-      // استخراج معرفات اللوحات المؤجرة حالياً في عقود نشطة
-      const rentedBillboardIds = new Set<number>();
-      (activeContracts || []).forEach(contract => {
-        if (contract.billboard_ids) {
-          const ids = contract.billboard_ids.split(',').map((id: string) => parseInt(id.trim())).filter(Boolean);
-          ids.forEach((id: number) => rentedBillboardIds.add(id));
-        }
-      });
-
-      // 3. جلب جميع اللوحات المنتهية من جدول اللوحات مباشرة (خلال آخر 4 أشهر فقط) للتأكد من جلب اللوحات المضافة يدوياً
-      const { data: expiredBillboardsData } = await supabase
+      // 2. جلب جميع اللوحات
+      const { data: allBillboards, error: billboardsError } = await supabase
         .from('billboards')
-        .select('ID, Billboard_Name, Contract_Number, Rent_End_Date, Customer_Name, Ad_Type')
-        .not('Contract_Number', 'is', null)
-        .lte('Rent_End_Date', todayStr)
-        .gte('Rent_End_Date', fourMonthsAgoStr);
+        .select('*');
 
-      const expiredBillboardsByContract = new Map<number, any[]>();
-      (expiredBillboardsData || []).forEach(b => {
-        const cNum = Number(b.Contract_Number);
-        if (!isNaN(cNum)) {
-          if (!expiredBillboardsByContract.has(cNum)) {
-            expiredBillboardsByContract.set(cNum, []);
-          }
-          expiredBillboardsByContract.get(cNum)!.push(b);
-        }
-      });
+      if (billboardsError) {
+        console.error('Error fetching billboards for removal alert:', billboardsError);
+        throw billboardsError;
+      }
 
-      // جلب جميع اللوحات المشمولة بالفعل في مهام إزالة معلقة أو مكتملة لمنع التكرار
+      // 3. جلب عناصر مهام الإزالة المعلقة وقيد التنفيذ لمنع التكرار
       const { data: removalItems } = await supabase
         .from('removal_task_items')
-        .select('billboard_id');
+        .select('billboard_id, removal_tasks!inner(status)')
+        .in('removal_tasks.status', ['pending', 'in_progress']);
       const existingTaskBillboardIds = new Set(removalItems?.map(item => item.billboard_id).filter(Boolean) || []);
 
-      // دمج وتجهيز القائمة النهائية
-      const processedContracts = new Map<number, any>();
+      // خريطة اللوحات
+      const billboardsByContract = new Map<number, any[]>();
+      const allBillboardsMap = new Map<number, any>();
 
-      // أ) معالجة العقود القادمة من جدول العقود
-      (contractsData || []).forEach(contract => {
-        if (contract.ignore_removal_alert) return;
-        if (existingTaskContractIds.has(contract.Contract_Number)) return;
+      (allBillboards || []).forEach((b: any) => {
+        allBillboardsMap.set(b.ID, b);
+        const cNum = Number(b.Contract_Number);
+        if (!isNaN(cNum) && cNum > 0) {
+          if (!billboardsByContract.has(cNum)) {
+            billboardsByContract.set(cNum, []);
+          }
+          billboardsByContract.get(cNum)!.push(b);
+        }
+      });
 
-        const contractBillboardIds = contract.billboard_ids?.split(',').map((id: string) => parseInt(id.trim())).filter(Boolean) || [];
+      const processedContracts = new Map<number, ExpiredContract>();
+
+      // فحص العقود
+      (allContracts || []).forEach((contract: any) => {
+        const cNum = Number(contract.Contract_Number);
+        if (contract.ignore_removal_alert || localIgnored.has(cNum)) return;
+        if (existingTaskContractIds.has(cNum)) return;
+
+        // استخراج معرفات لوحات العقد
+        const contractBillboardIds = contract.billboard_ids
+          ? String(contract.billboard_ids).split(',').map((id: string) => parseInt(id.trim())).filter(Boolean)
+          : [];
         
-        // جلب اللوحات الإضافية من جدول اللوحات التي ترتبط بنفس العقد
-        const extraBillboards = expiredBillboardsByContract.get(contract.Contract_Number) || [];
-        const extraIds = extraBillboards.map(b => b.ID);
-        
-        const mergedBillboardIds = Array.from(new Set([...contractBillboardIds, ...extraIds]));
-        const availableBillboards = mergedBillboardIds.filter((id: number) => {
-          return !rentedBillboardIds.has(id) && !existingTaskBillboardIds.has(id);
+        const contractBillboardsFromMap = billboardsByContract.get(contract.Contract_Number) || [];
+        const extraIds = contractBillboardsFromMap.map((b: any) => b.ID);
+        const allUniqueIds = Array.from(new Set([...contractBillboardIds, ...extraIds]));
+
+        if (allUniqueIds.length === 0) return;
+
+        // فحص كل لوحة بمنطق تصدير المتاح الموحد (Single Source of Truth)
+        const availableBillboardIds: number[] = [];
+
+        allUniqueIds.forEach((id: number) => {
+          if (existingTaskBillboardIds.has(id)) return;
+          const billboard = allBillboardsMap.get(id);
+          if (!billboard) return; // لوحة غير موجودة في قاعدة البيانات
+
+          // ✅ المنطق الموحد: اللوحة تُضاف فقط إذا كانت متاحة (غير مؤجرة/غير محجوبة/غير تحت صيانة)
+          const isAvailable = checkIsAvailableForAvailableExports(billboard, allContracts || []);
+          if (isAvailable) {
+            availableBillboardIds.push(id);
+          }
         });
 
-        if (availableBillboards.length > 0) {
+        // العقد لا يظهر إذا لم يكن لديه ولو لوحة واحدة متاحة
+        if (availableBillboardIds.length === 0) return;
+
+        const endDate = contract['End Date'] ? new Date(contract['End Date']) : null;
+        const isExpired = endDate ? endDate <= today : true;
+
+        // ✅ القاعدة الجديدة:
+        // - العقد المنتهي: يظهر دائماً طالما لديه لوحات متاحة، بغض النظر عن is_visible_in_available
+        // - العقد النشط: يظهر فقط إذا كان is_visible_in_available = true (مفعّل يدوياً)
+        const isContractVisibleInAvailable = contract.is_visible_in_available === true;
+        const isActiveButVisibleInAvailable = !isExpired && isContractVisibleInAvailable;
+
+        // is_visible_in_available لا اعتبار لها للعقود المنتهية - تُعامل كعقد عادي محتاج إزالة
+        const isVisibleInAvailable = isActiveButVisibleInAvailable;
+
+        if (isExpired || isActiveButVisibleInAvailable) {
           processedContracts.set(contract.Contract_Number, {
             Contract_Number: contract.Contract_Number,
             'Customer Name': contract['Customer Name'] || 'غير محدد',
             'Ad Type': contract['Ad Type'] || '—',
-            'End Date': contract['End Date'],
-            billboard_ids: availableBillboards.join(','),
-            originalBillboardCount: mergedBillboardIds.length,
-            availableBillboardCount: availableBillboards.length,
-            daysExpired: differenceInDays(today, new Date(contract['End Date'] || today))
-          });
-        }
-      });
-
-      // ب) معالجة العقود التي لديها لوحات منتهية في جدول اللوحات ولكن لا يوجد لها عقد مسجل أو العقد مسجل بدون لوحات
-      expiredBillboardsByContract.forEach((billboards, contractNumber) => {
-        if (existingTaskContractIds.has(contractNumber)) return;
-        if (processedContracts.has(contractNumber)) return;
-
-        // فلترة اللوحات المتاحة للإزالة
-        const availableBillboards = billboards.filter(b => {
-          return !rentedBillboardIds.has(b.ID) && !existingTaskBillboardIds.has(b.ID);
-        });
-
-        if (availableBillboards.length > 0) {
-          const firstBill = availableBillboards[0];
-          processedContracts.set(contractNumber, {
-            Contract_Number: contractNumber,
-            'Customer Name': firstBill.Customer_Name || 'غير محدد',
-            'Ad Type': firstBill.Ad_Type || '—',
-            'End Date': firstBill.Rent_End_Date || todayStr,
-            billboard_ids: availableBillboards.map(b => b.ID).join(','),
-            originalBillboardCount: billboards.length,
-            availableBillboardCount: availableBillboards.length,
-            daysExpired: differenceInDays(today, new Date(firstBill.Rent_End_Date || today))
+            'End Date': contract['End Date'] || todayStr,
+            billboard_ids: availableBillboardIds.join(','),
+            originalBillboardCount: allUniqueIds.length,
+            availableBillboardCount: availableBillboardIds.length,
+            daysExpired: isExpired ? differenceInDays(today, new Date(contract['End Date'] || today)) : 0,
+            isExpired,
+            isVisibleInAvailable,
           });
         }
       });
 
       const result = Array.from(processedContracts.values()).sort((a, b) => b.Contract_Number - a.Contract_Number);
-      
-      console.log('Final expired contracts in alert:', result.map(c => c.Contract_Number));
       return result;
     },
     refetchInterval: 60000 // تحديث كل دقيقة
@@ -190,10 +228,17 @@ export function ExpiredContractsAlert({
   const filteredContracts = useMemo(() => {
     let filtered = expiredContracts;
     
-    // فلترة حسب الأيام
-    if (filterDays !== 'all') {
-      const days = parseInt(filterDays);
-      filtered = filtered.filter(c => c.daysExpired <= days);
+    // فلترة حسب الحالة والنوع
+    if (filterType === 'available') {
+      filtered = filtered.filter(c => c.isVisibleInAvailable);
+    } else if (filterType === 'expired') {
+      filtered = filtered.filter(c => c.isExpired);
+    } else if (filterType === '7') {
+      filtered = filtered.filter(c => c.isExpired && c.daysExpired <= 7);
+    } else if (filterType === '30') {
+      filtered = filtered.filter(c => c.isExpired && c.daysExpired <= 30);
+    } else if (filterType === '60') {
+      filtered = filtered.filter(c => c.isExpired && c.daysExpired <= 60);
     }
     
     // فلترة حسب البحث
@@ -207,18 +252,19 @@ export function ExpiredContractsAlert({
     }
     
     return filtered;
-  }, [expiredContracts, filterDays, searchTerm]);
+  }, [expiredContracts, filterType, searchTerm]);
 
   // إحصائيات سريعة
   const stats = useMemo(() => {
-    const recentlyExpired = expiredContracts.filter(c => c.daysExpired <= 7).length;
-    const expired30Days = expiredContracts.filter(c => c.daysExpired <= 30).length;
+    const recentlyExpired = expiredContracts.filter(c => c.isExpired && c.daysExpired <= 7).length;
+    const activeInAvailable = expiredContracts.filter(c => c.isVisibleInAvailable).length;
+    const expired30Days = expiredContracts.filter(c => c.isExpired && c.daysExpired <= 30).length;
     const totalBillboards = expiredContracts.reduce((sum, c) => {
       const ids = c.billboard_ids?.split(',').filter(Boolean) || [];
       return sum + ids.length;
     }, 0);
     
-    return { recentlyExpired, expired30Days, totalBillboards, total: expiredContracts.length };
+    return { recentlyExpired, activeInAvailable, expired30Days, totalBillboards, total: expiredContracts.length };
   }, [expiredContracts]);
 
   // Toggle contract selection
@@ -318,14 +364,43 @@ export function ExpiredContractsAlert({
                 .limit(1)
                 .maybeSingle();
 
+              let designFaceA = installationItem?.design_face_a || null;
+              let designFaceB = installationItem?.design_face_b || null;
+
+              // Fallback to contract design_data if not found in installation tasks
+              if ((!designFaceA || !designFaceB) && contractNumber) {
+                const { data: contractData } = await supabase
+                  .from('Contract')
+                  .select('design_data')
+                  .eq('Contract_Number', contractNumber)
+                  .maybeSingle();
+
+                if (contractData?.design_data) {
+                  try {
+                    const dd = typeof contractData.design_data === 'string'
+                      ? JSON.parse(contractData.design_data) : contractData.design_data;
+                    const arr = typeof dd === 'string' ? JSON.parse(dd) : dd;
+                    if (Array.isArray(arr)) {
+                      const match = arr.find((d: any) => String(d.billboardId) === String(billboard.ID));
+                      if (match) {
+                        if (!designFaceA) designFaceA = match.designFaceA || match.design_face_a_url || null;
+                        if (!designFaceB) designFaceB = match.designFaceB || match.design_face_b_url || null;
+                      }
+                    }
+                  } catch (e) {
+                    console.error("Error parsing contract design_data for removal alert:", e);
+                  }
+                }
+              }
+
               await supabase
                 .from('removal_task_items')
                 .insert({
                   task_id: task.id,
                   billboard_id: billboard.ID,
                   status: 'pending',
-                  design_face_a: installationItem?.design_face_a || null,
-                  design_face_b: installationItem?.design_face_b || null,
+                  design_face_a: designFaceA,
+                  design_face_b: designFaceB,
                   installed_image_url: installationItem?.installed_image_url || null
                 });
             }
@@ -355,14 +430,43 @@ export function ExpiredContractsAlert({
               .limit(1)
               .maybeSingle();
 
+            let designFaceA = installationItem?.design_face_a || null;
+            let designFaceB = installationItem?.design_face_b || null;
+
+            // Fallback to contract design_data if not found in installation tasks
+            if ((!designFaceA || !designFaceB) && contractNumber) {
+              const { data: contractData } = await supabase
+                .from('Contract')
+                .select('design_data')
+                .eq('Contract_Number', contractNumber)
+                .maybeSingle();
+
+              if (contractData?.design_data) {
+                try {
+                  const dd = typeof contractData.design_data === 'string'
+                    ? JSON.parse(contractData.design_data) : contractData.design_data;
+                  const arr = typeof dd === 'string' ? JSON.parse(dd) : dd;
+                  if (Array.isArray(arr)) {
+                    const match = arr.find((d: any) => String(d.billboardId) === String(billboard.ID));
+                    if (match) {
+                      if (!designFaceA) designFaceA = match.designFaceA || match.design_face_a_url || null;
+                      if (!designFaceB) designFaceB = match.designFaceB || match.design_face_b_url || null;
+                    }
+                  }
+                } catch (e) {
+                  console.error("Error parsing contract design_data for removal alert:", e);
+                }
+              }
+            }
+
             await supabase
               .from('removal_task_items')
               .insert({
                 task_id: task.id,
                 billboard_id: billboard.ID,
                 status: 'pending',
-                design_face_a: installationItem?.design_face_a || null,
-                design_face_b: installationItem?.design_face_b || null,
+                design_face_a: designFaceA,
+                design_face_b: designFaceB,
                 installed_image_url: installationItem?.installed_image_url || null
               });
           }
@@ -386,6 +490,33 @@ export function ExpiredContractsAlert({
     }
   });
 
+  // تجاهل العقود المحددة (تمت الإزالة / لا تحتاج مهمة)
+  const ignoreSelectedMutation = useMutation({
+    mutationFn: async (contractNumbers: number[]) => {
+      addLocalIgnoredContracts(contractNumbers);
+      try {
+        for (const num of contractNumbers) {
+          await (supabase as any)
+            .from('Contract')
+            .update({ ignore_removal_alert: true })
+            .eq('Contract_Number', num);
+        }
+      } catch (e) {
+        console.error('Error updating ignore_removal_alert in supabase:', e);
+      }
+      return contractNumbers.length;
+    },
+    onSuccess: (count) => {
+      toast.success(`تم تجاهل ${count} عقد (تمت الإزالة)`);
+      setSelectedContracts(new Set());
+      queryClient.invalidateQueries({ queryKey: ['expired-contracts-for-alert'] });
+      refetch();
+    },
+    onError: (err: any) => {
+      toast.error('فشل في تجاهل العقود: ' + err.message);
+    }
+  });
+
   // الحصول على لون المدة
   const getDaysColor = (days: number) => {
     if (days <= 7) return 'text-red-500 bg-red-500/10';
@@ -399,7 +530,7 @@ export function ExpiredContractsAlert({
         <CardContent className="py-5">
           <div className="flex items-center justify-center gap-3">
             <RefreshCw className="h-5 w-5 animate-spin text-amber-500" />
-            <span className="text-muted-foreground">جاري تحميل العقود المنتهية...</span>
+            <span className="text-muted-foreground">جاري تحميل العقود الجاهزة للإزالة...</span>
           </div>
         </CardContent>
       </Card>
@@ -412,7 +543,7 @@ export function ExpiredContractsAlert({
         <CardContent className="py-5">
           <div className="flex items-center justify-center gap-3">
             <CheckCircle2 className="h-6 w-6 text-emerald-500" />
-            <span className="text-emerald-600 font-medium">لا توجد عقود منتهية تحتاج لإنشاء مهام إزالة</span>
+            <span className="text-emerald-600 font-medium">لا توجد عقود منتهية أو مفعلة في المتاح تحتاج لإنشاء مهام إزالة</span>
           </div>
         </CardContent>
       </Card>
@@ -437,12 +568,21 @@ export function ExpiredContractsAlert({
                   </div>
                   <div>
                     <CardTitle className="flex flex-wrap items-center gap-2 text-sm font-black sm:text-base">
-                      <span>عقود منتهية جاهزة لإنشاء مهام إزالة</span>
+                      <span>عقود جاهزة لإنشاء مهام إزالة</span>
                       <Badge variant="secondary" className="h-6 rounded-lg border border-primary/20 bg-primary/10 text-[10px] text-primary">
                         {stats.total} عقد
                       </Badge>
+                      {stats.activeInAvailable > 0 && (
+                        <Badge className="h-6 gap-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">
+                          <Eye className="h-3 w-3" />
+                          {stats.activeInAvailable} مفعل في المتاح
+                        </Badge>
+                      )}
                     </CardTitle>
                     <p className="mt-1 text-[11px] text-muted-foreground">
+                      {stats.activeInAvailable > 0 && (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-bold">{stats.activeInAvailable} مفعل بالظهور في المتاح • </span>
+                      )}
                       {stats.recentlyExpired > 0 && (
                         <span className="text-red-500 font-medium">{stats.recentlyExpired} منتهي منذ أقل من أسبوع • </span>
                       )}
@@ -459,7 +599,7 @@ export function ExpiredContractsAlert({
                       refetch();
                     }}
                     className="h-10 w-10 cursor-pointer rounded-xl text-muted-foreground transition-all duration-200 hover:bg-primary/10 hover:text-primary active:scale-95"
-                    aria-label="تحديث العقود المنتهية"
+                    aria-label="تحديث العقود"
                   >
                     <RefreshCw className="h-4 w-4" />
                   </Button>
@@ -479,9 +619,12 @@ export function ExpiredContractsAlert({
                   <div className="text-xl font-black text-rose-400">{stats.recentlyExpired}</div>
                   <div className="text-xs text-muted-foreground">منذ أقل من أسبوع</div>
                 </div>
-                <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-center">
-                  <div className="text-xl font-black text-amber-400">{stats.expired30Days}</div>
-                  <div className="text-xs text-muted-foreground">منذ أقل من شهر</div>
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.06] p-3 text-center">
+                  <div className="text-xl font-black text-emerald-500 flex items-center justify-center gap-1">
+                    <Eye className="h-4 w-4" />
+                    {stats.activeInAvailable}
+                  </div>
+                  <div className="text-xs text-muted-foreground">مفعلة في المتاح</div>
                 </div>
                 <div className="rounded-xl border border-primary/20 bg-primary/[0.06] p-3 text-center">
                   <div className="text-xl font-black text-primary">{stats.total}</div>
@@ -504,18 +647,20 @@ export function ExpiredContractsAlert({
                     className="h-10 rounded-xl border-border/45 bg-background/70 pr-10 text-xs focus-visible:ring-primary/40"
                   />
                 </div>
-                <Select value={filterDays} onValueChange={(v: any) => setFilterDays(v)}>
-                  <SelectTrigger className="h-10 w-full rounded-xl border-border/45 bg-background/70 text-xs md:w-[180px]">
-                    <SelectValue placeholder="فترة الانتهاء" />
+                <Select value={filterType} onValueChange={(v: any) => setFilterType(v)}>
+                  <SelectTrigger className="h-10 w-full rounded-xl border-border/45 bg-background/70 text-xs md:w-[190px]">
+                    <SelectValue placeholder="تصفية حسب الحالة" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">كل الفترات</SelectItem>
-                    <SelectItem value="7">آخر أسبوع</SelectItem>
-                    <SelectItem value="30">آخر شهر</SelectItem>
-                    <SelectItem value="60">آخر شهرين</SelectItem>
+                    <SelectItem value="all">كل العقود ({stats.total})</SelectItem>
+                    <SelectItem value="available">مفعلة في المتاح ({stats.activeInAvailable})</SelectItem>
+                    <SelectItem value="expired">المنتهية فقط</SelectItem>
+                    <SelectItem value="7">منتهية خلال أسبوع ({stats.recentlyExpired})</SelectItem>
+                    <SelectItem value="30">منتهية خلال شهر ({stats.expired30Days})</SelectItem>
+                    <SelectItem value="60">منتهية خلال شهرين</SelectItem>
                   </SelectContent>
                 </Select>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <Button
                     variant="outline"
                     size="sm"
@@ -525,15 +670,30 @@ export function ExpiredContractsAlert({
                     تحديد الكل ({filteredContracts.length})
                   </Button>
                   {selectedContracts.size > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={clearSelection}
-                      className="h-10 cursor-pointer rounded-xl text-xs text-muted-foreground active:scale-95"
-                    >
-                      <X className="h-4 w-4 ml-1" />
-                      إلغاء ({selectedContracts.size})
-                    </Button>
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearSelection}
+                        className="h-10 cursor-pointer rounded-xl text-xs text-muted-foreground active:scale-95"
+                      >
+                        <X className="h-4 w-4 ml-1" />
+                        إلغاء ({selectedContracts.size})
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={ignoreSelectedMutation.isPending}
+                        onClick={() => {
+                          const nums = Array.from(selectedContracts) as number[];
+                          ignoreSelectedMutation.mutate(nums);
+                        }}
+                        className="h-10 cursor-pointer rounded-xl px-3 text-xs font-bold text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 active:scale-95"
+                      >
+                        <CheckCircle2 className="h-4 w-4 ml-1" />
+                        {ignoreSelectedMutation.isPending ? 'جاري...' : `تمت الإزالة (${selectedContracts.size})`}
+                      </Button>
+                    </>
                   )}
                 </div>
               </div>
@@ -576,6 +736,12 @@ export function ExpiredContractsAlert({
                               <Badge variant="outline" className="h-6 rounded-lg border-border px-2 text-[10px]">
                                 {contract['Ad Type'] || 'غير محدد'}
                               </Badge>
+                              {contract.isVisibleInAvailable && (
+                                <Badge className="h-6 gap-1 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 px-2 text-[10px] font-bold">
+                                  <Eye className="h-3 w-3" />
+                                  مفعل في المتاح
+                                </Badge>
+                              )}
                               <Badge variant="secondary" className="h-6 gap-1 rounded-lg bg-muted px-2 text-[10px] text-foreground">
                                 <MapPin className="h-3 w-3" />
                                 {availableCount} لوحة
@@ -594,11 +760,18 @@ export function ExpiredContractsAlert({
                           
                           <div className="text-left shrink-0 flex items-center gap-1.5">
                             <div className="flex flex-col items-end">
-                              <div className={`text-xs font-bold px-2 py-1 rounded-md ${getDaysColor(contract.daysExpired)}`}>
-                                منذ {contract.daysExpired} يوم
-                              </div>
+                              {!contract.isExpired && contract.isVisibleInAvailable ? (
+                                <div className="text-xs font-bold px-2 py-1 rounded-md bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                                  <Eye className="h-3 w-3" />
+                                  مفعل في المتاح
+                                </div>
+                              ) : (
+                                <div className={`text-xs font-bold px-2 py-1 rounded-md ${getDaysColor(contract.daysExpired)}`}>
+                                  منذ {contract.daysExpired} يوم
+                                </div>
+                              )}
                               <div className="text-xs text-muted-foreground mt-1">
-                                {format(new Date(contract['End Date']), 'dd/MM/yyyy')}
+                                {contract['End Date'] ? format(new Date(contract['End Date']), 'dd/MM/yyyy') : '—'}
                               </div>
                             </div>
                             <Button
@@ -609,20 +782,18 @@ export function ExpiredContractsAlert({
                               aria-label={`تجاهل تنبيه العقد ${contract.Contract_Number}`}
                               onClick={async (e) => {
                                 e.stopPropagation();
+                                addLocalIgnoredContracts([contract.Contract_Number]);
                                 try {
-                                   const { error } = await (supabase as any)
+                                  await (supabase as any)
                                     .from('Contract')
                                     .update({ ignore_removal_alert: true })
                                     .eq('Contract_Number', contract.Contract_Number);
-                                  
-                                  if (error) throw error;
-                                  
-                                  toast.success('تم تجاهل العقد بنجاح ولن يظهر في التنبيهات');
-                                  refetch();
                                 } catch (err: any) {
                                   console.error(err);
-                                  toast.error('فشل في تجاهل العقد: ' + err.message);
                                 }
+                                toast.success('تم تجاهل العقد بنجاح ولن يظهر في التنبيهات');
+                                queryClient.invalidateQueries({ queryKey: ['expired-contracts-for-alert'] });
+                                refetch();
                               }}
                             >
                               <X className="h-4 w-4" />

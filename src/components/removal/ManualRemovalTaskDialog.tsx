@@ -15,6 +15,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { findOptimalTeamForRemoval, sortTeamsByPriority } from '@/utils/teamAssignment';
+import { checkIsAvailableForAvailableExports, resolveBillboardAvailability } from '@/services/billboardAvailabilityService';
 import { 
   Search, 
   MapPin,
@@ -33,7 +34,8 @@ import {
   ChevronUp,
   Image,
   Navigation,
-  Maximize2
+  Maximize2,
+  Eye
 } from 'lucide-react';
 
 interface ManualRemovalTaskDialogProps {
@@ -48,6 +50,7 @@ interface ContractGroup {
   customerName: string;
   adType: string;
   designUrl: string | null;
+  isVisibleInAvailable?: boolean;
   billboards: any[];
 }
 
@@ -63,6 +66,7 @@ export function ManualRemovalTaskDialog({
   const [notes, setNotes] = useState('');
   const [currentStep, setCurrentStep] = useState<1 | 2>(1);
   const [filterCity, setFilterCity] = useState<string>('all');
+  const [filterAvailability, setFilterAvailability] = useState<'all' | 'available' | 'expired'>('all');
   const [expandedContracts, setExpandedContracts] = useState<Set<number | string>>(new Set());
   
   const queryClient = useQueryClient();
@@ -76,20 +80,17 @@ export function ManualRemovalTaskDialog({
       setNotes('');
       setCurrentStep(1);
       setFilterCity('all');
+      setFilterAvailability('all');
       setExpandedContracts(new Set());
     }
   }, [open, teams]);
 
-  // جلب اللوحات من العقود المنتهية فقط وغير المضافة لمهام إزالة وغير المؤجرة حالياً
+  // جلب اللوحات من العقود المنتهية أو المفعلة في المتاح (باستخدام المنطق المركزي الموحد لتصدير المتاح)
   const { data: allBillboards = [], isLoading: billboardsLoading } = useQuery({
     queryKey: ['expired-billboards-for-manual-removal', open],
     enabled: open,
     queryFn: async () => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const todayStr = today.toISOString().split('T')[0];
-      
-      // جلب جميع اللوحات المرتبطة بعقود (دون قيد انتهاء التاريخ لتسهيل الإضافة اليدوية لأي لوحة)
+      // جلب جميع اللوحات المرتبطة بعقود
       const { data: billboards, error } = await supabase
         .from('billboards')
         .select('*')
@@ -98,30 +99,50 @@ export function ManualRemovalTaskDialog({
       
       if (error) throw error;
       
-      // جلب جميع العقود النشطة (غير منتهية) للتحقق من اللوحات المؤجرة
-      const { data: activeContracts } = await supabase
+      // جلب جميع العقود للتأكد من حالة الإتاحة المركزية (نفس منطق تصدير المتاح)
+      const { data: allContracts } = await supabase
         .from('Contract')
-        .select('billboard_ids, "End Date"')
-        .gt('"End Date"', todayStr); // العقود التي لم تنتهي بعد فقط
+        .select('*')
+        .order('Contract_Number', { ascending: false });
       
-      // استخراج معرفات اللوحات المؤجرة حالياً في عقود نشطة
-      const rentedBillboardIds = new Set<number>();
-      (activeContracts || []).forEach(contract => {
-        if (contract.billboard_ids) {
-          const ids = contract.billboard_ids.split(',').map((id: string) => parseInt(id.trim())).filter(Boolean);
-          ids.forEach((id: number) => rentedBillboardIds.add(id));
-        }
-      });
-      
-      // فلترة اللوحات الموجودة بالفعل في مهام إزالة مع وسم اللوحات ذات العقود النشطة
+      // فلترة اللوحات الموجودة بالفعل في مهام إزالة مع تطبيق منطق تصدير المتاح الموحد
       return (billboards || []).filter(b => 
         !existingTaskBillboardIds.has(b.ID)
-      ).map(b => ({
-        ...b,
-        isRentedInActiveContract: rentedBillboardIds.has(b.ID)
-      }));
+      ).map(b => {
+        const isAvailable = checkIsAvailableForAvailableExports(b, allContracts || []);
+        const res = resolveBillboardAvailability(b, allContracts || []);
+        const isVisibleInAvailable = res.classification === 'EXPLICIT_CONTRACT_SHOW' || res.classification === 'EXPLICIT_BILLBOARD_SHOW' || res.isMarketingVisible;
+        
+        return {
+          ...b,
+          isAvailable,
+          isVisibleInAvailable,
+          isRentedInActiveContract: res.operationalStatus === 'RENTED' && !isAvailable
+        };
+      });
     }
   });
+
+  // جلب أحجام اللوحات لترتيب اللوحات حسب رتبة المقاس من الإعدادات
+  const { data: sizes = [] } = useQuery({
+    queryKey: ['sizes-order-for-manual-removal'],
+    queryFn: async () => {
+      const { data } = await supabase.from('sizes').select('*').order('sort_order', { ascending: true });
+      return data || [];
+    }
+  });
+
+  const sizeOrderMap = useMemo(() => {
+    const map = new Map<string, number>();
+    sizes.forEach((s: any, idx: number) => {
+      const name = String(s.name || '').trim();
+      const rank = typeof s.sort_order === 'number' && s.sort_order > 0 ? s.sort_order : idx + 1;
+      map.set(name, rank);
+      map.set(name.toLowerCase(), rank);
+      map.set(name.replace(/[×*]/g, 'x').toLowerCase(), rank);
+    });
+    return map;
+  }, [sizes]);
 
   // استخراج المدن الفريدة
   const uniqueCities = useMemo(() => {
@@ -129,10 +150,16 @@ export function ManualRemovalTaskDialog({
     return Array.from(cities).sort();
   }, [allBillboards]);
 
-  // فلترة اللوحات
+  // فلترة وترتيب اللوحات
   const filteredBillboards = useMemo(() => {
-    let result = allBillboards;
+    let result = [...allBillboards];
     
+    if (filterAvailability === 'available') {
+      result = result.filter(b => b.isVisibleInAvailable);
+    } else if (filterAvailability === 'expired') {
+      result = result.filter(b => !b.isVisibleInAvailable && b.isAvailable);
+    }
+
     if (searchTerm.trim()) {
       const search = searchTerm.toLowerCase();
       result = result.filter(b => 
@@ -150,10 +177,20 @@ export function ManualRemovalTaskDialog({
       result = result.filter(b => b.City === filterCity);
     }
     
-    return result;
-  }, [allBillboards, searchTerm, filterCity]);
+    // ترتيب اللوحات حسب رتبة المقاس من الإعدادات
+    result.sort((a, b) => {
+      const sizeA = String(a.Size || a.size || '').trim();
+      const sizeB = String(b.Size || b.size || '').trim();
+      const rankA = sizeOrderMap.get(sizeA) ?? sizeOrderMap.get(sizeA.toLowerCase()) ?? sizeOrderMap.get(sizeA.replace(/[×*]/g, 'x').toLowerCase()) ?? 9999;
+      const rankB = sizeOrderMap.get(sizeB) ?? sizeOrderMap.get(sizeB.toLowerCase()) ?? sizeOrderMap.get(sizeB.replace(/[×*]/g, 'x').toLowerCase()) ?? 9999;
+      if (rankA !== rankB) return rankA - rankB;
+      return Number(a.ID || 0) - Number(b.ID || 0);
+    });
 
-  // تجميع اللوحات حسب العقود
+    return result;
+  }, [allBillboards, filterAvailability, searchTerm, filterCity, sizeOrderMap]);
+
+  // تجميع اللوحات حسب العقود مع الحفاظ على ترتيب رتبة المقاس
   const groupedByContract = useMemo(() => {
     const groups: Map<number | string, ContractGroup> = new Map();
     
@@ -167,20 +204,35 @@ export function ManualRemovalTaskDialog({
           customerName: billboard.Customer_Name || 'غير محدد',
           adType: billboard.Ad_Type || 'غير محدد',
           designUrl: billboard.design_face_a || billboard.design_face_b || null,
+          isVisibleInAvailable: billboard.isVisibleInAvailable,
           billboards: []
         });
+      } else if (billboard.isVisibleInAvailable) {
+        groups.get(key)!.isVisibleInAvailable = true;
       }
       
       groups.get(key)!.billboards.push(billboard);
     });
     
+    // فرز لوحات كل مجموعة حسب رتبة المقاس من الإعدادات
+    groups.forEach(group => {
+      group.billboards.sort((a, b) => {
+        const sizeA = String(a.Size || a.size || '').trim();
+        const sizeB = String(b.Size || b.size || '').trim();
+        const rankA = sizeOrderMap.get(sizeA) ?? sizeOrderMap.get(sizeA.toLowerCase()) ?? sizeOrderMap.get(sizeA.replace(/[×*]/g, 'x').toLowerCase()) ?? 9999;
+        const rankB = sizeOrderMap.get(sizeB) ?? sizeOrderMap.get(sizeB.toLowerCase()) ?? sizeOrderMap.get(sizeB.replace(/[×*]/g, 'x').toLowerCase()) ?? 9999;
+        if (rankA !== rankB) return rankA - rankB;
+        return Number(a.ID || 0) - Number(b.ID || 0);
+      });
+    });
+
     // ترتيب المجموعات - العقود ذات الأرقام أولاً
     return Array.from(groups.entries()).sort((a, b) => {
       const aNum = typeof a[0] === 'number' ? a[0] : 0;
       const bNum = typeof b[0] === 'number' ? b[0] : 0;
       return bNum - aNum;
     });
-  }, [filteredBillboards]);
+  }, [filteredBillboards, sizeOrderMap]);
 
   const toggleBillboard = (billboardId: number) => {
     const newSet = new Set(selectedBillboards);
@@ -474,6 +526,16 @@ export function ManualRemovalTaskDialog({
                       </Button>
                     )}
                   </div>
+                  <Select value={filterAvailability} onValueChange={(v: any) => setFilterAvailability(v)}>
+                    <SelectTrigger className="w-[150px] h-10">
+                      <SelectValue placeholder="الحالة" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">كل اللوحات</SelectItem>
+                      <SelectItem value="available">مفعل في المتاح</SelectItem>
+                      <SelectItem value="expired">المنتهية فقط</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Select value={filterCity} onValueChange={setFilterCity}>
                     <SelectTrigger className="w-[160px] h-10">
                       <SelectValue placeholder="المدينة" />
@@ -575,6 +637,12 @@ export function ManualRemovalTaskDialog({
                                         </Badge>
                                       )}
                                       <Badge variant="outline">{group.adType}</Badge>
+                                      {group.isVisibleInAvailable && (
+                                        <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 text-xs gap-1 font-bold">
+                                          <Eye className="h-3 w-3" />
+                                          مفعل في المتاح
+                                        </Badge>
+                                      )}
                                     </div>
                                     <p className="text-sm text-muted-foreground mt-1 truncate">
                                       {group.customerName}
@@ -629,7 +697,7 @@ export function ManualRemovalTaskDialog({
                                               <>
                                                 <img 
                                                   src={heroImage} 
-                                                  alt=""
+                                                  alt="" 
                                                   className="w-full h-full object-cover transition-transform duration-500 group-hover/card:scale-105"
                                                   onError={(e) => (e.currentTarget.style.display = 'none')}
                                                 />
@@ -657,7 +725,12 @@ export function ManualRemovalTaskDialog({
                                               <span className="text-xs font-bold text-white bg-black/40 backdrop-blur-md px-2 py-1 rounded-full">
                                                 #{billboard.ID}
                                               </span>
-                                              {(billboard as any).isRentedInActiveContract && (
+                                              {(billboard as any).isVisibleInAvailable ? (
+                                                <span className="text-[9px] font-extrabold text-white bg-emerald-600/90 backdrop-blur-sm px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
+                                                  <Eye className="h-2.5 w-2.5" />
+                                                  مفعل في المتاح
+                                                </span>
+                                              ) : (billboard as any).isRentedInActiveContract && (
                                                 <span className="text-[9px] font-extrabold text-white bg-amber-600/90 backdrop-blur-sm px-1.5 py-0.5 rounded-md">
                                                   عقد نشط
                                                 </span>
