@@ -30,6 +30,7 @@ import {
   getCurrentOperationInstallationCost,
   getOperationLabel,
   getTaskContractGroupKey,
+  isReinstallationOperation,
   normalizeCompositeTaskType,
   sortTasksNewestFirst,
 } from '@/lib/compositeTaskOperation';
@@ -52,6 +53,7 @@ import {
   ImagePlus, Shuffle, ClipboardCheck, Building2, UserRound,
   Maximize2, ExternalLink, Gift, Check, CheckSquare, Sparkles, Layers
 } from 'lucide-react';
+import { useSystemDialog } from '@/contexts/SystemDialogContext';
 import { exportContractImagesToZip } from '@/utils/exportContractImagesToZip';
 import { getContractWithBillboards } from '@/services/contractService';
 import { EnhancedEditCompositeTaskCostsDialog } from './EnhancedEditCompositeTaskCostsDialog';
@@ -1218,6 +1220,8 @@ const ContractGroupCard = ({
   zipDownloadingGroup,
   handleDownloadGroupZip,
   handleCreatePrintTasksForGroup,
+  handleCreateReinstallationForGroup,
+  reinstallCreatingGroup,
   discountPopoverGroup,
   setDiscountPopoverGroup,
   discountAmount,
@@ -1363,7 +1367,28 @@ const ContractGroupCard = ({
 
             {/* Top Left: Toolbar Action Buttons */}
             <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-              {/* Costs are managed once from the contract cover, not repeated inside task rows. */}
+              {/* 1. زر إنشاء مهمة إعادة تركيب للعقد */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    disabled={reinstallCreatingGroup === group.key}
+                    onClick={() => handleCreateReinstallationForGroup(group)}
+                    className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 text-xs font-black text-amber-400 transition-all duration-200 hover:bg-amber-500/25 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 shadow-xs disabled:opacity-50"
+                    aria-label="إنشاء مهمة إعادة تركيب للعقد"
+                  >
+                    {reinstallCreatingGroup === group.key ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-amber-400" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 text-amber-400" />
+                    )}
+                    <span className="hidden xl:inline">إنشاء مهمة إعادة تركيب</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">إنشاء مهمة إعادة تركيب جديدة ومنفصلة لهذا العقد</TooltipContent>
+              </Tooltip>
+
+              {/* 2. Costs are managed once from the contract cover, not repeated inside task rows. */}
               {activeOperation?.tasks?.length > 0 && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1787,6 +1812,26 @@ const ContractGroupCard = ({
                         {isOperationExpanded ? <ChevronUp className="mr-auto h-4 w-4 text-amber-300" /> : <ChevronDown className="mr-auto h-4 w-4 text-amber-300" />}
                       </button>
                       <div className="flex items-center gap-2">
+                        {/* تعديل تكاليف هذه العملية */}
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingOperationTasks(operation.tasks);
+                                setEditingTask(operation.tasks[0]);
+                                setEditDialogOpen(true);
+                              }}
+                              className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-primary/35 bg-primary/12 px-3.5 text-[11px] font-black text-primary transition-all duration-200 hover:bg-primary/20 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                              aria-label={`تعديل تكاليف ${operation.label}`}
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                              <span>تعديل التكاليف</span>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">تعديل تكاليف وأسعار بنود هذه العملية فقط</TooltipContent>
+                        </Tooltip>
+
                         {/* فاتورة العملية */}
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -1974,9 +2019,135 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
   const setSearch = (v: string) => { _setSearch(v); setPersisted('search', v); };
   const setFilterStatus = (v: string) => { _setFilterStatus(v); setPersisted('filterStatus', v); };
   const setPage = (v: number) => { _setPage(v); setPersisted('page', v); };
+  const { confirm: systemConfirm } = useSystemDialog();
   const [editingTask, setEditingTask] = useState<CompositeTaskWithDetails | null>(null);
   const [editingOperationTasks, setEditingOperationTasks] = useState<CompositeTaskWithDetails[] | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [reinstallCreatingGroup, setReinstallCreatingGroup] = useState<string | null>(null);
+
+  const handleCreateReinstallationForGroup = async (group: any) => {
+    try {
+      const activeOp = group.operations?.[0];
+      const targetTasks = activeOp?.tasks || group.tasks || [];
+      const installTasks = targetTasks.filter((t: any) => t.installation_task_id);
+
+      const confirmed = await systemConfirm({
+        title: 'إنشاء مهمة إعادة تركيب',
+        message: `هل ترغب في إنشاء مهمة إعادة تركيب جديدة لعقد #${group.contractId || (group.contractIds ? group.contractIds.join(', #') : '')} (${group.customerName})؟ سيتم إنشاء دورة إعادة تركيب كاملة لجميع الفرق مع تصفير حالة إكمال اللوحات وجاهزية إدخال التكاليف.`,
+        confirmText: 'إنشاء إعادة تركيب',
+        variant: 'default',
+      });
+
+      if (!confirmed) return;
+
+      setReinstallCreatingGroup(group.key);
+
+      if (installTasks.length > 0) {
+        const contractId = group.contractId || installTasks[0].contract_id;
+
+        // حساب رقم الدورة التالي بالاعتماد على عدد دورات إعادة التركيب الموجودة حالياً في العقد (تصفير العداد بعد الحذف)
+        const existingReinstallOps = (group.operations || []).filter((op: any) => 
+          op.tasks?.some((t: any) => isReinstallationOperation(t))
+        );
+        const nextNumber = existingReinstallOps.length + 1;
+
+        for (const installTask of installTasks) {
+          const origInstallTaskId = installTask.installation_task_id;
+
+          const { data: origTask } = await supabase
+            .from('installation_tasks')
+            .select('*')
+            .eq('id', origInstallTaskId)
+            .single();
+
+          const { data: newTask, error: taskError } = await supabase
+            .from('installation_tasks')
+            .insert({
+              contract_id: contractId,
+              contract_ids: group.contractIds && group.contractIds.length > 0 ? group.contractIds : origTask?.contract_ids,
+              team_id: origTask?.team_id || null,
+              status: 'pending',
+              task_type: 'reinstallation',
+              reinstallation_number: nextNumber,
+            })
+            .select()
+            .single();
+
+          if (taskError) throw taskError;
+
+          const newTaskId = newTask.id;
+
+          const { data: origDesigns } = await supabase
+            .from('task_designs')
+            .select('*')
+            .eq('task_id', origInstallTaskId);
+
+          const designIdMap: Record<string, string> = {};
+          if (origDesigns && origDesigns.length > 0) {
+            const designsToInsert = origDesigns.map(({ id, created_at, updated_at, task_id, ...rest }) => ({
+              ...rest,
+              task_id: newTaskId,
+            }));
+
+            const { data: newDesigns } = await supabase
+              .from('task_designs')
+              .insert(designsToInsert)
+              .select();
+
+            if (newDesigns) {
+              origDesigns.forEach(od => {
+                const nd = newDesigns.find(n => n.design_name === od.design_name && n.design_order === od.design_order && n.billboard_id === od.billboard_id);
+                if (nd) designIdMap[od.id] = nd.id;
+              });
+            }
+          }
+
+          const { data: origItems } = await supabase
+            .from('installation_task_items')
+            .select('*')
+            .eq('task_id', origInstallTaskId);
+
+          if (origItems && origItems.length > 0) {
+            const itemsToInsert = origItems.map(({ id, created_at, updated_at, task_id, ...rest }) => ({
+              ...rest,
+              task_id: newTaskId,
+              status: 'pending',
+              installation_date: null,
+              installed_image_face_a_url: null,
+              installed_image_face_b_url: null,
+              reinstall_count: nextNumber,
+              selected_design_id: rest.selected_design_id && designIdMap[rest.selected_design_id] ? designIdMap[rest.selected_design_id] : rest.selected_design_id,
+            }));
+
+            await supabase.from('installation_task_items').insert(itemsToInsert);
+          }
+
+          // ✅ الـ trigger التلقائي auto_create_composite_task ينشئ المهمة المجمعة تلقائياً في قاعدة البيانات
+          // نقوم فقط بتحديث التكاليف واسم الزبون عليها لمنع أي تضارب فريد (unique constraint)
+          await supabase
+            .from('composite_tasks')
+            .update({
+              customer_name: group.customerName || 'غير محدد',
+              customer_installation_cost: installTask.customer_installation_cost || 0,
+              company_installation_cost: installTask.company_installation_cost || 0,
+            })
+            .eq('installation_task_id', newTaskId);
+        }
+
+        toast.success(`تم إنشاء مهمة إعادة التركيب (المرة ${nextNumber}) لجميع الفرق بنجاح`);
+        queryClient.invalidateQueries({ queryKey: ['composite-tasks'] });
+        queryClient.invalidateQueries({ queryKey: ['composite-task-extras'] });
+        queryClient.invalidateQueries({ queryKey: ['installation-tasks'] });
+      } else {
+        navigate(`/admin/installation-tasks?create=1&type=reinstallation&contractId=${group.contractId}&from=hub`);
+      }
+    } catch (err: any) {
+      console.error('Error creating reinstallation task:', err);
+      toast.error(err.message || 'فشل في إنشاء مهمة إعادة التركيب');
+    } finally {
+      setReinstallCreatingGroup(null);
+    }
+  };
   const [invoiceTask, setInvoiceTask] = useState<any>(null);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>('customer');
   const [invoiceOpen, setInvoiceOpen] = useState(false);
@@ -2219,8 +2390,9 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           t.contractIds = t._contractIds;
           t.contract_ids = t._contractIds;
           t._reinstallationNumber = normalizedTaskType === 'reinstallation'
-            ? (reinstallInfo?.number ?? null)
+            ? ((reinstallInfo?.number as number) || 1)
             : null;
+          t.reinstallationNumber = t._reinstallationNumber;
           t._taskType = normalizedTaskType;
           if (!t.contract_id && directContract) {
             t.contract_id = directContract;
@@ -2687,7 +2859,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       printerName: extra.printerName || '',
       companyName: task.customer?.company || '',
       reinstallationNumber: normalizedTaskType === 'reinstallation'
-        ? (task._reinstallationNumber ?? extra.reinstallationNumber ?? null)
+        ? (task._reinstallationNumber ?? task.reinstallationNumber ?? extra.reinstallationNumber ?? 1)
         : null,
       taskDesignCount: extra.taskDesignCount || 0,
       installationItemCount: extra.installationItemCount || 0,
@@ -2835,7 +3007,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         if (!operationMap.has(operationKey)) operationMap.set(operationKey, []);
         operationMap.get(operationKey)!.push(task);
       });
-      const operations = [...operationMap.entries()]
+      const rawOperations = [...operationMap.entries()]
         .map(([operationKey, operationTasks]) => {
           const orderedOperationTasks = sortTasksNewestFirst(operationTasks);
           const opInstallTaskIds = new Set(orderedOperationTasks.map((t: any) => t.installation_task_id).filter(Boolean));
@@ -2861,17 +3033,39 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           }
           
           const operationProgressPercentage = operationTotalBillboards > 0 ? Math.round((operationCompletedBillboards / operationTotalBillboards) * 100) : 0;
+          const isReinstall = orderedOperationTasks.some(t => isReinstallationOperation(t));
+
           return {
             key: operationKey,
-            label: getOperationLabel(orderedOperationTasks[0]),
+            isReinstall,
             createdAt: orderedOperationTasks[0]?.created_at || null,
             tasks: orderedOperationTasks,
             operationTotalBillboards,
             operationCompletedBillboards,
             operationProgressPercentage,
           };
-        })
-        .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        });
+
+      // ترتيب زمني تصاعدي لترقيم الدورات بالتسلسل الصحيح (إعادة تركيب 1، 2، 3...) بناءً على العمليات الموجودة حالياً
+      const chronological = [...rawOperations].sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+      
+      let reinstallCounter = 0;
+      const sequencedOperations = chronological.map(op => {
+        if (!op.isReinstall) {
+          return {
+            ...op,
+            label: isMultiContract ? 'مهمة تركيب مجمعة لعدة عقود' : 'التركيب الأول',
+          };
+        }
+        reinstallCounter++;
+        return {
+          ...op,
+          label: isMultiContract ? `إعادة تركيب مجمعة (${reinstallCounter})` : `إعادة تركيب ${reinstallCounter}`,
+        };
+      });
+
+      // عرض الأحدث أولاً
+      const operations = sequencedOperations.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
       groups.push({
         key,
@@ -3388,6 +3582,8 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
                 zipDownloadingGroup={zipDownloadingGroup}
                 handleDownloadGroupZip={handleDownloadGroupZip}
                 handleCreatePrintTasksForGroup={handleCreatePrintTasksForGroup}
+                handleCreateReinstallationForGroup={handleCreateReinstallationForGroup}
+                reinstallCreatingGroup={reinstallCreatingGroup}
                 discountPopoverGroup={discountPopoverGroup}
                 setDiscountPopoverGroup={setDiscountPopoverGroup}
                 discountAmount={discountAmount}

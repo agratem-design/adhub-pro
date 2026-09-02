@@ -121,9 +121,9 @@ export const getOperationLabel = (task: OperationTaskLike): string => {
   }
   const sequence = getTaskReinstallationNumber(task);
   if (isMulti) {
-    return sequence !== null ? `إعادة تركيب مجمعة (${sequence})` : 'إعادة تركيب مجمعة لعدة عقود';
+    return sequence !== null ? `إعادة تركيب مجمعة (${sequence})` : 'إعادة تركيب 1';
   }
-  return sequence !== null ? `إعادة تركيب ${sequence}` : 'إعادة تركيب مستقلة';
+  return sequence !== null ? `إعادة تركيب ${sequence}` : 'إعادة تركيب 1';
 };
 
 export const sortTasksNewestFirst = <T extends OperationTaskLike>(tasks: T[]): T[] =>

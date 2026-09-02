@@ -2985,6 +2985,8 @@ export default function InstallationTasks() {
                 nameParts.push(taskCode);
               }
               nameParts.push(`face-${face}`);
+              const uniqueSalt = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+              nameParts.push(uniqueSalt);
               const imageName = nameParts.join('_').replace(/\s+/g, '-').replace(/[^\w\u0600-\u06FF_-]/g, '-') + '.jpg';
               return { imageName, folderPath };
             };

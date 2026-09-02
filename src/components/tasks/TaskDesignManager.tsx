@@ -87,12 +87,14 @@ export function TaskDesignManager({ taskId, designs, onDesignsUpdate, contractNu
     const cNum = contractNumber ? String(contractNumber).trim() : '';
     const aType = resolvedAdType?.trim() || '';
     const taskCode = `re${taskId.substring(0, 6)}`;
+    const uniqueSalt = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
     const nameParts: string[] = [dName];
     if (cNum) nameParts.push(`C${cNum}`);
     nameParts.push(taskCode);
     if (aType) nameParts.push(aType);
     nameParts.push(`face-${face}`);
+    nameParts.push(uniqueSalt);
     const imageName = nameParts.join('_').replace(/\s+/g, '-').replace(/[^\w\u0600-\u06FF_-]/g, '-') + '.jpg';
 
     const folderParts = [cNum ? `C${cNum}` : '', taskCode, aType].filter(Boolean);
@@ -253,12 +255,20 @@ export function TaskDesignManager({ taskId, designs, onDesignsUpdate, contractNu
     setEditingDesign(null);
     setUploadMethodA('url');
     setUploadMethodB('url');
+    if (fileInputRefA.current) fileInputRefA.current.value = '';
+    if (fileInputRefB.current) fileInputRefB.current.value = '';
+  };
+
+  const openAddDialog = () => {
+    resetForm();
+    setDialogOpen(true);
   };
 
   const openEditDialog = (design: TaskDesign) => {
+    resetForm();
     setEditingDesign(design);
-    setDesignName(design.design_name);
-    setDesignFaceAUrl(design.design_face_a_url);
+    setDesignName(design.design_name || '');
+    setDesignFaceAUrl(design.design_face_a_url || '');
     setDesignFaceBUrl(design.design_face_b_url || '');
     setDesignDate(design.created_at ? new Date(design.created_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
     setDialogOpen(true);
@@ -469,16 +479,14 @@ export function TaskDesignManager({ taskId, designs, onDesignsUpdate, contractNu
             <Badge variant="secondary" className="text-[10px] h-5 rounded-md font-bold">{designs.length}</Badge>
           )}
         </h3>
+        <Button size="sm" className="gap-1.5 rounded-xl h-8 text-xs font-bold" onClick={openAddDialog}>
+          <Plus className="w-3.5 h-3.5" />
+          إضافة تصميم
+        </Button>
         <Dialog open={dialogOpen} onOpenChange={(open) => {
           setDialogOpen(open);
           if (!open) resetForm();
         }}>
-          <DialogTrigger asChild>
-            <Button size="sm" className="gap-1.5 rounded-xl h-8 text-xs font-bold">
-              <Plus className="w-3.5 h-3.5" />
-              إضافة تصميم
-            </Button>
-          </DialogTrigger>
           <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" dir="rtl">
             <DialogHeader>
               <DialogTitle className="text-right">
