@@ -272,7 +272,25 @@ export default function InstallationTasks() {
       toast.error('لا توجد مهمة مجمعة مرتبطة بمهمة التركيب هذه');
       return;
     }
-    setInvoiceCompositeTask(data as CompositeTaskWithDetails);
+
+    // جلب contract_ids من installation_tasks لإثراء المهمة في الفاتورة
+    const { data: installTaskData } = await supabase
+      .from('installation_tasks')
+      .select('contract_id, contract_ids')
+      .eq('id', taskId)
+      .maybeSingle();
+
+    const installContractIds = installTaskData?.contract_ids?.length
+      ? installTaskData.contract_ids
+      : (installTaskData?.contract_id ? [installTaskData.contract_id] : []);
+
+    const enrichedTask: CompositeTaskWithDetails = {
+      ...(data as CompositeTaskWithDetails),
+      contractIds: (data as any).contract_ids?.length ? (data as any).contract_ids : (installContractIds.length > 0 ? installContractIds : undefined),
+      _contractIds: (data as any).contract_ids?.length ? (data as any).contract_ids : (installContractIds.length > 0 ? installContractIds : undefined),
+    };
+
+    setInvoiceCompositeTask(enrichedTask);
     setInvoiceType(type);
     setInvoiceDialogOpen(true);
   };
@@ -480,19 +498,20 @@ export default function InstallationTasks() {
     return map;
   }, [billboards]);
 
-  // ✅ استخراج العقود الفعلية لكل مهمة من العقد الأساسي + contract_ids المخزنة
+  // ✅ استخراج العقود الفعلية لكل مهمة من العقد الأساسي + contract_ids المخزنة في المهمة
   const derivedContractIdsByTaskId = useMemo(() => {
     const map = new Map<string, number[]>();
 
     tasks.forEach((task: any) => {
       const ids = new Set<number>();
-      // أولاً: العقد الأساسي
-      if (task.contract_id) ids.add(task.contract_id);
-      // ثانياً: العقود المخزنة (مهمة مدمجة)
+      if (task.contract_id) ids.add(Number(task.contract_id));
       if (task.contract_ids && Array.isArray(task.contract_ids)) {
-        task.contract_ids.forEach((id: number) => ids.add(id));
+        task.contract_ids.forEach((id: any) => {
+          const numId = Number(id);
+          if (numId) ids.add(numId);
+        });
       }
-      map.set(task.id, [...ids].sort((a, b) => a - b));
+      map.set(task.id, [...ids].filter(Boolean).sort((a, b) => a - b));
     });
 
     return map;
@@ -844,12 +863,15 @@ export default function InstallationTasks() {
   const createTaskMutation = useMutation({
     mutationFn: async (vars: {
       contractId: number;
+      contractIds?: number[];
       billboardIds: number[];
       teamId: string | null;
       taskType: 'installation' | 'reinstallation';
       task_name?: string;
     }) => {
       const { contractId, teamId, taskType, task_name } = vars;
+      const contractIds = [...new Set((vars.contractIds?.length ? vars.contractIds : [contractId]).map(Number).filter(Boolean))];
+      const isMultiContract = contractIds.length > 1;
       let { billboardIds } = vars;
 
       if (!contractId) throw new Error('يرجى اختيار عقد');
@@ -860,7 +882,7 @@ export default function InstallationTasks() {
         const { data: pausedRows } = await supabase
           .from('paused_billboards' as any)
           .select('billboard_id')
-          .eq('contract_number', contractId);
+          .in('contract_number', contractIds);
         const pausedSet = new Set<number>((pausedRows || []).map((p: any) => Number(p.billboard_id)));
         if (pausedSet.size > 0) {
           billboardIds = billboardIds.filter((id) => !pausedSet.has(Number(id)));
@@ -893,6 +915,7 @@ export default function InstallationTasks() {
             .from('installation_tasks')
             .insert({
               contract_id: contractId,
+              contract_ids: contractIds,
               team_id: teamId,
               status: 'pending',
               task_type: 'reinstallation',
@@ -906,13 +929,13 @@ export default function InstallationTasks() {
           taskId = newTask.id;
         } else {
           // For normal installation: reuse existing task if found
-          const { data: existingTask } = await supabase
+          const { data: existingTask } = !isMultiContract ? await supabase
             .from('installation_tasks')
             .select('id')
             .eq('contract_id', contractId)
             .eq('team_id', teamId)
             .eq('task_type', 'installation')
-            .maybeSingle();
+            .maybeSingle() : { data: null };
 
           taskId = existingTask?.id;
 
@@ -921,6 +944,7 @@ export default function InstallationTasks() {
               .from('installation_tasks')
               .insert({
                 contract_id: contractId,
+                contract_ids: contractIds,
                 team_id: teamId,
                 status: 'pending',
                 task_type: 'installation',
@@ -1033,6 +1057,7 @@ export default function InstallationTasks() {
             .from('installation_tasks')
             .insert({
               contract_id: contractId,
+              contract_ids: contractIds,
               team_id: autoTeamId,
               status: 'pending',
               task_type: 'reinstallation',
@@ -1045,13 +1070,13 @@ export default function InstallationTasks() {
           if (taskError) throw taskError;
           taskId = newTask.id;
         } else {
-          const { data: existingTask } = await supabase
+          const { data: existingTask } = !isMultiContract ? await supabase
             .from('installation_tasks')
             .select('id')
             .eq('contract_id', contractId)
             .eq('team_id', autoTeamId)
             .eq('task_type', 'installation')
-            .maybeSingle();
+            .maybeSingle() : { data: null };
 
           taskId = existingTask?.id;
 
@@ -1060,6 +1085,7 @@ export default function InstallationTasks() {
               .from('installation_tasks')
               .insert({
                 contract_id: contractId,
+                contract_ids: contractIds,
                 team_id: autoTeamId,
                 status: 'pending',
                 task_type: 'installation',
@@ -1215,8 +1241,20 @@ export default function InstallationTasks() {
       const finalCustomerId = customerId || contract?.customer_id;
       const finalCustomerName = customerName || contract?.['Customer Name'] || 'غير محدد';
 
-      const compositeData = {
-        contract_id: contractId,
+      // Get installation task to extract contract_ids
+      const { data: installTask } = await supabase
+        .from('installation_tasks')
+        .select('contract_id, contract_ids')
+        .eq('id', taskId)
+        .maybeSingle();
+
+      const taskContractIds = installTask?.contract_ids?.length
+        ? installTask.contract_ids
+        : (contractId ? [contractId] : []);
+
+      const compositeData: any = {
+        contract_id: taskContractIds.length === 1 ? taskContractIds[0] : (contractId || null),
+        contract_ids: taskContractIds.length > 0 ? taskContractIds : (contractId ? [contractId] : []),
         customer_id: finalCustomerId,
         customer_name: finalCustomerName,
         task_type: 'reinstallation',
@@ -2672,6 +2710,7 @@ export default function InstallationTasks() {
             teamAssignments.forEach(assignment => {
               createTaskMutation.mutate({
                 contractId: contractIds[0],
+                contractIds,
                 billboardIds: assignment.billboardIds,
                 teamId: assignment.teamId,
                 taskType,
@@ -2682,6 +2721,7 @@ export default function InstallationTasks() {
             // بدون تعيينات - توزيع تلقائي
             createTaskMutation.mutate({
               contractId: contractIds[0],
+              contractIds,
               billboardIds,
               teamId: null,
               taskType,

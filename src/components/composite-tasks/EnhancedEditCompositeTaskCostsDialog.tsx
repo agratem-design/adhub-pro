@@ -14,7 +14,7 @@ import {
   Calculator, Ruler, ChevronDown, ChevronUp,
   Building2, Landmark, LayoutGrid, Check, Square, Zap, Gift, Pencil, X, Save,
   Loader2, AlertCircle, AlertTriangle, CheckCircle2, Search, CheckSquare, Plus, Minus,
-  Sparkles, Layers, FileText, MapPin
+  Sparkles, Layers, FileText, MapPin, Box
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
@@ -254,6 +254,8 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
   // Batch pricing helpers
   const [batchPriceValue, setBatchPriceValue] = useState<number>(0);
   const [batchPricingMode, setBatchPricingMode] = useState<'piece' | 'meter'>('piece');
+  const [groupPriceInputs, setGroupPriceInputs] = useState<Record<string, number>>({});
+  const [groupBySizeAndType, setGroupBySizeAndType] = useState<boolean>(false);
 
   // Load all Data on Open
   useEffect(() => {
@@ -339,10 +341,29 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
           .neq('status', 'replaced');
 
         if (installItems?.length) {
-          const itemsWithTeams: TaskItem[] = (installItems as any[]).map(item => ({
-            ...item,
-            teamName: teamNameByTaskId.get(item.task_id) || 'غير محدد',
-          }));
+          const itemIds = installItems.map(i => i.id);
+          const { data: photoHistory } = await supabase
+            .from('installation_photo_history')
+            .select('task_item_id, reinstall_number')
+            .in('task_item_id', itemIds);
+
+          const maxHistoryByItem: Record<string, number> = {};
+          (photoHistory || []).forEach((ph: any) => {
+            const num = (ph.reinstall_number || 1) + 1;
+            maxHistoryByItem[ph.task_item_id] = Math.max(maxHistoryByItem[ph.task_item_id] || 1, num);
+          });
+
+          const itemsWithTeams: TaskItem[] = (installItems as any[]).map(item => {
+            const autoIterations = Math.max(
+              item.reinstall_count || 0,
+              maxHistoryByItem[item.id] || (item.replacement_status === 'reinstalled' ? 2 : 1)
+            );
+            return {
+              ...item,
+              reinstall_count: autoIterations,
+              teamName: teamNameByTaskId.get(item.task_id) || 'غير محدد',
+            };
+          });
           setTaskItems(itemsWithTeams);
           loadedBillboardIds = Array.from(new Set(installItems.map(i => i.billboard_id)));
           const installationVisuals: Record<number, string> = {};
@@ -474,11 +495,14 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
         faces_to_install: item.faces_to_install,
         billboard: bb,
       });
-      const itemTotalArea = singleFaceArea * faces;
 
-      const isReinstalled = (item.reinstall_count || 0) > 0;
+      const isTaskRe = (primaryTask as any)?.task_type === 'reinstallation' || (editingTask as any)?.task_type === 'reinstallation';
+      const isReinstalled = isTaskRe && (item.reinstall_count || 0) > 0;
+      const iterationsCount = isReinstalled ? Math.max(1, item.reinstall_count || 1) : 1;
+      const itemTotalArea = singleFaceArea * faces * iterationsCount;
+
       const itemCustPrice = isReinstalled
-        ? (Number(item.customer_original_install_cost) || 0) + (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
+        ? (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
         : (Number(item.customer_installation_cost) || 0);
 
       const baseCompCost = item.company_installation_cost !== null && item.company_installation_cost !== undefined
@@ -498,6 +522,7 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
         itemCustPrice,
         itemCompCost,
         faces,
+        iterationsCount,
       };
     });
 
@@ -622,6 +647,42 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
     toast.success('تم تحويل سعر اللوحة إلى مجاني');
   };
 
+  const handleToggleItemFaces = (itemId: string, newFaces: number) => {
+    setTaskItems(prev => prev.map(item => {
+      if (item.id !== itemId) return item;
+      return {
+        ...item,
+        faces_to_install: newFaces,
+      };
+    }));
+  };
+
+  const handleToggleItemIterations = (itemId: string, iterations: number) => {
+    setTaskItems(prev => prev.map(item => {
+      if (item.id !== itemId) return item;
+      const prevCount = Math.max(1, item.reinstall_count || 1);
+      const ratio = iterations / prevCount;
+      const currentCost = item.customer_installation_cost || item.customer_reinstall_cost || 0;
+      const newCustCost = Math.round(currentCost * ratio);
+      const newCompCost = Math.round((item.company_installation_cost || 0) * ratio);
+      return {
+        ...item,
+        reinstall_count: iterations,
+        customer_installation_cost: newCustCost,
+        customer_reinstall_cost: newCustCost,
+        company_installation_cost: newCompCost,
+      };
+    }));
+  };
+
+  const handleSetAllFaces = (faces: number) => {
+    setTaskItems(prev => prev.map(item => ({
+      ...item,
+      faces_to_install: faces,
+    })));
+    toast.success(`تم تعيين جميع اللوحات على ${faces === 1 ? 'وجه واحد' : 'وجهين'}`);
+  };
+
   const handleToggleItemCutout = (itemId: string, checked: boolean) => {
     setTaskItems(prev => prev.map(item => {
       if (item.id !== itemId) return item;
@@ -638,6 +699,120 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
     if (checked && !isPrintActive) setIsPrintActive(true);
   };
 
+  // Grouping by Size and Billboard Type for targeted batch pricing
+  const sizeAndTypeGroups = useMemo(() => {
+    const map = new Map<string, {
+      key: string;
+      sizeName: string;
+      billboardType: string;
+      itemIds: string[];
+      billboardCount: number;
+      totalFaces: number;
+      totalArea: number;
+      singleFaceArea: number;
+    }>();
+
+    filteredBillboardItems.forEach(item => {
+      const bb = item.billboard;
+      const size = bb.Size || 'غير محدد';
+      const type = bb.billboard_type || bb.Billboard_Type || bb.type || 'برجية';
+      const key = `${size}__${type}`;
+
+      const existing = map.get(key) || {
+        key,
+        sizeName: size,
+        billboardType: type,
+        itemIds: [],
+        billboardCount: 0,
+        totalFaces: 0,
+        totalArea: 0,
+        singleFaceArea: item.singleFaceArea || 0,
+      };
+
+      existing.itemIds.push(item.id);
+      existing.billboardCount += 1;
+      existing.totalFaces += (item.faces || 1) * (item.iterationsCount || 1);
+      existing.totalArea += item.itemTotalArea || 0;
+      map.set(key, existing);
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      const sortA = sizesMap[a.sizeName]?.sortOrder ?? 999;
+      const sortB = sizesMap[b.sizeName]?.sortOrder ?? 999;
+      return sortA - sortB;
+    });
+  }, [filteredBillboardItems, sizesMap]);
+
+  // Unique Types List for Meter Mode
+  const billboardTypeGroups = useMemo(() => {
+    const map = new Map<string, {
+      type: string;
+      billboardCount: number;
+      totalArea: number;
+      totalFaces: number;
+      itemIds: string[];
+    }>();
+
+    filteredBillboardItems.forEach(item => {
+      const bb = item.billboard;
+      const type = bb.billboard_type || bb.Billboard_Type || bb.type || 'برجية';
+      const existing = map.get(type) || {
+        type,
+        billboardCount: 0,
+        totalArea: 0,
+        totalFaces: 0,
+        itemIds: [],
+      };
+      existing.itemIds.push(item.id);
+      existing.billboardCount += 1;
+      existing.totalArea += item.itemTotalArea || 0;
+      existing.totalFaces += (item.faces || 1) * (item.iterationsCount || 1);
+      map.set(type, existing);
+    });
+
+    return Array.from(map.values());
+  }, [filteredBillboardItems]);
+
+  const handleApplyPriceToGroup = (targetItemIds: string[], priceVal: number, mode: 'piece' | 'meter', groupLabel: string) => {
+    if (priceVal <= 0) {
+      toast.error('الرجاء إدخال سعر صحيح');
+      return;
+    }
+    const idSet = new Set(targetItemIds);
+
+    setTaskItems(prev => prev.map(item => {
+      if (!idSet.has(item.id)) return item;
+      const isTaskRe = (primaryTask as any)?.task_type === 'reinstallation';
+      const isRe = isTaskRe && (item.reinstall_count || 0) > 0;
+      const iterationsCount = isRe ? Math.max(1, item.reinstall_count || 1) : 1;
+
+      let newPrice = priceVal;
+      if (mode === 'meter') {
+        const bb = billboards[item.billboard_id];
+        const sizeName = bb?.Size || 'غير محدد';
+        const area = calculateEnhancedCompositeAreaFromSize(sizeName, sizesMap);
+        const faces = resolveInstallationFacesCount({
+          faces_to_install: item.faces_to_install,
+          billboard: bb,
+        });
+        newPrice = Math.round(priceVal * area * faces * iterationsCount);
+      } else {
+        // بالقطعة: السعر المدخل يُعامل كسعر اللوحة كاملة (وجهين). إذا كانت اللوحة وجه واحد تأخذ النصف
+        const bb = billboards[item.billboard_id];
+        const totalFaces = bb?.Faces_Count || 2;
+        const facesToInstall = item.faces_to_install || totalFaces;
+        const faceMultiplier = totalFaces > 0 ? (facesToInstall / totalFaces) : 1;
+        newPrice = Math.round(priceVal * faceMultiplier * iterationsCount);
+      }
+
+      return isRe
+        ? { ...item, customer_reinstall_cost: newPrice }
+        : { ...item, customer_installation_cost: newPrice };
+    }));
+
+    toast.success(`تم تطبيق السعر (${priceVal} ${mode === 'meter' ? 'د.ل/م²' : 'د.ل'}) على ${groupLabel}`);
+  };
+
   // Batch Pricing Handlers
   const handleApplyBatchPricing = () => {
     if (batchPriceValue <= 0) {
@@ -645,7 +820,9 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
       return;
     }
     setTaskItems(prev => prev.map(item => {
-      const isRe = (item.reinstall_count || 0) > 0;
+      const isTaskRe = (primaryTask as any)?.task_type === 'reinstallation';
+      const isRe = isTaskRe && (item.reinstall_count || 0) > 0;
+      const iterationsCount = isRe ? Math.max(1, item.reinstall_count || 1) : 1;
       let newPrice = batchPriceValue;
       if (batchPricingMode === 'meter') {
         const bb = billboards[item.billboard_id];
@@ -655,7 +832,7 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
           faces_to_install: item.faces_to_install,
           billboard: bb,
         });
-        newPrice = Math.round(batchPriceValue * area * faces);
+        newPrice = Math.round(batchPriceValue * area * faces * iterationsCount);
       }
       return isRe
         ? { ...item, customer_reinstall_cost: newPrice }
@@ -696,9 +873,10 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
         for (const item of taskItems) {
           const isRe = (item.reinstall_count || 0) > 0;
           await supabase.from('installation_task_items').update({
-            customer_installation_cost: isRe ? item.customer_reinstall_cost : item.customer_installation_cost,
+            customer_installation_cost: isRe ? (item.customer_reinstall_cost || item.customer_installation_cost) : item.customer_installation_cost,
             customer_original_install_cost: item.customer_original_install_cost || 0,
-            customer_reinstall_cost: item.customer_reinstall_cost || 0,
+            customer_reinstall_cost: item.customer_reinstall_cost || item.customer_installation_cost || 0,
+            reinstall_count: item.reinstall_count ?? null,
             company_installation_cost: item.company_installation_cost,
             additional_cost: item.additional_cost || null,
             additional_cost_notes: item.additional_cost_notes || null,
@@ -1114,59 +1292,214 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                     )}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-3" dir="rtl">
-                    <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-muted/30 border border-border/20 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setBatchPricingMode('piece')}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
-                          batchPricingMode === 'piece' ? "bg-amber-500/20 text-amber-300 border border-amber-500/30" : "text-muted-foreground hover:text-foreground"
-                        )}
-                      >
-                        سعر بالقطعة
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setBatchPricingMode('meter')}
-                        className={cn(
-                          "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap",
-                          batchPricingMode === 'meter' ? "bg-amber-500/20 text-amber-300 border border-amber-500/30" : "text-muted-foreground hover:text-foreground"
-                        )}
-                      >
-                        سعر بالمتر المربع
-                      </button>
+                  <div className="space-y-2.5" dir="rtl">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      {/* Mode Selector */}
+                      <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-muted/30 border border-border/20 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setBatchPricingMode('piece')}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5",
+                            batchPricingMode === 'piece' ? "bg-amber-500 text-black shadow-xs font-black" : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          <Box className="h-3.5 w-3.5" />
+                          <span>تسعير بالقطعة (مفصول حسب المقاس)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBatchPricingMode('meter')}
+                          className={cn(
+                            "px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5",
+                            batchPricingMode === 'meter' ? "bg-amber-500 text-black shadow-xs font-black" : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          <Ruler className="h-3.5 w-3.5" />
+                          <span>تسعير بالمتر المربع (مفصول حسب النوع)</span>
+                        </button>
+                      </div>
+
+                      {/* Global Actions */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-center gap-1 bg-card/60 p-1 rounded-xl border border-border/25">
+                          <span className="text-[10px] font-bold text-muted-foreground px-1.5">الأوجه للكل:</span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            type="button"
+                            onClick={() => handleSetAllFaces(1)}
+                            className="h-7 px-2.5 text-[11px] font-bold text-amber-300 hover:bg-amber-500/10 rounded-lg gap-1 shrink-0 cursor-pointer whitespace-nowrap"
+                          >
+                            وجه واحد
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            type="button"
+                            onClick={() => handleSetAllFaces(2)}
+                            className="h-7 px-2.5 text-[11px] font-bold text-amber-300 hover:bg-amber-500/10 rounded-lg gap-1 shrink-0 cursor-pointer whitespace-nowrap"
+                          >
+                            وجهين
+                          </Button>
+                        </div>
+
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={handleSetAllBillboardsFree}
+                          disabled={isFirstInstallation}
+                          className="h-8 px-3 text-xs font-bold text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 rounded-xl gap-1.5 shrink-0 cursor-pointer whitespace-nowrap"
+                        >
+                          <Gift className="h-3.5 w-3.5" />
+                          جعل الكل مجاني
+                        </Button>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-2 flex-1 min-w-[220px]" dir="rtl">
-                      <Input
-                        type="number"
-                        placeholder={batchPricingMode === 'meter' ? "سعر المتر د.ل/م²..." : "سعر القطعة د.ل..."}
-                        value={batchPriceValue === 0 ? '' : batchPriceValue}
-                        onChange={e => setBatchPriceValue(Number(e.target.value) || 0)}
-                        className="h-9 text-xs font-bold bg-background/60 border-border/30 rounded-xl text-right font-mono flex-1"
-                      />
-                      <Button
-                        size="sm"
-                        onClick={handleApplyBatchPricing}
-                        disabled={batchPriceValue <= 0 || isFirstInstallation}
-                        className="h-9 px-4 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black rounded-xl gap-1.5 shrink-0 cursor-pointer whitespace-nowrap shadow-sm"
-                      >
-                        <Check className="h-3.5 w-3.5" />
-                        تطبيق على الكل
-                      </Button>
-                    </div>
+                    {/* Section 1: By Piece Mode (Grouped & Separated by Size) */}
+                    {batchPricingMode === 'piece' && (
+                      <div className="p-3 bg-muted/20 border border-border/30 rounded-2xl space-y-2">
+                        <div className="flex items-center justify-between text-xs font-bold text-muted-foreground">
+                          <span className="flex items-center gap-1.5 text-foreground">
+                            <Box className="h-4 w-4 text-amber-400" />
+                            <span>تطبيق السعر حسب المقاس والنوع (يُحسب الوجه الفردي بنصف سعر الوجهين تلقائياً):</span>
+                          </span>
+                          <span className="text-[11px] text-muted-foreground">
+                            {sizeAndTypeGroups.length} مقاسات في هذه المهمة
+                          </span>
+                        </div>
 
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={handleSetAllBillboardsFree}
-                      disabled={isFirstInstallation}
-                      className="h-9 px-3 text-xs font-bold text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 rounded-xl gap-1.5 shrink-0 cursor-pointer whitespace-nowrap"
-                    >
-                      <Gift className="h-3.5 w-3.5" />
-                      جعل الكل مجاني
-                    </Button>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                          {sizeAndTypeGroups.map(grp => {
+                            const currentVal = groupPriceInputs[grp.key] ?? '';
+                            return (
+                              <div
+                                key={grp.key}
+                                className="flex items-center justify-between gap-2 p-2 rounded-xl bg-card/60 border border-border/25"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded font-mono text-xs font-black">
+                                      {grp.sizeName}
+                                    </span>
+                                    <span className="text-[10px] font-bold text-muted-foreground">
+                                      {grp.billboardType}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground/80 mt-0.5">
+                                    {grp.billboardCount} لوحة • {grp.totalFaces} وجه ({grp.totalArea.toFixed(1)} م²)
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <Input
+                                    type="number"
+                                    placeholder="السعر د.ل"
+                                    value={currentVal}
+                                    onChange={e => setGroupPriceInputs(prev => ({
+                                      ...prev,
+                                      [grp.key]: Number(e.target.value) || 0
+                                    }))}
+                                    className="h-8 w-20 text-xs font-bold text-center font-mono bg-background/80 border-border/30 rounded-lg p-1"
+                                  />
+                                  <Button
+                                    size="sm"
+                                    type="button"
+                                    disabled={!groupPriceInputs[grp.key] || isFirstInstallation}
+                                    onClick={() => handleApplyPriceToGroup(grp.itemIds, groupPriceInputs[grp.key] || 0, 'piece', `مقاس ${grp.sizeName}`)}
+                                    className="h-8 px-2.5 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black rounded-lg shrink-0 cursor-pointer shadow-xs"
+                                  >
+                                    تطبيق
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Section 2: By Meter Mode (Grouped & Separated by Billboard Type) */}
+                    {batchPricingMode === 'meter' && (
+                      <div className="p-3 bg-muted/20 border border-border/30 rounded-2xl space-y-2">
+                        <div className="flex items-center justify-between text-xs font-bold text-muted-foreground">
+                          <span className="flex items-center gap-1.5 text-foreground">
+                            <Ruler className="h-4 w-4 text-amber-400" />
+                            <span>تطبيق سعر المتر المربع (يُضرب سعر المتر في إجمالي أمتار اللوحة حسب الأوجه):</span>
+                          </span>
+                        </div>
+
+                        {/* Global Meter Price Row */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 flex-1 min-w-[220px]">
+                            <Input
+                              type="number"
+                              placeholder="سعر المتر الموحد لجميع اللوحات د.ل/م²..."
+                              value={batchPriceValue === 0 ? '' : batchPriceValue}
+                              onChange={e => setBatchPriceValue(Number(e.target.value) || 0)}
+                              className="h-9 text-xs font-bold bg-background/60 border-border/30 rounded-xl text-right font-mono flex-1"
+                            />
+                            <Button
+                              size="sm"
+                              onClick={handleApplyBatchPricing}
+                              disabled={batchPriceValue <= 0 || isFirstInstallation}
+                              className="h-9 px-4 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black rounded-xl gap-1.5 shrink-0 cursor-pointer whitespace-nowrap shadow-sm"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                              تطبيق سعر المتر على الكل
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Types meter pricing row if multiple types */}
+                        {billboardTypeGroups.length > 1 && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 pt-2 border-t border-border/20">
+                            {billboardTypeGroups.map(tGrp => {
+                              const tKey = `type__${tGrp.type}`;
+                              const currentVal = groupPriceInputs[tKey] ?? '';
+                              return (
+                                <div
+                                  key={tKey}
+                                  className="flex items-center justify-between gap-2 p-2 rounded-xl bg-card/60 border border-border/25"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-bold text-xs text-foreground">
+                                      لوحات {tGrp.type}
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                                      {tGrp.billboardCount} لوحة ({tGrp.totalArea.toFixed(1)} م²)
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <Input
+                                      type="number"
+                                      placeholder="د.ل/م²"
+                                      value={currentVal}
+                                      onChange={e => setGroupPriceInputs(prev => ({
+                                        ...prev,
+                                        [tKey]: Number(e.target.value) || 0
+                                      }))}
+                                      className="h-8 w-20 text-xs font-bold text-center font-mono bg-background/80 border-border/30 rounded-lg p-1"
+                                    />
+                                    <Button
+                                      size="sm"
+                                      type="button"
+                                      disabled={!groupPriceInputs[tKey] || isFirstInstallation}
+                                      onClick={() => handleApplyPriceToGroup(tGrp.itemIds, groupPriceInputs[tKey] || 0, 'meter', `لوحات ${tGrp.type}`)}
+                                      className="h-8 px-2.5 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black rounded-lg shrink-0 cursor-pointer shadow-xs"
+                                    >
+                                      تطبيق
+                                    </Button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1286,16 +1619,87 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                                   </div>
                                 </td>
 
-                                {/* Column 2: Size & Area */}
+                                {/* Column 2: Size, Faces & Area */}
                                 <td className="py-2.5 px-3 whitespace-nowrap">
-                                  <div className="font-bold text-foreground">
+                                  <div className="font-bold text-foreground flex items-center gap-1.5 flex-wrap">
                                     <span className="bg-amber-500/10 text-amber-300 border border-amber-500/20 px-1.5 py-0.5 rounded font-mono text-[10px]">
                                       {bb.Size}
                                     </span>
+                                    {item.iterationsCount > 1 && (
+                                      <span className="bg-orange-500/15 text-orange-400 border border-orange-500/30 px-1.5 py-0.5 rounded text-[9px] font-bold">
+                                        تركيب {item.iterationsCount} مرات
+                                      </span>
+                                    )}
+                                    <span className="text-[10px] text-muted-foreground font-mono">
+                                      ({item.itemTotalArea.toFixed(1)} م²)
+                                    </span>
                                   </div>
-                                  <div className="text-[10px] text-muted-foreground mt-0.5">
-                                    {item.faces === 1 ? 'وجه واحد' : 'وجهين'} ({item.itemTotalArea.toFixed(1)} م²)
+                                  <div className="flex items-center gap-1 mt-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleItemFaces(item.id, 1)}
+                                      className={cn(
+                                        "px-2 py-0.5 rounded text-[10px] font-bold border transition-all cursor-pointer",
+                                        item.faces === 1
+                                          ? "bg-amber-500 text-black border-amber-500 shadow-xs"
+                                          : "bg-muted/40 text-muted-foreground border-border/50 hover:bg-muted/70 hover:text-foreground"
+                                      )}
+                                    >
+                                      وجه واحد
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleItemFaces(item.id, 2)}
+                                      className={cn(
+                                        "px-2 py-0.5 rounded text-[10px] font-bold border transition-all cursor-pointer",
+                                        item.faces === 2
+                                          ? "bg-amber-500 text-black border-amber-500 shadow-xs"
+                                          : "bg-muted/40 text-muted-foreground border-border/50 hover:bg-muted/70 hover:text-foreground"
+                                      )}
+                                    >
+                                      وجهين
+                                    </button>
                                   </div>
+                                  {isTaskRe && (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleItemIterations(item.id, 1)}
+                                        className={cn(
+                                          "px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer",
+                                          (item.reinstall_count || 1) <= 1
+                                            ? "bg-amber-500 text-black border-amber-500 shadow-xs"
+                                            : "bg-muted/40 text-muted-foreground border-border/50 hover:bg-muted/70 hover:text-foreground"
+                                        )}
+                                      >
+                                        مرة 1
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleItemIterations(item.id, 2)}
+                                        className={cn(
+                                          "px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer",
+                                          item.reinstall_count === 2
+                                            ? "bg-amber-500 text-black border-amber-500 shadow-xs"
+                                            : "bg-muted/40 text-muted-foreground border-border/50 hover:bg-muted/70 hover:text-foreground"
+                                        )}
+                                      >
+                                        مرتين (2)
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleItemIterations(item.id, 3)}
+                                        className={cn(
+                                          "px-1.5 py-0.5 rounded text-[9px] font-bold border transition-all cursor-pointer",
+                                          item.reinstall_count === 3
+                                            ? "bg-amber-500 text-black border-amber-500 shadow-xs"
+                                            : "bg-muted/40 text-muted-foreground border-border/50 hover:bg-muted/70 hover:text-foreground"
+                                        )}
+                                      >
+                                        3 مرات
+                                      </button>
+                                    </div>
+                                  )}
                                 </td>
 
                                 {/* Column 3: Team */}
@@ -1485,8 +1889,39 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                                 <span className="text-[10px] font-black bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-md font-mono">
                                   {bb.Size}
                                 </span>
-                                <span className="text-[10px] font-bold bg-muted/60 text-muted-foreground border border-border/20 px-2 py-0.5 rounded-md">
-                                  {item.faces === 1 ? 'وجه واحد' : 'وجهين'} ({item.itemTotalArea.toFixed(1)} م²)
+                                <div className="inline-flex items-center gap-1 p-0.5 rounded-md bg-muted/40 border border-border/30">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleItemFaces(item.id, 1)}
+                                    className={cn(
+                                      "px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer",
+                                      item.faces === 1
+                                        ? "bg-amber-500 text-black shadow-xs"
+                                        : "text-muted-foreground hover:text-foreground"
+                                    )}
+                                  >
+                                    وجه واحد
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleItemFaces(item.id, 2)}
+                                    className={cn(
+                                      "px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer",
+                                      item.faces === 2
+                                        ? "bg-amber-500 text-black shadow-xs"
+                                        : "text-muted-foreground hover:text-foreground"
+                                    )}
+                                  >
+                                    وجهين
+                                  </button>
+                                </div>
+                                {item.iterationsCount > 1 && (
+                                  <span className="bg-orange-500/15 text-orange-400 border border-orange-500/30 px-1.5 py-0.5 rounded text-[9px] font-bold">
+                                    تركيب {item.iterationsCount} مرات
+                                  </span>
+                                )}
+                                <span className="text-[10px] font-mono text-muted-foreground font-bold">
+                                  ({item.itemTotalArea.toFixed(1)} م²)
                                 </span>
                                 {item.teamName && item.teamName !== 'غير محدد' && (
                                   <span className="text-[10px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-md">

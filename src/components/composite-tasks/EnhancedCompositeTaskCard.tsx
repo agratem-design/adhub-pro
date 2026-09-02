@@ -70,10 +70,11 @@ export const EnhancedCompositeTaskCard: React.FC<EnhancedCompositeTaskCardProps>
             .eq('task_id', task.installation_task_id);
           
           if (installItems) {
+            const isTaskReinstall = task.task_type === 'reinstallation';
             installItems.forEach(item => {
-              const isReinstalled = (item.reinstall_count || 0) > 0;
+              const isReinstalled = isTaskReinstall && (item.reinstall_count || 0) > 0;
               const itemCost = isReinstalled
-                ? (Number(item.customer_original_install_cost) || 0) + (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
+                ? (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
                 : (Number(item.customer_installation_cost) || 0);
               actualCustomerInstall += itemCost;
             });
@@ -169,10 +170,11 @@ export const EnhancedCompositeTaskCard: React.FC<EnhancedCompositeTaskCardProps>
           .select('customer_installation_cost, company_installation_cost, additional_cost, reinstall_count, customer_original_install_cost, customer_reinstall_cost')
           .eq('task_id', task.installation_task_id);
         if (installItems) {
+          const isTaskReinstall = task.task_type === 'reinstallation';
           installItems.forEach(i => {
-            const isReinstalled = (i.reinstall_count || 0) > 0;
+            const isReinstalled = isTaskReinstall && (i.reinstall_count || 0) > 0;
             const itemCost = isReinstalled
-              ? (Number(i.customer_original_install_cost) || 0) + (Number(i.customer_reinstall_cost) || Number(i.customer_installation_cost) || 0)
+              ? (Number(i.customer_reinstall_cost) || Number(i.customer_installation_cost) || 0)
               : (Number(i.customer_installation_cost) || 0);
             newCustomerInstall += itemCost;
             newCompanyInstall += (Number(i.company_installation_cost) || 0) + (Number(i.additional_cost) || 0);
@@ -290,32 +292,16 @@ export const EnhancedCompositeTaskCard: React.FC<EnhancedCompositeTaskCardProps>
       try {
         let contractIds: number[] = [];
         
-        // جلب العقود الفعلية من اللوحات في مهمة التركيب
-        if (task.installation_task_id) {
-          // جلب أرقام العقود الفعلية من اللوحات المرتبطة بالمهمة
-          const { data: installItems } = await supabase
-            .from('installation_task_items')
-            .select('billboard:billboards!installation_task_items_billboard_id_fkey(Contract_Number)')
-            .eq('task_id', task.installation_task_id);
-          
-          if (installItems && installItems.length > 0) {
-            const uniqueContracts = new Set<number>();
-            installItems.forEach((item: any) => {
-              const cNo = Number(item.billboard?.Contract_Number);
-              if (Number.isFinite(cNo) && cNo > 0) {
-                uniqueContracts.add(cNo);
-              }
-            });
-            contractIds = Array.from(uniqueContracts);
+        if (Array.isArray((task as any).contract_ids) && (task as any).contract_ids.length > 0) {
+          contractIds = [...(task as any).contract_ids].map(Number).filter(Boolean);
+        } else if (Array.isArray((task as any).contractIds) && (task as any).contractIds.length > 0) {
+          contractIds = [...(task as any).contractIds].map(Number).filter(Boolean);
+        } else if (task.contract_id) {
+          const cNo = Number(task.contract_id);
+          if (Number.isFinite(cNo) && cNo > 0) {
+            contractIds = [cNo];
           }
-          
-          // إذا لم نجد عقود من اللوحات، نستخدم contract_id المخزن
-          if (contractIds.length === 0 && task.contract_id) {
-            const cNo = Number(task.contract_id);
-            if (Number.isFinite(cNo) && cNo > 0) {
-              contractIds = [cNo];
-            }
-          }
+        }
           
           // جلب أنواع الإعلان من جميع العقود
           if (contractIds.length > 0) {

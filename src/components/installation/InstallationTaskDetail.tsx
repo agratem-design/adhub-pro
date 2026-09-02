@@ -325,17 +325,32 @@ export const InstallationTaskDetail: React.FC<Props> = ({
     });
   }, [searchQuery]);
 
+  const [iterationFilter, setIterationFilter] = useState<'all' | number>('all');
+
+  const availableIterations = useMemo(() => {
+    const counts = new Set<number>();
+    taskItems.forEach(item => {
+      counts.add(item.reinstall_count || 0);
+    });
+    return Array.from(counts).sort((a, b) => a - b);
+  }, [taskItems]);
+
+  const filterByIteration = useCallback((list: typeof billboardsWithData) => {
+    if (iterationFilter === 'all') return list;
+    return list.filter(b => (b.item.reinstall_count || 0) === iterationFilter);
+  }, [iterationFilter]);
+
   const incompleteBillboards = useMemo(() =>
-    filterBySearch(sortBillboards(billboardsWithData.filter(b => 
+    filterBySearch(sortBillboards(filterByIteration(billboardsWithData.filter(b => 
       b.item.status !== 'completed'
-    ))),
-    [billboardsWithData, sortBillboards, filterBySearch]
+    )))),
+    [billboardsWithData, sortBillboards, filterBySearch, filterByIteration]
   );
   const completedBillboards = useMemo(() =>
-    filterBySearch(sortBillboards(billboardsWithData.filter(b => 
+    filterBySearch(sortBillboards(filterByIteration(billboardsWithData.filter(b => 
       b.item.status === 'completed'
-    ))),
-    [billboardsWithData, sortBillboards, filterBySearch]
+    )))),
+    [billboardsWithData, sortBillboards, filterBySearch, filterByIteration]
   );
 
   const selectedCount = selectedItemsForCompletion.length + selectedItemsForDate.length;
@@ -822,6 +837,51 @@ export const InstallationTaskDetail: React.FC<Props> = ({
               </Button>
             )}
           </div>
+
+          {/* Iteration Classification Tabs if multiple iterations exist */}
+          {availableIterations.length > 1 && (
+            <div className="flex items-center gap-2 flex-wrap p-2 rounded-2xl bg-card/40 border border-border/30 shadow-xs" dir="rtl">
+              <span className="text-xs font-bold text-muted-foreground px-2 flex items-center gap-1.5">
+                <RefreshCw className="h-3.5 w-3.5 text-amber-400" />
+                <span>تصنيف دورات التركيب:</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIterationFilter('all')}
+                className={cn(
+                  "px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border",
+                  iterationFilter === 'all'
+                    ? "bg-amber-500 text-black border-amber-500 shadow-xs font-black"
+                    : "bg-background/60 text-muted-foreground border-border/40 hover:bg-muted/60"
+                )}
+              >
+                <span>جميع اللوحات ({taskItems.length})</span>
+              </button>
+              {availableIterations.map(cnt => {
+                const countItems = taskItems.filter(i => (i.reinstall_count || 0) === cnt).length;
+                const label = cnt === 0
+                  ? `التركيب الأول (${countItems})`
+                  : cnt === 1
+                  ? `إعادة تركيب - المرة الأولى (${countItems})`
+                  : `إعادة تركيب - المرة ${cnt + 1} (${countItems})`;
+                return (
+                  <button
+                    key={cnt}
+                    type="button"
+                    onClick={() => setIterationFilter(cnt)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border",
+                      iterationFilter === cnt
+                        ? "bg-amber-500 text-black border-amber-500 shadow-xs font-black"
+                        : "bg-background/60 text-muted-foreground border-border/40 hover:bg-muted/60"
+                    )}
+                  >
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Inline Floating Action Bar when items selected */}
           <AnimatePresence>

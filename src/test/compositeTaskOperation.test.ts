@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   getCompositeTaskOperationKey,
   getCurrentOperationInstallationCost,
+  getOperationLabel,
   getSharedOperationCostsForTask,
+  getTaskContractGroupKey,
+  isMultiContractOperation,
   normalizeCompositeTaskType,
   selectLatestOperationTasks,
 } from '@/lib/compositeTaskOperation';
@@ -19,6 +22,42 @@ describe('composite task type normalization', () => {
   it('treats missing and legacy initial values as a new installation', () => {
     expect(normalizeCompositeTaskType(null)).toBe('new_installation');
     expect(normalizeCompositeTaskType('new_installation')).toBe('new_installation');
+  });
+});
+
+describe('composite task multi-contract isolation and identity', () => {
+  it('identifies tasks spanning multiple contracts', () => {
+    expect(isMultiContractOperation({ contract_id: 1114, contract_ids: [1114, 1231, 1260] })).toBe(true);
+    expect(isMultiContractOperation({ contract_id: 1114, contract_ids: [1114] })).toBe(false);
+    expect(isMultiContractOperation({ contract_id: 1114, contractIds: [1114, 1231] })).toBe(true);
+  });
+
+  it('isolates multi-contract tasks into their own group instead of nesting under a single contract', () => {
+    const singleContractTask = { id: 'task-1', contract_id: 1114, task_type: 'reinstallation' };
+    const multiContractTask = { id: 'task-multi', contract_id: 1114, contract_ids: [1114, 1231, 1260, 1277], task_type: 'reinstallation' };
+
+    expect(getTaskContractGroupKey(singleContractTask)).toBe('contract-1114');
+    expect(getTaskContractGroupKey(multiContractTask)).toBe('multi-contract-task-multi');
+    expect(getTaskContractGroupKey(singleContractTask)).not.toBe(getTaskContractGroupKey(multiContractTask));
+  });
+
+  it('groups team rows from the same multi-contract reinstallation into one operation', () => {
+    const firstTeam = { id: 'team-a', contract_ids: [1114, 1231, 1260], task_type: 'reinstallation', reinstallationNumber: 71 };
+    const secondTeam = { id: 'team-b', contract_ids: [1260, 1114, 1231], task_type: 'reinstallation', reinstallationNumber: 71 };
+    const laterOperation = { id: 'team-c', contract_ids: [1114, 1231, 1260], task_type: 'reinstallation', reinstallationNumber: 72 };
+
+    expect(getTaskContractGroupKey(firstTeam)).toBe(getTaskContractGroupKey(secondTeam));
+    expect(getCompositeTaskOperationKey(firstTeam)).toBe(getCompositeTaskOperationKey(secondTeam));
+    expect(getTaskContractGroupKey(firstTeam)).not.toBe(getTaskContractGroupKey(laterOperation));
+  });
+
+  it('generates appropriate multi-contract operation labels', () => {
+    expect(getOperationLabel({ id: 'm1', contract_ids: [1114, 1231], task_type: 'reinstallation', reinstallationNumber: 71 }))
+      .toBe('إعادة تركيب مجمعة (71)');
+    expect(getOperationLabel({ id: 'm2', contract_ids: [1114, 1231], task_type: 'new_installation' }))
+      .toBe('مهمة تركيب مجمعة لعدة عقود');
+    expect(getOperationLabel({ id: 's1', contract_id: 1114, task_type: 'reinstallation', reinstallationNumber: 1 }))
+      .toBe('إعادة تركيب 1');
   });
 });
 

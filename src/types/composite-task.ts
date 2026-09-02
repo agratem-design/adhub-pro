@@ -7,6 +7,7 @@ export interface CompositeTask {
   
   // معلومات العقد والزبون
   contract_id: number;
+  contract_ids?: number[] | null;
   customer_id: string | null;
   customer_name: string | null;
   

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   filterTaskContractIdsByCustomer,
+  matchContractIdsForTaskBillboards,
   normalizeContractId,
   resolveTaskContractAdTypes,
 } from '@/lib/compositeTaskContractIdentity';
@@ -49,6 +50,39 @@ describe('Composite Tasks - normalizeContractId and Ad Type Logic', () => {
       });
 
       expect(contractIds).toEqual([1254, 1255]);
+    });
+  });
+
+  describe('Historical multi-contract matching', () => {
+    it('does not attach a later contract that reused the same billboard', () => {
+      const ids = matchContractIdsForTaskBillboards({
+        taskBillboardIds: [10, 20],
+        taskCustomerId: 'customer-1',
+        fallbackContractId: 1114,
+        taskDate: '2026-04-15T12:00:00Z',
+        contracts: [
+          { Contract_Number: 1114, customer_id: 'customer-1', billboard_ids: '10', 'Contract Date': '2026-01-01' },
+          { Contract_Number: 1231, customer_id: 'customer-1', billboard_ids: '20', 'Contract Date': '2026-02-01' },
+          { Contract_Number: 1400, customer_id: 'customer-1', billboard_ids: '10,20', 'Contract Date': '2026-06-01' },
+        ],
+      });
+
+      expect(ids).toEqual([1114, 1231]);
+      expect(ids).not.toContain(1400);
+    });
+
+    it('selects the latest eligible historical contract per billboard', () => {
+      const ids = matchContractIdsForTaskBillboards({
+        taskBillboardIds: [25],
+        taskCustomerName: 'محمد بن نصر',
+        taskDate: '2026-05-01',
+        contracts: [
+          { Contract_Number: 1100, 'Customer Name': 'محمد بن نصر', billboard_ids: '25', 'Contract Date': '2025-10-01' },
+          { Contract_Number: 1200, 'Customer Name': 'محمد بن نصر', billboard_ids: '25', 'Contract Date': '2026-03-01' },
+        ],
+      });
+
+      expect(ids).toEqual([1200]);
     });
   });
 

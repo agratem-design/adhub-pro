@@ -29,6 +29,7 @@ import { getMergedInvoiceStylesAsync } from '@/hooks/useInvoiceSettingsSync';
 import { unifiedHeaderHtml, unifiedHeaderFooterCss, unifiedFooterHtml, formatDateForPrint, type UnifiedPrintStyles } from '@/lib/unifiedInvoiceBase';
 import { getCurrentOperationInstallationCost } from '@/lib/compositeTaskOperation';
 import { calculateInstallationArea, resolveInstallationFacesCount } from '@/lib/installationFaces';
+import { matchContractIdsForTaskBillboards, resolveBillboardContractNumber } from '@/lib/compositeTaskContractIdentity';
 
 export type InvoiceType = 'customer' | 'print_vendor' | 'cutout_vendor' | 'installation_team';
 
@@ -77,6 +78,11 @@ interface InvoiceItem {
   originalInstalledImageB?: string; // صورة التركيب الأصلي - وجه خلفي
   reinstallInstalledImageA?: string; // صورة إعادة التركيب - وجه أمامي
   reinstallInstalledImageB?: string; // صورة إعادة التركيب - وجه خلفي
+  rawBillboardId?: number; // معرف اللوحة الفعلي بدون إزاحات
+  contractNumber?: number; // رقم العقد الخاص باللوحة (للمهام المجمعة)
+  contractAdType?: string; // نوع إعلان العقد الخاص باللوحة
+  installedImageA?: string; // صورة التركيب الفعلية - وجه أمامي
+  installedImageB?: string; // صورة التركيب الفعلية - وجه خلفي
 }
 
 interface UnifiedTaskInvoiceProps {
@@ -124,14 +130,45 @@ export function UnifiedTaskInvoice({
         if (t.installation_task_id) {
           const { data: installItems } = await supabase
             .from('installation_task_items')
-            .select('customer_installation_cost, company_installation_cost, additional_cost, reinstall_count, customer_original_install_cost, customer_reinstall_cost')
+            .select('id, billboard_id, customer_installation_cost, company_installation_cost, additional_cost, reinstall_count, customer_original_install_cost, customer_reinstall_cost, faces_to_install, reinstalled_faces, billboard:billboards!installation_task_items_billboard_id_fkey(Size, Faces_Count)')
             .eq('task_id', t.installation_task_id);
           if (installItems) {
-            installItems.forEach(i => {
-              const itemCost = getCurrentOperationInstallationCost(i, t.task_type);
+            for (const i of installItems) {
+              let itemCost = getCurrentOperationInstallationCost(i, t.task_type);
+              
+              if (t.task_type === 'reinstallation') {
+                const bb = (i as any).billboard;
+                const sizeStr = bb?.Size || '8x3';
+                let w = 0;
+                let h = 0;
+                const match = String(sizeStr).match(/(\d+(?:\.\d+)?)\s*[xX×*]\s*(\d+(?:\.\d+)?)/);
+                if (match) {
+                  w = parseFloat(match[1]);
+                  h = parseFloat(match[2]);
+                }
+                const area = w * h;
+                const faces = resolveInstallationFacesCount({
+                  faces_to_install: i.faces_to_install,
+                  billboard: bb,
+                });
+                const iterations = Math.max(1, i.reinstall_count || 1);
+                const standardItemCost = Math.round(area * faces * 10 * iterations);
+                
+                if (standardItemCost > 0) {
+                  itemCost = standardItemCost;
+                  await supabase
+                    .from('installation_task_items')
+                    .update({
+                      customer_installation_cost: standardItemCost,
+                      customer_reinstall_cost: standardItemCost,
+                    } as any)
+                    .eq('id', i.id);
+                }
+              }
+
               newCustomerInstall += itemCost;
               newCompanyInstall += (Number(i.company_installation_cost) || 0) + (Number(i.additional_cost) || 0);
-            });
+            }
           }
         }
 
@@ -241,7 +278,11 @@ export function UnifiedTaskInvoice({
   const [data, setData] = useState<typeof invoiceData>(invoiceData);
   const [displayMode, setDisplayMode] = useState<'detailed' | 'summary'>('detailed');
   const [separateFaces, setSeparateFaces] = useState(true);
-  const [contractIds, setContractIds] = useState<number[]>([task.contract_id].filter(Boolean));
+  const [contractIds, setContractIds] = useState<number[]>(() => {
+    const rawIds = (task as any)._contractIds || (task as any).contractIds || (task as any).contract_ids || (task.contract_id ? [task.contract_id] : []);
+    const arr = Array.isArray(rawIds) ? rawIds : [rawIds];
+    return [...new Set(arr.map(Number).filter(Boolean))];
+  });
   const [showSignatureSection, setShowSignatureSection] = useState(false);
   const [showInstalledImages, setShowInstalledImages] = useState(false);
   const [showBackFaceImages, setShowBackFaceImages] = useState(false);
@@ -271,47 +312,113 @@ export function UnifiedTaskInvoice({
   const [discountReason, setDiscountReason] = useState<string>('');
   const [savingDiscount, setSavingDiscount] = useState(false);
   const [adType, setAdType] = useState<string>('');
+  const [contractAdTypesMap, setContractAdTypesMap] = useState<Record<number, string>>({});
 
   // Load settings, contracts, and data
   useEffect(() => {
     const loadData = async () => {
       try {
         setIsLoading(true);
-        // ✅ استخدم contract_id من المهام المجمعة والمهام الفرعية
+        // ✅ استخراج أرقام العقود من المهام والبنود الفعلية للوحات
+        const allInstallTaskIdsForContracts = allTasks.map(t => t.installation_task_id).filter(Boolean) as string[];
         const taskContractIds: number[] = [...new Set(
           allTasks.flatMap(t => {
-            const ids = t._contractIds || t.contractIds || (t.contract_id ? [t.contract_id] : []);
+            const ids = t._contractIds || t.contractIds || (t as any).contract_ids || (t.contract_id ? [t.contract_id] : []);
             return Array.isArray(ids) ? ids : [ids];
           })
-        )].filter(Boolean) as number[];
+        )].map(Number).filter(Boolean) as number[];
 
-        // جلب نوع الإعلان من العقود الصحيحة للعميل فقط
+        // جلب contract_ids من جدول مهام التركيب مباشرة
+        if (allInstallTaskIdsForContracts.length > 0) {
+          const { data: installTasksData } = await supabase
+            .from('installation_tasks')
+            .select('contract_id, contract_ids')
+            .in('id', allInstallTaskIdsForContracts);
+
+          (installTasksData || []).forEach((it: any) => {
+            const ids = it.contract_ids || (it.contract_id ? [it.contract_id] : []);
+            (Array.isArray(ids) ? ids : [ids]).forEach((id: any) => {
+              const numId = Number(id);
+              if (numId && !taskContractIds.includes(numId)) {
+                taskContractIds.push(numId);
+              }
+            });
+          });
+        }
+
+        // إذا كانت المهمة تحتوي على لوحات متعددة لنفس الزبون:
+        // نكشف العقود عبر مطابقة لوحات المهمة مع حقل billboard_ids في عقود الزبون
+        if (taskContractIds.length <= 1 && allInstallTaskIdsForContracts.length > 0) {
+          const { data: itemRows } = await supabase
+            .from('installation_task_items')
+            .select('billboard_id')
+            .in('task_id', allInstallTaskIdsForContracts);
+
+          const taskBillboardIds = (itemRows || []).map((r: any) => Number(r.billboard_id)).filter(Boolean);
+
+          if (taskBillboardIds.length > 0) {
+            let custQuery = supabase.from('Contract').select('Contract_Number, billboard_ids, customer_id, "Customer Name", "Contract Date", "End Date"');
+            if (task.customer_id) {
+              custQuery = custQuery.eq('customer_id', task.customer_id);
+            } else if (task.customer_name) {
+              custQuery = custQuery.eq('Customer Name', task.customer_name);
+            }
+            const { data: custContracts } = await custQuery;
+
+            if (custContracts && custContracts.length > 0) {
+              const matched = matchContractIdsForTaskBillboards({
+                taskBillboardIds,
+                contracts: custContracts,
+                taskCustomerId: task.customer_id,
+                taskCustomerName: task.customer_name,
+                fallbackContractId: task.contract_id,
+                taskDate: task.created_at,
+              });
+              matched.forEach(cid => {
+                if (!taskContractIds.includes(cid)) taskContractIds.push(cid);
+              });
+            }
+          }
+        }
+
+        // جلب نوع الإعلان وبيانات العقود
+        let contractsDataForItems: any[] = [];
         if (taskContractIds.length > 0) {
           const { data: contractsData } = await supabase
             .from('Contract')
-            .select('Contract_Number, "Ad Type", "Customer Name", customer_id')
+            .select('Contract_Number, billboard_ids, "Ad Type", "Customer Name", customer_id')
             .in('Contract_Number', taskContractIds);
+          contractsDataForItems = contractsData || [];
           if (contractsData && contractsData.length > 0) {
             const filteredContracts = contractsData.filter(c => {
               if (c.customer_id && task.customer_id) {
                 return c.customer_id === task.customer_id;
               }
-              return c['Customer Name'] === task.customer_name;
+              if (task.customer_name) {
+                return c['Customer Name'] === task.customer_name;
+              }
+              return true;
             });
-            const finalContractIds = filteredContracts.map(c => Number(c.Contract_Number));
+            const validContracts = filteredContracts.length > 0 ? filteredContracts : contractsData;
+            const finalContractIds = [...new Set(validContracts.map(c => Number(c.Contract_Number)))].filter(Boolean);
             setContractIds(finalContractIds.sort((a, b) => a - b));
 
-            const uniqueAdTypes = [...new Set(filteredContracts.map(c => c['Ad Type']).filter(Boolean))];
+            const adMap: Record<number, string> = {};
+            validContracts.forEach((c: any) => {
+              if (c.Contract_Number) adMap[Number(c.Contract_Number)] = c['Ad Type'] || '';
+            });
+            setContractAdTypesMap(adMap);
+
+            const uniqueAdTypes = [...new Set(validContracts.map(c => c['Ad Type']).filter(Boolean))];
             if (uniqueAdTypes.length > 0) setAdType(uniqueAdTypes.join(' / '));
           }
         }
 
         // جلب صور التركيب من جميع المهام
-        const allInstallTaskIdsForContracts = allTasks.map(t => t.installation_task_id).filter(Boolean) as string[];
         if (allInstallTaskIdsForContracts.length > 0) {
           const { data: installItems } = await supabase
             .from('installation_task_items')
-            .select('billboard_id, installed_image_face_a_url, installed_image_face_b_url')
+            .select('billboard_id, installed_image_url, installed_image_face_a_url, installed_image_face_b_url, fallback_path_installed_a, fallback_path_installed_b')
             .in('task_id', allInstallTaskIdsForContracts);
 
           const installedImages: Record<number, { face_a?: string; face_b?: string }> = {};
@@ -365,7 +472,7 @@ export function UnifiedTaskInvoice({
 
         // If no data provided, load based on invoice type
         if (!invoiceData) {
-          await loadInvoiceData();
+          await loadInvoiceData(taskContractIds, contractsDataForItems);
         } else {
           setData(invoiceData);
           setInstallationTeamBuckets({});
@@ -383,7 +490,12 @@ export function UnifiedTaskInvoice({
     }
   }, [open, invoiceType, task.id, task.installation_task_id, task.contract_id, reloadCounter]);
 
-  const loadInvoiceData = async () => {
+  const loadInvoiceData = async (
+    taskContractIdsParam: number[] = [],
+    contractsDataForItemsParam: any[] = []
+  ) => {
+    const taskContractIds = taskContractIdsParam.length > 0 ? taskContractIdsParam : contractIds;
+    const contractsDataForItems = contractsDataForItemsParam;
     const items: InvoiceItem[] = [];
     let vendorName = '';
     let teamName = '';
@@ -591,7 +703,7 @@ export function UnifiedTaskInvoice({
         if (allInstallIds.length > 0) {
           const { data: installItems } = await supabase
             .from('installation_task_items')
-            .select('*, billboard:billboards!installation_task_items_billboard_id_fkey(ID, Billboard_Name, Size, Faces_Count, design_face_a, design_face_b, has_cutout, Image_URL, Nearest_Landmark, District, City, billboard_type)')
+            .select('*, billboard:billboards!installation_task_items_billboard_id_fkey(ID, Billboard_Name, Size, Faces_Count, design_face_a, design_face_b, has_cutout, Image_URL, Nearest_Landmark, District, City, billboard_type, Contract_Number)')
             .in('task_id', allInstallIds)
             .neq('status', 'replaced'); // استبعاد اللوحات المستبدلة
 
@@ -764,8 +876,9 @@ export function UnifiedTaskInvoice({
                 const additionalCostForItem = item.additional_cost || 0;
                 const facesCount = actualFacesCount;
 
-                // ✅ كشف التكلفة القديمة لإعادة التركيب
-                const itemReinstallCount = item.reinstall_count || 0;
+                // ✅ كشف التكلفة القديمة لإعادة التركيب (فقط لمهام إعادة التركيب)
+                const isTaskReinstall = (operationTask as any)?.task_type === 'reinstallation' || (task as any)?.task_type === 'reinstallation';
+                const itemReinstallCount = isTaskReinstall ? (item.reinstall_count || 0) : 0;
                 if (itemReinstallCount > 0 && itemCompanyCost > 0) {
                   const baseInstallPrice = sizeInfo.installationPrice || 0;
                   const halfBase = baseInstallPrice / 2;
@@ -827,6 +940,10 @@ export function UnifiedTaskInvoice({
                 city,
                 facesCount: actualFacesCount,
                 billboardId,
+                rawBillboardId: billboardId,
+                contractNumber: resolveBillboardContractNumber({ billboardId: Number(billboardId), matchedContractIds: taskContractIds, contracts: contractsDataForItems, fallbackContractId: linkedTask?.contract_id }),
+                installedImageA: item.installed_image_face_a_url || item.installed_image_url || undefined,
+                installedImageB: item.installed_image_face_b_url || undefined,
                 billboardType,
                 teamId: itemTeamId,
                 teamName: itemTeamName,
@@ -1029,21 +1146,22 @@ export function UnifiedTaskInvoice({
           // استخدام العلاقة الصريحة لتجنب خطأ PGRST201 - مع جلب has_cutout وبيانات اللوحة + بيانات التسعير
           const { data: installItems, error: installError } = await supabase
             .from('installation_task_items')
-            .select('*, billboard:billboards!installation_task_items_billboard_id_fkey(ID, Billboard_Name, Size, Faces_Count, design_face_a, design_face_b, has_cutout, Image_URL, Nearest_Landmark, District, City, billboard_type)')
+            .select('*, billboard:billboards!installation_task_items_billboard_id_fkey(ID, Billboard_Name, Size, Faces_Count, design_face_a, design_face_b, has_cutout, Image_URL, Nearest_Landmark, District, City, billboard_type, Contract_Number)')
             .in('task_id', allInstallIds)
             .neq('status', 'replaced'); // استبعاد اللوحات المستبدلة
 
 
 
-          // ✅ جلب صور التركيب الأصلية وإعادات التركيب من الأرشيف للوحات المُعاد تركيبها
-          const reinstalledItemIds = (installItems || []).filter((item: any) => (item.reinstall_count || 0) > 0).map((item: any) => item.id);
+          // ✅ جلب صور التركيب الأصلية وتاريخ مرات التركيب من الأرشيف لجميع اللوحات تلقائياً
+          const allTaskItemIds = (installItems || []).map((item: any) => item.id);
           let photoHistoryMap: Record<string, { face_a?: string; face_b?: string; installation_date?: string }> = {};
           let photoHistoryByItemMap: Record<string, Record<number, { face_a?: string; face_b?: string; installation_date?: string }>> = {};
-          if (reinstalledItemIds.length > 0) {
+          let photoHistoryCountByItemMap: Record<string, number> = {};
+          if (allTaskItemIds.length > 0) {
             const { data: photoHistory } = await supabase
               .from('installation_photo_history')
               .select('task_item_id, installed_image_face_a_url, installed_image_face_b_url, installation_date, reinstall_number')
-              .in('task_item_id', reinstalledItemIds)
+              .in('task_item_id', allTaskItemIds)
               .order('reinstall_number', { ascending: true });
 
             (photoHistory || []).forEach((ph: any) => {
@@ -1056,6 +1174,7 @@ export function UnifiedTaskInvoice({
                 face_b: ph.installed_image_face_b_url || undefined,
                 installation_date: ph.installation_date || undefined,
               };
+              photoHistoryCountByItemMap[ph.task_item_id] = Math.max(photoHistoryCountByItemMap[ph.task_item_id] || 1, rNum + 1);
 
               // أول أرشيف برقم 1 هو التركيب الأصلي
               if (rNum === 1 || !photoHistoryMap[ph.task_item_id]) {
@@ -1066,7 +1185,6 @@ export function UnifiedTaskInvoice({
                 };
               }
             });
-
           }
 
           if (installItems && installItems.length > 0) {
@@ -1284,116 +1402,131 @@ export function UnifiedTaskInvoice({
                 (item.has_cutout !== false && item.billboard?.has_cutout === true)
               );
               const facesCountForBillboard = hasBackFace ? 2 : 1;
-              const cutoutCostPerFaceForBillboard = hasCutout ? (taskCutoutCostPerBillboard / facesCountForBillboard) : 0;
-              const isPrinted = allPrintIds.length === 0 || printedBillboardIds.has(Number(billboardId));
-              const printCostPerFace = isPrinted ? (areaPerFace * taskPricePerMeter) : 0;
 
-              // ✅ صورة التركيب الحالية من المهمة (وليس الصورة القديمة على اللوحة)
+              const isBillboardPrinted = (
+                item.include_in_print !== false &&
+                (allPrintIds.length === 0 || printedBillboardIds.has(Number(billboardId)))
+              );
+              const printCostPerFace = isBillboardPrinted ? (areaPerFace * (taskPricePerMeter || pricePerMeter)) : 0;
+
+              const hasStoredCustomerCost = item.customer_installation_cost !== null && item.customer_installation_cost !== undefined;
+              let actualItemInstallCost = 0;
+              let installPricePerPieceValue: number | undefined;
+              let installPricePerMeterValue: number | undefined;
+              let installCalculationType: 'piece' | 'meter' = 'piece';
+
+              if (hasStoredCustomerCost) {
+                actualItemInstallCost = Number(item.customer_installation_cost) || 0;
+                installPricePerPieceValue = actualItemInstallCost;
+                installCalculationType = 'piece';
+              } else if (taskInstallRatio > 0 && (sizeInfo.installationPrice || 0) > 0) {
+                actualItemInstallCost = (sizeInfo.installationPrice || 0) * taskInstallRatio;
+                installPricePerPieceValue = actualItemInstallCost;
+                installCalculationType = 'piece';
+              } else if (taskCustomerInstallTotal > 0 && installItems.length > 0) {
+                actualItemInstallCost = taskCustomerInstallTotal / installItems.length;
+                installPricePerPieceValue = actualItemInstallCost;
+                installCalculationType = 'piece';
+              } else {
+                const totalItemCost = Number(item.total_cost) || 0;
+                if (totalItemCost > 0) {
+                  actualItemInstallCost = totalItemCost;
+                  installPricePerPieceValue = actualItemInstallCost;
+                  installCalculationType = 'piece';
+                }
+              }
+
+              const itemContractNumber = resolveBillboardContractNumber({
+                billboardId: Number(billboardId),
+                matchedContractIds: taskContractIds,
+                contracts: contractsDataForItems,
+                fallbackContractId: operationTask?.contract_id,
+              });
+              const itemReinstallCount = item.reinstall_count || 0;
+              const displaySizeName = hasCutout
+                ? `${billboardSize || 'غير محدد'} (مجسم)`
+                : (billboardSize || 'غير محدد');
+
               const billboardImage = item.installed_image_face_a_url || item.billboard?.Image_URL || '';
               const nearestLandmark = item.billboard?.Nearest_Landmark || '';
               const district = item.billboard?.District || '';
               const city = item.billboard?.City || '';
               const billboardType = item.billboard?.billboard_type || '';
 
-              const itemPricingType = item.pricing_type || 'piece';
-              const itemPricePerMeter = item.price_per_meter || 0;
-
-              const hasStoredCustomerCost = isIndependentReinstallation
-                ? item.customer_reinstall_cost !== null && item.customer_reinstall_cost !== undefined
-                  || item.customer_installation_cost !== null && item.customer_installation_cost !== undefined
-                : item.customer_installation_cost !== null && item.customer_installation_cost !== undefined;
-              let itemCustomerInstallationCost = item.customer_installation_cost ?? null;
-
-              const itemReinstallCount = item.reinstall_count || 0;
               if (isIndependentReinstallation) {
-                itemCustomerInstallationCost = getCurrentOperationInstallationCost(item, 'reinstallation');
-              } else if (INCLUDE_LEGACY_CUMULATIVE_REINSTALL_ROWS && itemReinstallCount > 0) {
-                itemCustomerInstallationCost = (item.customer_original_install_cost || 0) + (item.customer_reinstall_cost || item.customer_installation_cost || 0);
-              }
+                const operationFaces: ('a' | 'b')[] = requestedReinstalledFaces === 'face_b'
+                  ? ['b']
+                  : (hasBackFace ? ['a', 'b'] : ['a']);
+                const operationFacesCount = Math.max(1, operationFaces.length);
+                const singleIterationStandardCost = areaPerFace * operationFacesCount * (taskPricePerMeter || 10);
 
-              const isInstallByMeter = itemPricingType === 'meter' && itemPricePerMeter > 0;
-              const totalBillboardArea = areaPerFace * facesCountForBillboard;
+                const itemHistoryCount = photoHistoryCountByItemMap[item.id] || 0;
+                let iterationsCount = Math.max(1, itemReinstallCount || 1, itemHistoryCount);
+                // إذا كان السعر المسجل مضاعفاً لتكلفة العملية الواحدة ولم تكن reinstall_count محددة
+                if (iterationsCount === 1 && singleIterationStandardCost > 0 && actualItemInstallCost >= (singleIterationStandardCost * 1.7)) {
+                  iterationsCount = Math.max(1, Math.round(actualItemInstallCost / singleIterationStandardCost));
+                }
 
-              let actualItemInstallCost: number;
-              if (taskCustomerInstallTotal === 0) {
-                // ✅ المهمة المجمعة تكلفة تركيبها للزبون = 0 → جميع لوحاتها بدون تكلفة تركيب
-                actualItemInstallCost = 0;
-              } else if (isInstallByMeter) {
-                actualItemInstallCost = itemPricePerMeter * totalBillboardArea;
-              } else if (hasStoredCustomerCost) {
-                actualItemInstallCost = itemCustomerInstallationCost ?? 0;
-              } else {
-                // توزيع نسبي بسعر المقاس بحيث يطابق المجموع تكلفة المهمة
-                const baseInstallPrice = sizeInfo.installationPrice || 0;
-                actualItemInstallCost = taskInstallRatio > 0
-                  ? baseInstallPrice * taskInstallRatio
-                  : baseInstallPrice;
-              }
+                // احتساب تكلفة الوجه الواحد لكل دورة تركيب
+                const installCostPerFacePerIteration = actualItemInstallCost > 0
+                  ? (actualItemInstallCost / (operationFacesCount * iterationsCount))
+                  : (areaPerFace * (taskPricePerMeter || 10));
+                const cutoutCostPerFace = hasCutout ? (taskCutoutCostPerBillboard / (operationFacesCount * iterationsCount)) : 0;
 
-              const displaySizeName = hasCutout
-                ? `${billboardSize || 'غير حدد'} (مجسم)`
-                : (billboardSize || 'غير محدد');
+                for (let r = 1; r <= iterationsCount; r++) {
+                  const iterationBillboardId = billboardId + (r > 1 ? (r * 100000) : 0);
+                  const iterPhotoA = photoHistoryByItemMap[item.id]?.[r]?.face_a || item.installed_image_face_a_url || item.installed_image_url || undefined;
+                  const iterPhotoB = photoHistoryByItemMap[item.id]?.[r]?.face_b || item.installed_image_face_b_url || undefined;
 
-              const installPricePerPieceValue = !isInstallByMeter ? actualItemInstallCost : undefined;
-              const installPricePerMeterValue = isInstallByMeter ? itemPricePerMeter : undefined;
-              const installCalculationType = isInstallByMeter ? 'meter' : 'piece';
-
-              // عملية إعادة تركيب مستقلة: تعرض وتحاسب العملية الحالية فقط.
-              if (isIndependentReinstallation) {
-                const operationFaces: Array<'a' | 'b'> = actualFacesCount < 2
-                  ? (requestedReinstalledFaces === 'face_b' ? ['b'] : ['a'])
-                  : (requestedReinstalledFaces === 'face_b'
-                      ? ['b']
-                      : requestedReinstalledFaces === 'face_a'
-                        ? ['a']
-                        : ['a', 'b']);
-                const installCostPerFace = actualItemInstallCost / Math.max(operationFaces.length, 1);
-                const cutoutCostPerFace = hasCutout ? taskCutoutCostPerBillboard / Math.max(operationFaces.length, 1) : 0;
-                const operationNumber = Number(operationTask?.reinstallationNumber) || itemReinstallCount || 1;
-
-                operationFaces.forEach(face => {
-                  const isBackFace = face === 'b';
-                  const operationDesign = isBackFace ? (faceBImageRaw || faceAImage) : faceAImage;
-                  const operationPrintCost = printCostPerFace;
-                  items.push({
-                    designImage: operationDesign,
-                    face,
-                    sizeName: displaySizeName,
-                    width: sizeInfo.width || 0,
-                    height: sizeInfo.height || 0,
-                    quantity: 1,
-                    area: areaPerFace,
-                    printCost: operationPrintCost,
-                    installationCost: installCostPerFace,
-                    cutoutCost: cutoutCostPerFace,
-                    totalCost: operationPrintCost + installCostPerFace + cutoutCostPerFace,
-                    billboardName: item.billboard?.Billboard_Name || `لوحة #${billboardId}`,
-                    billboardImage,
-                    nearestLandmark,
-                    district,
-                    city,
-                    facesCount: actualFacesCount,
-                    billboardId,
-                    installationPricePerPiece: actualItemInstallCost,
-                    installationCalculationType: installCalculationType,
-                    billboardType,
-                    reinstallCount: operationNumber,
-                    isReinstallation: true,
-                    isOriginalInstallation: false,
-                    isReplacement: item.replaces_item_id ? true : false,
-                    reinstallInstalledImageA: item.installed_image_face_a_url || undefined,
-                    reinstallInstalledImageB: item.installed_image_face_b_url || undefined,
+                  operationFaces.forEach(face => {
+                    const isBackFace = face === 'b';
+                    const operationDesign = isBackFace ? (faceBImageRaw || faceAImage) : faceAImage;
+                    const operationPrintCost = printCostPerFace;
+                    items.push({
+                      designImage: operationDesign,
+                      face,
+                      sizeName: displaySizeName,
+                      width: sizeInfo.width || 0,
+                      height: sizeInfo.height || 0,
+                      quantity: 1,
+                      area: areaPerFace,
+                      printCost: operationPrintCost,
+                      installationCost: installCostPerFacePerIteration,
+                      cutoutCost: cutoutCostPerFace,
+                      totalCost: operationPrintCost + installCostPerFacePerIteration + cutoutCostPerFace,
+                      billboardName: item.billboard?.Billboard_Name || `لوحة #${billboardId}`,
+                      billboardImage,
+                      nearestLandmark,
+                      district,
+                      city,
+                      facesCount: actualFacesCount,
+                      billboardId: iterationBillboardId,
+                      rawBillboardId: billboardId,
+                      contractNumber: itemContractNumber || operationTask?.contract_id || undefined,
+                      installationPricePerPiece: actualItemInstallCost / iterationsCount,
+                      installationCalculationType: installCalculationType,
+                      billboardType,
+                      reinstallCount: r,
+                      reinstallSeq: iterationsCount > 1 ? r : undefined,
+                      isReinstallation: true,
+                      isOriginalInstallation: false,
+                      isReplacement: item.replaces_item_id ? true : false,
+                      installedImageA: iterPhotoA,
+                      installedImageB: iterPhotoB,
+                      reinstallInstalledImageA: iterPhotoA,
+                      reinstallInstalledImageB: iterPhotoB,
+                    });
                   });
-                });
-              // السجل التراكمي القديم يبقى للمهام الأصلية فقط، ولا يدخل في عملية مستقلة جديدة.
-              } else if (itemReinstallCount > 0) {
+                }
+              // السجل التراكمي القديم يبقى فقط إذا كانت المهمة محددة كإعادة تركيب
+              } else if (itemReinstallCount > 0 && isIndependentReinstallation) {
                 const origCost = Number(item.customer_original_install_cost) || (hasStoredCustomerCost ? (item.customer_installation_cost ?? 0) : actualItemInstallCost);
                 const origCostPerFace = origCost / facesCountForBillboard;
                 const origBillboardId = billboardId + 100000;
 
                 // صور التركيب الأصلي من الأرشيف رقم 1
                 const origPhotoA = photoHistoryByItemMap[item.id]?.[1]?.face_a || photoHistoryMap[item.id]?.face_a || item.billboardImage;
-                const origPhotoB = photoHistoryByItemMap[item.id]?.[1]?.face_b || photoHistoryMap[item.id]?.face_b || faceBImageRaw;
+                const origPhotoB = photoHistoryByItemMap[item.id]?.[1]?.face_b || photoHistoryMap[item.id]?.face_b || item.installed_image_face_b_url || undefined;
 
                 // 1. ========== صفوف التركيب الأصلي (تركيب 1) ==========
                 items.push({
@@ -1415,6 +1548,8 @@ export function UnifiedTaskInvoice({
                   city,
                   facesCount: actualFacesCount,
                   billboardId: origBillboardId,
+                  rawBillboardId: billboardId,
+                  contractNumber: itemContractNumber || operationTask?.contract_id || undefined,
                   installationPricePerPiece: origCost,
                   installationCalculationType: installCalculationType,
                   billboardType,
@@ -1422,6 +1557,8 @@ export function UnifiedTaskInvoice({
                   isOriginalInstallation: true,
                   isReinstallation: false,
                   isReplacement: item.replaces_item_id ? true : false,
+                  installedImageA: origPhotoA,
+                  installedImageB: origPhotoB,
                   originalInstalledImageA: origPhotoA,
                   originalInstalledImageB: origPhotoB,
                 });
@@ -1447,6 +1584,8 @@ export function UnifiedTaskInvoice({
                     city,
                     facesCount: actualFacesCount,
                     billboardId: origBillboardId,
+                    rawBillboardId: billboardId,
+                    contractNumber: itemContractNumber || operationTask?.contract_id || undefined,
                     installationPricePerPiece: origCost,
                     installationCalculationType: installCalculationType,
                     billboardType,
@@ -1454,6 +1593,8 @@ export function UnifiedTaskInvoice({
                     isOriginalInstallation: true,
                     isReinstallation: false,
                     isReplacement: item.replaces_item_id ? true : false,
+                    installedImageA: origPhotoA,
+                    installedImageB: origPhotoB,
                     originalInstalledImageA: origPhotoA,
                     originalInstalledImageB: origPhotoB,
                   });
@@ -1464,21 +1605,21 @@ export function UnifiedTaskInvoice({
                 const reinstallFacesCount = (actualFacesCount >= 2 && item.reinstalled_faces === 'both') ? 2 : (actualFacesCount >= 2 && !item.reinstalled_faces ? 2 : 1);
                 const reinstallCostPerFace = reinstallCost / reinstallFacesCount;
                 const reinstalledFaces = actualFacesCount < 2
-                  ? (item.reinstalled_faces === 'face_b' ? 'face_b' : 'face_a')
-                  : (item.reinstalled_faces || 'both');
+                  ? ['a' as const]
+                  : (item.reinstalled_faces === 'face_b' ? ['b' as const] : (item.reinstalled_faces === 'face_a' ? ['a' as const] : ['a' as const, 'b' as const]));
 
                 for (let r = 1; r <= itemReinstallCount; r++) {
-                  const reinstallBillboardId = billboardId + 200000 + (r - 1) * 10000;
+                  const reinstallBillboardId = billboardId + (r * 100000);
+                  const rPhotoA = photoHistoryByItemMap[item.id]?.[r + 1]?.face_a || item.installed_image_face_a_url;
+                  const rPhotoB = photoHistoryByItemMap[item.id]?.[r + 1]?.face_b || item.installed_image_face_b_url;
 
-                  // تحديد صورة إعادة التركيب الخاصة بالمرة r
-                  const rHist = photoHistoryByItemMap[item.id]?.[r + 1];
-                  const rPhotoA = rHist?.face_a || (r === itemReinstallCount ? (item.installed_image_face_a_url || item.billboardImage) : undefined);
-                  const rPhotoB = rHist?.face_b || (r === itemReinstallCount ? (item.installed_image_face_b_url || faceBImageRaw) : undefined);
+                  for (const face of reinstalledFaces) {
+                    const isBackFace = face === 'b';
+                    const rDesign = isBackFace ? (faceBImageRaw || faceAImage) : faceAImage;
 
-                  if (reinstalledFaces === 'both' || reinstalledFaces === 'face_a') {
                     items.push({
-                      designImage: faceAImage,
-                      face: 'a',
+                      designImage: rDesign,
+                      face,
                       sizeName: displaySizeName,
                       width: sizeInfo.width || 0,
                       height: sizeInfo.height || 0,
@@ -1495,6 +1636,8 @@ export function UnifiedTaskInvoice({
                       city,
                       facesCount: reinstallFacesCount,
                       billboardId: reinstallBillboardId,
+                      rawBillboardId: billboardId,
+                      contractNumber: itemContractNumber || operationTask?.contract_id || undefined,
                       installationPricePerPiece: reinstallCost,
                       installationCalculationType: 'piece' as const,
                       billboardType,
@@ -1502,38 +1645,8 @@ export function UnifiedTaskInvoice({
                       isReinstallation: true,
                       isOriginalInstallation: false,
                       isReplacement: false,
-                      reinstallInstalledImageA: rPhotoA,
-                      reinstallInstalledImageB: rPhotoB,
-                    });
-                  }
-
-                  if (reinstalledFaces === 'both' || reinstalledFaces === 'face_b') {
-                    items.push({
-                      designImage: faceBImageRaw || faceAImage,
-                      face: 'b',
-                      sizeName: displaySizeName,
-                      width: sizeInfo.width || 0,
-                      height: sizeInfo.height || 0,
-                      quantity: 1,
-                      area: areaPerFace,
-                      printCost: 0,
-                      installationCost: reinstallCostPerFace,
-                      cutoutCost: 0,
-                      totalCost: reinstallCostPerFace,
-                      billboardName: item.billboard?.Billboard_Name || `لوحة #${billboardId}`,
-                      billboardImage,
-                      nearestLandmark,
-                      district,
-                      city,
-                      facesCount: reinstallFacesCount,
-                      billboardId: reinstallBillboardId,
-                      installationPricePerPiece: reinstallCost,
-                      installationCalculationType: 'piece' as const,
-                      billboardType,
-                      reinstallCount: r,
-                      isReinstallation: true,
-                      isOriginalInstallation: false,
-                      isReplacement: false,
+                      installedImageA: rPhotoA,
+                      installedImageB: rPhotoB,
                       reinstallInstalledImageA: rPhotoA,
                       reinstallInstalledImageB: rPhotoB,
                     });
@@ -1562,6 +1675,8 @@ export function UnifiedTaskInvoice({
                   city,
                   facesCount: actualFacesCount,
                   billboardId,
+                  rawBillboardId: billboardId,
+                  contractNumber: itemContractNumber || operationTask?.contract_id || undefined,
                   installationPricePerPiece: installPricePerPieceValue,
                   installationPricePerMeter: installPricePerMeterValue,
                   installationCalculationType: installCalculationType,
@@ -1569,6 +1684,8 @@ export function UnifiedTaskInvoice({
                   reinstallCount: 0,
                   isReinstallation: false,
                   isReplacement: item.replaces_item_id ? true : false,
+                  installedImageA: item.installed_image_face_a_url || item.installed_image_url || undefined,
+                  installedImageB: item.installed_image_face_b_url || undefined,
                 });
 
                 if (hasBackFace) {
@@ -1592,6 +1709,8 @@ export function UnifiedTaskInvoice({
                     city,
                     facesCount: actualFacesCount,
                     billboardId,
+                    rawBillboardId: billboardId,
+                    contractNumber: itemContractNumber || operationTask?.contract_id || undefined,
                     installationPricePerPiece: installPricePerPieceValue,
                     installationPricePerMeter: installPricePerMeterValue,
                     installationCalculationType: installCalculationType,
@@ -1599,10 +1718,14 @@ export function UnifiedTaskInvoice({
                     reinstallCount: 0,
                     isReinstallation: false,
                     isReplacement: item.replaces_item_id ? true : false,
+                    installedImageA: item.installed_image_face_a_url || item.installed_image_url || undefined,
+                    installedImageB: item.installed_image_face_b_url || undefined,
                   });
                 }
               }
             });
+
+// أرقام العقود في الترويسة محسوبة بدقة من مطابقة تاريخ المهمة
 
             // ✅ ترتيب العناصر حسب sort_order من إعدادات المقاسات ثم حسب معرف اللوحة
             items.sort((a, b) => {
@@ -2149,6 +2272,37 @@ export function UnifiedTaskInvoice({
 
   .u-footer { margin-top: auto; page-break-inside: avoid !important; break-inside: avoid !important; }
   @media print {
+  table { page-break-inside: auto !important; width: 100% !important; max-width: 100% !important; border-collapse: collapse !important; margin-bottom: 8px !important; box-sizing: border-box !important; }
+  tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+  thead { display: table-header-group; }
+  tfoot { display: table-row-group !important; page-break-inside: avoid !important; break-inside: avoid !important; page-break-before: avoid !important; break-before: avoid !important; }
+  tfoot tr { display: table-row !important; }
+  img { page-break-inside: avoid !important; break-inside: avoid !important; }
+  td img { position: relative; z-index: 1; max-width: 100% !important; height: auto !important; object-fit: contain !important; }
+  td:has(img) { background-color: #fff !important; }
+
+  /* Prevent total/summary from breaking alone */
+  .total-section, .cost-section, .summary-section, .cost-summary, [data-no-break] {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    page-break-before: avoid !important;
+    break-before: avoid !important;
+  }
+  tbody tr:last-child {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+  tbody tr:nth-last-child(2) {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+  tbody tr:nth-last-child(3) {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  .u-footer { margin-top: auto; page-break-inside: avoid !important; break-inside: avoid !important; }
+  @media print {
     @page { size: A4 portrait; margin: 8mm 10mm; }
     * { box-sizing: border-box !important; }
     .print-container, .page, [data-print-page] { width: 100% !important; max-width: 100% !important; min-height: auto; padding: 0 !important; margin: 0 !important; display: block; box-sizing: border-box !important; }
@@ -2201,7 +2355,6 @@ export function UnifiedTaskInvoice({
       ? allTasks.reduce((s, t) => s + (t.customer_total || 0), 0)
       : (data?.totalCost || task.customer_total || 0);
 
-    // بناء عنوان الفاتورة بناءً على الخدمات المتوفرة فعلياً
     const services: string[] = [];
     if (task.print_task_id || (task.customer_print_cost && task.customer_print_cost > 0)) services.push('طباعة');
     if (task.cutout_task_id || (task.customer_cutout_cost && task.customer_cutout_cost > 0)) services.push('قص');
@@ -2231,16 +2384,11 @@ export function UnifiedTaskInvoice({
   };
 
   const getRecipientInfo = () => {
-    // الحصول على اسم الشركة من بيانات العميل المحملة
     const companyName = task.customer?.company;
     const customerName = task.customer?.name || task.customer_name;
 
-    // Debug log
-
-
     switch (invoiceType) {
       case 'customer':
-        // إظهار اسم الشركة أولاً، ثم اسم الزبون كـ fallback
         return { label: 'الشركة', name: companyName || customerName || 'غير محدد' };
       case 'print_vendor':
         return { label: 'المطبعة', name: data?.vendorName || 'غير محدد' };
@@ -2262,53 +2410,19 @@ export function UnifiedTaskInvoice({
   })();
   const headerTextColor = (() => {
     const raw = mergedStyles?.headerTextColor;
-    // If header bg is transparent and text is white/near-white, use primaryColor to avoid invisible text
     if (headerBgColor === 'transparent' && raw && /^#f[0-9a-f]{5}$/i.test(raw)) return primaryColor;
     return raw || primaryColor;
   })();
   const headerSwap = mergedStyles?.headerSwap === true;
   const logoSize = Math.min(140, Math.max(88, mergedStyles?.logoSize || shared.logoSize || 112));
-  const tableHeaderBg = mergedStyles?.tableHeaderBgColor || individual.tableHeaderBgColor || '#D4AF37';
-  const tableHeaderText = mergedStyles?.tableHeaderTextColor || individual.tableHeaderTextColor || '#ffffff';
-  const tableBorder = mergedStyles?.tableBorderColor || individual.tableBorderColor || '#D4AF37';
-  const tableRowEven = mergedStyles?.tableRowEvenColor || individual.tableRowEvenColor || '#f8f9fa';
-  const tableRowOdd = mergedStyles?.tableRowOddColor || individual.tableRowOddColor || '#ffffff';
-  const tableText = mergedStyles?.tableTextColor || individual.tableTextColor || '#333333';
-  const totalBg = mergedStyles?.totalBgColor || individual.totalBgColor || '#D4AF37';
-  const totalText = mergedStyles?.totalTextColor || individual.totalTextColor || '#ffffff';
-  const footerTextColor = mergedStyles?.footerTextColor || '#666';
-  const customerSectionBorderColor = mergedStyles?.customerSectionBorderColor || primaryColor;
-  const customerBg = mergedStyles?.customerSectionBgColor || '#f8f9fa';
-  const customerText = mergedStyles?.customerSectionTextColor || '#333333';
-
-  // Build UnifiedPrintStyles for the unified engine
-  const unifiedStyles: UnifiedPrintStyles & { invoiceTitle?: string } = {
-    companyName: shared.companyName,
-    companySubtitle: shared.companySubtitle,
-    companyAddress: shared.companyAddress,
-    companyPhone: shared.companyPhone,
-    companyTaxId: mergedStyles?.companyTaxId,
-    companyEmail: mergedStyles?.companyEmail,
-    companyWebsite: mergedStyles?.companyWebsite,
-    logoPath: shared.logoPath,
-    logoSize,
-    showLogo: shared.showLogo,
-    showCompanyInfo: mergedStyles?.showCompanyInfo,
-    showCompanyName: shared.showCompanyName,
-    showCompanySubtitle: shared.showCompanySubtitle,
-    showCompanyAddress: shared.showCompanyAddress,
-    showCompanyPhone: shared.showCompanyPhone,
-    showContactInfo: mergedStyles?.showContactInfo,
-    showTaxId: mergedStyles?.showTaxId,
-    showEmail: mergedStyles?.showEmail,
-    showWebsite: mergedStyles?.showWebsite,
-    headerMarginBottom: Math.min(16, Math.max(8, mergedStyles?.headerMarginBottom || 12)),
-    headerBgColor,
-    headerTextColor,
-    headerStyle: mergedStyles?.headerStyle || 'classic',
-    headerSwap,
+  const footerTextColor = mergedStyles?.footerTextColor || secondaryColor;
+  const unifiedStyles: PrintStyles = {
     primaryColor,
     secondaryColor,
+    headerBgColor,
+    headerTextColor,
+    headerSwap,
+    logoSize,
     headerFontSize: mergedStyles?.headerFontSize || 14,
     invoiceTitleArFontSize: Math.min(22, mergedStyles?.invoiceTitleArFontSize || 20),
     invoiceTitleEnFontSize: mergedStyles?.invoiceTitleEnFontSize || 12,
@@ -2323,6 +2437,18 @@ export function UnifiedTaskInvoice({
     showFooter: mergedStyles?.showFooter !== false,
     showPageNumber: mergedStyles?.showPageNumber !== false,
   };
+
+  const tableBorder = mergedStyles?.tableBorderColor || individual.tableBorderColor || '#e5e5e5';
+  const tableHeaderBg = mergedStyles?.tableHeaderBgColor || individual.tableHeaderBgColor || primaryColor;
+  const tableHeaderText = mergedStyles?.tableHeaderTextColor || individual.tableHeaderTextColor || '#ffffff';
+  const tableText = mergedStyles?.tableTextColor || individual.tableTextColor || '#1e293b';
+  const tableRowEven = mergedStyles?.tableRowEvenColor || individual.tableRowEvenColor || '#f8f9fa';
+  const tableRowOdd = mergedStyles?.tableRowOddColor || individual.tableRowOddColor || '#ffffff';
+  const totalBg = mergedStyles?.totalBgColor || individual.totalBgColor || primaryColor;
+  const totalText = mergedStyles?.totalTextColor || individual.totalTextColor || '#ffffff';
+  const customerBg = mergedStyles?.customerSectionBgColor || individual.customerSectionBgColor || '#f8f9fa';
+  const customerText = mergedStyles?.customerSectionTextColor || individual.customerSectionTextColor || primaryColor;
+  const customerSectionBorderColor = mergedStyles?.customerSectionBorderColor || individual.customerSectionBorderColor || primaryColor;
 
   const fullLogoUrl = shared.logoPath?.startsWith('http') ? shared.logoPath : `${window.location.origin}${shared.logoPath || '/logofaresgold.svg'}`;
 
@@ -2366,25 +2492,34 @@ export function UnifiedTaskInvoice({
       ? `إعادة تركيب ${reinstallIcon}`
       : `تركيب جديد ${newInstallIcon}`;
 
-  // بناء رمز المهمة مثل re1-1114 أو t1-1114
+  // بناء رمز المهمة مثل re1-1114 أو re71-مجمعة
   const buildTaskSymbol = (t: CompositeTaskWithDetails) => {
     const prefix = t.task_type === 'reinstallation' ? 're' : 't';
     const num = t.task_number || 0;
+    if (contractIds.length > 1) {
+      return `${prefix}${num}-مجمعة`;
+    }
     const contractId = t.contract_id || '';
     return `${prefix}${num}-${contractId}`;
   };
   const taskSymbols = allTasks.map(buildTaskSymbol);
   const taskSymbolDisplay = taskSymbols.join(' , ');
 
+  const taskTypeDetailedLabel = hasReinstallation && hasNewInstallation
+    ? `تركيب جديد + إعادة تركيب ${reinstallIcon}`
+    : hasReinstallation
+      ? (contractIds.length > 1 ? `إعادة تركيب (مهمة مجمعة) ${reinstallIcon}` : `إعادة تركيب ${reinstallIcon}`)
+      : (contractIds.length > 1 ? `تركيب جديد (مهمة مجمعة) ${newInstallIcon}` : `تركيب جديد ${newInstallIcon}`);
+
   const metaLinesHtml = `
     <div><span>التاريخ</span><strong>${formatDateForPrint(task.created_at, mergedStyles?.showHijriDate ?? false)}</strong></div>
-    <div><span>${contractIds.length > 1 ? 'أرقام العقود' : 'رقم العقد'}</span><strong>${contractIds.length > 1
-      ? contractIds.map(id => `#${id}`).join(', ')
+    <div><span>${contractIds.length > 1 ? 'أرقام العقود (مهمة مجمعة)' : 'رقم العقد'}</span><strong>${contractIds.length > 1
+      ? contractIds.map(id => `#${id}`).join('، ')
       : `#${contractIds[0] ?? task.contract_id ?? ''}`
     }</strong></div>
     <div><span>رمز المهمة</span><strong>${taskSymbolDisplay}</strong></div>
     ${adType ? `<div><span>نوع الإعلان</span><strong>${adType}</strong></div>` : ''}
-    <div><span>نوع المهمة</span><strong>${taskTypeLabel}</strong></div>
+    <div><span>نوع المهمة</span><strong>${taskTypeDetailedLabel}</strong></div>
   `;
 
   if (isLoading) {
@@ -2515,7 +2650,12 @@ export function UnifiedTaskInvoice({
                     <Switch
                       id="showInstalledImages"
                       checked={showInstalledImages}
-                      onCheckedChange={setShowInstalledImages}
+                      onCheckedChange={(checked) => {
+                        setShowInstalledImages(checked);
+                        if (checked) {
+                          setShowBackFaceImages(true);
+                        }
+                      }}
                     />
                     <Label htmlFor="showInstalledImages" className="text-xs sm:text-sm cursor-pointer">
                       <span className="hidden sm:inline">صور التركيب</span>
@@ -2771,7 +2911,7 @@ export function UnifiedTaskInvoice({
                           fileName,
                           driveFolder: 'فواتير',
                           phone: whatsAppManualPhone.trim(),
- message: ` ${getInvoiceTitle().split('|')[0].trim()} - ${task.customer_name || ''}`,
+                          message: ` ${getInvoiceTitle().split('|')[0].trim()} - ${task.customer_name || ''}`,
                         });
                         toast.success('تم الإرسال عبر واتساب');
                         setShowWhatsAppPhoneInput(false);
@@ -2810,7 +2950,7 @@ export function UnifiedTaskInvoice({
                         fileName,
                         driveFolder: 'فواتير',
                         phone: customerPhone,
- message: ` ${getInvoiceTitle().split('|')[0].trim()} - ${task.customer_name || ''}`,
+                        message: ` ${getInvoiceTitle().split('|')[0].trim()} - ${task.customer_name || ''}`,
                       });
                       toast.success('تم الإرسال عبر واتساب');
                     } catch (e) { console.error(e); toast.error('فشل الإرسال'); }
@@ -2821,19 +2961,45 @@ export function UnifiedTaskInvoice({
                   <span>واتساب</span>
                 </Button>
               )}
+              {/* Print and Download */}
+              <Button onClick={handlePrint} className="h-10 shrink-0 cursor-pointer gap-2 rounded-xl px-4 font-black transition-all duration-200 active:scale-95" size="sm">
+                <Printer className="h-3 w-3 sm:h-4 sm:w-4" />
+                <span>طباعة</span>
+              </Button>
+              <Button
+                variant="outline"
+                className="h-10 shrink-0 cursor-pointer gap-2 rounded-xl px-4 font-black transition-all duration-200 active:scale-95"
+                size="sm"
+                disabled={pdfExporting}
+                onClick={async () => {
+                  if (!printRef.current) return;
+                  setPdfExporting(true);
+                  try {
+                    const fullHtml = buildPrintableHtml();
+                    const contractPart = contractIds.length > 1 ? `عقود ${contractIds.join('-')}` : `عقد ${contractIds[0] ?? task.contract_id}`;
+                    const _pdfFileName = `${getInvoiceTitleAr()} - ${recipient.name} - ${contractPart} - ${format(new Date(), 'yyyy-MM-dd')}.pdf`;
+                    await saveHtmlDocAsPdf(fullHtml, _pdfFileName, {
+                      marginMm: [5, 5, 5, 5],
+                      waitMs: 1500,
+                    });
+                    toast.success('تم تحميل PDF بنجاح');
+                  } catch (e) {
+                    console.error(e);
+                    toast.error('فشل تحميل PDF');
+                  } finally {
+                    setPdfExporting(false);
+                  }
+                }}
+              >
+                {pdfExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                <span>{pdfExporting ? 'جارٍ تجهيز PDF' : 'تحميل PDF'}</span>
+              </Button>
               <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="h-10 w-10 shrink-0 cursor-pointer rounded-xl transition-all duration-200" aria-label="إغلاق نافذة الفاتورة">
                 <X className="h-4 w-4" />
               </Button>
             </div>
           </div>
         </DialogHeader>
-
-        {hasZeroPayableTotal && (
-          <div className="mx-3 mt-3 flex shrink-0 items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2.5 text-right text-xs font-bold text-amber-300 sm:mx-4">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>قيمة الفاتورة صفر. راجع تكاليف التركيب أو الطباعة قبل اعتمادها وإرسالها.</span>
-          </div>
-        )}
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="flex justify-center bg-muted/30 p-2 sm:p-6">
@@ -2888,6 +3054,23 @@ export function UnifiedTaskInvoice({
                   {invoiceType === 'customer' && customerName && companyName && customerName !== companyName && (
                     <div className="invoice-recipient-subtitle">الزبون: {customerName}</div>
                   )}
+                  {contractIds.length > 1 && (
+                    <div style={{ marginTop: '5px', display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                      {contractIds.map(cid => (
+                        <span key={cid} style={{
+                          background: 'rgba(255,255,255,0.85)',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '4px',
+                          padding: '1px 6px',
+                          fontSize: '8.5px',
+                          fontWeight: 'bold',
+                          color: '#334155'
+                        }}>
+                          عقد #{cid}{contractAdTypesMap[cid] ? `: ${contractAdTypesMap[cid]}` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 <div className="invoice-overview-stats">
                   {overviewStats.map(stat => (
@@ -2921,10 +3104,8 @@ export function UnifiedTaskInvoice({
                 </div>
               )}
 
- {/* ملخص المقاسات والمجسمات - لجميع أنواع الفواتير */}
+              {/* ملخص المقاسات والمجسمات - لجميع أنواع الفواتير */}
               {data?.items && data.items.length > 0 && (() => {
-                // حساب عدد اللوحات لكل مقاس (مع احتساب الأوجه)
-                // لأن كل وجه الآن في صف منفصل، نجمع حسب billboardId
                 const billboardsSeen = new Set<number>();
                 const sizeCounts: Record<string, { billboards: number; faces: number }> = {};
                 let totalCutouts = 0;
@@ -2932,18 +3113,14 @@ export function UnifiedTaskInvoice({
 
                 data.items.forEach(item => {
                   const baseSizeName = item.sizeName.replace(' (مجسم)', '');
-
-                  // تخطي إعادات الطباعة من ملخص المقاسات (تظهر كصفوف فقط)
                   if (baseSizeName.includes('إعادة طباعة')) return;
 
                   if (!sizeCounts[baseSizeName]) {
                     sizeCounts[baseSizeName] = { billboards: 0, faces: 0 };
                   }
 
-                  // عدد الأوجه
                   sizeCounts[baseSizeName].faces += 1;
 
-                  // عدد اللوحات (لا نحسب نفس اللوحة مرتين)
                   if (item.billboardId && !billboardsSeen.has(item.billboardId)) {
                     sizeCounts[baseSizeName].billboards += 1;
                     billboardsSeen.add(item.billboardId);
@@ -2951,7 +3128,6 @@ export function UnifiedTaskInvoice({
                     sizeCounts[baseSizeName].billboards += 1;
                   }
 
-                  // حساب المجسمات (لا نحسب نفس اللوحة مرتين)
                   if (item.sizeName.includes('(مجسم)') && item.billboardId && !cutoutBillboardsSeen.has(item.billboardId)) {
                     totalCutouts++;
                     cutoutBillboardsSeen.add(item.billboardId);
@@ -3007,11 +3183,7 @@ export function UnifiedTaskInvoice({
 
               {/* Items Table - يظهر فقط في العرض التفصيلي أو لغير فواتير الزبون */}
               {(displayMode === 'detailed' || invoiceType !== 'customer') && (() => {
-                // ✅ فاتورة الفرقة تستخدم نفس تصميم فاتورة الزبون
                 const isCustomerLike = invoiceType === 'customer' || invoiceType === 'installation_team';
-                // حساب الأعمدة المتوفرة - فاتورة الفرقة تظهر فقط عمود التركيب
-                // ✅ FIX: اعتمد على البنود الفعلية الظاهرة في الجدول وليس فقط على إجمالي المهمة
-                // هذا يضمن ظهور أعمدة التركيب/الطباعة حتى لو كانت التكلفة على الشركة أو إعادة تركيب
                 const itemsPrintSum = (data?.items || []).reduce((s, it) => s + (it.printCost || 0), 0);
                 const itemsInstallSum = (data?.items || []).reduce((s, it) => s + (it.installationCost || 0), 0);
                 const itemsCutoutSum = (data?.items || []).reduce((s, it) => s + (it.cutoutCost || 0), 0);
@@ -3024,41 +3196,12 @@ export function UnifiedTaskInvoice({
                   const printedArea = printItems.reduce((sum, item) => sum + (item.area || 0), 0) || 0;
                   return printedArea > 0 ? (isCustomerLike ? (task.customer_print_cost || 0) : (task.company_print_cost || 0)) / printedArea : 0;
                 })();
-                // ✅ سعر وحدة التركيب (لكل وجه/قطعة) عند تفعيل تفاصيل السعر
                 const installUnitPrice = (() => {
                   const installItems = (data?.items || []).filter(it => (it.installationCost || 0) > 0);
                   if (!installItems.length) return 0;
                   const total = installItems.reduce((s, it) => s + (it.installationCost || 0), 0);
                   return total / installItems.length;
                 })();
-
-                // ✅ تجميع العناصر حسب اللوحة للدمج في الجدول
-                // نحتاج لتحديد اللوحات ذات الوجهين ودمج الخلايا المشتركة
-                const billboardGroups: Map<number, InvoiceItem[]> = new Map();
-                data?.items?.forEach(item => {
-                  if (item.billboardId) {
-                    const group = billboardGroups.get(item.billboardId) || [];
-                    group.push(item);
-                    billboardGroups.set(item.billboardId, group);
-                  }
-                });
-
-                // تحديد أي صف هو أول صف في مجموعة اللوحة
-                const isFirstInGroup = (item: InvoiceItem, idx: number): boolean => {
-                  if (!item.billboardId) return true;
-                  const items = data?.items || [];
-                  for (let i = 0; i < idx; i++) {
-                    if (items[i].billboardId === item.billboardId) return false;
-                  }
-                  return true;
-                };
-
-                // الحصول على عدد الصفوف الفعلية لكل لوحة (عدد العناصر في الجدول، وليس عدد الأوجه النظري)
-                const getFaceCount = (billboardId: number | undefined, items: InvoiceItem[]): number => {
-                  if (!billboardId) return 1;
-                  // عدد الصفوف الفعلية لهذه اللوحة في البيانات
-                  return items.filter(i => i.billboardId === billboardId).length || 1;
-                };
 
                 return (
                   <table className="invoice-items-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px', marginBottom: '14px' }}>
@@ -3106,7 +3249,6 @@ export function UnifiedTaskInvoice({
                         {invoiceType === 'customer' && showCosts && !showServiceBreakdown && (
                           <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', backgroundColor: tableHeaderBg, fontSize: '10px', fontWeight: 'bold' }}>الإجمالي</th>
                         )}
-                        {/* عمود السعر لغير فواتير الزبون */}
                         {!isCustomerLike && showCosts && (
                           <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', fontSize: '10px', fontWeight: 'bold' }}>
                             الإجمالي
@@ -3116,7 +3258,6 @@ export function UnifiedTaskInvoice({
                       </tr>
                     </thead>
                     {(() => {
-                      // تجميع العناصر حسب اللوحة لضمان عدم انقسام أوجه اللوحة الواحدة بين الصفحات
                       const groupedBillboards: InvoiceItem[][] = [];
                       const billboardMap = new Map<any, InvoiceItem[]>();
 
@@ -3149,30 +3290,26 @@ export function UnifiedTaskInvoice({
                                   )}
                                   {/* صورة اللوحة - لفاتورة الزبون فقط */}
                                   {isCustomerLike && (() => {
-                                    // ✅ للتركيب الأصلي: استخدام الصور المؤرشفة
                                     const isOriginal = item.isOriginalInstallation;
-                                    const actualBillboardId = isOriginal
-                                      ? (item.billboardId ? item.billboardId - 100000 : undefined)
-                                      : (item.isReinstallation ? (item.billboardId ? item.billboardId - 200000 : undefined) : item.billboardId);
+                                    const rawBillboardId = item.rawBillboardId || (
+                                      isOriginal
+                                        ? (item.billboardId ? item.billboardId - 100000 : undefined)
+                                        : (item.billboardId && item.billboardId > 100000 ? (item.billboardId % 100000) : item.billboardId)
+                                    );
 
-                                    const installedImageA = actualBillboardId ? installedImagesMap[actualBillboardId]?.face_a : undefined;
-                                    const installedImageB = actualBillboardId ? installedImagesMap[actualBillboardId]?.face_b : undefined;
+                                    const mapImages = rawBillboardId ? installedImagesMap[rawBillboardId] : undefined;
+                                    const installedPhotoA = item.installedImageA || mapImages?.face_a || item.reinstallInstalledImageA || (isOriginal ? item.originalInstalledImageA : undefined);
+                                    const installedPhotoB = item.installedImageB || mapImages?.face_b || item.reinstallInstalledImageB || (isOriginal ? item.originalInstalledImageB : undefined);
 
-                                    // ✅ للتركيب الأصلي: صور من الأرشيف
-                                    const originalPhotoA = isOriginal ? item.originalInstalledImageA : undefined;
-                                    const originalPhotoB = isOriginal ? item.originalInstalledImageB : undefined;
+                                    const baseBillboardImage = item.billboardImage || '';
+
+                                    // صورة الوجه الأمامي: صورة التركيب إن كان الزر مفعلاً، وإلا صورة اللوحة
+                                    const photoA = showInstalledImages ? (installedPhotoA || baseBillboardImage) : baseBillboardImage;
+                                    // صورة الوجه الخلفي: صورة تركيب الوجه الخلفي (أو الأمامي/اللوحة كبديل واقعي). لا يُعرض التصميم الإعلاني أبداً كصورة لوحة!
+                                    const photoB = showInstalledImages ? (installedPhotoB || installedPhotoA || baseBillboardImage) : baseBillboardImage;
 
                                     if (showBackFaceImages) {
-                                      let displayImage: string | undefined;
-                                      if (isOriginal && showInstalledImages) {
-                                        displayImage = item.face === 'a' ? (originalPhotoA || item.billboardImage) : (originalPhotoB || item.designImage);
-                                      } else if (item.isReinstallation && showInstalledImages) {
-                                        displayImage = item.face === 'a' ? (installedImageA || item.billboardImage) : (installedImageB || item.designImage);
-                                      } else {
-                                        displayImage = item.face === 'a'
-                                          ? (showInstalledImages && installedImageA ? installedImageA : item.billboardImage)
-                                          : (showInstalledImages && installedImageB ? installedImageB : item.designImage);
-                                      }
+                                      const displayImage = item.face === 'b' ? photoB : photoA;
 
                                       return (
                                         <td style={{ padding: '2px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', width: '14%' }}>
@@ -3194,22 +3331,15 @@ export function UnifiedTaskInvoice({
                                         </td>
                                       );
                                     } else if (isFirst) {
-                                      let displayImage: string | undefined;
-                                      if (isOriginal && showInstalledImages) {
-                                        displayImage = originalPhotoA || originalPhotoB || item.billboardImage;
-                                      } else {
-                                        displayImage = showInstalledImages && installedImageA ? installedImageA : item.billboardImage;
-                                      }
-
                                       const cellH = faceCount > 1 ? '68px' : '44px';
                                       const maxCellH = faceCount > 1 ? '72px' : '48px';
 
                                       return (
                                         <td rowSpan={faceCount} data-no-break style={{ padding: '2px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', width: '14%' }}>
-                                          {displayImage ? (
+                                          {photoA ? (
                                             <img
-                                              src={displayImage}
-                                              alt={isOriginal ? "صورة التركيب الأصلي" : "صورة اللوحة"}
+                                              src={photoA}
+                                              alt={isOriginal ? "صورة التركيب الأصلي" : (showInstalledImages ? "صورة التركيب" : "صورة اللوحة")}
                                               style={{
                                                 width: '100%', height: cellH, maxHeight: maxCellH,
                                                 objectFit: 'cover', borderRadius: '4px',
@@ -3230,6 +3360,23 @@ export function UnifiedTaskInvoice({
                                   {isFirst && (
                                     <td rowSpan={faceCount} data-no-break style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontWeight: 'bold', fontSize: '10px', verticalAlign: 'middle', overflow: 'visible', whiteSpace: 'normal', wordBreak: 'break-word' }}>
                                       <div>{cleanReprintLabel(item.billboardName || '-')}</div>
+                                      {/* رقم العقد للوحة في المهام المجمعة */}
+                                      {contractIds.length > 1 && item.contractNumber && (
+                                        <div style={{ marginTop: '2px' }}>
+                                          <span style={{
+                                            background: '#f1f5f9',
+                                            color: '#334155',
+                                            padding: '1px 5px',
+                                            borderRadius: '3px',
+                                            fontSize: '7.5px',
+                                            fontWeight: 'bold',
+                                            border: '1px solid #cbd5e1',
+                                            display: 'inline-block',
+                                          }}>
+                                            عقد #{item.contractNumber}
+                                          </span>
+                                        </div>
+                                      )}
                                       {/* علامة التركيب الأصلي */}
                                       {item.isOriginalInstallation && (
                                         <div style={{ marginTop: '3px' }}>

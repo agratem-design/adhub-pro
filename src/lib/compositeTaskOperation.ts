@@ -1,7 +1,11 @@
 export type OperationTaskLike = {
   id?: string | null;
   contract_id?: number | string | null;
+  contract_ids?: number[] | null;
+  contractIds?: number[] | null;
+  _contractIds?: number[] | null;
   task_type?: string | null;
+  _taskType?: string | null;
   installation_task_id?: string | null;
   reinstallationNumber?: number | null;
   _reinstallationNumber?: number | null;
@@ -46,8 +50,24 @@ const normalizeContractKey = (value: unknown): string => {
   return String(value).trim();
 };
 
+/**
+ * فحص حاسم وشامل إذا كانت المهمة تغطي أكثر من عقد مختلف
+ */
+export const isMultiContractOperation = (task: OperationTaskLike): boolean => {
+  return getOperationContractIds(task).length > 1;
+};
+
+const getOperationContractIds = (task: OperationTaskLike): number[] => {
+  const allIds = [
+    ...(Array.isArray((task as any).contractIds) ? (task as any).contractIds : []),
+    ...(Array.isArray((task as any).contract_ids) ? (task as any).contract_ids : []),
+    ...(Array.isArray((task as any)._contractIds) ? (task as any)._contractIds : []),
+  ];
+  return [...new Set(allIds.map(Number).filter(Boolean))].sort((a, b) => a - b);
+};
+
 export const isReinstallationOperation = (task: OperationTaskLike): boolean =>
-  task.task_type === 'reinstallation';
+  task.task_type === 'reinstallation' || task._taskType === 'reinstallation';
 
 export const getTaskReinstallationNumber = (task: OperationTaskLike): number | null => {
   const raw = task.reinstallationNumber ?? task._reinstallationNumber;
@@ -55,8 +75,19 @@ export const getTaskReinstallationNumber = (task: OperationTaskLike): number | n
   return Number.isFinite(value) && value > 0 ? value : null;
 };
 
-export const getTaskContractGroupKey = (task: OperationTaskLike): string =>
-  `contract-${normalizeContractKey(task.contract_id)}`;
+/**
+ * مفتاح تجميع المهام في البطاقات:
+ * المهام المجمعة لعدة عقود تكون بطاقة مستقلة بذاتها ولاتنضوي تحت بطاقة عقد واحد محدد.
+ */
+export const getTaskContractGroupKey = (task: OperationTaskLike): string => {
+  if (isMultiContractOperation(task)) {
+    const contractIdentity = getOperationContractIds(task).join('-');
+    const sequence = getTaskReinstallationNumber(task);
+    if (sequence !== null) return `multi-contract-${contractIdentity}-reinstallation-${sequence}`;
+    return `multi-contract-${task.id || task.installation_task_id || 'isolated'}`;
+  }
+  return `contract-${normalizeContractKey(task.contract_id)}`;
+};
 
 /**
  * Financial and operational grouping boundary.
@@ -64,6 +95,15 @@ export const getTaskContractGroupKey = (task: OperationTaskLike): string =>
  * invoices must not combine unrelated operations that happened in the same week.
  */
 export const getCompositeTaskOperationKey = (task: OperationTaskLike): string => {
+  if (isMultiContractOperation(task)) {
+    const contractIdentity = getOperationContractIds(task).join('-');
+    const stableTaskId = task.installation_task_id || task.id || 'isolated';
+    const sequence = getTaskReinstallationNumber(task);
+    return sequence !== null
+      ? `multi-contract:${contractIdentity}:reinstallation:${sequence}`
+      : `multi-contract:reinstallation:${stableTaskId}`;
+  }
+
   const contractKey = normalizeContractKey(task.contract_id);
   if (!isReinstallationOperation(task)) return `${contractKey}:installation:initial`;
 
@@ -75,8 +115,14 @@ export const getCompositeTaskOperationKey = (task: OperationTaskLike): string =>
 };
 
 export const getOperationLabel = (task: OperationTaskLike): string => {
-  if (!isReinstallationOperation(task)) return 'التركيب الأول';
+  const isMulti = isMultiContractOperation(task);
+  if (!isReinstallationOperation(task)) {
+    return isMulti ? 'مهمة تركيب مجمعة لعدة عقود' : 'التركيب الأول';
+  }
   const sequence = getTaskReinstallationNumber(task);
+  if (isMulti) {
+    return sequence !== null ? `إعادة تركيب مجمعة (${sequence})` : 'إعادة تركيب مجمعة لعدة عقود';
+  }
   return sequence !== null ? `إعادة تركيب ${sequence}` : 'إعادة تركيب مستقلة';
 };
 

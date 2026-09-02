@@ -35,6 +35,7 @@ import {
 } from '@/lib/compositeTaskOperation';
 import {
   filterTaskContractIdsByCustomer,
+  matchContractIdsForTaskBillboards,
   normalizeContractId,
   resolveTaskContractAdTypes,
 } from '@/lib/compositeTaskContractIdentity';
@@ -693,9 +694,23 @@ const TaskCardRow = ({
 
           {/* Footer: Contract & Date */}
           <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap pt-1 border-t border-border/15">
-            <span className="inline-flex items-center gap-1 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-extrabold px-2 py-0.5 rounded-md font-mono text-[11px]">
-              <FileText className="h-3 w-3 text-indigo-400" />
-              <span>العقد: #{task.contractIds && task.contractIds.length > 0 ? task.contractIds.join(', #') : task.contract_id}</span>
+            <span className={cn(
+              "inline-flex items-center gap-1 font-extrabold px-2 py-0.5 rounded-md font-mono text-[11px]",
+              (task.contractIds && task.contractIds.length > 1)
+                ? "bg-amber-500/10 text-amber-400 border border-amber-500/30"
+                : "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20"
+            )}>
+              {(task.contractIds && task.contractIds.length > 1) ? (
+                <>
+                  <Layers className="h-3 w-3 text-amber-400" />
+                  <span>عقود مجمعة: #{task.contractIds.join('، #')}</span>
+                </>
+              ) : (
+                <>
+                  <FileText className="h-3 w-3 text-indigo-400" />
+                  <span>العقد: #{task.contractIds && task.contractIds.length === 1 ? task.contractIds[0] : (task.contract_id || 'غير محدد')}</span>
+                </>
+              )}
             </span>
             <span className="inline-flex items-center gap-1 text-muted-foreground/75 text-[11px] font-semibold">
               <CalendarDays className="h-3 w-3 text-muted-foreground/50" />
@@ -1300,10 +1315,22 @@ const ContractGroupCard = ({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="space-y-2 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/15 px-3 font-mono text-xs font-black text-primary">
-                  <FolderOpen className="h-3.5 w-3.5" />
-                  {group.label}
-                </span>
+                {group.isMultiContract ? (
+                  <>
+                    <span className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3 font-mono text-xs font-black text-amber-400 shadow-sm">
+                      <Layers className="h-3.5 w-3.5 text-amber-400" />
+                      {group.label}
+                    </span>
+                    <span className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[10px] font-black text-amber-300">
+                      مهمة مجمعة مستقلة
+                    </span>
+                  </>
+                ) : (
+                  <span className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/15 px-3 font-mono text-xs font-black text-primary">
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    {group.label}
+                  </span>
+                )}
                 <span className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2 py-1 text-[10px] font-black text-emerald-400">
                   {group.operations.length} {group.operations.length === 1 ? 'عملية' : 'عمليات'}
                 </span>
@@ -1501,6 +1528,56 @@ const ContractGroupCard = ({
             </div>
           </div>
 
+          {/* Installation Progress Bar & Status (شريط إنجاز التركيب والعدد من أصل كم) */}
+          {group.groupTotalBillboards > 0 && (
+            <div className="p-3.5 rounded-2xl border border-border/30 bg-muted/20 backdrop-blur-sm shadow-xs space-y-2" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2">
+                  {group.groupProgressPercentage === 100 ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                  ) : (
+                    <Clock className="h-4 w-4 text-amber-400 shrink-0" />
+                  )}
+                  <span className="text-xs font-black text-foreground">
+                    إنجاز التركيب:
+                  </span>
+                  <span className="text-xs font-bold text-muted-foreground font-mono">
+                    {group.groupCompletedBillboards} من أصل {group.groupTotalBillboards} لوحة
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className={cn(
+                    "text-[10px] font-black px-2.5 py-0.5 rounded-lg border",
+                    group.groupProgressPercentage === 100
+                      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                      : group.groupProgressPercentage > 0
+                      ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                      : "bg-muted/40 text-muted-foreground border-border/40"
+                  )}>
+                    {group.groupProgressPercentage === 100 ? "مكتمل بالكامل" : group.groupProgressPercentage > 0 ? "قيد التنفيذ" : "لم يبدأ بعد"}
+                  </span>
+                  <span className="text-xs font-black font-mono text-emerald-400">
+                    {group.groupProgressPercentage}%
+                  </span>
+                </div>
+              </div>
+
+              {/* High-contrast gradient progress bar */}
+              <div className="h-2.5 w-full bg-muted/50 rounded-full overflow-hidden p-0.5 border border-border/20">
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-all duration-500 shadow-xs",
+                    group.groupProgressPercentage === 100
+                      ? "bg-gradient-to-l from-emerald-400 to-emerald-600 shadow-emerald-500/30"
+                      : "bg-gradient-to-l from-amber-400 via-yellow-400 to-amber-600 shadow-amber-500/30"
+                  )}
+                  style={{ width: `${group.groupProgressPercentage}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {/* Middle Row: HERO Financial & Payment Cards Bar */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 py-1" onClick={e => e.stopPropagation()}>
             {/* 1. Contract Value */}
@@ -1675,6 +1752,27 @@ const ContractGroupCard = ({
                             {operationCustomerTotal.toLocaleString('ar-LY')} د.ل
                           </span>
                         </div>
+
+                        {/* Operation Progress Badge */}
+                        {operation.operationTotalBillboards > 0 && (
+                          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-xl border border-border/30 bg-muted/30 shadow-xs">
+                            <span className="text-[11px] font-bold text-muted-foreground">
+                              الإنجاز:
+                            </span>
+                            <span className="text-[11px] font-black font-mono text-foreground">
+                              {operation.operationCompletedBillboards} / {operation.operationTotalBillboards} لوحة
+                            </span>
+                            <div className="w-16 h-2 bg-muted/60 rounded-full overflow-hidden border border-border/30">
+                              <div
+                                className="h-full bg-gradient-to-l from-emerald-400 to-amber-500 rounded-full transition-all duration-300"
+                                style={{ width: `${operation.operationProgressPercentage}%` }}
+                              />
+                            </div>
+                            <span className="text-[11px] font-black font-mono text-emerald-400">
+                              {operation.operationProgressPercentage}%
+                            </span>
+                          </div>
+                        )}
 
                         <span className="inline-flex items-center gap-1 text-[11px] font-bold text-muted-foreground">
                           <Users className="h-3.5 w-3.5" />
@@ -2089,15 +2187,20 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       if (installationTaskIds.length > 0) {
         const { data: installTasksData } = await supabase
           .from('installation_tasks')
-          .select('id, task_type, reinstallation_number, contract_id')
+          .select('id, task_type, reinstallation_number, contract_id, contract_ids')
           .in('id', installationTaskIds);
 
-        const reinstallInfoMap = new Map<string, { number: number | null; taskType: string; contractId: number | null }>();
+        const reinstallInfoMap = new Map<string, { number: number | null; taskType: string; contractId: number | null; contractIds: number[] }>();
         (installTasksData || []).forEach((it: any) => {
+          const cIds = (it.contract_ids || []).map(normalizeContractId).filter((id): id is number => id !== null);
+          const directC = normalizeContractId(it.contract_id);
+          if (directC && !cIds.includes(directC)) cIds.push(directC);
+
           reinstallInfoMap.set(it.id, { 
             number: it.reinstallation_number, 
             taskType: normalizeCompositeTaskType(it.task_type),
-            contractId: normalizeContractId(it.contract_id)
+            contractId: directC,
+            contractIds: cIds,
           });
         });
 
@@ -2106,7 +2209,15 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           const directContract = normalizeContractId(t.contract_id) || reinstallInfo?.contractId;
           const normalizedTaskType = normalizeCompositeTaskType(reinstallInfo?.taskType || t.task_type);
           
-          t._contractIds = directContract ? [directContract] : [];
+          const rawIds = (t.contract_ids && Array.isArray(t.contract_ids) && t.contract_ids.length > 0)
+            ? t.contract_ids
+            : (reinstallInfo?.contractIds && reinstallInfo.contractIds.length > 0)
+              ? reinstallInfo.contractIds
+              : (directContract ? [directContract] : []);
+
+          t._contractIds = [...new Set(rawIds.map(normalizeContractId).filter((id): id is number => id !== null))];
+          t.contractIds = t._contractIds;
+          t.contract_ids = t._contractIds;
           t._reinstallationNumber = normalizedTaskType === 'reinstallation'
             ? (reinstallInfo?.number ?? null)
             : null;
@@ -2119,8 +2230,12 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
 
       tasks.forEach((t: any) => {
         if (!t._contractIds || !Array.isArray(t._contractIds) || t._contractIds.length === 0) {
-          const c = normalizeContractId(t.contract_id);
-          t._contractIds = c ? [c] : [];
+          const rawIds = (t.contract_ids && Array.isArray(t.contract_ids) && t.contract_ids.length > 0)
+            ? t.contract_ids
+            : (t.contract_id ? [t.contract_id] : []);
+          t._contractIds = [...new Set(rawIds.map(normalizeContractId).filter((id): id is number => id !== null))];
+          t.contractIds = t._contractIds;
+          t.contract_ids = t._contractIds;
         }
       });
 
@@ -2172,31 +2287,53 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
 
       const promises: Promise<any>[] = [];
 
-      // Fetch installation tasks to ensure contract links
-      if (installIds.length > 0) {
+      // Fetch installation tasks to ensure contract links and items resolution
+      const allContractIdsArray = Array.from(allContractIdsSet);
+      if (installIds.length > 0 || allContractIdsArray.length > 0) {
         promises.push(
-          supabase.from('installation_tasks')
-            .select('id, task_type, reinstallation_number, contract_id, team:installation_teams!installation_tasks_team_id_fkey(team_name)')
-            .in('id', installIds)
-            .then(({ data }) => {
-              installTasks = data || [];
+          (async () => {
+            try {
+              let installQuery = supabase
+                .from('installation_tasks')
+                .select('id, task_type, reinstallation_number, contract_id, status, team:installation_teams!installation_tasks_team_id_fkey(team_name)');
+              if (installIds.length > 0 && allContractIdsArray.length > 0) {
+                installQuery = installQuery.or(`id.in.(${installIds.join(',')}),contract_id.in.(${allContractIdsArray.join(',')})`);
+              } else if (installIds.length > 0) {
+                installQuery = installQuery.in('id', installIds);
+              } else {
+                installQuery = installQuery.in('contract_id', allContractIdsArray);
+              }
+
+              const { data: iTasks } = await installQuery;
+              installTasks = iTasks || [];
               (installTasks || []).forEach(it => {
                 const c = normalizeContractId(it.contract_id);
                 if (c) allContractIdsSet.add(c);
               });
-            })
-        );
-        promises.push(
-          supabase.from('installation_task_items')
-          .select('task_id, design_face_a, design_face_b, selected_design_id, installed_image_face_a_url, installed_image_face_b_url')
-            .in('task_id', installIds)
-            .then(({ data }) => { installDesigns = data || []; })
-        );
-        promises.push(
-          supabase.from('task_designs')
-            .select('id, task_id, design_face_a_url, design_face_b_url')
-            .in('task_id', installIds)
-            .then(({ data }) => { taskDesignsData = data || []; })
+
+              const allFetchedInstallIds = Array.from(new Set([
+                ...installIds,
+                ...installTasks.map(it => it.id)
+              ]));
+
+              if (allFetchedInstallIds.length > 0) {
+                const [{ data: itemsData }, { data: designsData }] = await Promise.all([
+                  supabase
+                    .from('installation_task_items')
+                    .select('id, task_id, billboard_id, status, installation_date, installed_image_face_a_url, installed_image_face_b_url, design_face_a, design_face_b, selected_design_id')
+                    .in('task_id', allFetchedInstallIds),
+                  supabase
+                    .from('task_designs')
+                    .select('id, task_id, design_face_a_url, design_face_b_url')
+                    .in('task_id', allFetchedInstallIds)
+                ]);
+                installDesigns = itemsData || [];
+                taskDesignsData = designsData || [];
+              }
+            } catch (err) {
+              console.error('Error fetching installation data:', err);
+            }
+          })()
         );
       }
 
@@ -2217,14 +2354,41 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
 
       await Promise.all(promises);
 
+      // Fetch all customer contracts with billboard_ids to support multi-contract tasks
+      const customerIds = [...new Set(compositeTasks.map(t => t.customer_id).filter(Boolean))] as string[];
+      const customerNames = [...new Set(compositeTasks.map(t => t.customer_name).filter(Boolean))] as string[];
+
+      let customerContracts: any[] = [];
+      if (customerIds.length > 0 || customerNames.length > 0) {
+        let custQuery = supabase
+          .from('Contract')
+          .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price');
+        if (customerIds.length > 0) {
+          custQuery = custQuery.in('customer_id', customerIds);
+        } else {
+          custQuery = custQuery.in('Customer Name', customerNames);
+        }
+        const { data: custData } = await custQuery;
+        customerContracts = custData || [];
+      }
+
       // Now query Contract table for ALL gathered contract numbers
       const finalUniqueContractIds = Array.from(allContractIdsSet);
       if (finalUniqueContractIds.length > 0) {
         const { data: contractsData } = await supabase
           .from('Contract')
-          .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, include_installation_in_price, include_print_in_billboard_price')
+          .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price')
           .in('Contract_Number', finalUniqueContractIds);
-        contracts = contractsData || [];
+        const combinedContracts = [...(contractsData || []), ...customerContracts];
+        const seenC = new Set<number>();
+        contracts = combinedContracts.filter((c: any) => {
+          const num = Number(c.Contract_Number);
+          if (!num || seenC.has(num)) return false;
+          seenC.add(num);
+          return true;
+        });
+      } else {
+        contracts = customerContracts;
       }
 
       const contractCandidates: ContractAdTypeCandidate[] = contracts.map((contract: any) => ({
@@ -2298,15 +2462,55 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         const seen = new Set<string>();
         const urls: string[] = [];
 
-        // Resolve definitive contract ID for this task strictly without contaminating from unrelated contracts
-        const directC = normalizeContractId(task.contract_id) || (task.installation_task_id ? contractByInstallTaskId.get(task.installation_task_id) : null);
-        const candidateContractIds: number[] = directC ? [directC] : [];
-        if (candidateContractIds.length === 0 && Array.isArray((task as any)._contractIds)) {
+        // Resolve definitive contract IDs for this task (extracting from task, installation_task, and task item billboards)
+        const taskOwnedContractIds: number[] = [];
+        if (Array.isArray((task as any)._contractIds) && (task as any)._contractIds.length > 0) {
           (task as any)._contractIds.forEach((cid: unknown) => {
             const c = normalizeContractId(cid);
-            if (c && !candidateContractIds.includes(c)) candidateContractIds.push(c);
+            if (c && !taskOwnedContractIds.includes(c)) taskOwnedContractIds.push(c);
           });
         }
+        if (Array.isArray((task as any).contract_ids) && (task as any).contract_ids.length > 0) {
+          (task as any).contract_ids.forEach((cid: unknown) => {
+            const c = normalizeContractId(cid);
+            if (c && !taskOwnedContractIds.includes(c)) taskOwnedContractIds.push(c);
+          });
+        }
+        // مطابقة اللوحات الفعلية للمهمة مع عقود العميل لكشف المهام المجمعة لعدة عقود
+        if (
+          task.installation_task_id
+          && taskOwnedContractIds.length <= 1
+          && normalizeCompositeTaskType(task.task_type) === 'reinstallation'
+        ) {
+          const taskBbIds = installDesigns
+            .filter((item: any) => item.task_id === task.installation_task_id)
+            .map((item: any) => Number(item.billboard_id))
+            .filter(Boolean);
+
+          if (taskBbIds.length > 0) {
+            const matchedIds = matchContractIdsForTaskBillboards({
+              taskBillboardIds: taskBbIds,
+              contracts,
+              taskCustomerId: task.customer_id,
+              taskCustomerName: task.customer_name,
+              fallbackContractId: task.contract_id,
+              taskDate: task.created_at,
+            });
+            matchedIds.forEach(cid => {
+              if (!taskOwnedContractIds.includes(cid)) {
+                taskOwnedContractIds.push(cid);
+              }
+            });
+          }
+        }
+
+        if (taskOwnedContractIds.length === 0) {
+          const directC = normalizeContractId(task.contract_id) || (task.installation_task_id ? contractByInstallTaskId.get(task.installation_task_id) : null);
+          if (directC) taskOwnedContractIds.push(directC);
+        }
+
+        const candidateContractIds: number[] = taskOwnedContractIds;
+        const directC = candidateContractIds.length === 1 ? candidateContractIds[0] : (normalizeContractId(task.contract_id) || null);
 
         // Task designs are the authoritative visuals for installation work.
         if (task.installation_task_id) {
@@ -2387,6 +2591,16 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           installationItemCount: task.installation_task_id
             ? installDesigns.filter((item: any) => item.task_id === task.installation_task_id).length
             : 0,
+          completedItemCount: task.installation_task_id
+            ? installDesigns.filter((item: any) => item.task_id === task.installation_task_id && item.status === 'completed').length
+            : 0,
+          installationProgressPercentage: (() => {
+            if (!task.installation_task_id) return 0;
+            const items = installDesigns.filter((item: any) => item.task_id === task.installation_task_id);
+            const total = items.length;
+            const completed = items.filter((item: any) => item.status === 'completed').length;
+            return total > 0 ? Math.round((completed / total) * 100) : 0;
+          })(),
           assignedDesignCount: task.installation_task_id
             ? installDesigns.filter((item: any) => item.task_id === task.installation_task_id && (
                 item.selected_design_id || item.design_face_a || item.design_face_b
@@ -2461,6 +2675,9 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       customer_total: customerTotal,
       company_total: companyTotal,
       net_profit: netProfit,
+      installationItemCount: extra.installationItemCount || 0,
+      completedItemCount: extra.completedItemCount || 0,
+      installationProgressPercentage: extra.installationProgressPercentage || 0,
       designUrls: extra.designUrls,
       installationImages: extra.installationImages || [],
       contractInclusion: extra.contractInclusion || { includeInstall: false, includePrint: false },
@@ -2477,6 +2694,8 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       assignedDesignCount: extra.assignedDesignCount || 0,
       accent,
       contractIds,
+      contract_ids: contractIds,
+      _contractIds: contractIds,
       _payments: payments,
       _totalPaid: totalPaid,
       _paymentPercentage: paymentPercentage,
@@ -2581,11 +2800,13 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       
       // Deduplicate contracts
       const allGroupContractIds = [...new Set(
-        orderedTasks.flatMap((t: any) => t.contractIds || [t.contract_id]).map(normalizeContractId).filter((id): id is number => id !== null)
+        orderedTasks.flatMap((t: any) => t.contractIds || t.contract_ids || t._contractIds || (t.contract_id ? [t.contract_id] : [])).map(normalizeContractId).filter((id): id is number => id !== null)
       )];
 
-      const label = allGroupContractIds.length > 1
-        ? `عقود #${allGroupContractIds.join(', #')}`
+      const isMultiContract = allGroupContractIds.length > 1;
+
+      const label = isMultiContract
+        ? `مهمة مجمعة لعدة عقود (عقود #${allGroupContractIds.join('، #')})`
         : `عقد #${first.contract_id}`;
       const customerName = first.customer_name || 'غير محدد';
       const companyName = orderedTasks
@@ -2617,11 +2838,37 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       const operations = [...operationMap.entries()]
         .map(([operationKey, operationTasks]) => {
           const orderedOperationTasks = sortTasksNewestFirst(operationTasks);
+          const opInstallTaskIds = new Set(orderedOperationTasks.map((t: any) => t.installation_task_id).filter(Boolean));
+          const opTasksWithItems = orderedOperationTasks.filter((t: any) => t.installationItemCount > 0);
+          
+          let operationTotalBillboards = 0;
+          let operationCompletedBillboards = 0;
+          
+          if (opTasksWithItems.length > 0) {
+            // Sum only tasks that have distinct installation task IDs
+            const seenTaskIds = new Set<string>();
+            opTasksWithItems.forEach((t: any) => {
+              const tid = t.installation_task_id || t.id;
+              if (!seenTaskIds.has(tid)) {
+                seenTaskIds.add(tid);
+                operationTotalBillboards += (t.installationItemCount || 0);
+                operationCompletedBillboards += (t.completedItemCount || 0);
+              }
+            });
+          } else {
+            operationTotalBillboards = orderedOperationTasks.reduce((sum: number, t: any) => sum + (t.installationItemCount || 0), 0);
+            operationCompletedBillboards = orderedOperationTasks.reduce((sum: number, t: any) => sum + (t.completedItemCount || 0), 0);
+          }
+          
+          const operationProgressPercentage = operationTotalBillboards > 0 ? Math.round((operationCompletedBillboards / operationTotalBillboards) * 100) : 0;
           return {
             key: operationKey,
             label: getOperationLabel(orderedOperationTasks[0]),
             createdAt: orderedOperationTasks[0]?.created_at || null,
             tasks: orderedOperationTasks,
+            operationTotalBillboards,
+            operationCompletedBillboards,
+            operationProgressPercentage,
           };
         })
         .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
@@ -2629,6 +2876,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       groups.push({
         key,
         label,
+        isMultiContract,
         contractId: first.contract_id,
         contractIds: allGroupContractIds.length > 0 ? allGroupContractIds : [first.contract_id],
         customerName,
@@ -2659,6 +2907,11 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       const groupPaid = g.tasks.reduce((s: number, t: any) => s + (t._totalPaid || 0), 0);
       const groupRemaining = Math.max(0, groupTotal - groupPaid);
       const groupPaymentPercentage = groupTotal > 0 ? Math.min(100, Math.round((groupPaid / groupTotal) * 100)) : 0;
+      // Deduplicate installation tasks in the active/first operation or across unique install tasks
+      const activeOp = g.operations[0];
+      const groupTotalBillboards = activeOp ? activeOp.operationTotalBillboards : g.tasks.reduce((s: number, t: any) => s + (t.installationItemCount || 0), 0);
+      const groupCompletedBillboards = activeOp ? activeOp.operationCompletedBillboards : g.tasks.reduce((s: number, t: any) => s + (t.completedItemCount || 0), 0);
+      const groupProgressPercentage = groupTotalBillboards > 0 ? Math.round((groupCompletedBillboards / groupTotalBillboards) * 100) : 0;
       return {
         ...g,
         groupTotal,
@@ -2667,6 +2920,9 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         groupPaid,
         groupRemaining,
         groupPaymentPercentage,
+        groupTotalBillboards,
+        groupCompletedBillboards,
+        groupProgressPercentage,
       };
     });
   }, [grouped, page]);

@@ -509,7 +509,10 @@ export function BillboardTaskCard({
     try {
       const { error } = await supabase
         .from('installation_task_items')
-        .update({ faces_to_install: faces } as any)
+        .update({
+          faces_to_install: faces,
+          reinstalled_faces: faces === 1 ? 'face_a' : 'both',
+        } as any)
         .eq('id', item.id);
       if (error) throw error;
       toast.success(
@@ -1381,10 +1384,12 @@ export function BillboardTaskCard({
                 <Layers className="h-3 w-3 text-primary" />
                 <span>
                   الوجوه: {
-                    item.reinstalled_faces === 'both' ? 'وجهين (أمامي وخلفي)' :
+                    (facesToInstall ?? item.faces_to_install) === 1 ? 'وجه واحد (أمامي)' :
+                    (facesToInstall ?? item.faces_to_install) === 2 ? 'وجهين (أمامي وخلفي)' :
                     item.reinstalled_faces === 'face_a' ? 'وجه أمامي (1)' :
                     item.reinstalled_faces === 'face_b' ? 'وجه خلفي (1)' :
-                    `${item.faces_to_install || availableFacesCount || 1} وجه`
+                    item.reinstalled_faces === 'both' ? 'وجهين (أمامي وخلفي)' :
+                    `${availableFacesCount || 1} وجه`
                   }
                 </span>
               </Badge>
@@ -1549,6 +1554,49 @@ export function BillboardTaskCard({
 
             {/* The applied design remains visible without expanding the card. */}
             {renderDesignSelector()}
+
+            {/* Faces to install selector for completed billboards */}
+            {availableFacesCount > 1 && (
+              <div className="space-y-1.5 pt-1" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-bold text-foreground">تحديد الوجه المطلوب للتركيب:</Label>
+                  {onApplyFacesToAll && (
+                    <button
+                      type="button"
+                      onClick={() => onApplyFacesToAll(facesToInstall)}
+                      className="text-[10px] text-primary hover:text-primary/80 font-bold underline transition-colors cursor-pointer"
+                    >
+                      تطبيق على الكل
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  {Array.from({ length: availableFacesCount }).map((_, idx) => {
+                    const faceNum = idx + 1;
+                    const label = availableFacesCount === 2
+                      ? (faceNum === 1 ? 'الوجه الأمامي فقط (1)' : 'الوجهين بالكامل (2)')
+                      : availableFacesCount === 1
+                      ? 'وجه واحد (1)'
+                      : `${faceNum} ${faceNum === 1 ? 'وجه' : faceNum === 2 ? 'وجهين' : 'أوجه'}`;
+
+                    return (
+                      <button
+                        key={faceNum}
+                        type="button"
+                        onClick={() => handleFacesChange(faceNum)}
+                        className={`flex-1 min-w-[80px] py-1.5 px-2 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center ${
+                          facesToInstall === faceNum
+                            ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                            : 'bg-muted/40 text-muted-foreground border-border/50 hover:bg-muted/60'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Reinstall history button */}
             {(item.replacement_status === 'reinstalled' || item.replacement_status === 'replaced') && (

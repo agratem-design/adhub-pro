@@ -402,7 +402,7 @@ export function CompositeTaskInvoicePrint({ task }: CompositeTaskInvoicePrintPro
               
               // ✅ أولوية: task_designs > العقد > اللوحة
               const tdDesign = taskDesignsMap[b.ID];
-              const designA = tdDesign?.face_a || contractDesign.designFaceA || b.design_face_a || contractDesign.billboardImage || b.Image_URL;
+              const designA = tdDesign?.face_a || contractDesign.designFaceA || b.design_face_a;
               const designB = tdDesign?.face_b || contractDesign.designFaceB || b.design_face_b;
               
               details.installationBillboards[b.ID] = {
@@ -869,10 +869,11 @@ function generateSummarySection(task: CompositeTaskWithDetails, details: any, in
     const printCost = group.totalArea * customerPricePerMeter;
     // ✅ احتساب تكلفة القص لكل عنصر باستخدام السعر الفردي عند توفره
     const cutoutCost = calculateCutoutCostForItems(group.items, cutoutPricePerUnit, details);
+    const isTaskReinstall = (task as any)?.task_type === 'reinstallation';
     const installCost = isInstallationOnly ? group.items.reduce((sum: number, item: any) => {
-      const isReinstalled = (item.reinstall_count || 0) > 0;
+      const isReinstalled = isTaskReinstall && (item.reinstall_count || 0) > 0;
       const itemCost = isReinstalled
-        ? (Number(item.customer_original_install_cost) || 0) + (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
+        ? (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
         : (item.customer_installation_cost || installationCostPerItem);
       return sum + itemCost;
     }, 0) : 0;
@@ -1229,10 +1230,11 @@ function generateInvoiceHTML(task: CompositeTaskWithDetails, details: any, showD
       
       rows = groupedItems.map((group: any, idx: number) => {
         // حساب إجمالي تكلفة التركيب للمجموعة - التكلفة الفعلية لكل عنصر
+        const isTaskReinstall = (task as any)?.task_type === 'reinstallation';
         const totalInstallCost = group.items.reduce((sum: number, item: any) => {
-          const isReinstalled = (item.reinstall_count || 0) > 0;
+          const isReinstalled = isTaskReinstall && (item.reinstall_count || 0) > 0;
           const itemCost = isReinstalled
-            ? (Number(item.customer_original_install_cost) || 0) + (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
+            ? (Number(item.customer_reinstall_cost) || Number(item.customer_installation_cost) || 0)
             : (item.customer_installation_cost || installationCostPerItem);
           return sum + itemCost;
         }, 0);

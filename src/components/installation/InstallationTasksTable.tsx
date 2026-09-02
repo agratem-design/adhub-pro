@@ -469,14 +469,25 @@ const TaskCardRowInner = ({
 
           {/* Metadata Grid */}
           <div className="flex flex-wrap items-center gap-3 text-xs">
-            <span className="inline-flex items-center gap-1 bg-amber-500/10 text-amber-500 border border-amber-500/20 font-extrabold px-2.5 py-1 rounded-xl font-mono">
-              العقد: {task.isMerged ? (
-                <span className="flex items-center gap-1 text-amber-400">
-                  {task.effectiveContractIds.slice(0, 3).map((cId: number) => `#${cId}`).join(', ')}
-                  {task.effectiveContractIds.length > 3 && ` +${task.effectiveContractIds.length - 3}`}
-                </span>
+            <span className={cn(
+              "inline-flex items-center gap-1.5 font-extrabold px-2.5 py-1 rounded-xl font-mono",
+              task.isMerged
+                ? "bg-amber-500/15 text-amber-400 border border-amber-500/30 shadow-sm"
+                : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+            )}>
+              {task.isMerged ? (
+                <>
+                  <Layers className="h-3.5 w-3.5 text-amber-400" />
+                  <span>عقود مجمعة: #{task.effectiveContractIds.join('، #')}</span>
+                  <span className="rounded-md bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-black text-amber-300">
+                    مهمة مجمعة
+                  </span>
+                </>
               ) : (
-                <span className="text-amber-400">#{task.contractNumber}</span>
+                <>
+                  <FileText className="h-3 w-3 text-amber-500" />
+                  <span>العقد: <strong className="text-amber-400">#{task.contractNumber}</strong></span>
+                </>
               )}
             </span>
             {task.installDate && (
@@ -760,9 +771,17 @@ const TaskCardRowInner = ({
         {/* Meta info */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-xs text-muted-foreground">
           <span className="flex items-center gap-1">
-            <FileText className="h-3 w-3 text-amber-500/70" />
-            <span className="font-mono text-amber-400 font-semibold">#{task.isMerged ? task.effectiveContractIds[0] : task.contractNumber}</span>
-            {task.isMerged && <span className="text-[9px] bg-orange-500/15 text-orange-400 rounded px-1">+{task.effectiveContractIds.length - 1}</span>}
+            {task.isMerged ? (
+              <>
+                <Layers className="h-3 w-3 text-amber-500/70" />
+                <span className="font-mono text-amber-400 font-semibold">عقود: #{task.effectiveContractIds.join('، #')}</span>
+              </>
+            ) : (
+              <>
+                <FileText className="h-3 w-3 text-amber-500/70" />
+                <span className="font-mono text-amber-400 font-semibold">#{task.contractNumber}</span>
+              </>
+            )}
           </span>
           {task.team && (
             <span className="flex items-center gap-1">
@@ -964,9 +983,10 @@ export const InstallationTasksTable: React.FC<Props> = ({
       const cost = hasCost ? i.company_installation_cost : (installationPricingByBillboard[i.billboard_id] || 0);
       return s + cost;
     }, 0);
+    const isTaskReinstall = task.task_type === 'reinstallation';
     const totalCustomerCost = items.reduce((s, i) => {
-      return s + ((i.reinstall_count || 0) > 0 
-        ? ((Number(i.customer_original_install_cost) || Number(i.customer_installation_cost) || 0) + (Number(i.customer_reinstall_cost) || Number(i.customer_installation_cost) || 0))
+      return s + (isTaskReinstall && (i.reinstall_count || 0) > 0 
+        ? (Number(i.customer_reinstall_cost) || Number(i.customer_installation_cost) || 0)
         : (Number(i.customer_installation_cost) || 0));
     }, 0);
     const displayStatus = getDisplayStatus(items);
@@ -1069,13 +1089,15 @@ export const InstallationTasksTable: React.FC<Props> = ({
     return sortDir === 'asc' ? cmp : -cmp;
   }), [filtered, sortField, sortDir]);
 
-  // ── عند تفعيل التجميع: نبني المجموعات (مهام إعادة التركيب حسب أسبوع الإصدار، والمهام العادية حسب العقد) ──
+  // ── عند تفعيل التجميع: نبني المجموعات (مهام متعددة العقود مستقلة، إعادة التركيب حسب الأسبوع، والعادية حسب العقد) ──
   const contractGroups = useMemo(() => {
     if (!groupByContract) return null;
     const groups: Record<string, typeof sorted> = {};
     sorted.forEach(task => {
       let groupKey: string;
-      if (task.task_type === 'reinstallation') {
+      if (task.effectiveContractIds && task.effectiveContractIds.length > 1) {
+        groupKey = `multi-contract-${task.id}`;
+      } else if (task.task_type === 'reinstallation') {
         groupKey = getOperationalWeekKey(task.created_at);
       } else {
         groupKey = `${task.contract_id}-${task.task_type || 'installation'}-${(task as any).reinstallation_number ?? 'new'}`;
@@ -1606,7 +1628,12 @@ export const InstallationTasksTable: React.FC<Props> = ({
                         </div>
                         <div className="flex flex-col gap-0.5">
                           <div className="flex items-center gap-2">
-                            {groupKey.startsWith('reinstall-week-') ? (
+                            {groupKey.startsWith('multi-contract-') ? (
+                              <span className="inline-flex items-center gap-1.5 font-extrabold text-amber-400 text-base tracking-tight">
+                                <Layers className="h-4 w-4 text-amber-400" />
+                                مهمة مجمعة (عقود #{firstTask.effectiveContractIds?.join('، #') || firstTask.contractNumber})
+                              </span>
+                            ) : groupKey.startsWith('reinstall-week-') ? (
                               <span className="font-extrabold text-foreground text-base tracking-tight">
                                 {getOperationalWeekRange(firstTask.created_at).label}
                               </span>
