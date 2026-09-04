@@ -1,3 +1,9 @@
+import { buildReceiptAllocations, savedAllocationAmount } from '@/lib/distributionPayload';
+import { calculateOperatingFees, operatingPool } from '@/lib/operatingFees';
+import { validateDistribution } from '@/lib/distributionValidation';
+import { DistributionReview } from './distribute-payment/DistributionReview';
+import { createRequestId } from '@/lib/requestId';
+import '@/components/finance/finance.css';
 import { useState, useEffect, memo, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -41,6 +47,7 @@ interface EnhancedDistributePaymentDialogProps {
     used_as_payment: number;
     billboards?: {
       Billboard_Name?: string;
+      name?: string;
     };
     _groupRentals?: Array<{
       id: string;
@@ -79,6 +86,11 @@ export function EnhancedDistributePaymentDialog({
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [distributing, setDistributing] = useState(false);
+  const savingRef = useRef(false);
+  const requestId = useRef(createRequestId());
+  const newGroupId = useRef('');
+  const [editDataLoading, setEditDataLoading] = useState(false);
+  const [editDataError, setEditDataError] = useState('');
   const [totalAmount, setTotalAmount] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<string>('نقدي');
   const [paymentReference, setPaymentReference] = useState<string>('');
@@ -212,6 +224,7 @@ export function EnhancedDistributePaymentDialog({
 
   // تحميل بيانات الموظفين المرتبطة بالدفعة عند التعديل
   const loadEditModeEmployeeData = async (distributedPaymentId: string) => {
+    setEditDataLoading(true);
     try {
       let distributions: EmployeePaymentDistribution[] = [];
       
@@ -237,25 +250,25 @@ export function EnhancedDistributePaymentDialog({
         .select('receiver_name, amount')
         .eq('distributed_payment_id', distributedPaymentId);
       
-      if (!withdrawalsError && withdrawals && withdrawals.length > 0) {
-        // جلب الموظف المرتبط بمصروفات التشغيل
-        const { data: operatingEmployee } = await supabase
-          .from('employees')
-          .select('id, name')
-          .eq('linked_to_operating_expenses', true)
-          .single();
-        
-        if (operatingEmployee) {
-          withdrawals.forEach(w => {
-            distributions.push({
-              employeeId: operatingEmployee.id,
-              amount: Number(w.amount) || 0,
-              paymentType: 'from_balance' as const
-            });
-          });
-        }
+      if (advancesError) throw advancesError;
+      if (withdrawalsError) throw withdrawalsError;
+      const { data: recipients, error: recipientsError } = await supabase.from('employees').select('id, name, installation_team_id, linked_to_operating_expenses');
+      if (recipientsError) throw recipientsError;
+      for (const withdrawal of withdrawals || []) {
+        const candidates = (recipients || []).filter(employee => employee.linked_to_operating_expenses && !employee.installation_team_id && (!withdrawal.receiver_name || employee.name === withdrawal.receiver_name));
+        if (candidates.length !== 1) throw new Error('تعذر تحديد مستلم سحب قديم؛ راجع اسم المستلم قبل تعديل الدفعة');
+        distributions.push({ employeeId: candidates[0].id, amount: Number(withdrawal.amount), paymentType: 'from_balance' });
       }
-      
+      const { data: teamPayments, error: teamError } = await (supabase as any).from('installation_team_accounts').select('team_id, amount').eq('distributed_payment_id', distributedPaymentId);
+      if (teamError) throw teamError;
+      const teamAmounts = new Map<string, number>();
+      for (const row of teamPayments || []) teamAmounts.set(row.team_id, (teamAmounts.get(row.team_id) || 0) + Number(row.amount));
+      for (const [teamId, amount] of teamAmounts) {
+        const candidates = (recipients || []).filter(employee => employee.installation_team_id === teamId);
+        if (candidates.length !== 1) throw new Error('تعذر تحديد موظف الفريق المرتبط؛ راجع مستلم سداد الفريق');
+        distributions.push({ employeeId: candidates[0].id, amount, paymentType: 'from_balance' });
+      }
+
       if (distributions.length > 0) {
         setEnableEmployee(true);
         setEmployeePaymentDistributions(distributions);
@@ -269,6 +282,7 @@ export function EnhancedDistributePaymentDialog({
         .eq('source_type', 'distributed_payment')
         .order('created_at', { ascending: true });
       
+      if (custodiesError) throw custodiesError;
       if (!custodiesError && custodies && custodies.length > 0) {
         setEnableCustodyOption(true);
         setConvertToCustody(true);
@@ -276,7 +290,7 @@ export function EnhancedDistributePaymentDialog({
         const seenEmployees = new Set<string>();
         const custodyDists: CustodyDistribution[] = [];
         for (const c of custodies) {
-          if (!c.employee_id || seenEmployees.has(c.employee_id)) continue;
+          if (!c.employee_id || seenEmployees.has(c.employee_id)) throw new Error('توجد عهد مكررة أو بلا مستلم؛ راجع العهد المرتبطة قبل التعديل');
           seenEmployees.add(c.employee_id);
           custodyDists.push({
             employeeId: c.employee_id,
@@ -294,6 +308,7 @@ export function EnhancedDistributePaymentDialog({
         .select('expense_id, amount')
         .eq('distributed_payment_id', distributedPaymentId);
 
+      if (expPaysError) throw expPaysError;
       if (!expPaysError && expPays && expPays.length > 0) {
         const rows = expPays.map((p: any) => ({
           expense_id: p.expense_id,
@@ -326,11 +341,24 @@ export function EnhancedDistributePaymentDialog({
       }
     } catch (error) {
       console.error('Error loading edit mode employee data:', error);
+      setEditDataError(error instanceof Error ? error.message : 'تعذر تحميل كل التوزيعات السابقة؛ أعد فتح الدفعة');
+    } finally {
+      setEditDataLoading(false);
     }
   };
 
   useEffect(() => {
     if (open) {
+      requestId.current = createRequestId();
+      newGroupId.current = 'dist-' + createRequestId();
+      setEditDataError('');
+      setEnableAdditionalDistributions(false);
+      setEnableEmployee(false); setEnableCustodyOption(false); setConvertToCustody(false); setEnableExpensePayment(false);
+      setExpensePayments([]); setEditingExpenseIds([]); setCustodyOptionAmount('');
+      setEmployeePaymentDistributions([{ employeeId: '', amount: 0, paymentType: 'advance' }]);
+      setCustodyDistributions([{ employeeId: '', amount: 0 }]);
+      setCollectedViaIntermediary(false); setIntermediaryCommission('0'); setTransferFee('0');
+      setCollectorName(''); setReceiverName(''); setDeliveryLocation(''); setCollectionDate(''); setCommissionNotes('');
       setStep(1);
       setSaveRemainderAsCredit(true);
       // ✅ Fix: read from ref to avoid stale closure without causing infinite loop
@@ -341,6 +369,14 @@ export function EnhancedDistributePaymentDialog({
         const totalAmt = currentEditingPayments.reduce((sum: number, p: any) => sum + (Number(p.amount) || 0), 0);
         setTotalAmount(String(totalAmt));
         setPaymentMethod(currentEditingPayments[0]?.method || 'نقدي');
+        setCollectedViaIntermediary(!!currentEditingPayments[0]?.collected_via_intermediary);
+        setIntermediaryCommission(String(Math.max(0, ...currentEditingPayments.map(p => Number(p.intermediary_commission) || 0))));
+        setTransferFee(String(Math.max(0, ...currentEditingPayments.map(p => Number(p.transfer_fee) || 0))));
+        setCollectorName(currentEditingPayments[0]?.collector_name || '');
+        setReceiverName(currentEditingPayments[0]?.receiver_name || '');
+        setDeliveryLocation(currentEditingPayments[0]?.delivery_location || '');
+        setCollectionDate(currentEditingPayments[0]?.collection_date || '');
+        setCommissionNotes(currentEditingPayments[0]?.commission_notes || '');
         setPaymentReference(currentEditingPayments[0]?.reference || '');
         setPaymentNotes(currentEditingPayments[0]?.notes || '');
         setPaymentDate(currentEditingPayments[0]?.paid_at ? new Date(currentEditingPayments[0].paid_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
@@ -423,13 +459,12 @@ export function EnhancedDistributePaymentDialog({
     }
   }, [convertToCustody, enableEmployee]);
 
-  // تحديث مبلغ العهدة عند تغيير المبلغ الكلي
+  // The custody envelope, not the entire receipt, controls its single allocation.
   useEffect(() => {
-    if (convertToCustody && custodyDistributions.length === 1) {
-      const netAmount = inputAmountNum - (parseFloat(intermediaryCommission) || 0) - (parseFloat(transferFee) || 0);
-      setCustodyDistributions([{ ...custodyDistributions[0], amount: netAmount }]);
+    if (enableCustodyOption && custodyDistributions.length === 1) {
+      setCustodyDistributions(previous => [{ ...previous[0], amount: Number(custodyOptionAmount) || 0 }]);
     }
-  }, [totalAmount, intermediaryCommission, transferFee, convertToCustody]);
+  }, [custodyOptionAmount, enableCustodyOption, custodyDistributions.length]);
 
   // ✅ ربط تفاعلي: عند تعيين موظف نشط من قسم آخر، املأ تلقائياً أول صف فارغ
   useEffect(() => {
@@ -531,7 +566,7 @@ export function EnhancedDistributePaymentDialog({
           // جلب العقود مع نسبة التشغيل ونسب التركيب والطباعة
           const { data: contracts, error: contractsError } = await supabase
             .from('Contract')
-            .select('Contract_Number, "Total Rent", Total, installation_cost, print_cost, operating_fee_rate, operating_fee_rate_installation, operating_fee_rate_print, include_operating_in_installation, include_operating_in_print, "Total Paid"');
+            .select('*');
 
           if (contractsError) {
             console.error('Error loading contracts:', contractsError);
@@ -555,50 +590,9 @@ export function EnhancedDistributePaymentDialog({
             }
           });
 
-          // فلترة العقود غير المغطاة بالتسكير وغير المستبعدة
-          const uncoveredContracts = (contracts || []).filter(c => {
-            const isExcluded = excludedSet.has(String(c.Contract_Number));
-            const isClosed = isContractCoveredByClosure(c.Contract_Number);
-            return !isExcluded && !isClosed;
-          });
-
-          // حساب النسبة المتحصلة فعلياً (نفس منطق صفحة مستحقات التشغيل Expenses.tsx)
-          const totalOperatingDues = uncoveredContracts.reduce((sum, c) => {
-            const rentCost = Number(c['Total Rent']) || 0;
-            const installationCost = Number(c.installation_cost) || 0;
-            const printCost = Number(c.print_cost) || 0;
-            const feeRate = Number(c.operating_fee_rate) || 0;
-            const feeRateInstallation = Number(c.operating_fee_rate_installation || feeRate) || 0;
-            const feeRatePrint = Number(c.operating_fee_rate_print || feeRate) || 0;
-            const includeInstallation = c.include_operating_in_installation === true;
-            const includePrint = c.include_operating_in_print === true;
-
-            const totalAmount = rentCost + installationCost + printCost;
-            const totalPaid = paidByContract[String(c.Contract_Number)] || 0;
-            const paymentRatio = totalAmount > 0 ? Math.min(1, totalPaid / totalAmount) : 0;
-
-            let collectedFeeAmount = Math.round(rentCost * paymentRatio * (feeRate / 100));
-            if (includeInstallation) collectedFeeAmount += Math.round(installationCost * paymentRatio * (feeRateInstallation / 100));
-            if (includePrint) collectedFeeAmount += Math.round(printCost * paymentRatio * (feeRatePrint / 100));
-
-            return sum + collectedFeeAmount;
-          }, 0);
-
-          // حساب إجمالي السحوبات - نفس منطق صفحة الموظف
-          // للموظف المرتبط بمصروفات التشغيل بدون فريق، نحتسب جميع السحوبات
-          // (السحوبات القديمة قد لا تحتوي على receiver_name)
-          const employeeWithdrawals = (withdrawals || [])
-            .reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
-
-          const pendingAmount = Math.max(0, totalOperatingDues - employeeWithdrawals);
-
-          console.log(`📊 حساب رصيد ${emp.name}:`, {
-            totalOperatingDues,
-            employeeWithdrawals,
-            pendingAmount,
-            uncoveredContractsCount: uncoveredContracts.length,
-            withdrawalsCount: (withdrawals || []).filter(w => w.receiver_name === emp.name).length
-          });
+          const eligibleWithdrawals = (withdrawals || []).filter(w => !editMode || w.distributed_payment_id !== editingDistributedPaymentId);
+          const pool = operatingPool(contracts || [], paymentsData || [], eligibleWithdrawals, closures || [], excludedSet);
+          const pendingAmount = Math.max(0, pool.remaining);
 
           balances.push({
             employeeId: emp.id,
@@ -607,61 +601,13 @@ export function EnhancedDistributePaymentDialog({
             pendingAmount: pendingAmount
           });
         }
-        // للموظفين المرتبطين بمصروفات التشغيل مع فريق
-        else if (emp.linked_to_operating_expenses && emp.installation_team_id) {
-          // جلب حسابات الفريق
-          const { data: teamAccounts, error: teamAccountsError } = await supabase
-            .from('installation_team_accounts')
-            .select('*, installation_teams(team_name)')
-            .eq('team_id', emp.installation_team_id);
-
-          if (teamAccountsError) {
-            console.error('Error loading team accounts:', teamAccountsError);
-            continue;
-          }
-
-          // فلترة العقود غير المغطاة بالتسكير
-          const uncoveredAccounts = (teamAccounts || []).filter(account => 
-            !isContractCoveredByClosure(account.contract_id)
-          );
-
-          // حساب إجمالي المستحقات من العقود غير المغطاة
-          const totalPending = uncoveredAccounts
-            .filter(a => a.status === 'pending')
-            .reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
-
-          // حساب إجمالي السحوبات لهذا الموظف فقط
-          const totalWithdrawalsForTeam = (withdrawals || [])
-            .filter(w => w.receiver_name === emp.name)
-            .reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
-
-          const teamName = teamAccounts?.[0]?.installation_teams?.team_name || 'الفريق';
-          const pendingAmount = Math.max(0, totalPending - totalWithdrawalsForTeam);
-
-          balances.push({
-            employeeId: emp.id,
-            teamId: emp.installation_team_id,
-            teamName: teamName,
-            pendingAmount: pendingAmount
-          });
-        }
-        // للموظفين العاديين مع فريق
         else if (emp.installation_team_id) {
-          // استخدام team_accounts_summary
-          const { data: teamSummary, error: summaryError } = await supabase
-            .from('team_accounts_summary')
-            .select('*')
-            .eq('team_id', emp.installation_team_id)
-            .single();
-
-          if (!summaryError && teamSummary) {
-            balances.push({
-              employeeId: emp.id,
-              teamId: emp.installation_team_id,
-              teamName: teamSummary.team_name,
-              pendingAmount: Number(teamSummary.pending_amount) || 0
-            });
-          }
+          const { data: accounts, error } = await (supabase as any).from('installation_team_accounts')
+            .select('amount, status, distributed_payment_id, installation_teams(team_name)').eq('team_id', emp.installation_team_id);
+          if (error) throw error;
+          const pending = (accounts || []).filter(account => account.status === 'pending' || (editMode && account.distributed_payment_id === editingDistributedPaymentId))
+            .reduce((sum, account) => sum + Number(account.amount), 0);
+          balances.push({ employeeId: emp.id, teamId: emp.installation_team_id, teamName: accounts?.[0]?.installation_teams?.team_name || 'فريق التركيب', pendingAmount: pending });
         }
       }
       
@@ -803,8 +749,7 @@ export function EnhancedDistributePaymentDialog({
           // ✅ في وضع التعديل، أضف المبلغ المُحرر للمتبقي حتى يمكن تعديله
           let editingAmount = 0;
           if (isPartOfEditingPayment && editingPayments) {
-            const existingPayment = editingPayments.find(p => Number(p.contract_number) === contractNum);
-            editingAmount = existingPayment ? (Number(existingPayment.amount) || 0) : 0;
+            editingAmount = savedAllocationAmount(editingPayments, 'contract', contractNum);
           }
           
           const remaining = Math.max(0, total - paid + editingAmount);
@@ -892,8 +837,7 @@ export function EnhancedDistributePaymentDialog({
           // ✅ في وضع التعديل، أضف المبلغ المُحرر للمتبقي
           let editingAmount = 0;
           if (isPartOfEditingPayment && editingPayments) {
-            const existingPayment = editingPayments.find(p => p.printed_invoice_id === invoice.id);
-            editingAmount = existingPayment ? (Number(existingPayment.amount) || 0) : 0;
+            editingAmount = savedAllocationAmount(editingPayments, 'printed_invoice', invoice.id);
           }
           
           const remaining = Math.max(0, total - paid + editingAmount);
@@ -950,8 +894,7 @@ export function EnhancedDistributePaymentDialog({
           // ✅ في وضع التعديل، أضف المبلغ المُحرر للمتبقي
           let editingAmount = 0;
           if (isPartOfEditingPayment && editingPayments) {
-            const existingPayment = editingPayments.find(p => p.sales_invoice_id === invoice.id);
-            editingAmount = existingPayment ? (Number(existingPayment.amount) || 0) : 0;
+            editingAmount = savedAllocationAmount(editingPayments, 'sales_invoice', invoice.id);
           }
           
           const remaining = Math.max(0, total - paid + editingAmount);
@@ -1015,8 +958,7 @@ export function EnhancedDistributePaymentDialog({
           // ✅ في وضع التعديل، أضف المبلغ المُحرر للمتبقي
           let editingAmount = 0;
           if (isPartOfEditingPayment && editingPayments) {
-            const existingPayment = editingPayments.find(p => p.composite_task_id === task.id);
-            editingAmount = existingPayment ? (Number(existingPayment.amount) || 0) : 0;
+            editingAmount = savedAllocationAmount(editingPayments, 'composite_task', task.id);
           }
           
           const remaining = Math.max(0, total - paid + editingAmount);
@@ -1043,16 +985,10 @@ export function EnhancedDistributePaymentDialog({
       // في حالة التعديل، تحديد العناصر المحددة مسبقاً
       if (editMode && editingPayments && editingPayments.length > 0) {
         allItems.forEach(item => {
-          const existingPayment = editingPayments.find(p => {
-            if (item.type === 'contract') return Number(p.contract_number) === Number(item.id);
-            if (item.type === 'printed_invoice') return p.printed_invoice_id === item.id;
-            if (item.type === 'sales_invoice') return p.sales_invoice_id === item.id;
-            if (item.type === 'composite_task') return p.composite_task_id === item.id;
-            return false;
-          });
-          if (existingPayment) {
+          const existingAmount = savedAllocationAmount(editingPayments, item.type, item.id);
+          if (existingAmount > 0) {
             item.selected = true;
-            item.allocatedAmount = Number(existingPayment.amount) || 0;
+            item.allocatedAmount = existingAmount;
           }
         });
       }
@@ -1076,9 +1012,9 @@ export function EnhancedDistributePaymentDialog({
     }
   };
 
-  const handleSelectItemById = (id: string | number, selected: boolean) => {
+  const handleSelectItemById = (id: string | number, selected: boolean, type?: DistributableItem['type']) => {
     setItems(prev => prev.map(it => {
-      if (it.id === id) {
+      if (it.id === id && (!type || it.type === type)) {
         return {
           ...it,
           selected,
@@ -1089,11 +1025,11 @@ export function EnhancedDistributePaymentDialog({
     }));
   };
 
-  const handleAmountChangeById = (id: string | number, value: string) => {
+  const handleAmountChangeById = (id: string | number, value: string, type?: DistributableItem['type']) => {
     // السماح بالنص الفارغ أو القيم الصالحة فقط
     if (value === '') {
       setItems(prev => prev.map(it => {
-        if (it.id === id) {
+        if (it.id === id && (!type || it.type === type)) {
           return { ...it, allocatedAmount: 0 };
         }
         return it;
@@ -1105,10 +1041,10 @@ export function EnhancedDistributePaymentDialog({
     if (!Number.isFinite(amount)) return;
 
     setItems(prev => prev.map(it => {
-      if (it.id === id) {
+      if (it.id === id && (!type || it.type === type)) {
         // ✅ السقف يخص دفعة العميل فقط (مستقل تماماً عن الموظفين/العهدة/المصاريف)
         const customerOthersAllocated = prev.reduce(
-          (s, x) => s + (x.id !== id && x.selected ? x.allocatedAmount : 0),
+          (s, x) => s + ((x.id !== id || (type && x.type !== type)) && x.selected ? x.allocatedAmount : 0),
           0,
         );
         const inputNum = parseFloat(totalAmount) || 0;
@@ -1135,10 +1071,10 @@ export function EnhancedDistributePaymentDialog({
 
     // ✅ التوزيع التلقائي على عناصر العميل فقط — مستقل عن الأقسام الجانبية
     let remainingToDistribute = inputAmount;
-    const newItems = [...items];
+    const newItems = items.map(item => ({ ...item }));
 
     // توزيع تلقائي ذكي: يبدأ من الأصغر إلى الأكبر
-    for (const item of newItems) {
+    for (const item of [...newItems].sort((a, b) => a.type === 'contract' && b.type === 'contract' ? Number(a.id) - Number(b.id) : 0)) {
       if (item.selected && remainingToDistribute > 0) {
         const amountToAllocate = Math.min(item.remainingAmount, remainingToDistribute);
         item.allocatedAmount = amountToAllocate;
@@ -1159,13 +1095,13 @@ export function EnhancedDistributePaymentDialog({
 
   // ✅ احتساب موحّد: يشمل العميل + الموظفين + العهدة + سداد المصاريف
   const customerAllocated = items.reduce((sum, item) => sum + (item.selected ? item.allocatedAmount : 0), 0);
-  const employeesAllocated = enableEmployee
+  const employeesAllocated = enableAdditionalDistributions && enableEmployee
     ? employeePaymentDistributions.reduce((s, d) => s + (Number(d.amount) || 0), 0)
     : 0;
-  const custodyAllocated = enableCustodyOption
+  const custodyAllocated = enableAdditionalDistributions && enableCustodyOption
     ? (parseFloat(custodyOptionAmount) || 0)
     : 0;
-  const expensesAllocated = enableExpensePayment ? totalExpensePayments : 0;
+  const expensesAllocated = enableAdditionalDistributions && enableExpensePayment ? totalExpensePayments : 0;
 
   // ✅ المبلغ الكلي للدفعة يخص عناصر العميل فقط؛ الموظفين/العهد/المصاريف مستقلون
   const sideAllocated = employeesAllocated + custodyAllocated + expensesAllocated; // للعرض فقط
@@ -1175,16 +1111,30 @@ export function EnhancedDistributePaymentDialog({
   const customerPool = inputAmountNum;
   const remainingToAllocate = customerPool - customerAllocated;
   // بركة مشتركة للأقسام الثلاثة (موظفين/عهدة/مصاريف) مستقلة عن العميل
-  const sidePool = inputAmountNum;
+  const feesAllocated = collectedViaIntermediary ? (Number(intermediaryCommission) || 0) + (Number(transferFee) || 0) : 0;
+  const sidePool = Math.max(0, inputAmountNum - feesAllocated);
   const sideRemaining = Math.max(0, sidePool - employeesAllocated - custodyAllocated - expensesAllocated);
   const hasCustomerItems = items.some(i => i.selected && i.allocatedAmount > 0);
-  const hasExpensePayments = expensePayments.some(p => Number(p.amount) > 0);
+  const hasExpensePayments = enableAdditionalDistributions && enableExpensePayment && expensePayments.some(p => Number(p.amount) > 0);
   const hasAnyAllocation = (customerAllocated + sideAllocated) > 0;
+  const validationErrors = validateDistribution({
+    amount: inputAmountNum, fees: feesAllocated, items, saveCredit: saveRemainderAsCredit,
+    employees: enableAdditionalDistributions && enableEmployee ? employeePaymentDistributions : [],
+    balances: employeeBalances,
+    custody: enableAdditionalDistributions && enableCustodyOption ? custodyDistributions : [],
+    custodyAmount: custodyAllocated,
+    expenses: enableAdditionalDistributions && enableExpensePayment ? expensePayments : [],
+  });
 
   const handleDistribute = async () => {
+    if (savingRef.current) return;
+    if (!paymentDate || !Number.isFinite(new Date(paymentDate).getTime())) { toast.error('حدد تاريخًا صحيحًا للدفعة'); return; }
+    if (collectedViaIntermediary && [Number(intermediaryCommission), Number(transferFee)].some(value => !Number.isFinite(value) || value < 0)) { toast.error('العمولات والرسوم يجب أن تكون مبالغ صحيحة غير سالبة'); return; }
+    if (editDataLoading || editDataError) { toast.error(editDataError || 'انتظر تحميل التوزيعات المرتبطة'); return; }
+    if (validationErrors.length) { toast.error(validationErrors[0]); return; }
     const selectedItems = items.filter(i => i.selected && i.allocatedAmount > 0);
 
-    if (selectedItems.length === 0 && !hasExpensePayments) {
+    if (selectedItems.length === 0 && !hasAnyAllocation && !saveRemainderAsCredit) {
       toast.error('الرجاء اختيار عنصر واحد على الأقل وتخصيص مبلغ له');
       return;
     }
@@ -1193,24 +1143,6 @@ export function EnhancedDistributePaymentDialog({
     if (activePurchaseInvoice && inputAmountNum > availableCredit + 0.01) {
       toast.error(`لا يمكن توزيع مبلغ أكبر من الرصيد المتاح في فاتورة المشتريات المرتبطة (${availableCredit.toLocaleString('ar-LY')} د.ل). يرجى تعديل فاتورة المشتريات أولاً.`);
       return;
-    }
-
-    // ✅ التحقق على عناصر العميل فقط (الأقسام الأخرى مستقلة)
-    if (hasCustomerItems) {
-      if (inputAmountNum <= 0) {
-        toast.error('الرجاء إدخال مبلغ صحيح');
-        return;
-      }
-      if (customerAllocated > inputAmountNum + 0.01) {
-        toast.error(`تجاوزت المبلغ الكلي بـ ${(customerAllocated - inputAmountNum).toFixed(2)} د.ل`);
-        return;
-      }
-      if (inputAmountNum - customerAllocated > 0.01) {
-        if (!saveRemainderAsCredit) {
-          toast.error(`متبقي ${(inputAmountNum - customerAllocated).toFixed(2)} د.ل غير موزّع على عناصر العميل`);
-          return;
-        }
-      }
     }
 
     // التحقق من حقول الوسيط إذا كان مفعلاً
@@ -1222,7 +1154,7 @@ export function EnhancedDistributePaymentDialog({
     }
 
     // التحقق من صحة توزيع العهدة إذا كان مفعلاً
-    if (convertToCustody) {
+    if (enableAdditionalDistributions && enableCustodyOption && convertToCustody) {
       const validDistributions = custodyDistributions.filter(d => d.employeeId && d.amount > 0);
       if (validDistributions.length === 0) {
         toast.error('يرجى اختيار موظف واحد على الأقل وتحديد مبلغ للعهدة');
@@ -1238,638 +1170,60 @@ export function EnhancedDistributePaymentDialog({
       }
     }
 
+    savingRef.current = true;
     setDistributing(true);
-    
     try {
-      // في حالة التعديل
-      if (editMode && editingDistributedPaymentId) {
-        // حذف الدفعات القديمة
-        const { error: deleteError } = await supabase
-          .from('customer_payments')
-          .delete()
-          .eq('distributed_payment_id', editingDistributedPaymentId);
-
-        if (deleteError) {
-          console.error('Error deleting old payments:', deleteError);
-          throw deleteError;
-        }
-        
-        // ✅ حذف السلف القديمة المرتبطة
-        const { error: deleteAdvancesError } = await supabase
-          .from('employee_advances')
-          .delete()
-          .eq('distributed_payment_id', editingDistributedPaymentId);
-        
-        if (deleteAdvancesError) {
-          console.error('Error deleting old advances:', deleteAdvancesError);
-        }
-        
-        // ✅ حذف السحوبات القديمة المرتبطة
-        const { error: deleteWithdrawalsError } = await supabase
-          .from('expenses_withdrawals')
-          .delete()
-          .eq('distributed_payment_id', editingDistributedPaymentId);
-        
-        if (deleteWithdrawalsError) {
-          console.error('Error deleting old withdrawals:', deleteWithdrawalsError);
-        }
-
-        // ✅ حذف سداد المصروفات القديمة المرتبطة بهذه الدفعة
-        const { error: deleteExpPaysError } = await supabase
-          .from('expense_payments')
-          .delete()
-          .eq('distributed_payment_id', editingDistributedPaymentId);
-
-        if (deleteExpPaysError) {
-          console.error('Error deleting old expense payments:', deleteExpPaysError);
-        }
-      }
-
-      const distributedPaymentId = editMode && editingDistributedPaymentId ? editingDistributedPaymentId : `dist-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const currentDate = paymentDate ? new Date(paymentDate).toISOString() : new Date().toISOString();
-      const paymentInserts = [];
-      const errors = [];
-
-      // تجهيز/تنظيف العهد الحالية للدفعة (مهم جداً لمنع تكرار العهد عند تعديل الدفعة)
-      let existingCustodyAccounts: Array<{ id: string; employee_id: string; account_number: string; created_at: string | null }> = [];
-      const movementCountByCustodyId: Record<string, number> = {};
-      if (convertToCustody) {
-        const { data: existingCustody, error: existingCustodyError } = await supabase
-          .from('custody_accounts')
-          .select('id, employee_id, account_number, created_at')
-          .eq('source_payment_id', distributedPaymentId)
-          .eq('source_type', 'distributed_payment');
-
-        if (existingCustodyError) {
-          console.error('Error fetching existing custody accounts:', existingCustodyError);
-        } else if (existingCustody && existingCustody.length > 0) {
-          existingCustodyAccounts = existingCustody as any;
-
-          const custodyIds = existingCustodyAccounts.map(c => c.id);
-          custodyIds.forEach(id => {
-            movementCountByCustodyId[id] = 0;
-          });
-
-          // حساب عدد الحركات/المصروفات لكل عهدة
-          const [{ data: txData }, { data: expData }] = await Promise.all([
-            supabase.from('custody_transactions').select('id, custody_account_id').in('custody_account_id', custodyIds),
-            supabase.from('custody_expenses').select('id, custody_account_id').in('custody_account_id', custodyIds),
-          ]);
-
-          (txData || []).forEach(t => {
-            movementCountByCustodyId[t.custody_account_id] = (movementCountByCustodyId[t.custody_account_id] || 0) + 1;
-          });
-          (expData || []).forEach(e => {
-            movementCountByCustodyId[e.custody_account_id] = (movementCountByCustodyId[e.custody_account_id] || 0) + 1;
-          });
-
-          // تنظيف العهد المكررة لنفس الموظف (نحذف فقط العهد بدون حركات)
-          const byEmployee: Record<string, Array<{ id: string; employee_id: string; account_number: string; created_at: string | null }>> = {};
-          existingCustodyAccounts.forEach(c => {
-            if (!c.employee_id) return;
-            if (!byEmployee[c.employee_id]) byEmployee[c.employee_id] = [];
-            byEmployee[c.employee_id].push(c);
-          });
-
-          const idsToDelete: string[] = [];
-          Object.values(byEmployee).forEach(list => {
-            if (list.length <= 1) return;
-
-            const withMovements = list.filter(c => (movementCountByCustodyId[c.id] || 0) > 0);
-            // إذا كانت هناك أكثر من عهدة عليها حركات لنفس الموظف، لا نحذف تلقائياً لتجنب فقد البيانات
-            if (withMovements.length > 1) return;
-
-            const keep = withMovements.length === 1
-              ? withMovements[0]
-              : [...list].sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime())[0];
-
-            list.forEach(c => {
-              if (c.id === keep.id) return;
-              if ((movementCountByCustodyId[c.id] || 0) === 0) idsToDelete.push(c.id);
-            });
-          });
-
-          if (idsToDelete.length > 0) {
-            await supabase.from('custody_transactions').delete().in('custody_account_id', idsToDelete);
-            await supabase.from('custody_expenses').delete().in('custody_account_id', idsToDelete);
-            const { error: deleteDupCustodyError } = await supabase
-              .from('custody_accounts')
-              .delete()
-              .in('id', idsToDelete);
-            if (deleteDupCustodyError) {
-              console.error('Error deleting duplicate custody accounts:', deleteDupCustodyError);
-            } else {
-              existingCustodyAccounts = existingCustodyAccounts.filter(c => !idsToDelete.includes(c.id));
-            }
-          }
-        }
-      }
-
-      console.log('🔄 بدء توزيع الدفعة:', {
-        totalAmount: inputAmountNum,
-        selectedItems: selectedItems.length,
-        distributedPaymentId
+      const payments = buildReceiptAllocations({ items, amount: inputAmountNum, saveCredit: saveRemainderAsCredit,
+        commission: collectedViaIntermediary ? Number(intermediaryCommission) || 0 : 0,
+        transferFee: collectedViaIntermediary ? Number(transferFee) || 0 : 0,
+        common: {
+          customer_name: customerName, paid_at: paymentDate, method: paymentMethod,
+          reference: paymentMethod === 'تحويل بنكي' ? transferReference : paymentReference || null,
+          notes: paymentNotes || null, collected_via_intermediary: collectedViaIntermediary,
+          collector_name: collectedViaIntermediary ? collectorName : null,
+          receiver_name: collectedViaIntermediary ? receiverName : null,
+          delivery_location: collectedViaIntermediary ? deliveryLocation : null,
+          collection_date: collectedViaIntermediary ? collectionDate : null,
+          commission_notes: collectedViaIntermediary ? commissionNotes : null,
+          source_bank: paymentMethod === 'تحويل بنكي' ? sourceBank : null,
+          destination_bank: paymentMethod === 'تحويل بنكي' ? destinationBank : null,
+          transfer_reference: paymentMethod === 'تحويل بنكي' ? transferReference : null,
+          transfer_image_url: transferImageUrl || null,
+        },
       });
-
-      // حساب الصافي بعد العمولات
-      const commissionAmount = (parseFloat(intermediaryCommission) || 0) + (parseFloat(transferFee) || 0);
-      const netAmount = inputAmountNum - commissionAmount;
-
-      // إدخال جميع الدفعات
-      for (const item of selectedItems) {
-        // الملاحظات بدون معلومات البنك (لأنها مخزنة في حقول منفصلة)
-        let fullNotes = paymentNotes || `توزيع على ${item.displayName} من دفعة بمبلغ ${inputAmountNum.toFixed(2)} د.ل`;
-
-        const paymentData: any = {
-          customer_id: customerId,
-          customer_name: customerName,
-          amount: item.allocatedAmount,
-          paid_at: currentDate,
-          method: paymentMethod || 'نقدي',
-          reference: paymentMethod === 'تحويل بنكي' ? transferReference : (paymentReference || null),
-          entry_type: 'payment',
-          distributed_payment_id: distributedPaymentId,
-          notes: fullNotes,
-          collected_via_intermediary: collectedViaIntermediary,
-          intermediary_commission: collectedViaIntermediary ? (parseFloat(intermediaryCommission) || 0) : 0,
-          transfer_fee: collectedViaIntermediary ? (parseFloat(transferFee) || 0) : 0,
-          net_amount: item.allocatedAmount,
-          commission_notes: collectedViaIntermediary ? commissionNotes : null,
-          collector_name: collectedViaIntermediary ? collectorName : null,
-          receiver_name: collectedViaIntermediary ? receiverName : null,
-          delivery_location: collectedViaIntermediary ? deliveryLocation : null,
-          collection_date: collectedViaIntermediary ? collectionDate : null,
-          source_bank: paymentMethod === 'تحويل بنكي' ? sourceBank : null,
-          destination_bank: paymentMethod === 'تحويل بنكي' ? destinationBank : null,
-          transfer_reference: paymentMethod === 'تحويل بنكي' ? transferReference : null,
-          transfer_image_url: transferImageUrl || null
-        };
-
-        // إضافة purchase_invoice_id في حالة المقايضة
-        if (purchaseInvoice) {
-          paymentData.purchase_invoice_id = purchaseInvoice.id;
-        }
-
-        if (item.type === 'contract') {
-          paymentData.contract_number = Number(item.id);
-        } else if (item.type === 'printed_invoice') {
-          paymentData.printed_invoice_id = String(item.id);
-        } else if (item.type === 'sales_invoice') {
-          paymentData.sales_invoice_id = String(item.id);
-        } else if (item.type === 'composite_task') {
-          paymentData.composite_task_id = String(item.id);
-        }
-
-        console.log(`💳 إضافة دفعة لـ ${item.displayName}:`, paymentData);
-
-        const { error: paymentError, data: paymentResult } = await supabase
-          .from('customer_payments')
-          .insert(paymentData)
-          .select();
-
-        if (paymentError) {
-          console.error(`❌ خطأ في إضافة دفعة ${item.displayName}:`, paymentError);
-          errors.push(`فشل حفظ الدفعة لـ ${item.displayName}: ${paymentError.message}`);
-          continue;
-        }
-
-        console.log(`✅ تم إضافة الدفعة لـ ${item.displayName}:`, paymentResult);
-        paymentInserts.push({ item, paymentResult });
-      }
-
-      if (errors.length > 0) {
-        toast.error(`حدثت أخطاء:\n${errors.join('\n')}`);
-        setDistributing(false);
-        return;
-      }
-
-      // ✅ حفظ الرصيد المتبقي غير الموزع كدفعة حساب للزبون
-      if (saveRemainderAsCredit && remainingToAllocate > 0.01) {
-        const creditNotes = paymentNotes 
-          ? `${paymentNotes} - (رصيد متبقي غير موزع)` 
-          : `رصيد متبقي غير موزع من دفعة بمبلغ ${inputAmountNum.toFixed(2)} د.ل`;
-          
-        const creditPaymentData: any = {
-          customer_id: customerId,
-          customer_name: customerName,
-          amount: remainingToAllocate,
-          paid_at: currentDate,
-          method: paymentMethod || 'نقدي',
-          reference: paymentMethod === 'تحويل بنكي' ? transferReference : (paymentReference || null),
-          entry_type: 'payment',
-          distributed_payment_id: distributedPaymentId,
-          notes: creditNotes,
-          collected_via_intermediary: collectedViaIntermediary,
-          intermediary_commission: collectedViaIntermediary ? (parseFloat(intermediaryCommission) || 0) : 0,
-          transfer_fee: collectedViaIntermediary ? (parseFloat(transferFee) || 0) : 0,
-          net_amount: remainingToAllocate,
-          commission_notes: collectedViaIntermediary ? commissionNotes : null,
-          collector_name: collectedViaIntermediary ? collectorName : null,
-          receiver_name: collectedViaIntermediary ? receiverName : null,
-          delivery_location: collectedViaIntermediary ? deliveryLocation : null,
-          collection_date: collectedViaIntermediary ? collectionDate : null,
-          source_bank: paymentMethod === 'تحويل بنكي' ? sourceBank : null,
-          destination_bank: paymentMethod === 'تحويل بنكي' ? destinationBank : null,
-          transfer_reference: paymentMethod === 'تحويل بنكي' ? transferReference : null,
-          transfer_image_url: transferImageUrl || null
-        };
-        
-        if (purchaseInvoice) {
-          creditPaymentData.purchase_invoice_id = purchaseInvoice.id;
-        }
-
-        console.log('💳 إضافة رصيد متبقي غير موزع:', creditPaymentData);
-        
-        const { error: creditError } = await supabase
-          .from('customer_payments')
-          .insert(creditPaymentData);
-          
-        if (creditError) {
-          console.error('❌ خطأ في إضافة الرصيد المتبقي:', creditError);
-          errors.push(`فشل حفظ الرصيد المتبقي للعميل: ${creditError.message}`);
-        } else {
-          console.log('✅ تم إضافة الرصيد المتبقي بنجاح');
-        }
-      }
-
-      // تحديث المبالغ المدفوعة
-      for (const { item } of paymentInserts) {
-        try {
-          if (item.type === 'contract') {
-            const newPaidAmount = item.paidAmount + item.allocatedAmount;
-            
-            console.log(`📝 تحديث عقد #${item.id}:`, {
-              oldPaid: item.paidAmount,
-              allocated: item.allocatedAmount,
-              newPaid: newPaidAmount
-            });
-
-            const { error: updateError } = await supabase
-              .from('Contract')
-              .update({
-                'Total Paid': String(newPaidAmount)
-              })
-              .eq('Contract_Number', Number(item.id));
-            
-            if (updateError) {
-              console.error(`❌ خطأ في تحديث العقد #${item.id}:`, updateError);
-              errors.push(`فشل تحديث العقد #${item.id}: ${updateError.message}`);
-            } else {
-              console.log(`✅ تم تحديث العقد #${item.id} بنجاح`);
-            }
-          } else if (item.type === 'printed_invoice') {
-            const newPaid = item.paidAmount + item.allocatedAmount;
-            const isPaid = newPaid >= item.totalAmount;
-            
-            console.log(`📄 تحديث فاتورة طباعة ${item.id}:`, {
-              newPaid,
-              isPaid
-            });
-
-            const { error: updateError } = await supabase
-              .from('printed_invoices')
-              .update({
-                paid_amount: newPaid,
-                paid: isPaid
-              })
-              .eq('id', String(item.id));
-            
-            if (updateError) {
-              console.error(`❌ خطأ في تحديث فاتورة طباعة:`, updateError);
-              errors.push(`فشل تحديث الفاتورة: ${updateError.message}`);
-            } else {
-              console.log(`✅ تم تحديث فاتورة الطباعة بنجاح`);
-            }
-          } else if (item.type === 'sales_invoice') {
-            const newPaid = item.paidAmount + item.allocatedAmount;
-            
-            console.log(`🛒 تحديث فاتورة مبيعات ${item.id}:`, { newPaid });
-
-            const { error: updateError } = await supabase
-              .from('sales_invoices')
-              .update({
-                paid_amount: newPaid
-              })
-              .eq('id', String(item.id));
-            
-            if (updateError) {
-              console.error(`❌ خطأ في تحديث فاتورة مبيعات:`, updateError);
-              errors.push(`فشل تحديث الفاتورة: ${updateError.message}`);
-            } else {
-              console.log(`✅ تم تحديث فاتورة المبيعات بنجاح`);
-            }
-          } else if (item.type === 'composite_task') {
-            const newPaid = item.paidAmount + item.allocatedAmount;
-            
-            console.log(`🔧 تحديث مهمة مجمعة ${item.id}:`, { newPaid });
-
-            const { error: updateError } = await supabase
-              .from('composite_tasks')
-              .update({
-                paid_amount: newPaid
-              })
-              .eq('id', String(item.id));
-            
-            if (updateError) {
-              console.error(`❌ خطأ في تحديث مهمة مجمعة:`, updateError);
-              errors.push(`فشل تحديث المهمة المجمعة: ${updateError.message}`);
-            } else {
-              console.log(`✅ تم تحديث المهمة المجمعة بنجاح`);
-            }
-          }
-        } catch (err) {
-          console.error(`❌ خطأ غير متوقع في تحديث ${item.displayName}:`, err);
-          errors.push(`خطأ غير متوقع: ${err.message}`);
-        }
-      }
-
-      if (errors.length > 0) {
-        toast.info(`تم توزيع الدفعة مع بعض التحذيرات:\n${errors.join('\n')}`);
-      } else {
-        console.log('✅ تم توزيع الدفعة بنجاح بالكامل');
-        toast.success(`تم توزيع ${inputAmountNum.toFixed(2)} د.ل على ${selectedItems.length} عناصر بنجاح`);
-      }
-      
-      // تحديث فاتورة المشتريات في حالة المقايضة
-      if (activePurchaseInvoice) {
-        const newUsedAsPayment = activePurchaseInvoice.used_as_payment - currentDistributionTotalForPurchase + totalAllocated;
-        const { error: purchaseUpdateError } = await supabase
-          .from('purchase_invoices')
-          .update({
-            used_as_payment: Math.max(0, newUsedAsPayment)
-          })
-          .eq('id', activePurchaseInvoice.id);
-
-        if (purchaseUpdateError) {
-          console.error('Error updating purchase invoice:', purchaseUpdateError);
-          toast.info('تم توزيع الدفعة ولكن فشل تحديث فاتورة المشتريات');
-        }
-      }
-
-      // تحديث إيجارات لوحات الأصدقاء في حالة المقايضة
-      if (friendRental) {
-        let remaining = totalAllocated;
-        for (const gr of rentalGrouped) {
-          if (remaining <= 0) break;
-          const grRemaining = Math.max(0, (Number(gr.friend_rental_cost) || 0) - (Number(gr.used_as_payment) || 0));
-          if (grRemaining <= 0) continue;
-          const amount = Math.min(grRemaining, remaining);
-          
-          const { error: err } = await supabase
-            .from('friend_billboard_rentals')
-            .update({ used_as_payment: (Number(gr.used_as_payment) || 0) + amount })
-            .eq('id', gr.id);
-            
-          if (err) {
-            console.error('Error updating friend_billboard_rentals:', err);
-            toast.info('تم توزيع الدفعة ولكن فشل تحديث إيجار اللوحة');
-          }
-          remaining -= amount;
-        }
-      }
-      
-      // إنشاء سلفات الموظفين أو سحب من الرصيد إذا كان الخيار مفعلاً
-      if (enableEmployee) {
-        const validEmployeeDistributions = employeePaymentDistributions.filter(d => d.employeeId && d.amount > 0);
-        
-        if (validEmployeeDistributions.length > 0) {
-          for (const distribution of validEmployeeDistributions) {
-            const employee = employees.find(e => e.id === distribution.employeeId);
-            const balance = getEmployeeBalance(distribution.employeeId);
-            
-            // التحقق من نوع الدفع والرصيد
-            if (distribution.paymentType === 'from_balance' && balance && balance.pendingAmount > 0) {
-              // معرفة نوع الموظف
-              const isOperatingExpenseEmployee = balance.teamName === 'مصروفات التشغيل' && !balance.teamId;
-              
-              if (isOperatingExpenseEmployee) {
-                // سحب من مصروفات التشغيل - تسجيل في expenses_withdrawals
-                const { error: withdrawalError } = await supabase
-                  .from('expenses_withdrawals')
-                  .insert({
-                    amount: distribution.amount,
-                    date: paymentDate,
-                    type: 'individual',
-                    method: paymentMethod,
-                    notes: `سحب من رصيد مستحقات التشغيل - دفعة ${customerName}`,
-                    receiver_name: employee?.name,
-                    distributed_payment_id: distributedPaymentId
-                  });
-                
-                if (withdrawalError) {
-                  console.error('Error creating withdrawal:', withdrawalError);
-                  toast.info(`فشل في تسجيل السحب لـ ${employee?.name}`);
-                } else {
-                  toast.success(`تم سحب ${distribution.amount.toFixed(2)} د.ل من رصيد ${employee?.name}`);
-                }
-              } else if (balance.teamId) {
-                // سحب من مستحقات التركيب - تحديث حالة السجلات إلى "مدفوع"
-                let remainingToWithdraw = distribution.amount;
-                
-                // جلب السجلات المعلقة للفريق
-                const { data: pendingAccounts, error: fetchError } = await supabase
-                  .from('installation_team_accounts')
-                  .select('*')
-                  .eq('team_id', balance.teamId)
-                  .eq('status', 'pending')
-                  .order('installation_date', { ascending: true });
-                
-                if (fetchError) {
-                  console.error('Error fetching pending accounts:', fetchError);
-                  toast.info(`فشل في سحب المستحقات لـ ${employee?.name}`);
-                  continue;
-                }
-                
-                if (pendingAccounts) {
-                  for (const account of pendingAccounts) {
-                    if (remainingToWithdraw <= 0) break;
-                    
-                    const accountAmount = Number(account.amount) || 0;
-                    
-                    if (accountAmount <= remainingToWithdraw) {
-                      // سحب كامل المبلغ من هذا السجل
-                      const { error: updateError } = await supabase
-                        .from('installation_team_accounts')
-                        .update({ 
-                          status: 'paid',
-                          notes: `${account.notes || ''}\nتم السحب بتاريخ ${paymentDate} من دفعة ${customerName}`
-                        })
-                        .eq('id', account.id);
-                      
-                      if (updateError) {
-                        console.error('Error updating account:', updateError);
-                      }
-                      remainingToWithdraw -= accountAmount;
-                    } else {
-                      // سحب جزئي - نحتاج لإنشاء سجل جديد للباقي
-                      // تحديث السجل الحالي ليعكس المبلغ المسحوب
-                      const { error: updateError } = await supabase
-                        .from('installation_team_accounts')
-                        .update({ 
-                          status: 'paid',
-                          amount: remainingToWithdraw,
-                          notes: `${account.notes || ''}\nسحب جزئي ${remainingToWithdraw} من ${accountAmount} بتاريخ ${paymentDate}`
-                        })
-                        .eq('id', account.id);
-                      
-                      // إنشاء سجل جديد للباقي
-                      if (!updateError) {
-                        await supabase
-                          .from('installation_team_accounts')
-                          .insert({
-                            team_id: account.team_id,
-                            task_item_id: account.task_item_id,
-                            billboard_id: account.billboard_id,
-                            contract_id: account.contract_id,
-                            installation_date: account.installation_date,
-                            amount: accountAmount - remainingToWithdraw,
-                            status: 'pending',
-                            notes: `متبقي من سحب جزئي`
-                          });
-                      }
-                      remainingToWithdraw = 0;
-                    }
-                  }
-                }
-                
-                toast.success(`تم سحب ${distribution.amount.toFixed(2)} د.ل من مستحقات ${employee?.name}`);
-              }
-            } else {
-              // إنشاء سلفة جديدة
-              const { error: advanceError } = await supabase
-                .from('employee_advances')
-                .insert({
-                  employee_id: distribution.employeeId,
-                  amount: distribution.amount,
-                  remaining: distribution.amount,
-                  reason: `سلفة من دفعة موزعة - ${customerName}`,
-                  status: 'approved',
-                  request_date: paymentDate,
-                  distributed_payment_id: distributedPaymentId
-                });
-
-              if (advanceError) {
-                console.error('Error creating employee advance:', advanceError);
-                toast.info(`تم التوزيع ولكن فشل إنشاء سلفة لـ ${employee?.name}`);
-              } else {
-                toast.success(`تم إنشاء سلفة بقيمة ${distribution.amount.toFixed(2)} د.ل لـ ${employee?.name}`);
-              }
-            }
-          }
-        }
-      }
-      
-      // إنشاء العهد إذا كان الخيار مفعلاً
-      if (convertToCustody) {
-        const validDistributions = custodyDistributions.filter(d => d.employeeId && d.amount > 0);
-        
-        if (validDistributions.length > 0) {
-          for (const distribution of validDistributions) {
-            const employee = employees.find(e => e.id === distribution.employeeId);
-
-            // إذا كانت هناك عهدة موجودة بالفعل لنفس الدفعة ونفس الموظف: حدّثها (بدلاً من إنشاء عهدة جديدة مكررة)
-            const existingForEmployee = existingCustodyAccounts.find(c => c.employee_id === distribution.employeeId);
-            if (existingForEmployee) {
-              const movementsCount = movementCountByCustodyId[existingForEmployee.id] || 0;
-              
-              // جلب البيانات الحالية للعهدة لحساب الفرق
-              const { data: currentCustodyData } = await supabase
-                .from('custody_accounts')
-                .select('initial_amount, current_balance')
-                .eq('id', existingForEmployee.id)
-                .single();
-              
-              if (currentCustodyData) {
-                const oldInitialAmount = Number(currentCustodyData.initial_amount) || 0;
-                const oldCurrentBalance = Number(currentCustodyData.current_balance) || 0;
-                const newAmount = Number(distribution.amount) || 0;
-                
-                // حساب الفرق بين المبلغ الجديد والقديم
-                const amountDifference = newAmount - oldInitialAmount;
-                
-                // الرصيد الجديد = الرصيد الحالي + الفرق
-                const newCurrentBalance = oldCurrentBalance + amountDifference;
-                
-                const { error: updateCustodyError } = await supabase
-                  .from('custody_accounts')
-                  .update({
-                    initial_amount: newAmount,
-                    current_balance: newCurrentBalance,
-                  })
-                  .eq('id', existingForEmployee.id);
-
-                if (updateCustodyError) {
-                  console.error('Error updating existing custody:', updateCustodyError);
-                  toast.info(`تم التوزيع لكن فشل تحديث عهدة ${employee?.name || ''}`);
-                } else if (amountDifference !== 0) {
-                  console.log(`✅ تم تحديث عهدة ${employee?.name}: المبلغ الأولي من ${oldInitialAmount} إلى ${newAmount}، الرصيد الحالي من ${oldCurrentBalance} إلى ${newCurrentBalance}`);
-                }
-              }
-              continue;
-            }
-
-            const accountNumber = generateCustodyAccountNumber();
-            
-            const { error: custodyError } = await supabase
-              .from('custody_accounts')
-              .insert({
-                employee_id: distribution.employeeId,
-                account_number: accountNumber,
-                initial_amount: distribution.amount,
-                current_balance: distribution.amount,
-                status: 'active',
-                source_payment_id: distributedPaymentId,
-                source_type: 'distributed_payment',
-                notes: `عهدة من دفعة موزعة - ${customerName} - ${employee?.name || ''}`
-              });
-
-            if (custodyError) {
-              console.error('Error creating custody:', custodyError);
-              toast.info(`تم التوزيع ولكن فشل إنشاء عهدة لـ ${employee?.name}`);
-            }
-          }
-          toast.success(`تم إنشاء ${validDistributions.length} عهدة بنجاح`);
-        }
-      }
-      
-      // ✅ سداد المصروفات المختارة
-      if (expensePayments.length > 0) {
-        const rows = expensePayments
-          .filter(p => p.amount > 0)
-          .map(p => ({
-            expense_id: p.expense_id,
-            amount: Number(p.amount),
-            paid_via: 'distributed_payment',
-            payment_source: `distributed_payment:${distributedPaymentId}`,
-            distributed_payment_id: distributedPaymentId,
-            notes: `سداد من دفعة موزعة - ${customerName}`,
-          }));
-        if (rows.length > 0) {
-          const { error: expErr } = await supabase.from('expense_payments').insert(rows);
-          if (expErr) {
-            console.error('Error inserting expense payments:', expErr);
-            toast.warning('تم التوزيع لكن فشل تسجيل سداد بعض المصروفات');
-          } else {
-            toast.success(`تم سداد ${rows.length} مصروف`);
-          }
-        }
-      }
-
+      const { error } = await (supabase as any).rpc('save_payment_distribution', {
+        p_request_id: requestId.current,
+        p_payload: {
+          group_id: editMode ? editingDistributedPaymentId : newGroupId.current,
+          customer_id: customerId, customer_name: customerName, amount: inputAmountNum, fees: feesAllocated,
+          date: paymentDate, method: paymentMethod, sender_name: receiverName || collectorName || null,
+          expected_payment_ids: editMode ? editingPayments.map(payment => payment.id) : [],
+          source_payment_id: sourceAccountPaymentId,
+          purchase_invoice_id: activePurchaseInvoice?.id || null,
+          payments,
+          employees: enableAdditionalDistributions && enableEmployee ? employeePaymentDistributions : [],
+          custody: enableAdditionalDistributions && enableCustodyOption ? custodyDistributions : [],
+          expenses: enableAdditionalDistributions && enableExpensePayment ? expensePayments : [],
+          rentals: friendRental ? rentalGrouped.map(rental => ({ id: rental.id })) : [],
+        },
+      });
+      if (error) throw error;
+      toast.success('تم حفظ الدفعة وتوزيعاتها بنجاح');
       onSuccess();
       onOpenChange(false);
-    } catch (error) {
-      console.error('❌ خطأ عام في توزيع الدفعة:', error);
-      toast.error(`فشل في توزيع الدفعة: ${error.message || 'خطأ غير معروف'}`);
+    } catch (error: any) {
+      toast.error(error.message || 'تعذر حفظ التوزيع؛ أعد المحاولة بالبيانات نفسها');
     } finally {
+      savingRef.current = false;
       setDistributing(false);
     }
   };
 
-  const maxStep = enableAdditionalDistributions ? 2 : 1;
+  const maxStep = enableAdditionalDistributions ? 3 : 2;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[95vh] flex flex-col bg-card border-border/50 shadow-2xl overflow-hidden p-0">
+    <Dialog open={open} onOpenChange={value => { if (!distributing) onOpenChange(value); }}>
+      <DialogContent dir="rtl" className="finance-dialog w-[calc(100vw_-_1rem)] max-w-6xl h-[92vh] h-[92dvh] max-h-[95vh] max-h-[95dvh] flex flex-col bg-card border-primary/20 shadow-2xl overflow-hidden p-0 [&_button]:cursor-pointer [&_button]:transition-all [&_button]:duration-200">
         {/* Header */}
         <DialogHeader className="border-b border-border/50 p-4 bg-gradient-to-l from-primary/5 to-transparent shrink-0">
           <div className="flex items-center gap-3">
@@ -1901,47 +1255,20 @@ export function EnhancedDistributePaymentDialog({
           </div>
         ) : (
           <>
-            {/* Step Indicator */}
-            {enableAdditionalDistributions && (
-              <div className="flex items-center justify-center gap-2 py-3 border-b border-border/20 bg-muted/10 shrink-0">
-                <button 
-                  type="button"
-                  onClick={() => step > 1 && setStep(1)} 
-                  className="flex items-center gap-2 focus:outline-none hover:opacity-85 transition-opacity"
-                >
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                    step === 1 
-                      ? 'bg-primary text-primary-foreground ring-4 ring-primary/20' 
-                      : 'bg-primary/20 text-primary'
-                  }`}>
-                    {step > 1 ? <CheckCircle className="h-4 w-4 text-primary" /> : '1'}
-                  </div>
-                  <span className={`text-xs font-bold ${step === 1 ? 'text-primary' : 'text-muted-foreground'}`}>تفاصيل وتوزيع الدفعة</span>
+            <nav aria-label="خطوات توزيع الدفعة" className="grid grid-flow-col auto-cols-fr gap-1.5 sm:gap-2 border-b bg-muted/20 p-2 sm:p-3 shrink-0">
+              {['حساب العميل', ...(enableAdditionalDistributions ? ['أوجه صرف الدفعة'] : []), 'المراجعة والحفظ'].map((label, index) => (
+                <button type="button" key={label} disabled={distributing || index + 1 > step} onClick={() => setStep(index + 1)} aria-current={step === index + 1 ? 'step' : undefined}
+                  className={'flex min-h-12 items-center justify-center gap-1.5 sm:gap-2 rounded-xl px-1.5 sm:px-2 py-2.5 text-[11px] sm:text-sm font-semibold leading-snug transition-all duration-200 ' + (step === index + 1 ? 'bg-card text-primary shadow-sm ring-1 ring-primary/30' : 'text-muted-foreground hover:bg-muted')}>
+                  <span className={'flex h-6 w-6 shrink-0 items-center justify-center rounded-full ' + (step === index + 1 ? 'bg-primary text-primary-foreground' : 'bg-muted')}>{index + 1}</span>{label}
                 </button>
-                
-                <div className="w-12 h-0.5 bg-muted"></div>
-                
-                <button 
-                  type="button"
-                  disabled={step < 2}
-                  className="flex items-center gap-2 focus:outline-none disabled:cursor-not-allowed"
-                >
-                  <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                    step === 2 
-                      ? 'bg-primary text-primary-foreground ring-4 ring-primary/20' 
-                      : 'bg-muted text-muted-foreground'
-                  }`}>2</div>
-                  <span className={`text-xs font-bold ${step === 2 ? 'text-primary' : 'text-muted-foreground'}`}>التوزيعات الإضافية (موظفين ومصروفات)</span>
-                </button>
-              </div>
-            )}
-
-            <div className="flex-1 flex flex-col overflow-hidden min-h-0 bg-background/50">
+              ))}
+            </nav>
+            <div className="flex-1 flex flex-col overflow-hidden min-h-0">
               {/* Step 1: Payment Details & Customer Allocation */}
               {step === 1 && (
-                <div className="flex-1 flex flex-col lg:flex-row overflow-hidden min-h-0">
+                <div className="flex-1 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden min-h-0">
                   {/* Left Side (wider): Items Tabs */}
-                  <div className="flex-1 overflow-y-auto p-5 min-h-0 order-2 lg:order-1 border-r border-border/10 bg-background/30">
+                  <div className="flex-1 lg:overflow-y-auto p-4 sm:p-5 lg:min-h-0 shrink-0 order-2 lg:order-1 border-r border-border/10 bg-background/30">
                     <ItemsTabsSection
                       items={items}
                       setItems={setItems}
@@ -1952,7 +1279,7 @@ export function EnhancedDistributePaymentDialog({
                   </div>
 
                   {/* Right Side (narrower): Payment Inputs and Summary */}
-                  <div className="lg:w-[380px] shrink-0 p-5 space-y-4 bg-card border-l border-border/50 overflow-y-auto order-1 lg:order-2 flex flex-col justify-between">
+                  <div className="lg:w-[380px] shrink-0 p-5 space-y-4 bg-card border-l border-border/50 lg:overflow-y-auto order-1 lg:order-2 flex flex-col justify-between">
                     <div className="space-y-4">
                       <h3 className="text-sm font-bold text-primary dark:text-white border-b pb-2 mb-3 flex items-center gap-2">
                         <Wallet className="h-4 w-4 text-primary" />
@@ -2069,7 +1396,7 @@ export function EnhancedDistributePaymentDialog({
                             size="sm"
                           >
                             <Sparkles className="h-4 w-4 ml-1.5 animate-pulse" />
-                            توزيع تلقائي ذكي (حسب الأقدمية)
+                            توزيع تلقائي على المحدد (العقود الأقدم أولًا)
                           </Button>
 
                           {items.filter(i => i.selected).length === 0 && (
@@ -2098,6 +1425,7 @@ export function EnhancedDistributePaymentDialog({
                                   // Reset step 2 fields if toggled off
                                   setEnableEmployee(false);
                                   setEnableCustodyOption(false);
+                                  setConvertToCustody(false);
                                   setEnableExpensePayment(false);
                                 }
                               }}
@@ -2114,10 +1442,10 @@ export function EnhancedDistributePaymentDialog({
               )}
 
               {/* Step 2: Disbursements & Custody */}
-              {step === 2 && (
-                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 overflow-y-auto p-5 gap-5 min-h-0 bg-background/20">
+              {step === 2 && enableAdditionalDistributions && (
+                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 overflow-y-auto p-3 sm:p-5 gap-4 sm:gap-5 min-h-0 bg-background/20">
                   {/* 1. Employee Distributions */}
-                  <div className="bg-card p-5 rounded-2xl border border-border/40 shadow-sm flex flex-col min-h-[420px] overflow-y-auto">
+                  <div className="bg-card p-4 sm:p-5 rounded-2xl border border-border shadow-sm flex flex-col overflow-y-auto">
                     <div className="flex items-center justify-between border-b pb-3 mb-4">
                       <h3 className="text-base font-bold text-foreground flex items-center gap-2">
                         <div className="p-1.5 rounded-lg bg-emerald-500/10">
@@ -2151,7 +1479,7 @@ export function EnhancedDistributePaymentDialog({
                   </div>
 
                   {/* 2. Custody Section */}
-                  <div className="bg-card p-5 rounded-2xl border border-border/40 shadow-sm flex flex-col min-h-[420px] overflow-y-auto">
+                  <div className="bg-card p-4 sm:p-5 rounded-2xl border border-border shadow-sm flex flex-col overflow-y-auto">
                     <div className="flex items-center justify-between border-b pb-3 mb-4">
                       <h3 className="text-base font-bold text-foreground flex items-center gap-2">
                         <div className="p-1.5 rounded-lg bg-amber-500/10">
@@ -2186,7 +1514,7 @@ export function EnhancedDistributePaymentDialog({
                   </div>
 
                   {/* 3. Expense Payment Section */}
-                  <div className="bg-card p-5 rounded-2xl border border-border/40 shadow-sm flex flex-col min-h-[420px] overflow-y-auto">
+                  <div className="bg-card p-4 sm:p-5 rounded-2xl border border-border shadow-sm flex flex-col overflow-y-auto md:col-span-2 xl:col-span-1">
                     <div className="flex items-center justify-between border-b pb-3 mb-4">
                       <h3 className="text-base font-bold text-foreground flex items-center gap-2">
                         <div className="p-1.5 rounded-lg bg-rose-500/10">
@@ -2217,19 +1545,21 @@ export function EnhancedDistributePaymentDialog({
                   </div>
                 </div>
               )}
+              {step === maxStep && <DistributionReview amount={inputAmountNum} fees={feesAllocated} items={items} employees={employeesAllocated} custody={custodyAllocated} expenses={expensesAllocated} errors={[...validationErrors, ...(editDataError ? [editDataError] : []), ...(editDataLoading ? ['جارٍ تحميل التوزيعات السابقة'] : [])]} customerName={customerName} date={paymentDate} method={paymentMethod} />}
             </div>
           </>
         )}
 
         {/* Footer */}
         <div className="border-t border-border/50 p-4 bg-accent/5 shrink-0 flex items-center justify-between">
-          <div className="flex gap-2 w-full">
+          <div className="flex flex-wrap gap-2 w-full">
             {step > 1 && (
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => setStep(step - 1)}
-                className="h-10 px-4 font-bold text-xs"
+                disabled={distributing}
+                className="h-10 px-4 font-bold text-xs flex-1 sm:flex-none"
               >
                 السابق
               </Button>
@@ -2240,7 +1570,7 @@ export function EnhancedDistributePaymentDialog({
               variant="secondary"
               onClick={() => onOpenChange(false)}
               disabled={distributing}
-              className="h-10 px-4 font-bold text-xs"
+              className="h-10 px-4 font-bold text-xs flex-1 sm:flex-none"
             >
               إلغاء
             </Button>
@@ -2263,9 +1593,9 @@ export function EnhancedDistributePaymentDialog({
                   }
                   setStep(step + 1);
                 }}
-                className="mr-auto h-10 px-6 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs"
+                className="w-full sm:w-auto sm:mr-auto h-10 px-6 bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs"
               >
-                التالي
+                    {step + 1 === maxStep ? 'مراجعة التوزيع' : 'متابعة إلى أوجه الصرف'}
               </Button>
             ) : null}
 
@@ -2276,10 +1606,11 @@ export function EnhancedDistributePaymentDialog({
                 onClick={handleDistribute}
                 disabled={
                   distributing ||
-                  (!hasCustomerItems && !hasExpensePayments && !hasAnyAllocation) ||
+                  loadingEmployees || editDataLoading || !!editDataError || validationErrors.length > 0 ||
+                  (!hasCustomerItems && !hasExpensePayments && !hasAnyAllocation && !saveRemainderAsCredit) ||
                   (hasCustomerItems && inputAmountNum > 0 && Math.abs(remainingToAllocate) > 0.01 && !saveRemainderAsCredit)
                 }
-                className="mr-auto h-10 px-6 font-bold text-xs bg-gradient-to-r from-primary to-primary/80 hover:from-primary hover:to-primary/90 text-primary-foreground shadow-lg shadow-primary/20"
+                className="w-full sm:w-auto sm:mr-auto h-10 px-6 font-bold text-xs bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 active:scale-[0.98]"
               >
                 {distributing ? (
                   <span className="flex items-center gap-2">

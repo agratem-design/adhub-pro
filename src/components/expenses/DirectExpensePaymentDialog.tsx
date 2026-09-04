@@ -1,5 +1,7 @@
 // @ts-nocheck
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { createRequestId } from '@/lib/requestId';
+import '@/components/finance/finance.css';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,12 +40,15 @@ export function DirectExpensePaymentDialog({ open, onOpenChange, expense, onSucc
   const [paidAt, setPaidAt] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const requestId = useRef(createRequestId());
   const [custodyAccounts, setCustodyAccounts] = useState<CustodyAccount[]>([]);
 
   const remaining = expense ? Number(expense.amount) - Number(expense.paid_amount || 0) : 0;
 
   useEffect(() => {
     if (!open) return;
+    requestId.current = createRequestId();
     setAmount(remaining > 0 ? String(remaining) : '');
     setSourceType('cash');
     setSourceDetails('');
@@ -60,9 +65,9 @@ export function DirectExpensePaymentDialog({ open, onOpenChange, expense, onSucc
   }, [open, expense?.id]);
 
   const handleSave = async () => {
-    if (!expense) return;
+    if (!expense || savingRef.current) return;
     const amt = parseFloat(amount);
-    if (!amt || amt <= 0) {
+    if (!Number.isFinite(amt) || amt <= 0) {
       toast.error('الرجاء إدخال مبلغ صحيح');
       return;
     }
@@ -80,37 +85,26 @@ export function DirectExpensePaymentDialog({ open, onOpenChange, expense, onSucc
         return;
       }
       payment_source = `custody:${custodyId}`;
+      const account = custodyAccounts.find(c => c.id === custodyId);
+      if (!account || amt > Number(account.current_balance)) {
+        toast.error('المبلغ يتجاوز الرصيد المتاح في العهدة');
+        return;
+      }
     } else payment_source = sourceDetails || 'other';
 
+    if (!paidAt || !Number.isFinite(new Date(paidAt).getTime())) { toast.error('حدد تاريخ سداد صحيحًا'); return; }
+    savingRef.current = true;
     setSaving(true);
     try {
-      const { error } = await supabase.from('expense_payments').insert({
-        expense_id: expense.id,
-        amount: amt,
-        paid_at: new Date(paidAt).toISOString(),
-        paid_via: 'direct',
-        payment_source,
-        notes: notes || null,
+      const { error } = await supabase.rpc('record_expense_payment', {
+        p_expense_id: expense.id,
+        p_amount: amt,
+        p_paid_at: new Date(paidAt).toISOString(),
+        p_source: payment_source,
+        p_notes: notes || null,
+        p_request_id: requestId.current,
       });
       if (error) throw error;
-
-      // Deduct from custody if applicable
-      if (sourceType === 'custody' && custodyId) {
-        const acc = custodyAccounts.find(c => c.id === custodyId);
-        if (acc) {
-          await supabase.from('custody_expenses').insert({
-            custody_account_id: custodyId,
-            description: `سداد مصروف: ${expense.description}`,
-            amount: amt,
-            expense_category: 'expense_payment',
-            expense_date: paidAt,
-            notes: `expense_id=${expense.id}`,
-          });
-          await supabase.from('custody_accounts').update({
-            current_balance: Number(acc.current_balance) - amt,
-          }).eq('id', custodyId);
-        }
-      }
 
       toast.success('تم تسجيل الدفعة');
       onOpenChange(false);
@@ -119,25 +113,27 @@ export function DirectExpensePaymentDialog({ open, onOpenChange, expense, onSucc
       console.error(e);
       toast.error('فشل تسجيل الدفعة: ' + (e.message || ''));
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md bg-card" dir="rtl">
+    <Dialog open={open} onOpenChange={v => { if (!saving) onOpenChange(v); }}>
+      <DialogContent className="finance-dialog sm:max-w-lg max-h-[92dvh] overflow-y-auto bg-card rounded-2xl border-primary/20 [&_button]:cursor-pointer [&_button]:transition-all [&_button]:duration-200" dir="rtl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Wallet className="h-5 w-5 text-primary" />
             سداد مباشر للمصروف
           </DialogTitle>
+          <p className="text-sm text-muted-foreground">اختر مصدر الأموال وسجّل مبلغ السداد. سيظهر القيد في سجل تسديدات المصروف.</p>
         </DialogHeader>
 
         {expense && (
           <div className="space-y-3 pt-2">
             <div className="p-3 rounded-lg bg-muted/40 border border-border/50 text-sm">
               <div className="font-semibold mb-1">{expense.description}</div>
-              <div className="flex justify-between text-xs text-muted-foreground">
+              <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
                 <span>إجمالي: {Number(expense.amount).toLocaleString('ar-LY')} د.ل</span>
                 <span>مسدد: {Number(expense.paid_amount || 0).toLocaleString('ar-LY')} د.ل</span>
                 <span className="font-bold text-destructive">متبقي: {remaining.toLocaleString('ar-LY')} د.ل</span>
@@ -146,7 +142,7 @@ export function DirectExpensePaymentDialog({ open, onOpenChange, expense, onSucc
 
             <div className="space-y-1.5">
               <Label className="text-xs">المبلغ المدفوع (د.ل)</Label>
-              <Input type="number" min={0} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+              <Input aria-label="المبلغ المدفوع" className="h-12 text-lg font-bold" type="number" min={0.01} max={remaining} step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </div>
 
             <div className="space-y-1.5">

@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { FinancePageHeader, FinanceStatCard, FinanceDialogContent, FinanceDialogHeader, FinanceDialogFooter } from '@/components/finance/FinanceUI';
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
@@ -12,10 +13,12 @@ import { Textarea } from '@/components/ui/textarea';
 import * as UIDialog from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
-import { Loader2, DollarSign, Plus, Calculator, TrendingUp, TrendingDown, Lock, Calendar, Hash, Printer, Edit, Trash2, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, DollarSign, Plus, Calculator, TrendingUp, TrendingDown, Lock, Calendar, Hash, Printer, Edit, Trash2, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight, Wallet, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import ExpenseReceiptPrintDialog from '@/components/billing/ExpenseReceiptPrintDialog';
 import { OperatingDuesPrintDialog } from '@/components/billing/OperatingDuesPrintDialog';
+import { calculateOperatingFees, operatingFeeAccruals } from '@/lib/operatingFees';
+import { groupPaymentSources, normalizeWithdrawal, type PaymentSource } from '@/lib/paymentSources';
 
 interface Contract {
   id: string;
@@ -51,6 +54,7 @@ interface Withdrawal {
   note?: string;
   receiver_name?: string;
   sender_name?: string;
+  distributed_payment_id?: string | null;
 }
 
 interface PeriodClosure {
@@ -97,54 +101,10 @@ const normalizeContract = (record: any): Contract => {
   const normalizedFeePercent = Math.round(feePercent * 100) / 100;
   
   // ✅ نسب مستقلة للتركيب والطباعة
-  const feePercentInstallation = toNumber(record?.operating_fee_rate_installation || feePercent);
-  const feePercentPrint = toNumber(record?.operating_fee_rate_print || feePercent);
+  const feePercentInstallation = toNumber(record?.operating_fee_rate_installation ?? feePercent);
+  const feePercentPrint = toNumber(record?.operating_fee_rate_print ?? feePercent);
   
-  // ✅ رسوم تشغيل اللوحات الصديقة أولاً لمعرفة التكاليف وطرحها من النسبة العادية
-  const friendOpEnabled = record?.friend_rental_operating_fee_enabled === true;
-  const friendOpRate = toNumber(record?.friend_rental_operating_fee_rate);
-  const friendCostsTotal = (() => {
-    const rawData = record?.friend_rental_data;
-    if (!rawData) return 0;
-    try {
-      const data = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
-      if (Array.isArray(data)) {
-        return data.reduce((sum: number, item: any) => sum + toNumber(item.friendRentalCost ?? item.friend_rental_cost), 0);
-      }
-    } catch (e) {
-      console.warn('Failed to parse friend_rental_data in Expenses:', e);
-    }
-    return 0;
-  })();
-  const friendFeeFull = friendOpEnabled
-    ? Math.round(friendCostsTotal * (friendOpRate / 100))
-    : 0;
-
-  // ✅ حساب القيمة الكاملة للنسبة بنسب مستقلة (مع طرح تكاليف الصديق من الوعاء لمنع التكرار)
-  const regularRentalBase = Math.max(0, rentCost - friendCostsTotal);
-  let fullFeeAmount = Math.round(regularRentalBase * (normalizedFeePercent / 100));
-  if (includeOperatingInInstallation) fullFeeAmount += Math.round(installationCost * (feePercentInstallation / 100));
-  if (includeOperatingInPrint) fullFeeAmount += Math.round(printCost * (feePercentPrint / 100));
-
-  // ✅ رسوم تشغيل الشراكة
-  const partnershipRaw = record?.partnership_operating_data;
-  const partnershipData: any[] = (() => {
-    if (!partnershipRaw) return [];
-    try { return typeof partnershipRaw === 'string' ? JSON.parse(partnershipRaw) : (Array.isArray(partnershipRaw) ? partnershipRaw : []); } catch { return []; }
-  })();
-  const partnershipFeeFull = partnershipData.reduce(
-    (s: number, p: any) => s + toNumber(p?.operating_fee_amount),
-    0
-  );
-
-  fullFeeAmount += friendFeeFull + partnershipFeeFull;
-
-  // ✅ حساب النسبة المتحصلة فعلياً (مع تحديد أقصى 100%)
-  const paymentRatio = totalAmount > 0 ? Math.min(1, totalPaid / totalAmount) : 0;
-  let collectedFeeAmount = Math.round(regularRentalBase * paymentRatio * (normalizedFeePercent / 100));
-  if (includeOperatingInInstallation) collectedFeeAmount += Math.round(installationCost * paymentRatio * (feePercentInstallation / 100));
-  if (includeOperatingInPrint) collectedFeeAmount += Math.round(printCost * paymentRatio * (feePercentPrint / 100));
-  collectedFeeAmount += Math.round((friendFeeFull + partnershipFeeFull) * paymentRatio);
+  const { fullFeeAmount, collectedFeeAmount, friendCosts: friendCostsTotal, friendFee: friendFeeFull, partnershipFee: partnershipFeeFull } = calculateOperatingFees(record, totalPaid);
 
   const feeAmount = collectedFeeAmount;
 
@@ -204,9 +164,21 @@ export default function OperatingExpenses() {
   const { confirm: systemConfirm } = useSystemDialog();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
+  const [paymentSources, setPaymentSources] = useState<Record<string, PaymentSource>>({});
+  const [withdrawalSearch, setWithdrawalSearch] = useState('');
+  const [withdrawalSourceFilter, setWithdrawalSourceFilter] = useState('all');
+  const [selectedSource, setSelectedSource] = useState<PaymentSource | null>(null);
+  const filteredWithdrawals = useMemo(() => withdrawals.filter(w => {
+    if (withdrawalSourceFilter === 'distributed' && !w.distributed_payment_id) return false;
+    if (withdrawalSourceFilter === 'manual' && w.distributed_payment_id) return false;
+    const source = paymentSources[w.distributed_payment_id || ''];
+    return [w.amount, w.note, w.receiver_name, w.sender_name, w.distributed_payment_id, source?.customerName, source?.contracts.join(' ')].join(' ').toLowerCase().includes(withdrawalSearch.trim().toLowerCase());
+  }), [withdrawals, withdrawalSourceFilter, withdrawalSearch, paymentSources]);
   const [closures, setClosures] = useState<PeriodClosure[]>([]);
   const [excludedIds, setExcludedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [ledgerNotice, setLedgerNotice] = useState('');
+  const [contractWarnings, setContractWarnings] = useState<string[]>([]);
   const [recentPayments, setRecentPayments] = useState<RecentPayment[]>([]);
   const [allAdditions, setAllAdditions] = useState<RecentPayment[]>([]);
   const [allAdditionsOpen, setAllAdditionsOpen] = useState(false);
@@ -397,10 +369,11 @@ export default function OperatingExpenses() {
 
         // ✅ احتساب المدفوع فعلياً لكل عقد من جدول customer_payments (إيصالات + دفعات حساب + دفعات عامة)
         try {
-          const { data: paymentsData } = await (supabase as any)
+          const { data: paymentsData, error: paymentsError } = await (supabase as any)
             .from('customer_payments')
             .select('id, contract_number, amount, entry_type, paid_at, customer_name')
             .order('paid_at', { ascending: false });
+          if (paymentsError) throw paymentsError;
 
           const paidByContract: Record<string, number> = {};
           const validPayments: any[] = [];
@@ -416,65 +389,23 @@ export default function OperatingExpenses() {
             }
           });
 
-          // جلب آخر 10 دفعات مع حساب النسبة لكل منها
-          const contractInfo: Record<string, { fullFeeAmount: number; totalAmount: number; feeRate: number }> = {};
-          mappedContracts.forEach(c => {
-            contractInfo[c.contract_number] = {
-              fullFeeAmount: c.fullFeeAmount,
-              totalAmount: c.total_amount,
-              feeRate: c.feePercent
-            };
-          });
-
-          const mappedAdditions = validPayments.map(p => {
-            const info = contractInfo[String(p.contract_number)];
-            const amount = Number(p.amount) || 0;
-            let feeAmount = 0;
-            let feeRate = 0;
-            if (info) {
-              feeRate = info.feeRate;
-              if (info.totalAmount > 0) {
-                feeAmount = Math.round(amount * (info.fullFeeAmount / info.totalAmount) * 100) / 100;
-              } else {
-                feeAmount = Math.round(amount * (info.feeRate / 100) * 100) / 100;
-              }
-            } else {
-              feeRate = 3;
-              feeAmount = Math.round(amount * (feeRate / 100) * 100) / 100;
-            }
-            return {
-              id: p.id,
-              contract_number: String(p.contract_number),
-              customer_name: p.customer_name || '',
-              amount,
-              paid_at: p.paid_at,
-              fee_rate: feeRate,
-              fee_amount: feeAmount
-            };
-          });
+          const mappedAdditions = operatingFeeAccruals(contractsData || [], validPayments).map(p => ({
+            id: p.id, contract_number: String(p.contract_number), customer_name: p.customer_name || '',
+            amount: Number(p.amount) || 0, paid_at: p.paid_at, fee_rate: p.fee_rate, fee_amount: p.fee_amount,
+          }));
           setAllAdditions(mappedAdditions);
           setRecentPayments(mappedAdditions.slice(0, 10));
 
-          // تحديث العقود بقيم المدفوع المحسوبة وإعادة حساب النسبة والمتجمع للنسبة
-          mappedContracts = mappedContracts.map((c) => {
-            const paid = paidByContract[String(c.contract_number)] || 0;
-            const collectionPct = c.total_amount > 0 ? (paid / c.total_amount) * 100 : 0;
-            // ✅ حساب النسبة مع نسب مستقلة للتركيب والطباعة
-            const paymentRatio = c.total_amount > 0 ? Math.min(1, paid / c.total_amount) : 0;
-            const regularRentalBase = Math.max(0, c.rent_cost - (c.friendCostsTotal || 0));
-            let collectedFee = Math.round(regularRentalBase * paymentRatio * (c.feePercent / 100));
-            if (c.include_operating_in_installation) collectedFee += Math.round(c.installation_cost * paymentRatio * (c.feePercentInstallation / 100));
-            if (c.include_operating_in_print) collectedFee += Math.round(c.print_cost * paymentRatio * (c.feePercentPrint / 100));
-            collectedFee += Math.round(((c.friendFeeFull || 0) + (c.partnershipFeeFull || 0)) * paymentRatio);
-            return {
-              ...c,
-              total_paid: paid,
-              collectionPercentage: Math.round(collectionPct * 100) / 100,
-              collectedFeeAmount: collectedFee,
-            };
-          });
+          mappedContracts = (contractsData || [])
+            .map(record => normalizeContract({ ...record, 'Total Paid': paidByContract[String(record.Contract_Number)] || 0 }))
+            .filter(contract => Number(contract.contract_number) >= 1086);
+          const differences = (contractsData || []).filter(record => Number(record.Contract_Number) >= 1086 && toNumber(record['Total Paid']) !== (paidByContract[String(record.Contract_Number)] || 0));
+          setLedgerNotice(differences.length ? `يعتمد الرصيد على سجل الدفعات الفعلي. الإجمالي المحفوظ قديم في ${differences.length} عقدًا ولا يُستخدم في هذا الحساب.` : 'يعتمد الرصيد على سجل الدفعات الفعلي.');
+          setContractWarnings(mappedContracts.filter(c => c.total_paid > c.total_amount).map(c => `العقد ${c.contract_number}: قيمته ${c.total_amount.toLocaleString()} د.ل، والمسجل عليه ${c.total_paid.toLocaleString()} د.ل. راجع قيمة العقد وتخصيص الدفعات.`));
         } catch (e) {
-          console.warn('تعذر تحميل الدفعات، سيتم الاعتماد على Total Paid من جدول العقود فقط', e);
+          mappedContracts = [];
+          setLedgerNotice('تعذر تحميل سجل الدفعات؛ لا يمكن اعتماد الرصيد الظاهر. أعد تحميل الصفحة.');
+          toast.error('تعذر حساب مستحقات التشغيل من سجل الدفعات');
         }
 
         mappedContracts.sort((a, b) => {
@@ -490,23 +421,27 @@ export default function OperatingExpenses() {
 
       // Load withdrawals
       try {
-        const { data: withdrawalsData } = await supabase
+        const { data: withdrawalsData, error: withdrawalsError } = await supabase
           .from('expenses_withdrawals')
           .select('*')
-          .order('created_at', { ascending: false });
+          .order('date', { ascending: false });
+        if (withdrawalsError) throw withdrawalsError;
         
         if (Array.isArray(withdrawalsData)) {
-          const mappedWithdrawals = withdrawalsData.map((w: any) => ({
-            id: w.id?.toString() || `w-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            amount: Number(w.amount) || 0,
-            date: (w.date || w.created_at || new Date().toISOString()).slice(0, 10),
-            method: w.method || undefined,
-            note: w.note || undefined
-          }));
+          const mappedWithdrawals = withdrawalsData.map(normalizeWithdrawal);
           setWithdrawals(mappedWithdrawals);
+          const ids = [...new Set(mappedWithdrawals.map(w => w.distributed_payment_id).filter(Boolean))];
+          if (ids.length) {
+            const { data, error } = await supabase.from('customer_payments')
+              .select('distributed_payment_id, customer_id, customer_name, amount, paid_at, contract_number, printed_invoice_id, sales_invoice_id, composite_task_id, reference')
+              .in('distributed_payment_id', ids);
+            if (error) throw error;
+            setPaymentSources(groupPaymentSources(data || []));
+          } else setPaymentSources({});
         }
       } catch (error) {
         console.error('خطأ في تحميل السحوبات:', error);
+        toast.error('تعذر تحميل السحوبات أو مصادرها؛ أعد تحميل الصفحة للتحقق من الرصيد');
       }
 
       // Load period closures
@@ -749,9 +684,9 @@ export default function OperatingExpenses() {
 
     const totalWithdrawnAll = withdrawals.reduce((sum, w) => sum + w.amount, 0);
     // ✅ جميع المسحوبات تبدأ من عقد 1086 - لا يوجد مسحوبات قبلها
-    const effectiveWithdrawals = totalWithdrawnAll;
+    const effectiveWithdrawals = totalWithdrawnAll - computedClosures.reduce((sum, closure) => sum + closure.total_withdrawn, 0);
     // ✅ الرصيد المتبقي = مجموع النسب المفتوحة - المسحوبات
-    const remainingPool = Math.max(0, poolTotal - effectiveWithdrawals);
+    const remainingPool = poolTotal - effectiveWithdrawals;
 
     return {
       totalContracts,
@@ -789,6 +724,7 @@ export default function OperatingExpenses() {
 
   // Add withdrawal
   const addWithdrawal = async () => {
+    if (!canEditSection) return;
     if (!withdrawalAmount) {
       toast.error('يرجى إدخال مبلغ السحب');
       return;
@@ -801,6 +737,18 @@ export default function OperatingExpenses() {
 
     try {
       const amount = parseFloat(withdrawalAmount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        toast.error('أدخل مبلغ سحب أكبر من صفر');
+        return;
+      }
+      if (editingWithdrawal?.distributed_payment_id) {
+        toast.error('عدّل السحب من الدفعة الموزعة المرتبطة للحفاظ على تطابق الحسابات');
+        return;
+      }
+      if (amount > totals.remainingPool + (editingWithdrawal?.amount || 0)) {
+        toast.error('المبلغ يتجاوز رصيد مستحقات التشغيل المتاح');
+        return;
+      }
       
       // استخدام user_id من الجلسة الحالية
       const { data: { user } } = await supabase.auth.getUser();
@@ -915,6 +863,11 @@ export default function OperatingExpenses() {
 
   // Delete withdrawal
   const deleteWithdrawal = async (id: string) => {
+    if (!canEditSection) return;
+    if (withdrawals.find(row => row.id === id)?.distributed_payment_id) {
+      toast.error('عدّل السحب من الدفعة الموزعة المرتبطة للحفاظ على تطابق الحسابات');
+      return;
+    }
     if (!await systemConfirm({ title: 'تأكيد الحذف', message: 'هل أنت متأكد من حذف هذا السحب؟', variant: 'destructive', confirmText: 'حذف' })) {
       return;
     }
@@ -1106,105 +1059,28 @@ export default function OperatingExpenses() {
   }
 
   return (
-    <div className="w-full px-4 md:px-6 py-6 md:py-8 space-y-6 animate-fade-in" dir="rtl">
-      {/* Premium Glassmorphic Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-orange-500/10 via-amber-500/5 to-transparent border border-orange-500/15 p-6 backdrop-blur-sm shadow-sm">
-        <div className="absolute right-0 top-0 -z-10 h-32 w-32 rounded-full bg-orange-500/5 blur-3xl"></div>
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div className="flex items-center gap-4">
-            <Button 
-              variant="ghost" 
-              onClick={() => navigate('/admin/expense-management')}
-              className="h-10 w-10 p-0 rounded-xl hover:bg-orange-500/10 hover:text-orange-600 transition-colors shrink-0"
-            >
-              <ArrowRight className="h-5 w-5" />
-            </Button>
-            <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-amber-500 rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/20 text-white shrink-0">
-              <Calculator className="h-6 w-6" />
-            </div>
-            <div>
-              <h1 className="text-2xl md:text-3xl font-extrabold text-foreground tracking-tight">مصروفات التشغيل</h1>
-              <p className="text-muted-foreground text-sm mt-1">حساب نسب وعقود التشغيل والمسحوبات وإغلاقات الفترات</p>
-            </div>
-          </div>
-        </div>
+    <div className="finance-page w-full max-w-[1440px] mx-auto px-4 md:px-6 py-6 space-y-6" dir="rtl">
+      <FinancePageHeader title="مصروفات التشغيل" description="راجع مستحقات العقود المحصّلة، وتتبع السحوبات والدفعات التي موّلتها." icon={Calculator}
+        actions={<>
+          <Button variant="outline" onClick={() => setShowPrintDialog(true)} className="gap-2"><Printer className="h-4 w-4" /> طباعة الكشف</Button>
+          {canEditSection && <><Button variant="outline" onClick={() => setClosureOpen(true)} className="gap-2"><Lock className="h-4 w-4" /> تسكير حساب</Button><Button onClick={() => { setEditingWithdrawal(null); setWithdrawalOpen(true); }} className="gap-2"><Plus className="h-4 w-4" /> تسجيل سحب</Button></>}
+        </>} />
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+        <FinanceStatCard label="المتبقي للسحب" value={totals.remainingPool} icon={Wallet} tone={totals.remainingPool < 0 ? 'danger' : 'primary'} note="المستحق المحصّل − السحب الفعّال" />
+        <FinanceStatCard label="المستحقات المحصّلة" value={totals.poolTotal} icon={TrendingUp} tone="success" note="للعقود المفتوحة بدءًا من 1086" />
+        <FinanceStatCard label="إجمالي السحوبات" value={totals.totalWithdrawn} icon={TrendingDown} note="يشمل السحوبات المرتبطة بالدفعات" />
+        <FinanceStatCard label="العقود المفتوحة" value={totals.totalContracts} icon={FileText} currency={false} note="بعد الاستبعادات وإغلاق الفترات" />
       </div>
-
-      {/* Statistics Cards */}
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
-        <Card className="border-blue-500/20 bg-blue-500/[0.02] hover:bg-blue-500/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden">
-          <div className="absolute right-0 top-0 bottom-0 w-1 bg-blue-500"></div>
-          <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-xs font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
-              <Calculator className="h-3.5 w-3.5" /> إجمالي العقود
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-4 pt-0">
-            <div className="text-xl md:text-2xl font-black font-numbers tracking-tight">
-              {totals.totalContracts}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-emerald-500/20 bg-emerald-500/[0.02] hover:bg-emerald-500/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden">
-          <div className="absolute right-0 top-0 bottom-0 w-1 bg-emerald-500"></div>
-          <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-              <TrendingUp className="h-3.5 w-3.5" /> المجموع العام للنسبة
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-4 pt-0">
-            <div className="text-xl md:text-2xl font-black font-numbers tracking-tight">
-              {totals.poolTotal.toLocaleString('en-US')} <span className="text-[10px] font-semibold text-muted-foreground">د.ل</span>
-            </div>
-            <p className="text-[9px] text-muted-foreground mt-1 leading-tight">
-              مجموع نسب التشغيل المحصّلة للعقود النشطة (من 1086)
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-red-500/20 bg-red-500/[0.02] hover:bg-red-500/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden">
-          <div className="absolute right-0 top-0 bottom-0 w-1 bg-red-500"></div>
-          <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-xs font-bold text-red-600 dark:text-red-400 flex items-center gap-1.5">
-              <TrendingDown className="h-3.5 w-3.5" /> المسحوبات
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-4 pt-0">
-            <div className="text-xl md:text-2xl font-black font-numbers tracking-tight">
-              {totals.totalWithdrawn.toLocaleString('en-US')} <span className="text-[10px] font-semibold text-muted-foreground">د.ل</span>
-            </div>
-            <p className="text-[9px] text-muted-foreground mt-1 leading-tight">
-              إجمالي المسحوبات من مستحقات التشغيل (من عقد 1086)
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-amber-500/20 bg-amber-500/[0.02] hover:bg-amber-500/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden">
-          <div className="absolute right-0 top-0 bottom-0 w-1 bg-amber-500"></div>
-          <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-              <DollarSign className="h-3.5 w-3.5" /> الرصيد المتبقي للسحب
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-4 pt-0">
-            <div className="text-xl md:text-2xl font-black font-numbers tracking-tight text-amber-600 dark:text-amber-400">
-              {totals.remainingPool.toLocaleString('en-US')} <span className="text-[10px] font-semibold text-muted-foreground">د.ل</span>
-            </div>
-            <p className="text-[9px] text-muted-foreground mt-1 leading-tight">
-              المجموع العام − المسحوب الفعّال = المتبقي للسحب
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      {ledgerNotice && <p className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm text-muted-foreground">{ledgerNotice}</p>}
+      {contractWarnings.length > 0 && <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-800 dark:text-amber-300 space-y-2"><p className="font-bold">بيانات تحتاج مراجعة قبل اعتماد الرصيد نهائيًا</p>{contractWarnings.map(warning => <p key={warning}>{warning}</p>)}</div>}
 
       {/* Recent Payments - آخر 10 دفعات زادت الرصيد */}
       {recentPayments.length > 0 && (
         <Card className="shadow-sm border-primary/10 overflow-hidden">
-          <CardHeader className="pb-3 bg-muted/20 border-b flex flex-row items-center justify-between">
+          <CardHeader className="finance-toolbar pb-4 bg-muted/20 border-b">
             <CardTitle className="text-sm font-bold flex items-center gap-2 text-foreground">
-              <TrendingUp className="h-4 w-4 text-emerald-600 animate-pulse" />
-              آخر 10 مدفوعات زادت رصيد مستحقات التشغيل
+              <TrendingUp className="h-4 w-4 text-emerald-600" />
+              أحدث الدفعات وأثرها على مستحقات التشغيل
             </CardTitle>
             <Button 
               variant="ghost" 
@@ -1254,28 +1130,6 @@ export default function OperatingExpenses() {
         </Card>
       )}
 
-      {/* Action Buttons Console */}
-      <div className="flex flex-wrap gap-3">
-        {canEditSection && (
-          <Button onClick={() => {
-            setEditingWithdrawal(null);
-            setWithdrawalOpen(true);
-          }} className="bg-orange-600 hover:bg-orange-700 text-white gap-2 font-bold shadow-lg shadow-orange-500/10 transition-all">
-            <Plus className="h-4 w-4" />
-            تسجيل سحب جديد
-          </Button>
-        )}
-        {canEditSection && (
-          <Button onClick={() => setClosureOpen(true)} variant="outline" className="gap-2 font-bold border-orange-500/20 text-orange-600 hover:bg-orange-500/10 hover:text-orange-700 transition-colors">
-            <Lock className="h-4 w-4" />
-            تسكير حساب
-          </Button>
-        )}
-        <Button onClick={() => setShowPrintDialog(true)} variant="outline" className="gap-2 font-bold border-blue-500/20 text-blue-600 hover:bg-blue-500/10 hover:text-blue-700 transition-colors">
-          <Printer className="h-4 w-4" />
-          طباعة كشف
-        </Button>
-      </div>
 
       {/* Preview Panel */}
       {((closureType === 'period' && periodStart && periodEnd) || 
@@ -1607,12 +1461,25 @@ export default function OperatingExpenses() {
     </Card>
 
       {/* Withdrawals History */}
-      <Card className="border-primary/10 shadow-sm overflow-hidden">
-        <CardHeader className="bg-muted/10 border-b pb-3 flex flex-row items-center justify-between">
+      <Card className="border-primary/20 shadow-sm overflow-hidden">
+        <CardHeader className="bg-muted/20 border-b space-y-4">
           <CardTitle className="text-sm font-bold flex items-center gap-2">
             <TrendingDown className="h-4 w-4 text-rose-500" />
             سجل السحوبات من مستحقات التشغيل
           </CardTitle>
+          <p className="text-sm text-muted-foreground">تتبع كل سحب إلى الدفعة التي موّلته، مع بيان المستلم والعقود المرتبطة.</p>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Input aria-label="البحث في السحوبات" placeholder="ابحث بالمستلم، العميل، المبلغ أو رقم العقد" value={withdrawalSearch} onChange={e => setWithdrawalSearch(e.target.value)} className="sm:max-w-md bg-background" />
+            <Select value={withdrawalSourceFilter} onValueChange={setWithdrawalSourceFilter}>
+              <SelectTrigger className="sm:w-52 cursor-pointer" aria-label="مصدر السحب"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">جميع المصادر</SelectItem>
+                <SelectItem value="distributed">من دفعة موزعة</SelectItem>
+                <SelectItem value="manual">غير مرتبط بدفعة</SelectItem>
+              </SelectContent>
+            </Select>
+            <Badge variant="outline" className="self-start sm:self-center">{withdrawals.length} حركة</Badge>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -1622,19 +1489,33 @@ export default function OperatingExpenses() {
                   <TableHead className="text-right text-xs font-bold">التاريخ</TableHead>
                   <TableHead className="text-right text-xs font-bold">المبلغ</TableHead>
                   <TableHead className="text-right text-xs font-bold">الطريقة</TableHead>
+                  <TableHead className="text-right text-xs font-bold min-w-52">مصدر الأموال</TableHead>
                   <TableHead className="text-right text-xs font-bold">البيان</TableHead>
                   <TableHead className="text-right text-xs font-bold">المستلم/المسلم</TableHead>
                   <TableHead className="text-right text-xs font-bold">الإجراءات</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {withdrawals.map(withdrawal => (
+                {filteredWithdrawals.map(withdrawal => (
                   <TableRow key={withdrawal.id} className="hover:bg-muted/30 transition-colors border-b">
                     <TableCell className="text-right font-manrope text-sm text-muted-foreground">{new Date(withdrawal.date).toLocaleDateString('ar-LY')}</TableCell>
                     <TableCell className="text-right font-bold font-manrope text-sm text-rose-600">
                       {withdrawal.amount.toLocaleString()} د.ل
                     </TableCell>
                     <TableCell className="text-right text-sm">{withdrawal.method || '—'}</TableCell>
+                    <TableCell className="text-right">
+                      {withdrawal.distributed_payment_id ? (
+                        paymentSources[withdrawal.distributed_payment_id] ? (
+                          <button type="button" onClick={() => setSelectedSource(paymentSources[withdrawal.distributed_payment_id!])} className="cursor-pointer text-right rounded-lg border border-primary/20 bg-primary/5 p-2.5 w-full hover:bg-primary/10 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                            <span className="block text-xs text-muted-foreground">دفعة موزعة من</span>
+                            <span className="block font-semibold">{paymentSources[withdrawal.distributed_payment_id].customerName}</span>
+                            <span className="block text-xs font-semibold text-primary mt-1">إجمالي الدفعة: {paymentSources[withdrawal.distributed_payment_id].amount.toLocaleString('ar-LY')} د.ل</span>
+                            <span className="block text-xs text-muted-foreground mt-1">العقود: {paymentSources[withdrawal.distributed_payment_id].contracts.join('، ') || 'رصيد حساب / فواتير'}</span>
+                            {paymentSources[withdrawal.distributed_payment_id].creditAmount > 0 && <span className="block text-xs text-emerald-700 dark:text-emerald-400 mt-1">رصيد العميل: {paymentSources[withdrawal.distributed_payment_id].creditAmount.toLocaleString('ar-LY')} د.ل</span>}
+                          </button>
+                        ) : <span className="text-xs text-amber-700 dark:text-amber-400">دفعة مرتبطة؛ تفاصيل المصدر غير متاحة<br /><span dir="ltr">{withdrawal.distributed_payment_id}</span></span>
+                      ) : <Badge variant="secondary">غير مرتبط بدفعة</Badge>}
+                    </TableCell>
                     <TableCell className="text-right text-sm text-muted-foreground">{withdrawal.note || '—'}</TableCell>
                     <TableCell className="text-right text-xs">
                       {withdrawal.receiver_name && (
@@ -1668,6 +1549,7 @@ export default function OperatingExpenses() {
                             setWithdrawalOpen(true);
                           }}
                           title="تعديل"
+                          disabled={!canEditSection || !!withdrawal.distributed_payment_id}
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -1677,6 +1559,7 @@ export default function OperatingExpenses() {
                           className="h-8 w-8 p-0 rounded-lg hover:bg-rose-500/10 hover:text-rose-600 transition-colors"
                           onClick={() => deleteWithdrawal(withdrawal.id)}
                           title="حذف"
+                          disabled={!canEditSection || !!withdrawal.distributed_payment_id}
                         >
                           <Trash2 className="h-4 w-4 text-rose-600" />
                         </Button>
@@ -1684,10 +1567,10 @@ export default function OperatingExpenses() {
                     </TableCell>
                   </TableRow>
                 ))}
-                {withdrawals.length === 0 && (
+                {filteredWithdrawals.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                      لا توجد سحوبات مسجلة
+                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                      {withdrawals.length ? 'لا توجد سحوبات تطابق البحث' : 'لا توجد سحوبات مسجلة'}
                     </TableCell>
                   </TableRow>
                 )}
@@ -1788,6 +1671,21 @@ export default function OperatingExpenses() {
         </CardContent>
       </Card>
 
+      <UIDialog.Dialog open={!!selectedSource} onOpenChange={open => { if (!open) setSelectedSource(null); }}>
+        <FinanceDialogContent dir="rtl" className="max-w-lg">
+          <FinanceDialogHeader>
+            <UIDialog.DialogTitle>مصدر السحب · دفعة موزعة</UIDialog.DialogTitle>
+            <UIDialog.DialogDescription>تفاصيل الدفعة الأصلية التي موّلت السحب.</UIDialog.DialogDescription>
+          </FinanceDialogHeader>
+          {selectedSource && <div className="space-y-4">
+            <div className="rounded-xl bg-primary/5 border border-primary/20 p-4"><p className="text-sm text-muted-foreground">العميل</p><p className="font-bold text-lg">{selectedSource.customerName}</p><p className="font-manrope text-2xl mt-2">{selectedSource.amount.toLocaleString('ar-LY')} د.ل</p><p className="text-xs text-muted-foreground">إجمالي الدفعة الأصلية؛ قد يشمل أكثر من عقد</p></div>
+            <dl className="grid grid-cols-2 gap-3 text-sm"><dt className="text-muted-foreground">الموزع على العقود والفواتير</dt><dd className="font-semibold">{selectedSource.allocatedAmount.toLocaleString('ar-LY')} د.ل</dd><dt className="text-muted-foreground">رصيد العميل غير الموزع</dt><dd className="font-semibold text-emerald-700 dark:text-emerald-400">{selectedSource.creditAmount.toLocaleString('ar-LY')} د.ل</dd><dt className="text-muted-foreground">تاريخ الدفعة</dt><dd>{selectedSource.paidAt ? new Date(selectedSource.paidAt).toLocaleDateString('ar-LY') : 'غير مسجل'}</dd><dt className="text-muted-foreground">العقود</dt><dd>{selectedSource.contracts.join('، ') || 'رصيد حساب / فواتير'}</dd><dt className="text-muted-foreground">المرجع</dt><dd>{selectedSource.reference || 'غير مسجل'}</dd></dl>
+            <p className="text-xs text-muted-foreground break-all" dir="ltr">{selectedSource.distributedPaymentId}</p>
+            {selectedSource.customerId && <Button className="w-full cursor-pointer transition-all duration-200" onClick={() => navigate(`/admin/customer-billing?id=${encodeURIComponent(selectedSource.customerId!)}`)}>فتح حساب العميل والدفعة المرتبطة</Button>}
+          </div>}
+        </FinanceDialogContent>
+      </UIDialog.Dialog>
+
       {/* Add Withdrawal Dialog */}
       <UIDialog.Dialog open={withdrawalOpen} onOpenChange={(open) => {
         setWithdrawalOpen(open);
@@ -1808,8 +1706,8 @@ export default function OperatingExpenses() {
           setWithdrawalSenderName(editingWithdrawal.sender_name || '');
         }
       }}>
-        <UIDialog.DialogContent className="max-w-md p-6">
-          <UIDialog.DialogHeader>
+        <FinanceDialogContent className="max-w-md p-6">
+          <FinanceDialogHeader>
             <UIDialog.DialogTitle className="text-xl font-bold flex items-center gap-2">
               <TrendingDown className="h-5 w-5 text-orange-600" />
               {editingWithdrawal ? 'تعديل السحب' : 'تسجيل سحب جديد'}
@@ -1817,7 +1715,7 @@ export default function OperatingExpenses() {
             <UIDialog.DialogDescription className="text-xs">
               أدخل تفاصيل السحب من المجموع العام لمستحقات التشغيل.
             </UIDialog.DialogDescription>
-          </UIDialog.DialogHeader>
+          </FinanceDialogHeader>
           <div className="space-y-4 my-2">
             <div>
               <label className="text-xs font-bold text-muted-foreground block mb-1">مبلغ السحب (د.ل) *</label>
@@ -1877,26 +1775,26 @@ export default function OperatingExpenses() {
               />
             </div>
           </div>
-          <UIDialog.DialogFooter className="flex justify-end gap-2 border-t pt-4 mt-2">
+          <FinanceDialogFooter className="flex justify-end gap-2 border-t pt-4 mt-2">
             <Button variant="outline" onClick={() => setWithdrawalOpen(false)}>
               إلغاء
             </Button>
             <Button onClick={addWithdrawal} className="bg-orange-600 hover:bg-orange-700 text-white font-bold">
               {editingWithdrawal ? 'تحديث' : 'حفظ السحب'}
             </Button>
-          </UIDialog.DialogFooter>
-        </UIDialog.DialogContent>
+          </FinanceDialogFooter>
+        </FinanceDialogContent>
       </UIDialog.Dialog>
 
       {/* Closure Dialog */}
       <UIDialog.Dialog open={closureOpen} onOpenChange={setClosureOpen}>
-        <UIDialog.DialogContent className="max-w-lg">
-          <UIDialog.DialogHeader>
+        <FinanceDialogContent className="max-w-lg">
+          <FinanceDialogHeader>
             <UIDialog.DialogTitle>تسكير حساب</UIDialog.DialogTitle>
             <UIDialog.DialogDescription>
               ا��تر طريقة التسكير: بالفترة الزمنية أو بنطاق أرقام العقود
             </UIDialog.DialogDescription>
-          </UIDialog.DialogHeader>
+          </FinanceDialogHeader>
           <div className="expenses-dialog-form">
             <div>
               <label className="expenses-form-label">تاريخ التسكير</label>
@@ -1989,15 +1887,15 @@ export default function OperatingExpenses() {
               />
             </div>
           </div>
-          <UIDialog.DialogFooter>
+          <FinanceDialogFooter>
             <Button variant="outline" onClick={() => setClosureOpen(false)}>
               إلغاء
             </Button>
             <Button onClick={closePeriodOrRange} variant="destructive">
               تسكير الحساب
             </Button>
-          </UIDialog.DialogFooter>
-        </UIDialog.DialogContent>
+          </FinanceDialogFooter>
+        </FinanceDialogContent>
       </UIDialog.Dialog>
 
       {/* Withdrawal Receipt Print Dialog */}
@@ -2031,8 +1929,8 @@ export default function OperatingExpenses() {
 
       {/* All Additions Dialog */}
       <UIDialog.Dialog open={allAdditionsOpen} onOpenChange={setAllAdditionsOpen}>
-        <UIDialog.DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-6" dir="rtl">
-          <UIDialog.DialogHeader className="pb-4 border-b">
+        <FinanceDialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-6" dir="rtl">
+          <FinanceDialogHeader className="pb-4 border-b">
             <UIDialog.DialogTitle className="text-xl font-bold flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-green-600" />
               مصادر جميع إضافات رسوم التشغيل ({allAdditions.length})
@@ -2040,7 +1938,7 @@ export default function OperatingExpenses() {
             <UIDialog.DialogDescription>
               سجل تفصيلي بكافة الدفعات التي رفعت رصيد مستحقات التشغيل.
             </UIDialog.DialogDescription>
-          </UIDialog.DialogHeader>
+          </FinanceDialogHeader>
           <div className="flex-1 overflow-y-auto my-4 pr-1">
             <Table>
               <TableHeader>
@@ -2082,10 +1980,10 @@ export default function OperatingExpenses() {
               </TableBody>
             </Table>
           </div>
-          <UIDialog.DialogFooter className="pt-4 border-t">
+          <FinanceDialogFooter className="pt-4 border-t">
             <Button onClick={() => setAllAdditionsOpen(false)}>إغلاق</Button>
-          </UIDialog.DialogFooter>
-        </UIDialog.DialogContent>
+          </FinanceDialogFooter>
+        </FinanceDialogContent>
       </UIDialog.Dialog>
     </div>
   );

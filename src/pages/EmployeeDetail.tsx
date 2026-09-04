@@ -1,3 +1,5 @@
+import { calculateOperatingFees, operatingPool } from '@/lib/operatingFees';
+import '@/components/finance/finance.css';
 import { useEffect, useState } from 'react';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -58,6 +60,7 @@ interface PayrollItem {
   allowances: number;
   overtime_amount: number;
   deductions: number;
+  advances_deduction?: number;
   net_salary: number;
   paid: boolean;
   created_at: string;
@@ -236,58 +239,8 @@ export default function EmployeeDetail() {
       // حساب النسبة والتفاصيل لكل عقد بنسبة مطابقة تماماً لـ Expenses.tsx
       const allContracts = (contractsData || []).map((c: any) => {
         const contractNum = Number(c.Contract_Number) || 0;
-        const rentCost = Number(c['Total Rent']) || 0;
-        const installationCost = Number(c.installation_cost) || 0;
-        const printCost = Number(c.print_cost) || 0;
-        
-        const includeInstallation = c.include_operating_in_installation === true;
-        const includePrint = c.include_operating_in_print === true;
-        
-        const totalAmount = Number(c.Total ?? (rentCost + installationCost + printCost));
-        const totalPaid = paidByContract[String(c.Contract_Number)] || 0;
-        
-        const feePercent = Number(c.operating_fee_rate) || 0;
-        const feePercentInstallation = Number(c.operating_fee_rate_installation ?? feePercent) || 0;
-        const feePercentPrint = Number(c.operating_fee_rate_print ?? feePercent) || 0;
-        
-        // Friend rentals
-        const friendOpEnabled = c.friend_rental_operating_fee_enabled === true;
-        const friendOpRate = Number(c.friend_rental_operating_fee_rate) || 0;
-        let friendCostsTotal = 0;
-        const rawFriendData = c.friend_rental_data;
-        if (rawFriendData) {
-          try {
-            const data = typeof rawFriendData === 'string' ? JSON.parse(rawFriendData) : rawFriendData;
-            if (Array.isArray(data)) {
-              friendCostsTotal = data.reduce((sum: number, item: any) => sum + (Number(item.friendRentalCost ?? item.friend_rental_cost) || 0), 0);
-            }
-          } catch (e) {
-            console.warn('Failed to parse friend_rental_data:', e);
-          }
-        }
-        const friendFeeFull = friendOpEnabled ? Math.round(friendCostsTotal * (friendOpRate / 100)) : 0;
-        
-        // Partnership
-        let partnershipFeeFull = 0;
-        const rawPartnership = c.partnership_operating_data;
-        if (rawPartnership) {
-          try {
-            const data = typeof rawPartnership === 'string' ? JSON.parse(rawPartnership) : rawPartnership;
-            if (Array.isArray(data)) {
-              partnershipFeeFull = data.reduce((sum: number, item: any) => sum + (Number(item.operating_fee_amount) || 0), 0);
-            }
-          } catch (e) {}
-        }
-        
-        // Ratio capped at 1
-        const paymentRatio = totalAmount > 0 ? Math.min(1, totalPaid / totalAmount) : 0;
-        
-        const regularRentalBase = Math.max(0, rentCost - friendCostsTotal);
-        let collectedFee = Math.round(regularRentalBase * paymentRatio * (feePercent / 100));
-        if (includeInstallation) collectedFee += Math.round(installationCost * paymentRatio * (feePercentInstallation / 100));
-        if (includePrint) collectedFee += Math.round(printCost * paymentRatio * (feePercentPrint / 100));
-        collectedFee += Math.round((friendFeeFull + partnershipFeeFull) * paymentRatio);
-        
+        const collectedFee = calculateOperatingFees(c, paidByContract[String(contractNum)] || 0).collectedFeeAmount;
+
         const startDate = c['Contract Date'] ?? c.start_date ?? '';
         
         return {
@@ -320,7 +273,7 @@ export default function EmployeeDetail() {
       const totalWithdrawals = filteredWithdrawals.reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
 
       const contractsCount = uncoveredContracts.length;
-      const remainingBalance = totalOperatingDues - totalWithdrawals;
+      const remainingBalance = operatingPool(contractsData || [], paymentsData || [], withdrawalsData || [], closuresData || [], excludedSet).remaining;
 
       setOperatingStats({
         totalContracts: contractsCount,
@@ -641,7 +594,7 @@ export default function EmployeeDetail() {
     : isLinkedToTeam
       ? teamAccountsStats.total
       : employee.salary_type === 'monthly' 
-        ? employee.base_salary 
+        ? payrollItems.reduce((sum, item) => sum + Number(item.net_salary || 0), 0)
         : manualTasks.filter(t => t.status === 'completed').reduce((sum, t) => sum + (t.operating_cost || 0), 0);
 
   // المدفوع - للفرقة: المبالغ المدفوعة من حساب الفرقة + السلف
@@ -661,7 +614,7 @@ export default function EmployeeDetail() {
     ? operatingStats.remainingBalance 
     : isLinkedToTeam
       ? teamAccountsStats.pending - totalAdvances
-      : totalDue - totalPaid - totalAdvances;
+      : employee.salary_type === 'monthly' ? totalDue - totalPaid : totalDue - totalPaid - totalAdvances;
 
   // Prepare chart data
   const monthlyData = Array.from({ length: 6 }, (_, i) => {
@@ -696,7 +649,7 @@ export default function EmployeeDetail() {
   const COLORS = ['#10b981', '#f59e0b'];
 
   return (
-    <div className="container mx-auto p-6 space-y-6 text-right" dir="rtl" style={{ fontFamily: "'Tajawal', sans-serif" }}>
+    <div className="finance-page container mx-auto p-4 sm:p-6 space-y-6 text-right max-w-[1440px]" dir="rtl">
       {/* Header */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#d6ac40]/12 via-[#f4c25a]/5 to-transparent border border-[#d6ac40]/25 p-6 backdrop-blur-md shadow-sm flex flex-col lg:flex-row items-center justify-between gap-6 transition-all duration-300">
         <div className="absolute top-0 right-0 -mt-6 -mr-6 w-32 h-32 bg-[#d6ac40]/10 rounded-full blur-2xl pointer-events-none" />
@@ -882,7 +835,7 @@ export default function EmployeeDetail() {
                 ? `عن طريق ${operatingStats.totalContracts} عقد تشغيل غير مغلق`
                 : isLinkedToTeam
                   ? `عن طريق ${teamAccounts.length} عملية تركيب`
-                  : employee.salary_type === 'monthly' ? 'الراتب الشهري الحالي' : 'من الأعمال المنجزة والمكتملة'}
+                  : employee.salary_type === 'monthly' ? 'صافي الرواتب المسجلة في دورات الرواتب' : 'من الأعمال المنجزة والمكتملة'}
             </p>
           </CardContent>
         </Card>
@@ -1615,7 +1568,7 @@ export default function EmployeeDetail() {
                           </TableCell>
                           <TableCell className="text-xs font-medium py-3.5 font-manrope">{item.basic_salary.toLocaleString('ar-LY')} د.ل</TableCell>
                           <TableCell className="text-xs text-emerald-600 py-3.5 font-manrope">+{item.allowances.toLocaleString('ar-LY')} د.ل</TableCell>
-                          <TableCell className="text-xs text-rose-600 py-3.5 font-manrope">-{item.deductions.toLocaleString('ar-LY')} د.ل</TableCell>
+                          <TableCell className="text-xs text-rose-600 py-3.5 font-manrope">{item.deductions.toLocaleString('ar-LY')} د.ل<div className="text-muted-foreground">تسوية سلف: {(item.advances_deduction || 0).toLocaleString('ar-LY')} د.ل</div></TableCell>
                           <TableCell className="font-bold text-xs py-3.5 text-foreground font-manrope">
                             {item.net_salary.toLocaleString('ar-LY')} د.ل
                           </TableCell>
@@ -1818,7 +1771,7 @@ export default function EmployeeDetail() {
 
       {/* Add Task Dialog */}
       <UIDialog.Dialog open={taskDialogOpen} onOpenChange={setTaskDialogOpen}>
-        <UIDialog.DialogContent>
+        <UIDialog.DialogContent className="finance-dialog max-h-[92dvh] overflow-y-auto">
           <UIDialog.DialogHeader>
             <UIDialog.DialogTitle>إضافة عمل يدوي</UIDialog.DialogTitle>
           </UIDialog.DialogHeader>
@@ -1881,7 +1834,7 @@ export default function EmployeeDetail() {
 
       {/* Payment Dialog */}
       <UIDialog.Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
-        <UIDialog.DialogContent>
+        <UIDialog.DialogContent className="finance-dialog max-h-[92dvh] overflow-y-auto">
           <UIDialog.DialogHeader>
             <UIDialog.DialogTitle>
               {employee?.installation_team_id ? 'سحب من مستحقات الفرقة' : employee?.linked_to_operating_expenses ? 'تسجيل سحب جديد' : 'دفع للموظف'}
@@ -2009,7 +1962,7 @@ export default function EmployeeDetail() {
           setSenderName('');
         }
       }}>
-        <UIDialog.DialogContent>
+        <UIDialog.DialogContent className="finance-dialog max-h-[92dvh] overflow-y-auto">
           <UIDialog.DialogHeader>
             <UIDialog.DialogTitle>تعديل السحب</UIDialog.DialogTitle>
           </UIDialog.DialogHeader>
@@ -2097,7 +2050,7 @@ export default function EmployeeDetail() {
           setAdvanceReason('');
         }
       }}>
-        <UIDialog.DialogContent>
+        <UIDialog.DialogContent className="finance-dialog max-h-[92dvh] overflow-y-auto">
           <UIDialog.DialogHeader>
             <UIDialog.DialogTitle>{editingAdvance ? 'تعديل السلفة' : 'إضافة سلفة جديدة'}</UIDialog.DialogTitle>
           </UIDialog.DialogHeader>
@@ -2183,7 +2136,7 @@ export default function EmployeeDetail() {
         setClosureDialogOpen(open);
         if (!open) setEditingClosure(null);
       }}>
-        <UIDialog.DialogContent>
+        <UIDialog.DialogContent className="finance-dialog max-h-[92dvh] overflow-y-auto">
           <UIDialog.DialogHeader>
             <UIDialog.DialogTitle>تعديل التسكير</UIDialog.DialogTitle>
           </UIDialog.DialogHeader>

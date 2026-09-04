@@ -1508,7 +1508,7 @@ export default function CustomerBilling() {
   const openEditDistributedPayment = (distributedPaymentId: string, distributedPayments: PaymentRow[]) => {
     setEditingDistributedPaymentId(distributedPaymentId);
     setEditingDistributedPayments(distributedPayments);
-    setEnhancedDistributePaymentOpen(true);
+    setEnhancedDistributePaymentOpen(false);
   };
 
   const saveEditDistributedPayment = async (distributions: { contractNumber: number; amount: number }[]) => {

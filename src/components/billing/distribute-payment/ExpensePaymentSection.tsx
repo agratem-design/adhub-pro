@@ -53,6 +53,7 @@ export function ExpensePaymentSection({
 }: Props) {
   const [isOpen, setIsOpen] = useState(enabled);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [allExpenses, setAllExpenses] = useState<UnpaidExpense[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [internalEmployeeId, setInternalEmployeeId] = useState<string>('');
@@ -65,16 +66,18 @@ export function ExpensePaymentSection({
 
   useEffect(() => {
     if (!enabled) return;
+    setIsOpen(true);
     (async () => {
       setLoading(true);
+      setLoadError('');
       try {
-        const { data: unpaidExps } = await supabase
+        const { data: unpaidExps, error: loadError } = await supabase
           .from('expenses')
           .select('id, description, amount, paid_amount, payment_status, employee_id, category, expense_date')
           .neq('payment_status', 'paid')
-          .not('employee_id', 'is', null)
           .order('expense_date', { ascending: false });
 
+        if (loadError) throw loadError;
         // ✅ ضمّن مصروفات وضع التعديل حتى لو كانت مسددة
         let extraExps: any[] = [];
         const haveIds = new Set((unpaidExps || []).map((e: any) => e.id));
@@ -117,6 +120,8 @@ export function ExpensePaymentSection({
             expense_date: e.expense_date,
           };
         }).filter(e => e.remaining > 0 || includeSet.has(e.id)));
+      } catch {
+        setLoadError('تعذر تحميل المصروفات؛ أعد فتح القسم للمحاولة مجددًا');
       } finally {
         setLoading(false);
       }
@@ -125,18 +130,11 @@ export function ExpensePaymentSection({
 
   // Filter by selected employee
   const visibleExpenses = useMemo(
-    () => selectedEmployeeId ? allExpenses.filter(e => e.employee_id === selectedEmployeeId) : [],
+    () => selectedEmployeeId ? allExpenses.filter(e => e.employee_id === selectedEmployeeId) : allExpenses,
     [allExpenses, selectedEmployeeId]
   );
 
-  // When employee changes, drop selections from other employees
-  useEffect(() => {
-    if (!selectedEmployeeId) return;
-    const visibleIds = new Set(allExpenses.filter(e => e.employee_id === selectedEmployeeId).map(e => e.id));
-    // ✅ لا تُسقط اختيارات وضع التعديل المُحمَّلة مسبقاً قبل اختيار الموظف
-    const editing = new Set(includeExpenseIds);
-    setExpensePayments(expensePayments.filter(p => visibleIds.has(p.expense_id) || editing.has(p.expense_id)));
-  }, [selectedEmployeeId]);
+  // Filtering changes the visible list, never previously selected settlements.
 
   const toggle = (exp: UnpaidExpense, checked: boolean) => {
     if (checked) {
@@ -266,10 +264,12 @@ export function ExpensePaymentSection({
                 <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 <span className="text-sm text-muted-foreground">جاري تحميل المصروفات...</span>
               </div>
-            ) : employees.length === 0 ? (
+            ) : loadError ? (
+              <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">{loadError}</p>
+            ) : allExpenses.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 gap-2 text-center">
                 <AlertCircle className="h-8 w-8 text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground">لا يوجد موظفون لديهم مصروفات غير مسددة</p>
+                <p className="text-sm text-muted-foreground">لا توجد مصروفات غير مسددة</p>
               </div>
             ) : (
               <>
@@ -277,13 +277,14 @@ export function ExpensePaymentSection({
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-foreground flex items-center gap-2">
                     <User className="h-4 w-4 text-primary" />
-                    اختر الموظف
+                    المصروفات المستحقة
                   </label>
-                  <Select value={selectedEmployeeId} onValueChange={setSelectedEmployeeId}>
+                  <Select value={selectedEmployeeId || 'all'} onValueChange={value => setSelectedEmployeeId(value === 'all' ? '' : value)}>
                     <SelectTrigger className="h-11 text-sm bg-background border-primary/30 focus:ring-primary/20">
-                      <SelectValue placeholder="-- اختر الموظف لعرض مصروفاته --" />
+                      <SelectValue placeholder="جميع المصروفات" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="all">جميع المصروفات والموظفين</SelectItem>
                       {employees.map(emp => {
                         const cnt = allExpenses.filter(e => e.employee_id === emp.id).length;
                         const total = allExpenses.filter(e => e.employee_id === emp.id).reduce((s, e) => s + e.remaining, 0);
@@ -297,13 +298,13 @@ export function ExpensePaymentSection({
                   </Select>
                 </div>
 
-                {selectedEmployeeId && visibleExpenses.length > 0 && (
+                {visibleExpenses.length > 0 && (
                   <>
                     {/* ── حقل المبلغ المتاح + توزيع تلقائي ── */}
                     <div className="p-4 rounded-xl border border-primary/25 bg-background space-y-3">
                       <div className="space-y-2">
                         <label className="text-sm font-semibold text-foreground">
-                          المبلغ المتاح لتوزيعه على هذا الموظف
+                          المبلغ المتاح للمصروفات المعروضة
                         </label>
                         <div className="flex gap-2">
                           <Input
@@ -478,7 +479,7 @@ export function ExpensePaymentSection({
                   </>
                 )}
 
-                {selectedEmployeeId && visibleExpenses.length === 0 && (
+                {visibleExpenses.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-8 gap-2 text-center">
                     <AlertCircle className="h-8 w-8 text-muted-foreground/40" />
                     <p className="text-sm text-muted-foreground">لا توجد مصروفات غير مسددة لهذا الموظف</p>

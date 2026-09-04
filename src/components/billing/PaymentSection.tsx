@@ -1330,6 +1330,7 @@ export function PaymentSection({
           onEdit={onEditDistributedPayment ? () => {
             const distributedPaymentId = selectedDistribution[0].distributed_payment_id;
             if (distributedPaymentId) {
+              setDetailsDialogOpen(false);
               onEditDistributedPayment(distributedPaymentId, selectedDistribution);
             }
           } : undefined}

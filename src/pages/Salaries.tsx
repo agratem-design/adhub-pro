@@ -1,3 +1,5 @@
+import { FinancePageHeader, FinanceStatCard, FinanceDialogContent, FinanceDialogHeader, FinanceDialogFooter } from '@/components/finance/FinanceUI';
+import { operatingPool } from '@/lib/operatingFees';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useState } from 'react';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
@@ -66,6 +68,7 @@ interface PayrollItem {
   allowances: number;
   overtime_amount: number;
   deductions: number;
+  advances_deduction?: number;
   net_salary: number;
   paid: boolean;
   employee?: Employee;
@@ -96,6 +99,9 @@ export default function Salaries() {
   const [advances, setAdvances] = useState<any[]>([]);
   const [manualTasks, setManualTasks] = useState<ManualTask[]>([]);
   const [loading, setLoading] = useState(true);
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [employeeStatus, setEmployeeStatus] = useState('all');
+  const visibleEmployees = employees.filter(employee => (employeeStatus === 'all' || employee.status === employeeStatus) && [employee.name, employee.position, employee.phone].join(' ').toLowerCase().includes(employeeSearch.trim().toLowerCase()));
   
   // Operating expenses data for linked employee
   const [operatingExpenses, setOperatingExpenses] = useState<any[]>([]);
@@ -204,7 +210,7 @@ export default function Salaries() {
       // Get contracts with operating fee
       const { data: contractsData } = await supabase
         .from('Contract')
-        .select('Contract_Number, "Total Rent", installation_cost, print_cost, operating_fee_rate');
+        .select('*');
 
       // جلب المدفوعات الفعلية لكل عقد
       const { data: paymentsData } = await supabase
@@ -223,41 +229,19 @@ export default function Salaries() {
         }
       });
 
-      // فلترة العقود غير المغطاة بالتسكير وغير المستبعدة
-      const uncoveredContracts = (contractsData || []).filter(c => {
-        const contractNum = c.Contract_Number;
-        const isExcluded = excludedSet.has(String(contractNum));
-        const isClosed = isContractCoveredByClosure(contractNum);
-        return !isExcluded && !isClosed;
-      });
-
-      // ✅ حساب النسبة المتحصلة فعلياً من سعر الإيجار فقط
-      const totalOperatingFees = uncoveredContracts.reduce((sum, c) => {
-        const feeRate = Number(c.operating_fee_rate) || 0;
-        const rentCost = Number(c['Total Rent']) || 0;
-        const installCost = Number(c.installation_cost) || 0;
-        const printCost = Number(c.print_cost) || 0;
-        const totalAmount = rentCost + installCost + printCost;
-        const totalPaid = paidByContract[String(c.Contract_Number)] || 0;
-        const rentPaidEstimate = totalAmount > 0 ? totalPaid * (rentCost / totalAmount) : 0;
-        const collectedFeeAmount = Math.round(rentPaidEstimate * (feeRate / 100));
-        return sum + collectedFeeAmount;
-      }, 0);
-
-      const contractsCount = uncoveredContracts.length;
-
-      // Calculate remaining balance
-      const remainingBalance = totalOperatingFees - totalWithdrawals;
-
+      const pool = operatingPool(contractsData || [], paymentsData || [], withdrawalsData || [], closuresData || [], excludedSet);
+      const totalOperatingDues = pool.openFees;
+      const remainingBalance = pool.remaining;
+      const uncoveredContracts = (contractsData || []).filter(c => Number(c.Contract_Number) >= 1086 && !excludedSet.has(String(c.Contract_Number)) && !isContractCoveredByClosure(c.Contract_Number));
       setOperatingStats({
         totalExpenses: 0,
         totalWithdrawals,
-        totalRevenue: totalOperatingFees,
+        totalRevenue: totalOperatingDues,
         remainingBalance
       });
       
       // Store contracts count for display
-      setOperatingExpenses([{ count: contractsCount }] as any);
+      setOperatingExpenses([{ count: uncoveredContracts.length }] as any);
     } catch (error) {
       console.error('Error loading operating expenses data:', error);
     }
@@ -555,70 +539,26 @@ export default function Salaries() {
 
   const handleCreatePayroll = async () => {
     try {
-      // Create payroll run
-      const { data: payrollRun, error: runError } = await supabase
-        .from('payroll_runs')
-        .insert({
-          period_start: periodStart,
-          period_end: periodEnd,
-          status: 'draft'
-        })
-        .select()
-        .single();
-
-      if (runError) throw runError;
-
-      // Create payroll items for all active employees
-      const activeEmployees = employees.filter(e => e.status === 'active');
-      
-      for (const employee of activeEmployees) {
-        // Calculate deductions (advances for this period)
-        const { data: employeeAdvances } = await supabase
-          .from('employee_advances')
-          .select('remaining')
-          .eq('employee_id', employee.id)
-          .eq('status', 'approved');
-
-        const totalDeductions = employeeAdvances?.reduce((sum, a) => sum + a.remaining, 0) || 0;
-
-        await supabase.from('payroll_items').insert({
-          payroll_id: payrollRun.id,
-          employee_id: employee.id,
-          basic_salary: employee.base_salary,
-          allowances: 0,
-          overtime_amount: 0,
-          deductions: totalDeductions,
-          net_salary: employee.base_salary - totalDeductions,
-          paid: false
-        });
-      }
-
+      const { error } = await (supabase as any).rpc('create_payroll_draft', { p_start: periodStart, p_end: periodEnd });
+      if (error) throw error;
       toast.success('تم إنشاء دورة الرواتب بنجاح');
       setPayrollDialogOpen(false);
       loadData();
     } catch (error) {
       console.error('Error creating payroll:', error);
-      toast.error('فشل في إنشاء دورة الرواتب');
+      toast.error(error instanceof Error ? error.message : (error as any)?.message || 'فشل في إنشاء دورة الرواتب');
     }
   };
 
   const handleMarkPayrollPaid = async (payrollId: string) => {
     try {
-      await supabase
-        .from('payroll_runs')
-        .update({ status: 'paid', paid_at: new Date().toISOString() })
-        .eq('id', payrollId);
-
-      await supabase
-        .from('payroll_items')
-        .update({ paid: true })
-        .eq('payroll_id', payrollId);
-
+      const { error } = await (supabase as any).rpc('settle_payroll_run', { p_run_id: payrollId });
+      if (error) throw error;
       toast.success('تم تسجيل الرواتب كمدفوعة');
       loadData();
     } catch (error) {
       console.error('Error marking payroll as paid:', error);
-      toast.error('فشل في تحديث حالة الرواتب');
+      toast.error((error as any)?.message || 'فشل في تحديث حالة الرواتب');
     }
   };
 
@@ -715,90 +655,22 @@ export default function Salaries() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-6 md:py-8 space-y-6 max-w-7xl animate-fade-in" dir="rtl">
-      {/* Premium Glassmorphic Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border border-primary/15 p-6 backdrop-blur-sm shadow-sm">
-        <div className="absolute right-0 top-0 -z-10 h-32 w-32 rounded-full bg-primary/5 blur-3xl"></div>
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-gradient-to-br from-primary to-primary/80 rounded-2xl flex items-center justify-center shadow-lg shadow-primary/20 text-white shrink-0">
-              <Users className="h-6 w-6" />
-            </div>
-            <div>
-              <h1 className="text-2xl md:text-3xl font-extrabold text-foreground tracking-tight">إدارة الرواتب والموظفين</h1>
-              <p className="text-muted-foreground text-sm mt-1">تتبع كادر العمل، دورات الرواتب، السلف، والأعمال اليدوية</p>
-            </div>
-          </div>
-          {canEditSection && (
-            <Button onClick={() => handleOpenDialog()} className="h-10 text-xs font-bold gap-1.5 bg-primary hover:bg-primary/95 text-primary-foreground shadow-lg shadow-primary/10 w-full sm:w-auto">
-              <Plus className="h-4 w-4" /> إضافة موظف جديد
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid gap-4 grid-cols-2 md:grid-cols-4">
-        <Card className="border-primary/20 bg-primary/[0.02] hover:bg-primary/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden">
-          <div className="absolute right-0 top-0 bottom-0 w-1 bg-primary"></div>
-          <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-xs font-bold text-primary flex items-center gap-1.5">
-              <DollarSign className="h-3.5 w-3.5" /> إجمالي الرواتب الشهرية
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-4 pt-0">
-            <div className="text-xl md:text-2xl font-black font-numbers tracking-tight">
-              {totalSalaries.toLocaleString('en-US')} <span className="text-[10px] font-semibold text-muted-foreground">د.ل</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-emerald-500/20 bg-emerald-500/[0.02] hover:bg-emerald-500/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden">
-          <div className="absolute right-0 top-0 bottom-0 w-1 bg-emerald-500"></div>
-          <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-              <User className="h-3.5 w-3.5" /> الموظفين النشطين
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-4 pt-0">
-            <div className="text-xl md:text-2xl font-black font-numbers tracking-tight">
-              {activeEmployees}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-blue-500/20 bg-blue-500/[0.02] hover:bg-blue-500/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden">
-          <div className="absolute right-0 top-0 bottom-0 w-1 bg-blue-500"></div>
-          <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-xs font-bold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
-              <Wallet className="h-3.5 w-3.5" /> إجمالي المدفوع
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-4 pt-0">
-            <div className="text-xl md:text-2xl font-black font-numbers tracking-tight">
-              {totalPaidPayroll.toLocaleString('en-US')} <span className="text-[10px] font-semibold text-muted-foreground">د.ل</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-purple-500/20 bg-purple-500/[0.02] hover:bg-purple-500/[0.04] hover:shadow-md hover:scale-[1.01] transition-all duration-300 shadow-sm relative overflow-hidden">
-          <div className="absolute right-0 top-0 bottom-0 w-1 bg-purple-500"></div>
-          <CardHeader className="p-4 pb-2">
-            <CardTitle className="text-xs font-bold text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
-              <FileText className="h-3.5 w-3.5" /> دورات الرواتب
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-4 pt-0">
-            <div className="text-xl md:text-2xl font-black font-numbers tracking-tight">
-              {payrollRuns.length}
-            </div>
-          </CardContent>
-        </Card>
+    <div className="finance-page mx-auto px-4 py-6 md:px-6 space-y-6 max-w-[1440px]" dir="rtl">
+      <FinancePageHeader title="الرواتب والموظفون" description="راجع مستحقات فريقك، وأنشئ دورات الرواتب وتابع السلف والمدفوعات." icon={Users}
+        actions={canEditSection && <>
+          <Button variant="outline" onClick={() => handleOpenDialog()} className="gap-2"><Plus className="h-4 w-4" /> إضافة موظف</Button>
+          <Button onClick={() => setPayrollDialogOpen(true)} className="gap-2"><Calendar className="h-4 w-4" /> دورة رواتب جديدة</Button>
+        </>} />
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+        <FinanceStatCard label="الرواتب الشهرية الأساسية" value={totalSalaries} icon={DollarSign} tone="primary" note="قبل الخصومات والسلف" />
+        <FinanceStatCard label="الرواتب المسددة" value={totalPaidPayroll} icon={CheckCircle} tone="success" note="إجمالي الدورات المدفوعة" />
+        <FinanceStatCard label="الموظفون النشطون" value={activeEmployees} icon={Users} currency={false} note="ضمن فريق العمل الحالي" />
+        <FinanceStatCard label="دورات الرواتب" value={payrollRuns.length} icon={Calendar} currency={false} note="المسودات والدورات المسددة" />
       </div>
 
       {/* Tabs */}
       <Tabs defaultValue="employees" className="space-y-4">
-        <TabsList className="bg-muted/50 p-1 w-full md:w-auto flex flex-wrap gap-1 rounded-xl border border-border/40">
+        <TabsList className="overflow-x-auto justify-start max-w-full bg-muted/50 p-1 w-full md:w-auto flex flex-wrap gap-1 rounded-xl border border-border/40">
           <TabsTrigger value="employees" className="font-bold text-xs px-4 py-2 rounded-lg">الموظفين</TabsTrigger>
           <TabsTrigger value="manual-tasks" className="font-bold text-xs px-4 py-2 rounded-lg">الأعمال اليدوية</TabsTrigger>
           <TabsTrigger value="payroll" className="font-bold text-xs px-4 py-2 rounded-lg">دورات الرواتب</TabsTrigger>
@@ -812,8 +684,12 @@ export default function Salaries() {
             <CardHeader className="bg-muted/10 border-b pb-3">
               <CardTitle className="text-sm font-bold flex items-center gap-2">
                 <User className="h-5 w-5 text-primary" />
-                قائمة الموظفين ودليل العمل
+                دليل الموظفين <Badge variant="secondary">{visibleEmployees.length}</Badge>
               </CardTitle>
+              <div className="flex flex-col sm:flex-row gap-3 pt-3">
+                <Input aria-label="البحث عن موظف" placeholder="ابحث بالاسم أو الوظيفة أو رقم الهاتف" value={employeeSearch} onChange={e => setEmployeeSearch(e.target.value)} className="sm:max-w-md bg-background" />
+                <Select value={employeeStatus} onValueChange={setEmployeeStatus}><SelectTrigger aria-label="حالة الموظف" className="sm:w-44 bg-background"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">جميع الموظفين</SelectItem><SelectItem value="active">النشطون</SelectItem><SelectItem value="inactive">غير النشطين</SelectItem></SelectContent></Select>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -832,14 +708,14 @@ export default function Salaries() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {employees.length === 0 ? (
+                    {visibleEmployees.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={9} className="text-center text-muted-foreground py-8 text-sm">
-                          لا يوجد موظفين مسجلين في النظام.
+                          {employees.length ? 'لا توجد نتائج مطابقة للبحث.' : 'ابدأ بإضافة أول موظف لتسجيل مستحقاته.'}
                         </TableCell>
                       </TableRow>
                     ) : (
-                      employees.map((employee) => {
+                      visibleEmployees.map((employee) => {
                         const team = installationTeams.find(t => t.id === employee.installation_team_id);
                         return (
                           <TableRow key={employee.id} className="hover:bg-muted/30 transition-colors border-b">
@@ -1146,7 +1022,7 @@ export default function Salaries() {
                           <TableCell className="text-sm">{(item.employee as any)?.position || '-'}</TableCell>
                           <TableCell className="font-manrope text-sm font-medium">{(item.basic_salary || 0).toLocaleString('en-US')} د.ل</TableCell>
                           <TableCell className="font-manrope text-sm text-green-600 font-medium">+{(item.allowances || 0).toLocaleString('en-US')} د.ل</TableCell>
-                          <TableCell className="font-manrope text-sm text-red-600 font-medium">-{(item.deductions || 0).toLocaleString('en-US')} د.ل</TableCell>
+                          <TableCell className="font-manrope text-sm text-red-600 font-medium">{(item.deductions || 0).toLocaleString('en-US')} د.ل<div className="text-xs text-muted-foreground">تسوية سلف: {(item.advances_deduction || 0).toLocaleString('en-US')} د.ل</div></TableCell>
                           <TableCell className="font-manrope text-sm font-bold text-foreground">{(item.net_salary || 0).toLocaleString('en-US')} د.ل</TableCell>
                           <TableCell>
                             <Badge 
@@ -1259,13 +1135,13 @@ export default function Salaries() {
 
       {/* Employee Dialog */}
       <UIDialog.Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <UIDialog.DialogContent className="max-w-2xl p-6">
-          <UIDialog.DialogHeader>
+        <FinanceDialogContent className="max-w-2xl p-6">
+          <FinanceDialogHeader>
             <UIDialog.DialogTitle className="text-xl font-bold flex items-center gap-2">
               <User className="h-5 w-5 text-primary" />
               {editingEmployee ? 'تعديل ملف موظف' : 'إضافة موظف جديد'}
             </UIDialog.DialogTitle>
-          </UIDialog.DialogHeader>
+          </FinanceDialogHeader>
 
           <div className="grid gap-4 py-4 text-right">
             <div className="grid gap-2">
@@ -1423,26 +1299,27 @@ export default function Salaries() {
             </div>
           </div>
 
-          <UIDialog.DialogFooter className="flex justify-end gap-2 border-t pt-4">
+          <FinanceDialogFooter className="flex justify-end gap-2 border-t pt-4">
             <Button variant="outline" onClick={handleCloseDialog}>
               إلغاء
             </Button>
             <Button onClick={handleSubmit} className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold">
               {editingEmployee ? 'تحديث البيانات' : 'إضافة الموظف'}
             </Button>
-          </UIDialog.DialogFooter>
-        </UIDialog.DialogContent>
+          </FinanceDialogFooter>
+        </FinanceDialogContent>
       </UIDialog.Dialog>
 
       {/* Payroll Creation Dialog */}
       <UIDialog.Dialog open={payrollDialogOpen} onOpenChange={setPayrollDialogOpen}>
-        <UIDialog.DialogContent className="max-w-md p-6">
-          <UIDialog.DialogHeader>
+        <FinanceDialogContent className="max-w-md p-6">
+          <FinanceDialogHeader>
             <UIDialog.DialogTitle className="text-xl font-bold flex items-center gap-2">
               <FileText className="h-5 w-5 text-primary" />
               إنشاء دورة رواتب جديدة
             </UIDialog.DialogTitle>
-          </UIDialog.DialogHeader>
+            <UIDialog.DialogDescription>حدد فترة الرواتب لإنشاء مسودة يمكن مراجعتها قبل تسجيل السداد.</UIDialog.DialogDescription>
+          </FinanceDialogHeader>
 
           <div className="grid gap-4 py-4 text-right">
             <div className="grid gap-2">
@@ -1467,7 +1344,7 @@ export default function Salaries() {
               <p className="text-xs text-muted-foreground">ملخص الدورة المستهدفة:</p>
               <div className="flex justify-between items-center">
                 <span className="text-sm font-semibold text-foreground">عدد الموظفين المستهدفين:</span>
-                <span className="font-bold text-primary">{activeEmployees} موظف نشط</span>
+                <span className="font-bold text-primary">{employees.filter(e => e.status === 'active' && e.salary_type === 'monthly' && Number(e.base_salary) > 0).length} موظف براتب شهري</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm font-semibold text-foreground">إجمالي رواتب الأساسية:</span>
@@ -1476,26 +1353,27 @@ export default function Salaries() {
             </div>
           </div>
 
-          <UIDialog.DialogFooter className="flex justify-end gap-2 border-t pt-4">
+          <FinanceDialogFooter className="flex justify-end gap-2 border-t pt-4">
             <Button variant="outline" onClick={() => setPayrollDialogOpen(false)}>
               إلغاء
             </Button>
             <Button onClick={handleCreatePayroll} className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold">
-              إنشاء الدورة واعتمادها
+              إنشاء مسودة الرواتب
             </Button>
-          </UIDialog.DialogFooter>
-        </UIDialog.DialogContent>
+          </FinanceDialogFooter>
+        </FinanceDialogContent>
       </UIDialog.Dialog>
 
       {/* Advance Dialog */}
       <UIDialog.Dialog open={advanceDialogOpen} onOpenChange={setAdvanceDialogOpen}>
-        <UIDialog.DialogContent className="max-w-md p-6">
-          <UIDialog.DialogHeader>
+        <FinanceDialogContent className="max-w-md p-6">
+          <FinanceDialogHeader>
             <UIDialog.DialogTitle className="text-xl font-bold flex items-center gap-2">
               <TrendingDown className="h-5 w-5 text-rose-500" />
               إضافة سلفة جديدة
             </UIDialog.DialogTitle>
-          </UIDialog.DialogHeader>
+            <UIDialog.DialogDescription>اختر الموظف وسجّل المبلغ والبيان لتتبّع السلفة في حسابه.</UIDialog.DialogDescription>
+          </FinanceDialogHeader>
 
           <div className="grid gap-4 py-4 text-right">
             <div className="grid gap-2">
@@ -1540,26 +1418,26 @@ export default function Salaries() {
             </div>
           </div>
 
-          <UIDialog.DialogFooter className="flex justify-end gap-2 border-t pt-4">
+          <FinanceDialogFooter className="flex justify-end gap-2 border-t pt-4">
             <Button variant="outline" onClick={() => setAdvanceDialogOpen(false)}>
               إلغاء
             </Button>
             <Button onClick={handleAddAdvance} className="bg-rose-600 hover:bg-rose-700 text-white font-bold">
               إضافة السلفة
             </Button>
-          </UIDialog.DialogFooter>
-        </UIDialog.DialogContent>
+          </FinanceDialogFooter>
+        </FinanceDialogContent>
       </UIDialog.Dialog>
 
       {/* Manual Task Dialog */}
       <UIDialog.Dialog open={taskDialogOpen} onOpenChange={setTaskDialogOpen}>
-        <UIDialog.DialogContent className="max-w-md p-6">
-          <UIDialog.DialogHeader>
+        <FinanceDialogContent className="max-w-md p-6">
+          <FinanceDialogHeader>
             <UIDialog.DialogTitle className="text-xl font-bold flex items-center gap-2">
               <FileText className="h-5 w-5 text-primary" />
               تسجيل عمل يدوي جديد
             </UIDialog.DialogTitle>
-          </UIDialog.DialogHeader>
+          </FinanceDialogHeader>
 
           <div className="grid gap-4 py-4 text-right">
             <div className="grid gap-2">
@@ -1629,15 +1507,15 @@ export default function Salaries() {
             </div>
           </div>
 
-          <UIDialog.DialogFooter>
+          <FinanceDialogFooter>
             <Button variant="outline" onClick={() => setTaskDialogOpen(false)}>
               إلغاء
             </Button>
             <Button onClick={handleAddManualTask}>
               إضافة العمل
             </Button>
-          </UIDialog.DialogFooter>
-        </UIDialog.DialogContent>
+          </FinanceDialogFooter>
+        </FinanceDialogContent>
       </UIDialog.Dialog>
     </div>
   );

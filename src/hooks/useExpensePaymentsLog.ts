@@ -1,3 +1,4 @@
+import { groupPaymentSources } from '@/lib/paymentSources';
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -79,6 +80,7 @@ export function useExpensePaymentsLog(filters: Filters = {}, refreshKey = 0) {
         if (k && !cpMap[k]) cpMap[k] = cp;
       }
 
+      const sourceGroups = groupPaymentSources(custPays || []);
       let merged: ExpensePaymentLogRow[] = pays.map((p: any) => {
         const exp = expMap[p.expense_id] || {};
         const cp = p.distributed_payment_id ? cpMap[p.distributed_payment_id] : null;
@@ -100,7 +102,7 @@ export function useExpensePaymentsLog(filters: Filters = {}, refreshKey = 0) {
           customer_name: cp?.customer_name || null,
           customer_payment_id: cp?.id || null,
           customer_payment_method: cp?.method || null,
-          customer_payment_amount: cp?.amount != null ? Number(cp.amount) : null,
+          customer_payment_amount: sourceGroups[p.distributed_payment_id]?.amount ?? null,
         };
       });
 

@@ -1,5 +1,9 @@
 // @ts-nocheck
-import { useEffect, useState, useMemo } from 'react';
+import { FinancePageHeader, FinanceStatCard, FinanceDialogContent, FinanceDialogHeader, FinanceDialogFooter } from '@/components/finance/FinanceUI';
+import { expenseRemaining, operatingPool } from '@/lib/operatingFees';
+import { createRequestId } from '@/lib/requestId';
+import { groupPaymentSources, type PaymentSource } from '@/lib/paymentSources';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -124,6 +128,9 @@ interface Withdrawal {
   method: string;
   note?: string;
   notes?: string;
+  receiver_name?: string;
+  sender_name?: string;
+  distributed_payment_id?: string | null;
   type?: string;
   contract_id?: number;
   user_id?: string;
@@ -174,6 +181,7 @@ export default function ExpenseManagement() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
+  const [withdrawalSources, setWithdrawalSources] = useState<Record<string, PaymentSource>>({});
   const [closures, setClosures] = useState<PeriodClosure[]>([]);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [employeeDues, setEmployeeDues] = useState<EmployeeDue[]>([]);
@@ -191,6 +199,11 @@ export default function ExpenseManagement() {
   const [showClosureDialog, setShowClosureDialog] = useState(false);
   const [showExpenseReceiptDialog, setShowExpenseReceiptDialog] = useState(false);
   const [showPayEmployeeDialog, setShowPayEmployeeDialog] = useState(false);
+  const expenseRequest = useRef(createRequestId());
+  const dueRequest = useRef(createRequestId());
+  const expenseSaving = useRef(false);
+  const dueSaving = useRef(false);
+  useEffect(() => { if (showPayEmployeeDialog) dueRequest.current = createRequestId(); }, [showPayEmployeeDialog]);
   const [selectedExpenseForReceipt, setSelectedExpenseForReceipt] = useState<Expense | null>(null);
   const [directPaymentExpense, setDirectPaymentExpense] = useState<any>(null);
   const [showDirectPaymentDialog, setShowDirectPaymentDialog] = useState(false);
@@ -200,6 +213,7 @@ export default function ExpenseManagement() {
   const [editingClosure, setEditingClosure] = useState<PeriodClosure | null>(null);
   
   // Filters
+  const [activeFinanceTab, setActiveFinanceTab] = useState('expenses');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
@@ -469,6 +483,14 @@ export default function ExpenseManagement() {
         console.error('Error loading withdrawals:', wError);
       } else if (withdrawalsData) {
         setWithdrawals(withdrawalsData);
+        const distributionIds = [...new Set(withdrawalsData.map(row => row.distributed_payment_id).filter(Boolean))];
+        if (distributionIds.length) {
+          const { data: sources, error: sourceError } = await supabase.from('customer_payments')
+            .select('distributed_payment_id, customer_id, customer_name, amount, paid_at, contract_number, printed_invoice_id, sales_invoice_id, composite_task_id, reference')
+            .in('distributed_payment_id', distributionIds);
+          if (sourceError) throw sourceError;
+          setWithdrawalSources(groupPaymentSources(sources || []));
+        } else setWithdrawalSources({});
       }
 
       // Load period closures
@@ -541,8 +563,7 @@ export default function ExpenseManagement() {
         .reduce((sum, w) => sum + (Number(w.amount) || 0), 0);
 
       const unpaidExpenses = (expensesData || [])
-        .filter(e => e.payment_status !== 'paid')
-        .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+        .reduce((sum, e) => sum + expenseRemaining(e), 0);
 
       const totalEmployeeDues = Object.values(duesMap)
         .reduce((sum, d) => sum + Math.max(0, d.balance), 0);
@@ -573,7 +594,7 @@ export default function ExpenseManagement() {
 
       const { data: contractsData } = await supabase
         .from('Contract')
-        .select('Contract_Number, "Total Rent", operating_fee_rate');
+        .select('*');
       
       const { data: paymentsData } = await supabase
         .from('customer_payments')
@@ -590,21 +611,8 @@ export default function ExpenseManagement() {
         }
       });
       
-      const uncoveredContracts = (contractsData || []).filter(c => {
-        const contractNum = c.Contract_Number;
-        const isExcluded = excludedSet.has(String(contractNum));
-        const isClosed = isContractCoveredByClosure(contractNum);
-        return !isExcluded && !isClosed;
-      });
-
-      const totalOperatingDues = uncoveredContracts.reduce((sum, c) => {
-        const feeRate = Number(c.operating_fee_rate) || 0;
-        const totalPaid = paidByContract[String(c.Contract_Number)] || 0;
-        const collectedFeeAmount = Math.round(totalPaid * (feeRate / 100));
-        return sum + collectedFeeAmount;
-      }, 0);
-
-      const remainingBalance = totalOperatingDues - totalWithdrawals;
+      const pool = operatingPool(contractsData || [], paymentsData || [], withdrawalsData || [], closuresData || [], excludedSet);
+      const remainingBalance = pool.remaining;
 
       setStats({
         totalExpenses,
@@ -675,10 +683,12 @@ export default function ExpenseManagement() {
   };
 
   const saveExpense = async () => {
+    if (expenseSaving.current) return;
+    expenseSaving.current = true;
     try {
       const expenseData = editingExpense || newExpense;
       
-      if (!expenseData.description || !expenseData.amount || !expenseData.category) {
+      if (!expenseData.description || !Number.isFinite(Number(expenseData.amount)) || Number(expenseData.amount) <= 0 || !expenseData.category) {
         toast.error('يرجى ملء جميع الحقول المطلوبة');
         return;
       }
@@ -719,6 +729,18 @@ export default function ExpenseManagement() {
       }
 
       if (editingExpense) {
+        const original = expenses.find(row => row.id === editingExpense.id);
+        if (original && original.payment_status !== status) {
+          toast.error('لتغيير السداد، استخدم سداد المصروف أو إلغاء السداد من سجل المصروفات');
+          return;
+        }
+        if (Number(dataToSave.amount) < Number(original?.paid_amount || 0)) {
+          toast.error('قيمة المصروف لا يمكن أن تقل عن المبلغ المسدد');
+          return;
+        }
+        delete dataToSave.paid_amount;
+        delete dataToSave.payment_status;
+        delete dataToSave.paid_date;
         const { error } = await supabase
           .from('expenses')
           .update(dataToSave)
@@ -727,69 +749,11 @@ export default function ExpenseManagement() {
         if (error) throw error;
         toast.success('تم تحديث المصروف');
       } else {
-        const { data: insertedData, error } = await supabase
-          .from('expenses')
-          .insert([dataToSave])
-          .select()
-          .single();
-        
+        const { error } = await supabase.rpc('create_expense_with_settlement', {
+          p_expense: dataToSave, p_request_id: expenseRequest.current, p_custody_id: isCustodyMode ? custodyAcc?.id : null,
+        });
         if (error) throw error;
-
-        // ✅ سداد من عهدة موظف: إنشاء سجل في expense_payments + custody_expenses
-        if (insertedData && isCustodyMode && custodyAcc) {
-          const employeeName = employees.find(e => e.id === custodyAcc.employee_id)?.name || '';
-          const [payRes, custodyExpRes] = await Promise.all([
-            supabase.from('expense_payments').insert({
-              expense_id: insertedData.id,
-              amount: Number(dataToSave.amount),
-              paid_via: 'direct',
-              payment_source: `custody:${custodyAcc.id}`,
-              notes: `سداد من عهدة ${employeeName} - حساب ${custodyAcc.account_number}`,
-            }),
-            supabase.from('custody_expenses').insert({
-              custody_account_id: custodyAcc.id,
-              expense_category: dataToSave.category,
-              amount: Number(dataToSave.amount),
-              expense_date: dataToSave.expense_date,
-              description: dataToSave.description,
-              vendor_name: dataToSave.receiver_name || null,
-              notes: `مرتبط بمصروف #${insertedData.id}`,
-            }),
-          ]);
-          if (payRes.error || custodyExpRes.error) {
-            console.error('Custody linkage error:', payRes.error || custodyExpRes.error);
-            toast.warning('تم حفظ المصروف لكن فشل ربطه بالعهدة بشكل كامل');
-          } else {
-            toast.success(`تم خصم ${Number(dataToSave.amount).toLocaleString('en-US')} د.ل من عهدة ${employeeName}`);
-          }
-        } else if (insertedData && dataToSave.employee_id) {
-          // ✅ قيد محاسبي آلي: إذا تم تحديد موظف (غير عهدة)، أضف رصيد دائن
-          // Get current balance for this employee
-          const { data: lastEntry } = await supabase
-            .from('employee_credit_entries')
-            .select('balance_after')
-            .eq('employee_id', dataToSave.employee_id)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
-          
-          const currentBalance = lastEntry?.balance_after || 0;
-          const newBalance = currentBalance + Number(dataToSave.amount);
-
-          await supabase.from('employee_credit_entries').insert({
-            employee_id: dataToSave.employee_id,
-            expense_id: insertedData.id,
-            entry_type: 'credit',
-            amount: Number(dataToSave.amount),
-            balance_after: newBalance,
-            description: `مصروف: ${dataToSave.description}`,
-            entry_date: dataToSave.expense_date,
-            notes: `تم إضافة رصيد تلقائي - صرف الموظف من حسابه الخاص`
-          });
-          
-          toast.success('تم إضافة رصيد دائن للموظف تلقائياً');
-        }
-        
+        expenseRequest.current = createRequestId();
         toast.success('تم إضافة المصروف بنجاح');
       }
 
@@ -812,22 +776,17 @@ export default function ExpenseManagement() {
       loadData();
     } catch (error) {
       console.error('Error saving expense:', error);
-      toast.error('فشل في حفظ المصروف');
-    }
+      toast.error((error as any)?.message || 'فشل في حفظ المصروف');
+    } finally { expenseSaving.current = false; }
   };
 
   // ✅ تسكير المصروف (Mark as Paid)
   const markExpenseAsPaid = async (expense: Expense, method: string = 'نقدي') => {
     try {
-      const { error } = await supabase
-        .from('expenses')
-        .update({
-          payment_status: 'paid',
-          paid_date: new Date().toISOString().split('T')[0],
-          payment_method: method
-        })
-        .eq('id', expense.id);
-      
+      const { error } = await supabase.rpc('record_expense_payment', {
+        p_expense_id: expense.id, p_amount: expenseRemaining(expense), p_paid_at: new Date().toISOString(),
+        p_source: method, p_request_id: createRequestId(), p_notes: null,
+      });
       if (error) throw error;
       toast.success('تم تسكير المصروف بنجاح');
       loadData();
@@ -839,35 +798,20 @@ export default function ExpenseManagement() {
 
   // ✅ سداد مستحقات موظف
   const payEmployeeDue = async () => {
-    if (!payEmployeeId || !payAmount || Number(payAmount) <= 0) {
+    if (dueSaving.current) return;
+    if (!payEmployeeId || !Number.isFinite(Number(payAmount)) || Number(payAmount) <= 0) {
       toast.error('يرجى ملء جميع الحقول المطلوبة');
       return;
     }
 
     try {
-      const { data: lastEntry } = await supabase
-        .from('employee_credit_entries')
-        .select('balance_after')
-        .eq('employee_id', payEmployeeId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      const currentBalance = lastEntry?.balance_after || 0;
-      const newBalance = currentBalance - Number(payAmount);
-
-      const { error } = await supabase.from('employee_credit_entries').insert({
-        employee_id: payEmployeeId,
-        entry_type: 'debit',
-        amount: Number(payAmount),
-        balance_after: newBalance,
-        description: 'سداد مستحقات للموظف',
-        payment_method: payMethod,
-        reference_number: payReference || null,
-        entry_date: new Date().toISOString().split('T')[0],
-        notes: payNotes || null
+      dueSaving.current = true;
+      const due = employeeDues.find(row => row.employee_id === payEmployeeId);
+      if (!due || Number(payAmount) > due.balance) { toast.error('المبلغ يتجاوز المستحق للموظف'); return; }
+      const { error } = await supabase.rpc('pay_employee_due', {
+        p_employee: payEmployeeId, p_amount: Number(payAmount), p_method: payMethod,
+        p_reference: payReference || null, p_notes: payNotes || null, p_request_id: dueRequest.current,
       });
-
       if (error) throw error;
       toast.success('تم سداد المستحقات بنجاح');
       setShowPayEmployeeDialog(false);
@@ -879,8 +823,8 @@ export default function ExpenseManagement() {
       loadData();
     } catch (error) {
       console.error('Error paying employee:', error);
-      toast.error('فشل في سداد المستحقات');
-    }
+      toast.error((error as any)?.message || 'فشل في سداد المستحقات');
+    } finally { dueSaving.current = false; }
   };
 
   // ✅ إنشاء موظف سريع من نموذج المصروف وربطه فوراً
@@ -1047,58 +991,7 @@ export default function ExpenseManagement() {
     if (!reopenExpense) return;
     setReopenSaving(true);
     try {
-      // إذا كان المصروف مسدداً عبر "سداد مباشر"، نحذف صفوف expense_payments المباشرة ونعيد رصيد العهدة عند اللزوم
-      const { data: directRows } = await supabase
-        .from('expense_payments')
-        .select('id, amount, payment_source')
-        .eq('expense_id', reopenExpense.id)
-        .eq('paid_via', 'direct')
-        .is('distributed_payment_id', null);
-
-      for (const row of (directRows || []) as any[]) {
-        const src: string = row.payment_source || '';
-        const m = src.match(/^custody:([0-9a-f-]{8,})/i);
-        if (m) {
-          const custodyId = m[1];
-          // حذف صف custody_expenses المرتبط
-          await supabase
-            .from('custody_expenses')
-            .delete()
-            .eq('custody_account_id', custodyId)
-            .eq('expense_category', 'expense_payment')
-            .like('notes', `%expense_id=${reopenExpense.id}%`);
-          // إعادة المبلغ لرصيد العهدة
-          const { data: acc } = await supabase
-            .from('custody_accounts')
-            .select('current_balance')
-            .eq('id', custodyId)
-            .maybeSingle();
-          if (acc) {
-            await supabase
-              .from('custody_accounts')
-              .update({ current_balance: Number((acc as any).current_balance || 0) + Number(row.amount || 0) })
-              .eq('id', custodyId);
-          }
-        }
-      }
-
-      if ((directRows || []).length > 0) {
-        await supabase
-          .from('expense_payments')
-          .delete()
-          .eq('expense_id', reopenExpense.id)
-          .eq('paid_via', 'direct')
-          .is('distributed_payment_id', null);
-      }
-
-      const { error } = await supabase
-        .from('expenses')
-        .update({
-          payment_status: 'unpaid',
-          paid_amount: 0,
-          paid_date: null,
-        })
-        .eq('id', reopenExpense.id);
+      const { error } = await supabase.rpc('cancel_expense_settlement', { p_expense_id: reopenExpense.id });
       if (error) throw error;
       toast.success('تم إلغاء السداد وإعادة فتح المصروف بنجاح');
       setReopenExpense(null);
@@ -1150,9 +1043,18 @@ export default function ExpenseManagement() {
   const saveWithdrawal = async () => {
     try {
       const withdrawalData = editingWithdrawal || newWithdrawal;
-      
-      if (!withdrawalData.amount || withdrawalData.amount <= 0) {
+
+      if (editingWithdrawal?.distributed_payment_id) {
+        toast.error('عدّل السحب من الدفعة الموزعة المرتبطة للحفاظ على تطابق الحسابات');
+        return;
+      }
+      if (!Number.isFinite(Number(withdrawalData.amount)) || Number(withdrawalData.amount) <= 0) {
         toast.error('يرجى إدخال مبلغ صحيح');
+        return;
+      }
+      const previousAmount = withdrawals.find(row => row.id === editingWithdrawal?.id)?.amount || 0;
+      if (Number(withdrawalData.amount) > stats.remainingBalance + Number(previousAmount)) {
+        toast.error('المبلغ يتجاوز رصيد مستحقات التشغيل المتاح');
         return;
       }
 
@@ -1191,6 +1093,10 @@ export default function ExpenseManagement() {
   };
 
   const deleteWithdrawal = async (id: number) => {
+    if (withdrawals.find(row => row.id === id)?.distributed_payment_id) {
+      toast.error('عدّل السحب من الدفعة الموزعة المرتبطة للحفاظ على تطابق الحسابات');
+      return;
+    }
     if (!confirm('هل أنت متأكد من حذف هذا السحب؟')) return;
     
     try {
@@ -1331,134 +1237,29 @@ export default function ExpenseManagement() {
   }, [categories]);
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-8" dir="rtl">
-      <div className="max-w-7xl mx-auto space-y-6">
-        {/* Premium Header Banner */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border border-primary/15 p-6 md:p-8 backdrop-blur-sm shadow-sm">
-          <div className="absolute right-0 top-0 -z-10 h-32 w-32 rounded-full bg-primary/5 blur-3xl"></div>
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <Button 
-                variant="outline" 
-                onClick={() => navigate(-1)}
-                className="shrink-0 rounded-xl border border-border bg-card h-10 w-10 p-0"
-              >
-                <ArrowRight className="h-5 w-5" />
-              </Button>
-              <div>
-                <h1 className="text-2xl md:text-3xl font-extrabold text-foreground tracking-tight">إدارة المصروفات والمرتبات</h1>
-                <p className="text-muted-foreground text-sm mt-1">
-                  تتبع هيكل النفقات، مرتبات الموظفين، العهد، والتسويات المالية
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2.5 w-full md:w-auto">
-              <Button variant="outline" onClick={() => navigate('/admin/expenses-report')} className="h-10 text-xs font-semibold gap-1.5 flex-1 sm:flex-none">
-                <FileText className="h-3.5 w-3.5 text-primary" /> كشف المصروفات التفصيلي
-              </Button>
-              <Button variant="outline" onClick={exportData} className="h-10 text-xs font-semibold gap-1.5 flex-1 sm:flex-none">
-                <Download className="h-3.5 w-3.5 text-primary" /> تصدير التقرير
-              </Button>
-              <Button variant="outline" onClick={loadData} disabled={loading} className="h-10 text-xs font-semibold gap-1.5 flex-1 sm:flex-none">
-                <RefreshCw className={`h-3.5 w-3.5 text-primary ${loading ? 'animate-spin' : ''}`} /> تحديث
-              </Button>
-            </div>
-          </div>
+    <div className="finance-page min-h-screen bg-background px-4 py-6 md:px-6" dir="rtl">
+      <div className="max-w-[1440px] mx-auto space-y-6">
+        <FinancePageHeader title="المصروفات والمستحقات" description="تابع المصروفات ومصادر سدادها، وراجع مستحقات الموظفين والعهد." icon={Wallet}
+          actions={<>
+            <Button variant="outline" onClick={loadData} disabled={loading} title="تحديث البيانات" aria-label="تحديث البيانات"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></Button>
+            <Button variant="outline" onClick={() => navigate('/admin/expenses-report')} className="gap-2"><FileText className="h-4 w-4" /> كشف المصروفات</Button>
+            <Button onClick={() => { setActiveFinanceTab('expenses'); setEditingExpense(null); setSelectedCustodyAccountId(''); setNewExpense({ description: '', amount: 0, category: categoryOptions.includes('أخرى') ? 'أخرى' : (categoryOptions[0] || ''), expense_date: new Date().toISOString().split('T')[0], payment_method: '', payment_status: 'unpaid', employee_id: '', notes: '', receiver_name: '', sender_name: '' }); setShowExpenseDialog(true); }} className="gap-2"><Plus className="h-4 w-4" /> مصروف جديد</Button>
+          </>} />
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+          <FinanceStatCard label="المصروفات غير المسددة" value={stats.unpaidExpenses} icon={Clock} tone={stats.unpaidExpenses > 0 ? 'danger' : 'default'} note="المتبقي بعد السداد الجزئي" />
+          <FinanceStatCard label="مستحقات الموظفين" value={stats.employeeDues} icon={Users} note="رصيد المستحقات غير المسددة" />
+          <FinanceStatCard label="رصيد التشغيل المتاح" value={stats.remainingBalance} icon={Wallet} tone="primary" note="المستحق المحصّل بعد السحوبات" />
+          <FinanceStatCard label="مصروفات هذا الشهر" value={stats.monthlyExpenses} icon={Calendar} note="إجمالي المصروفات المسجلة" />
         </div>
-
-        {/* Styled Executive Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
-          <Card className="border-red-500/20 bg-red-500/[0.02] hover:bg-red-500/[0.04] transition-all shadow-sm">
-            <CardHeader className="p-4 pb-2">
-              <CardTitle className="text-xs font-bold text-red-600 dark:text-red-400">إجمالي المصروفات</CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 pt-0">
-              <div className="text-lg font-black text-red-700 dark:text-red-300 font-numbers truncate">
-                {stats.totalExpenses.toLocaleString('en-US')} <span className="text-[10px] font-semibold text-muted-foreground">د.ل</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-amber-500/20 bg-amber-500/[0.02] hover:bg-amber-500/[0.04] transition-all shadow-sm">
-            <CardHeader className="p-4 pb-2">
-              <CardTitle className="text-xs font-bold text-amber-600 dark:text-amber-400">إجمالي المسحوبات</CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 pt-0">
-              <div className="text-lg font-black text-amber-700 dark:text-amber-300 font-numbers truncate">
-                {stats.totalWithdrawals.toLocaleString('en-US')} <span className="text-[10px] font-semibold text-muted-foreground">د.ل</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-emerald-500/20 bg-emerald-500/[0.02] hover:bg-emerald-500/[0.04] transition-all shadow-sm">
-            <CardHeader className="p-4 pb-2">
-              <CardTitle className="text-xs font-bold text-emerald-600 dark:text-emerald-400">الرصيد المتبقي</CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 pt-0">
-              <div className="text-lg font-black text-emerald-700 dark:text-emerald-300 font-numbers truncate">
-                {stats.remainingBalance.toLocaleString('en-US')} <span className="text-[10px] font-semibold text-muted-foreground">د.ل</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-blue-500/20 bg-blue-500/[0.02] hover:bg-blue-500/[0.04] transition-all shadow-sm">
-            <CardHeader className="p-4 pb-2">
-              <CardTitle className="text-xs font-bold text-blue-600 dark:text-blue-400">مصروفات الشهر</CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 pt-0">
-              <div className="text-lg font-black text-blue-700 dark:text-blue-300 font-numbers truncate">
-                {stats.monthlyExpenses.toLocaleString('en-US')} <span className="text-[10px] font-semibold text-muted-foreground">د.ل</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-purple-500/20 bg-purple-500/[0.02] hover:bg-purple-500/[0.04] transition-all shadow-sm">
-            <CardHeader className="p-4 pb-2">
-              <CardTitle className="text-xs font-bold text-purple-600 dark:text-purple-400">إجمالي المرتبات</CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 pt-0">
-              <div className="text-lg font-black text-purple-700 dark:text-purple-300 font-numbers truncate">
-                {stats.totalSalaries.toLocaleString('en-US')} <span className="text-[10px] font-semibold text-muted-foreground">د.ل</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-cyan-500/20 bg-cyan-500/[0.02] hover:bg-cyan-500/[0.04] transition-all shadow-sm">
-            <CardHeader className="p-4 pb-2">
-              <CardTitle className="text-xs font-bold text-cyan-600 dark:text-cyan-400">الموظفين النشطين</CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 pt-0">
-              <div className="text-lg font-black text-cyan-700 dark:text-cyan-300 font-numbers truncate">
-                {stats.activeEmployees}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-orange-500/20 bg-orange-500/[0.02] hover:bg-orange-500/[0.04] transition-all shadow-sm">
-            <CardHeader className="p-4 pb-2">
-              <CardTitle className="text-xs font-bold text-orange-600 dark:text-orange-400">غير مسددة</CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 pt-0">
-              <div className="text-lg font-black text-orange-700 dark:text-orange-300 font-numbers truncate">
-                {stats.unpaidExpenses.toLocaleString('en-US')} <span className="text-[10px] font-semibold text-muted-foreground">د.ل</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-rose-500/20 bg-rose-500/[0.02] hover:bg-rose-500/[0.04] transition-all shadow-sm">
-            <CardHeader className="p-4 pb-2">
-              <CardTitle className="text-xs font-bold text-rose-600 dark:text-rose-400">مستحقات موظفين</CardTitle>
-            </CardHeader>
-            <CardContent className="p-4 pt-0">
-              <div className="text-lg font-black text-rose-700 dark:text-rose-300 font-numbers truncate">
-                {stats.employeeDues.toLocaleString('en-US')} <span className="text-[10px] font-semibold text-muted-foreground">د.ل</span>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 rounded-xl border bg-card p-4 text-sm">
+          <div><span className="text-muted-foreground block text-xs">إجمالي المصروفات</span><strong className="font-manrope">{stats.totalExpenses.toLocaleString('en-US')} د.ل</strong></div>
+          <div><span className="text-muted-foreground block text-xs">إجمالي السحوبات</span><strong className="font-manrope">{stats.totalWithdrawals.toLocaleString('en-US')} د.ل</strong></div>
+          <div><span className="text-muted-foreground block text-xs">الرواتب الأساسية</span><strong className="font-manrope">{stats.totalSalaries.toLocaleString('en-US')} د.ل</strong></div>
+          <div className="flex justify-between items-center gap-2"><span><span className="text-muted-foreground block text-xs">الموظفون النشطون</span><strong className="font-manrope">{stats.activeEmployees}</strong></span><Button variant="ghost" onClick={exportData} className="gap-2"><Download className="h-4 w-4" /> تصدير</Button></div>
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="expenses" className="space-y-4">
+        <Tabs value={activeFinanceTab} onValueChange={setActiveFinanceTab} className="space-y-4">
           <TabsList className="bg-muted/50 p-1 w-full overflow-x-auto flex flex-nowrap justify-start h-auto gap-1">
             <TabsTrigger value="expenses" className="font-bold text-xs shrink-0 py-2">المصروفات</TabsTrigger>
             <TabsTrigger value="payments-log" className="font-bold text-xs shrink-0 py-2">سجل التسديدات</TabsTrigger>
@@ -1483,8 +1284,8 @@ export default function ExpenseManagement() {
           {/* Withdrawals Tab */}
           <TabsContent value="withdrawals">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>المسحوبات والسحوبات</CardTitle>
+              <CardHeader className="finance-toolbar">
+                <CardTitle>سجل السحوبات ومصادرها</CardTitle>
                 <Dialog open={showWithdrawalDialog} onOpenChange={setShowWithdrawalDialog}>
                   <DialogTrigger asChild>
                     <Button onClick={() => {
@@ -1501,12 +1302,12 @@ export default function ExpenseManagement() {
                       إضافة سحب
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
+                  <FinanceDialogContent className="max-w-md">
+                    <FinanceDialogHeader>
                       <DialogTitle>
                         {editingWithdrawal ? 'تعديل السحب' : 'إضافة سحب جديد'}
                       </DialogTitle>
-                    </DialogHeader>
+                    </FinanceDialogHeader>
                     <div className="space-y-4">
                       <div>
                         <Label>المبلغ</Label>
@@ -1577,7 +1378,7 @@ export default function ExpenseManagement() {
                         حفظ
                       </Button>
                     </div>
-                  </DialogContent>
+                  </FinanceDialogContent>
                 </Dialog>
               </CardHeader>
               <CardContent>
@@ -1587,14 +1388,16 @@ export default function ExpenseManagement() {
                       <TableHead>التاريخ</TableHead>
                       <TableHead>المبلغ</TableHead>
                       <TableHead>الطريقة</TableHead>
+                      <TableHead>مصدر الأموال</TableHead>
                       <TableHead>ملاحظات</TableHead>
+                      <TableHead>المستلم / المسلّم</TableHead>
                       <TableHead>إجراءات</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {withdrawals.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-muted-foreground">
+                        <TableCell colSpan={7} className="text-center text-muted-foreground">
                           لا توجد مسحوبات مسجلة
                         </TableCell>
                       </TableRow>
@@ -1610,8 +1413,28 @@ export default function ExpenseManagement() {
                           <TableCell>
                             <Badge variant="outline">{withdrawal.method}</Badge>
                           </TableCell>
+                          <TableCell className="min-w-52">
+                            {withdrawal.distributed_payment_id ? (
+                              withdrawalSources[withdrawal.distributed_payment_id] ? (
+                                <Button variant="outline" className="h-auto w-full cursor-pointer whitespace-normal text-right justify-start transition-all duration-200" onClick={() => navigate(`/admin/customer-billing?id=${withdrawalSources[withdrawal.distributed_payment_id!].customerId}`)}>
+                                  <span>
+                                    <span className="block text-xs text-muted-foreground">دفعة موزعة من</span>
+                                    <span className="block font-semibold">{withdrawalSources[withdrawal.distributed_payment_id].customerName}</span>
+                                    <span className="block text-xs font-semibold text-primary">إجمالي الدفعة: {withdrawalSources[withdrawal.distributed_payment_id].amount.toLocaleString('ar-LY')} د.ل</span>
+                                    <span className="block text-xs text-muted-foreground">العقود: {withdrawalSources[withdrawal.distributed_payment_id].contracts.join('، ') || 'رصيد حساب / فواتير'}</span>
+                                    {withdrawalSources[withdrawal.distributed_payment_id].creditAmount > 0 && <span className="block text-xs text-emerald-700 dark:text-emerald-400">رصيد العميل: {withdrawalSources[withdrawal.distributed_payment_id].creditAmount.toLocaleString('ar-LY')} د.ل</span>}
+                                  </span>
+                                </Button>
+                              ) : <span className="text-xs text-muted-foreground">دفعة مرتبطة؛ تفاصيل المصدر غير متاحة</span>
+                            ) : <Badge variant="secondary">غير مرتبط بدفعة</Badge>}
+                          </TableCell>
                           <TableCell className="max-w-xs truncate">
                             {withdrawal.note || withdrawal.notes || '-'}
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            {withdrawal.receiver_name && <div>المستلم: {withdrawal.receiver_name}</div>}
+                            {withdrawal.sender_name && <div>المسلّم: {withdrawal.sender_name}</div>}
+                            {!withdrawal.receiver_name && !withdrawal.sender_name && '—'}
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-2">
@@ -1622,6 +1445,8 @@ export default function ExpenseManagement() {
                                   setEditingWithdrawal(withdrawal);
                                   setShowWithdrawalDialog(true);
                                 }}
+                                disabled={!!withdrawal.distributed_payment_id}
+                                title={withdrawal.distributed_payment_id ? 'التعديل من الدفعة الموزعة' : 'تعديل السحب'}
                               >
                                 <Edit className="h-4 w-4" />
                               </Button>
@@ -1629,6 +1454,8 @@ export default function ExpenseManagement() {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => deleteWithdrawal(withdrawal.id)}
+                                disabled={!!withdrawal.distributed_payment_id}
+                                title={withdrawal.distributed_payment_id ? 'التعديل من الدفعة الموزعة' : 'حذف السحب'}
                               >
                                 <Trash2 className="h-4 w-4 text-destructive" />
                               </Button>
@@ -1646,7 +1473,7 @@ export default function ExpenseManagement() {
           {/* Closures Tab */}
           <TabsContent value="closures">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="finance-toolbar">
                 <CardTitle>سجل تسكير الفترات</CardTitle>
                 <Dialog open={showClosureDialog} onOpenChange={setShowClosureDialog}>
                   <DialogTrigger asChild>
@@ -1666,12 +1493,12 @@ export default function ExpenseManagement() {
                       إضافة تسكير
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-lg">
-                    <DialogHeader>
+                  <FinanceDialogContent className="max-w-lg">
+                    <FinanceDialogHeader>
                       <DialogTitle>
                         {editingClosure ? 'تعديل التسكير' : 'إضافة تسكير جديد'}
                       </DialogTitle>
-                    </DialogHeader>
+                    </FinanceDialogHeader>
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
                         <div>
@@ -1803,7 +1630,7 @@ export default function ExpenseManagement() {
                         حفظ التسكير
                       </Button>
                     </div>
-                  </DialogContent>
+                  </FinanceDialogContent>
                 </Dialog>
               </CardHeader>
               <CardContent>
@@ -1890,7 +1717,7 @@ export default function ExpenseManagement() {
           {/* Expenses Tab */}
           <TabsContent value="expenses">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="finance-toolbar">
                 <CardTitle>المصروفات والنفقات ({filteredExpenses.length})</CardTitle>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={printExpenseStatement}>
@@ -1914,10 +1741,11 @@ export default function ExpenseManagement() {
                         إضافة مصروف
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-                      <DialogHeader>
+                    <FinanceDialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+                      <FinanceDialogHeader>
                         <DialogTitle>{editingExpense ? 'تعديل المصروف' : 'إضافة مصروف جديد'}</DialogTitle>
-                      </DialogHeader>
+                        <p className="text-sm text-muted-foreground">سجّل بيانات المصروف، ثم حدد المستفيد وطريقة السداد.</p>
+                      </FinanceDialogHeader>
                       <div className="space-y-4">
                         <div>
                           <Label>الوصف *</Label>
@@ -1962,6 +1790,7 @@ export default function ExpenseManagement() {
                                     <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                       <SelectItem value="unpaid">غير مسدد</SelectItem>
+                        <SelectItem value="partial">مسدد جزئيًا</SelectItem>
                                       <SelectItem value="paid">مسدد</SelectItem>
                                     </SelectContent>
                                   </Select>
@@ -2121,7 +1950,7 @@ export default function ExpenseManagement() {
                           <Button onClick={saveExpense}>{editingExpense ? 'تحديث' : 'إضافة'}</Button>
                         </div>
                       </div>
-                    </DialogContent>
+                    </FinanceDialogContent>
                   </Dialog>
                 </div>
               </CardHeader>
@@ -2147,7 +1976,7 @@ export default function ExpenseManagement() {
                 </div>
 
                 {/* Filters */}
-                <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4 p-3 bg-muted/50 rounded-lg">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4 p-4 bg-muted/30 border rounded-xl">
                   <div className="md:col-span-2">
                     <Label className="text-xs">بحث</Label>
                     <div className="relative">
@@ -2156,7 +1985,7 @@ export default function ExpenseManagement() {
                         historyKey="expenses"
                         value={filterSearch}
                         onChange={(e) => setFilterSearch(e.target.value)}
-                        placeholder="وصف / مستلم / مسلّم / ملاحظات"
+                        placeholder="ابحث بالوصف أو المستلم أو البيان"
                         className="h-8 text-sm pr-7"
                       />
                     </div>
@@ -2240,7 +2069,9 @@ export default function ExpenseManagement() {
                           <TableCell><Badge variant="outline">{expense.category}</Badge></TableCell>
                           <TableCell className="font-bold">{expense.amount.toLocaleString('en-US')} د.ل</TableCell>
                           <TableCell>
-                            {expense.payment_status === 'paid' ? (
+                            {Number(expense.paid_amount || 0) > Number(expense.amount) ? (
+                              <Badge variant="destructive" className="gap-1 whitespace-normal"><AlertTriangle className="h-3 w-3 shrink-0" /> زيادة سداد {Number(Number(expense.paid_amount) - Number(expense.amount)).toLocaleString('ar-LY')} د.ل</Badge>
+                            ) : expense.payment_status === 'paid' ? (
                               <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
                                 <CheckCircle className="h-3 w-3 ml-1" /> مسدد
                               </Badge>
@@ -2295,14 +2126,14 @@ export default function ExpenseManagement() {
           {/* Employee Dues Tab */}
           <TabsContent value="employee-dues">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>مستحقات الموظفين</CardTitle>
+              <CardHeader className="finance-toolbar">
+                <CardTitle>مستحقات الموظفين غير المسددة</CardTitle>
                 <Dialog open={showPayEmployeeDialog} onOpenChange={setShowPayEmployeeDialog}>
                   <DialogTrigger asChild>
                     <Button><DollarSign className="h-4 w-4 ml-2" />سداد مستحقات</Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-md">
-                    <DialogHeader><DialogTitle>سداد مستحقات لموظف</DialogTitle></DialogHeader>
+                  <FinanceDialogContent className="max-w-md">
+                    <FinanceDialogHeader><DialogTitle>سداد مستحقات الموظف</DialogTitle><p className="text-sm text-muted-foreground">حدد المستلم والمبلغ، ثم راجع الرصيد بعد السداد.</p></FinanceDialogHeader>
                     <div className="space-y-4">
                       <div>
                         <Label>الموظف</Label>
@@ -2336,9 +2167,13 @@ export default function ExpenseManagement() {
                         <Label>ملاحظات</Label>
                         <Textarea value={payNotes} onChange={(e) => setPayNotes(e.target.value)} placeholder="ملاحظات" rows={2} />
                       </div>
-                      <Button onClick={payEmployeeDue} className="w-full">سداد</Button>
+                      <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-2 text-sm">
+                        <div className="flex justify-between gap-2"><span>المستحق الحالي</span><strong>{Number(employeeDues.find(d => d.employee_id === payEmployeeId)?.balance || 0).toLocaleString('en-US')} د.ل</strong></div>
+                        <div className="flex justify-between gap-2"><span>المتبقي بعد السداد</span><strong>{(Number(employeeDues.find(d => d.employee_id === payEmployeeId)?.balance || 0) - (Number(payAmount) || 0)).toLocaleString('en-US')} د.ل</strong></div>
+                      </div>
+                      <Button onClick={payEmployeeDue} disabled={!payEmployeeId || Number(payAmount) <= 0} className="w-full">تأكيد سداد المستحقات</Button>
                     </div>
-                  </DialogContent>
+                  </FinanceDialogContent>
                 </Dialog>
               </CardHeader>
               <CardContent>
@@ -2392,7 +2227,7 @@ export default function ExpenseManagement() {
           </TabsContent>
           <TabsContent value="employees">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="finance-toolbar">
                 <CardTitle>إدارة الموظفين</CardTitle>
                 <Dialog open={showEmployeeDialog} onOpenChange={setShowEmployeeDialog}>
                   <DialogTrigger asChild>
@@ -2412,12 +2247,12 @@ export default function ExpenseManagement() {
                       إضافة موظف
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
+                  <FinanceDialogContent className="max-w-md">
+                    <FinanceDialogHeader>
                       <DialogTitle>
                         {editingEmployee ? 'تعديل الموظف' : 'إضافة موظف جديد'}
                       </DialogTitle>
-                    </DialogHeader>
+                    </FinanceDialogHeader>
                     <div className="space-y-4">
                       <div>
                         <Label>الاسم</Label>
@@ -2535,7 +2370,7 @@ export default function ExpenseManagement() {
                         </Button>
                       </div>
                     </div>
-                  </DialogContent>
+                  </FinanceDialogContent>
                 </Dialog>
               </CardHeader>
               <CardContent>
@@ -2616,10 +2451,10 @@ export default function ExpenseManagement() {
 
       {/* Reopen Manual Expense Dialog */}
       <Dialog open={!!reopenExpense} onOpenChange={(v) => !v && setReopenExpense(null)}>
-        <DialogContent className="max-w-md" dir="rtl">
-          <DialogHeader>
+        <FinanceDialogContent className="max-w-md" dir="rtl">
+          <FinanceDialogHeader>
             <DialogTitle>إعادة فتح المصروف</DialogTitle>
-          </DialogHeader>
+          </FinanceDialogHeader>
           {reopenExpense && (
             <div className="space-y-3 text-sm">
               <div className="p-3 rounded-lg bg-muted/50 border">
@@ -2639,7 +2474,7 @@ export default function ExpenseManagement() {
               </div>
             </div>
           )}
-        </DialogContent>
+        </FinanceDialogContent>
       </Dialog>
 
       {/* Direct Payment Dialog */}
@@ -2652,10 +2487,10 @@ export default function ExpenseManagement() {
 
       {/* Quick Add Employee (from expense form) */}
       <Dialog open={showQuickEmployeeDialog} onOpenChange={setShowQuickEmployeeDialog}>
-        <DialogContent className="max-w-md" dir="rtl">
-          <DialogHeader>
+        <FinanceDialogContent className="max-w-md" dir="rtl">
+          <FinanceDialogHeader>
             <DialogTitle>إضافة موظف جديد</DialogTitle>
-          </DialogHeader>
+          </FinanceDialogHeader>
           <div className="space-y-3">
             <div>
               <Label>الاسم *</Label>
@@ -2676,9 +2511,8 @@ export default function ExpenseManagement() {
               </Button>
             </div>
           </div>
-        </DialogContent>
+        </FinanceDialogContent>
       </Dialog>
     </div>
   );
 }
-

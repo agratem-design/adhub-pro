@@ -1,0 +1,42 @@
+/* Scoped to financial screens; keep the rest of the application unchanged. */
+.finance-page, .finance-dialog {
+  font-family: 'Tajawal', 'Cairo', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: hsl(var(--foreground));
+}
+.finance-page .text-sm, .finance-dialog .text-sm { font-size: 14px; }
+.finance-page .text-xs, .finance-dialog .text-xs { font-size: 12px; }
+.finance-page :is(button, input, [role="combobox"]),
+.finance-dialog :is(button, input, [role="combobox"]) { min-height: 40px; }
+.finance-page :is(button, [role="combobox"], [role="tab"]),
+.finance-dialog :is(button, [role="combobox"], [role="tab"]) { cursor: pointer; transition: background-color 180ms, border-color 180ms, color 180ms; }
+.finance-page :is(button, input, [role="combobox"]):focus-visible,
+.finance-dialog :is(button, input, [role="combobox"]):focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.finance-page :is([role="checkbox"], [role="switch"]),
+.finance-dialog :is([role="checkbox"], [role="switch"]) { min-height: 20px; }
+.finance-dialog :is(input:not([type="checkbox"]), textarea, [role="combobox"]) { font-size: 14px; border-radius: 10px; background: hsl(var(--background)); min-width: 0; }
+.finance-dialog input:not([type="checkbox"]), .finance-dialog [role="combobox"] { min-height: 44px; }
+.finance-dialog label { display: inline-block; font-size: 13px; font-weight: 600; margin-bottom: 5px; color: hsl(var(--foreground)); }
+.finance-dialog h2 { font-size: 21px; line-height: 1.5; }
+.finance-dialog .finance-dialog-heading p { color: hsl(var(--muted-foreground)); font-size: 14px; }
+.finance-dialog > button:last-child { min-width: 40px; min-height: 40px; }
+.finance-page table th { font-size: 12px; font-weight: 700; white-space: nowrap; height: 46px; color: hsl(var(--muted-foreground)); background: hsl(var(--muted) / 0.55); }
+.finance-page table td { padding-top: 12px; padding-bottom: 12px; }
+.finance-page table button:has(>svg:only-child) { min-width: 40px; }
+.finance-page [role="tablist"] { height: auto; min-height: 48px; flex-wrap: wrap; gap: 4px; padding: 5px; border: 1px solid hsl(var(--border)); background: hsl(var(--muted) / .5); border-radius: 14px; }
+.finance-page [role="tab"] { min-height: 40px; border-radius: 10px; font-size: 13px; padding-inline: 16px; }
+.finance-page [role="tab"][data-state="active"] { background: hsl(var(--card)); color: hsl(var(--primary)); box-shadow: 0 1px 3px #0000000d; }
+.finance-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.finance-form-section { border: 1px solid hsl(var(--border)); border-radius: 14px; background: hsl(var(--background)); padding: 16px; }
+.finance-form-section > h3 { font-weight: 700; font-size: 14px; margin-bottom: 12px; }
+@media (max-width: 639px) {
+  .finance-page { padding-inline: 12px; }
+  .finance-page [role="tab"] { flex-grow: 1; padding-inline: 10px; }
+  .finance-dialog .grid-cols-2 { grid-template-columns: minmax(0, 1fr); }
+  .finance-dialog .col-span-2 { grid-column: auto; }
+  .finance-dialog-footer > button { flex: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .finance-page *, .finance-dialog * { animation: none !important; transition: none !important; }
+}

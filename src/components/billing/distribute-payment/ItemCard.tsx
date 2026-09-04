@@ -10,8 +10,8 @@ import type { DistributableItem } from './types';
 interface ItemCardProps {
   item: DistributableItem;
   index: number;
-  onSelect: (id: string | number, selected: boolean) => void;
-  onAmountChange: (id: string | number, value: string) => void;
+  onSelect: (id: string | number, selected: boolean, type?: DistributableItem['type']) => void;
+  onAmountChange: (id: string | number, value: string, type?: DistributableItem['type']) => void;
   remainingToAllocate: number;
 }
 
@@ -35,8 +35,9 @@ export const ItemCard = memo(({ item, index, onSelect, onAmountChange, remaining
           {index + 1}
         </div>
         <Checkbox
+          aria-label={`تحديد ${item.displayName}`}
           checked={item.selected}
-          onCheckedChange={(checked) => onSelect(item.id, checked as boolean)}
+          onCheckedChange={(checked) => onSelect(item.id, checked as boolean, item.type)}
           className="h-4 w-4 shrink-0"
           onClick={(e) => e.stopPropagation()}
         />
@@ -47,9 +48,9 @@ export const ItemCard = memo(({ item, index, onSelect, onAmountChange, remaining
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0 text-xs">
-          <span className="text-red-500 font-bold">{item.remainingAmount.toFixed(0)}</span>
+          <span className="text-red-500 font-bold">{item.remainingAmount.toLocaleString('ar-LY', { maximumFractionDigits: 2 })}</span>
           <span className="text-muted-foreground">/</span>
-          <span className="text-muted-foreground">{item.totalAmount.toFixed(0)}</span>
+          <span className="text-muted-foreground">{item.totalAmount.toLocaleString('ar-LY', { maximumFractionDigits: 2 })}</span>
           {!item.selected && (
             <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} />
           )}
@@ -74,15 +75,15 @@ export const ItemCard = memo(({ item, index, onSelect, onAmountChange, remaining
           <div className="grid grid-cols-3 gap-1.5 text-xs">
             <div className="text-center p-1.5 rounded bg-accent/30">
               <span className="text-muted-foreground block text-[10px]">الإجمالي</span>
-              <span className="font-bold">{item.totalAmount.toFixed(0)}</span>
+              <span className="font-bold">{item.totalAmount.toLocaleString('ar-LY', { maximumFractionDigits: 2 })}</span>
             </div>
             <div className="text-center p-1.5 rounded bg-green-500/10">
               <span className="text-muted-foreground block text-[10px]">المدفوع</span>
-              <span className="font-bold text-green-500">{item.paidAmount.toFixed(0)}</span>
+              <span className="font-bold text-green-500">{item.paidAmount.toLocaleString('ar-LY', { maximumFractionDigits: 2 })}</span>
             </div>
             <div className="text-center p-1.5 rounded bg-red-500/10">
               <span className="text-muted-foreground block text-[10px]">المتبقي</span>
-              <span className="font-bold text-red-500">{item.remainingAmount.toFixed(0)}</span>
+              <span className="font-bold text-red-500">{item.remainingAmount.toLocaleString('ar-LY', { maximumFractionDigits: 2 })}</span>
             </div>
           </div>
         </div>
@@ -94,12 +95,13 @@ export const ItemCard = memo(({ item, index, onSelect, onAmountChange, remaining
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
               <Input
+                aria-label={`مبلغ السداد لـ ${item.displayName}`}
                 type="number"
                 step="0.01"
                 min="0"
                 max={maxAllowed}
                 value={item.allocatedAmount || ''}
-                onChange={(e) => onAmountChange(item.id, e.target.value)}
+                onChange={(e) => onAmountChange(item.id, e.target.value, item.type)}
                 placeholder="0.00"
                 disabled={poolFull && item.allocatedAmount === 0}
                 className="text-right text-sm font-semibold h-9 pr-3 pl-9 bg-background/80 disabled:opacity-60"
@@ -111,7 +113,7 @@ export const ItemCard = memo(({ item, index, onSelect, onAmountChange, remaining
               size="sm"
               variant="outline"
               onClick={() => {
-                onAmountChange(item.id, String(maxAllowed));
+                onAmountChange(item.id, String(maxAllowed), item.type);
               }}
               disabled={poolFull && item.allocatedAmount === 0}
               className="whitespace-nowrap h-9 px-3 text-xs bg-primary/10 border-primary/30 hover:bg-primary/20 text-primary"

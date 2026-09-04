@@ -11,8 +11,8 @@ import type { DistributableItem } from './types';
 interface ItemsTabsSectionProps {
   items: DistributableItem[];
   setItems: (items: DistributableItem[]) => void;
-  onSelect: (id: string | number, selected: boolean) => void;
-  onAmountChange: (id: string | number, value: string) => void;
+  onSelect: (id: string | number, selected: boolean, type?: DistributableItem['type']) => void;
+  onAmountChange: (id: string | number, value: string, type?: DistributableItem['type']) => void;
   remainingToAllocate: number;
 }
 
@@ -86,13 +86,13 @@ export function ItemsTabsSection({ items, setItems, onSelect, onAmountChange, re
   const renderItems = (list: DistributableItem[]) => (
     <div className="space-y-1.5">
       {list.map((item, idx) => (
-        <ItemCard key={item.id} item={item} index={idx} onSelect={onSelect} onAmountChange={onAmountChange} remainingToAllocate={remainingToAllocate} />
+        <ItemCard key={`${item.type}:${item.id}`} item={item} index={idx} onSelect={onSelect} onAmountChange={onAmountChange} remainingToAllocate={remainingToAllocate} />
       ))}
     </div>
   );
 
   return (
-    <div className="flex flex-col h-full space-y-3">
+    <div className="flex flex-col h-full space-y-3 [&_button]:cursor-pointer [&_button]:transition-all [&_button]:duration-200">
       {/* Quick actions & Global Search */}
       <div className="flex flex-col gap-2 shrink-0 bg-muted/30 p-2.5 rounded-xl border border-border/20">
         <div className="flex gap-1.5">

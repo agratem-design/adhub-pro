@@ -19,7 +19,7 @@ export function DistributionSummaryBar({ inputAmountNum, totalAllocated, remaini
   return (
     <div className="space-y-4">
       {/* ── الأرقام الثلاثة الرئيسية ── */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-1 gap-2">
         {/* الكلي */}
         <div className="flex flex-col gap-1 p-4 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/30">
           <div className="flex items-center gap-1.5">
@@ -34,7 +34,7 @@ export function DistributionSummaryBar({ inputAmountNum, totalAllocated, remaini
           </div>
         </div>
 
-        {/* الموزّع للعميل */}
+        {/* المقيد على العقود والفواتير */}
         <div className={`flex flex-col gap-1 p-4 rounded-2xl border ${
           totalAllocated > 0
             ? 'bg-gradient-to-br from-emerald-500/20 to-emerald-500/5 border-emerald-500/30'
@@ -67,7 +67,7 @@ export function DistributionSummaryBar({ inputAmountNum, totalAllocated, remaini
               <AlertCircle className={`h-4 w-4 shrink-0 ${isOver ? 'text-red-500' : 'text-amber-500'}`} />
             )}
             <span className="text-xs text-muted-foreground font-medium">
-              {isBalanced ? 'موزّع بالكامل' : isOver ? 'تجاوز المبلغ' : 'متبقي للعميل'}
+              {isBalanced ? 'موزّع بالكامل' : isOver ? 'تجاوز المبلغ' : 'رصيد العميل غير الموزع'}
             </span>
           </div>
           <div className="flex items-end gap-1 mt-1">
@@ -83,7 +83,7 @@ export function DistributionSummaryBar({ inputAmountNum, totalAllocated, remaini
 
       {/* ── التفصيل حسب الوجهة ── */}
       {breakdown && (
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col items-center gap-1 p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20">
             <div className="flex items-center gap-1 text-blue-600 dark:text-blue-400">
               <Receipt className="h-3.5 w-3.5 shrink-0" />
