@@ -469,6 +469,7 @@ export const BillboardAddDialog: React.FC<BillboardAddDialogProps> = ({
             </div>
             إضافة لوحة جديدة
           </DialogTitle>
+          <DialogDescription className="sr-only">نموذج إضافة لوحة إعلانية جديدة</DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto space-y-5 py-4 px-1">

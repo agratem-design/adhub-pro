@@ -2297,6 +2297,7 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-foreground">الأسعار والمستوى</DialogTitle>
+          <DialogDescription className="sr-only">عرض وتعديل أسعار اللوحة حسب الفئات والمستوى</DialogDescription>
           <div className="flex items-center gap-2 flex-wrap mt-2">
             <Badge variant="outline" className="text-xs font-mono">{billboard.Billboard_Name}</Badge>
             {billboard.Size && <Badge variant="secondary" className="text-xs font-bold">{billboard.Size}</Badge>}
@@ -2440,6 +2441,8 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
     {/* Dialog تكبير التصاميم وصور التركيب */}
     <Dialog open={designPreviewOpen} onOpenChange={setDesignPreviewOpen}>
       <DialogContent className="max-w-[95vw] max-h-[95vh] p-0 bg-black/95 border-0 [&>button]:hidden">
+        <DialogTitle className="sr-only">معاينة الصورة</DialogTitle>
+        <DialogDescription className="sr-only">معاينة مكبرة لصورة أو تصميم اللوحة الإعلانية</DialogDescription>
         <div className="relative w-full h-full flex items-center justify-center min-h-[60vh]">
           {/* زر الإغلاق */}
           <button

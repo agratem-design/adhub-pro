@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { cn } from '@/lib/utils';
 import { usePersistedFilters } from '@/hooks/usePersistedFilters';
 import { createPortal } from 'react-dom';
 import { Button } from '@/components/ui/button';

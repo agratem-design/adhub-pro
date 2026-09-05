@@ -1734,7 +1734,7 @@ export default function CustomerBilling() {
                 </div>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-foreground">{customerName || '—'}</h1>
+                <h1 className="text-2xl font-bold text-foreground">{customerName || 'كشف حساب وفواتير العميل'}</h1>
                 <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                   {customerPhone && (
                     <span className="text-sm text-muted-foreground" dir="ltr">{customerPhone}</span>

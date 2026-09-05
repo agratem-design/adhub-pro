@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
@@ -473,9 +473,10 @@ export default function RolesManagement() {
                         <Badge 
                           key={group.id} 
                           variant="outline" 
-                          className={`text-xs ${allInGroup ? 'bg-primary/10 border-primary text-primary' : ''}`}
+                          className={`text-xs inline-flex items-center gap-1 ${allInGroup ? 'bg-primary/10 border-primary text-primary' : ''}`}
                         >
-                          {group.icon} {group.title} ({groupViewCount}/{group.items.length})
+                          <group.icon className="h-3 w-3 inline shrink-0" />
+                          <span>{group.title} ({groupViewCount}/{group.items.length})</span>
                         </Badge>
                       );
                     })}
@@ -494,6 +495,9 @@ export default function RolesManagement() {
             <DialogTitle className="text-xl">
               {editingRole ? `تعديل دور: ${editingRole.display_name}` : 'إضافة دور جديد'}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              تحديد الصلاحيات والوصول للمستخدمين
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6 py-4">

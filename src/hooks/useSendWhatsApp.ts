@@ -113,7 +113,7 @@ export function useSendWhatsApp() {
       if (error) throw error;
       return data.connected || false;
     } catch (error) {
-      console.error('Error checking WhatsApp connection:', error);
+      console.warn('[WhatsApp] Service currently unreachable or blocked by CORS:', error);
       return false;
     }
   };

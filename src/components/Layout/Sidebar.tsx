@@ -267,7 +267,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
           </div>
           <div className="min-w-0">
             <p className="text-sm font-bold text-sidebar-foreground leading-tight tracking-tight">لوحة التحكم</p>
-            <p className="text-[10px] text-sidebar-foreground/40 leading-tight mt-0.5">إدارة اللوحات الإعلانية</p>
+            <p className="text-[10px] text-sidebar-foreground/60 leading-tight mt-0.5">إدارة اللوحات الإعلانية</p>
           </div>
         </div>
       </div>
@@ -314,13 +314,13 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
                     hasActiveChild && 'text-primary'
                   )}
                 >
-                  <SectionIcon className="h-3.5 w-3.5 shrink-0 opacity-50 group-hover:opacity-80 transition-opacity" />
+                  <SectionIcon className="h-3.5 w-3.5 shrink-0 opacity-70 group-hover:opacity-100 transition-opacity" />
                   <span className="flex-1 truncate">{section.title}</span>
                   {hasActiveChild && (
                     <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
                   )}
                   <ChevronDown className={cn(
-                    'h-3 w-3 shrink-0 opacity-30 transition-transform duration-200',
+                    'h-3.5 w-3.5 shrink-0 opacity-50 group-hover:opacity-80 transition-transform duration-200',
                     isExpanded && 'rotate-180'
                   )} />
                 </button>
@@ -332,7 +332,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
                     isExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
                   )}
                 >
-                  <div className="mr-[14px] pr-2.5 border-r border-sidebar-border/20 space-y-0.5 py-1">
+                  <div className="mr-[14px] pr-2.5 border-r border-sidebar-border/30 space-y-0.5 py-1">
                     {section.items.map((item) => {
                       const Icon = item.icon;
                       const active = isActive(item.path);
@@ -349,7 +349,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
                           {active ? (
                             <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
                           ) : (
-                            <Icon className="h-3.5 w-3.5 shrink-0 opacity-30 group-hover:opacity-60 transition-opacity" />
+                            <Icon className="h-3.5 w-3.5 shrink-0 opacity-50 group-hover:opacity-90 transition-opacity" />
                           )}
                           <span className="truncate">{item.label}</span>
                         </button>

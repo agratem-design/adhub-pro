@@ -36,7 +36,7 @@ export async function findContractGaps(targetYear?: number | 'all'): Promise<Con
     // جلب العقود مع أرقامها وتواريخها واسم العميل
     let query = supabase
       .from('Contract')
-      .select('Contract_Number, "Customer Name", "Contract Date", "Ad Type", created_at')
+      .select('Contract_Number, "Customer Name", "Contract Date", "Ad Type"')
       .not('Contract_Number', 'is', null);
 
     const { data, error } = await query;
@@ -60,7 +60,7 @@ export async function findContractGaps(targetYear?: number | 'all'): Promise<Con
     // استخراج السنوات المتاحة في قاعدة البيانات
     const yearsSet = new Set<number>();
     data.forEach((c: any) => {
-      const dateStr = c['Contract Date'] || c.created_at;
+      const dateStr = c['Contract Date'];
       if (dateStr) {
         const y = new Date(dateStr).getFullYear();
         if (!isNaN(y) && y > 2000) yearsSet.add(y);
@@ -76,7 +76,7 @@ export async function findContractGaps(targetYear?: number | 'all'): Promise<Con
 
       if (selectedYear === 'all') return true;
 
-      const dateStr = c['Contract Date'] || c.created_at;
+      const dateStr = c['Contract Date'];
       if (!dateStr) return false;
       const y = new Date(dateStr).getFullYear();
       return y === Number(selectedYear);
@@ -127,7 +127,7 @@ export async function findContractGaps(targetYear?: number | 'all'): Promise<Con
 
         gaps.push({
           number: num,
-          year: typeof selectedYear === 'number' ? selectedYear : (prevC ? new Date(prevC['Contract Date'] || prevC.created_at).getFullYear() : currentYear),
+          year: typeof selectedYear === 'number' ? selectedYear : (prevC ? new Date(prevC['Contract Date']).getFullYear() : currentYear),
           previousContract: prevC ? {
             number: prevNum,
             customerName: prevC['Customer Name'] || 'عميل غير محدد',

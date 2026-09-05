@@ -12,6 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -311,6 +312,9 @@ export default function Printers() {
             <DialogTitle>
               {selectedPrinter ? 'تعديل المطبعة' : 'إضافة مطبعة جديدة'}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              بيانات المطبعة ومعلومات التواصل
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -408,6 +412,9 @@ export default function Printers() {
             <DialogTitle>
               فواتير الطباعة - {selectedPrinter?.name}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              قائمة فواتير الطباعة الصادرة من هذه المطبعة
+            </DialogDescription>
           </DialogHeader>
           
           {loadingInvoices ? (

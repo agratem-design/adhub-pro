@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -256,8 +256,8 @@ export default function ExpensesReport() {
                     const isOpen = !!expanded[e.id];
                     const exPays = payments[e.id] || [];
                     return (
-                      <>
-                        <TableRow key={e.id} className="cursor-pointer" onClick={() => setExpanded({ ...expanded, [e.id]: !isOpen })}>
+                      <React.Fragment key={e.id}>
+                        <TableRow className="cursor-pointer" onClick={() => setExpanded({ ...expanded, [e.id]: !isOpen })}>
                           <TableCell>{exPays.length > 0 && (isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />)}</TableCell>
                           <TableCell className="text-xs">{e.expense_date}</TableCell>
                           <TableCell className="text-xs">{e.description}</TableCell>
@@ -291,7 +291,7 @@ export default function ExpensesReport() {
                             </TableCell>
                           </TableRow>
                         )}
-                      </>
+                      </React.Fragment>
                     );
                   })}
                   {filtered.length === 0 && (

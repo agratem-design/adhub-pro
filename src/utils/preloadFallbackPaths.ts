@@ -127,20 +127,28 @@ async function loadFromBillboardHistory() {
 
 /**
  * Preload all fallback paths from DB into globalFallbackMap.
- * Call once on app startup. Non-blocking, errors are swallowed.
+ * Non-blocking, deferred to idle/background so it never competes with initial page loads.
  */
-export function preloadFallbackPaths(): Promise<void> {
+export function preloadFallbackPaths(immediate = false): Promise<void> {
   if (loaded) return Promise.resolve();
   if (loadingPromise) return loadingPromise;
 
-  loadingPromise = (async () => {
+  const startPreload = async () => {
     try {
-      await Promise.all([
-        loadFromInstallationTaskItems(),
-        loadFromTaskDesigns(),
-        loadFromBillboards(),
-        loadFromBillboardHistory(),
-      ]);
+      // Allow the active page's critical queries to resolve before streaming background images
+      if (!immediate) {
+        await new Promise(r => setTimeout(r, 3000));
+      }
+
+      // Load sequentially with cooperative yields to avoid saturating HTTP connection pool
+      await loadFromBillboards();
+      await new Promise(r => setTimeout(r, 50));
+      await loadFromTaskDesigns();
+      await new Promise(r => setTimeout(r, 50));
+      await loadFromInstallationTaskItems();
+      await new Promise(r => setTimeout(r, 50));
+      await loadFromBillboardHistory();
+
       loaded = true;
       console.log(`[FallbackPaths] ✅ Loaded ${globalFallbackMap.size} URL→path mappings`);
     } catch (e) {
@@ -149,8 +157,9 @@ export function preloadFallbackPaths(): Promise<void> {
       // Signal that map is ready (even if partially loaded)
       if (resolveReady) resolveReady();
     }
-  })();
+  };
 
+  loadingPromise = startPreload();
   return loadingPromise;
 }
 

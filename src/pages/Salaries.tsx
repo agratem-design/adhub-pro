@@ -1141,6 +1141,9 @@ export default function Salaries() {
               <User className="h-5 w-5 text-primary" />
               {editingEmployee ? 'تعديل ملف موظف' : 'إضافة موظف جديد'}
             </UIDialog.DialogTitle>
+            <UIDialog.DialogDescription className="sr-only">
+              نموذج بيانات الموظف والراتب والمهنة
+            </UIDialog.DialogDescription>
           </FinanceDialogHeader>
 
           <div className="grid gap-4 py-4 text-right">
@@ -1437,6 +1440,9 @@ export default function Salaries() {
               <FileText className="h-5 w-5 text-primary" />
               تسجيل عمل يدوي جديد
             </UIDialog.DialogTitle>
+            <UIDialog.DialogDescription className="sr-only">
+              نموذج تسجيل عمل يدوي للموظف
+            </UIDialog.DialogDescription>
           </FinanceDialogHeader>
 
           <div className="grid gap-4 py-4 text-right">

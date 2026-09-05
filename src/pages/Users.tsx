@@ -453,7 +453,7 @@ export default function Users() {
                       <div className="hidden md:flex items-center gap-2">
                         {/* Linked Customer */}
                         <Tooltip>
-                          <TooltipTrigger>
+                          <TooltipTrigger asChild>
                             <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
                               r.linked_customer_id 
                                 ? 'bg-blue-500/10 text-blue-600 border-blue-200 dark:border-blue-800' 
@@ -486,7 +486,7 @@ export default function Users() {
 
                         {/* Permissions count */}
                         <Tooltip>
-                          <TooltipTrigger>
+                          <TooltipTrigger asChild>
                             <button 
                               onClick={() => handleViewPermissions(r)}
                               className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-muted-foreground hover:bg-muted transition-colors"
@@ -662,6 +662,7 @@ export default function Users() {
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2"><Key className="h-5 w-5" />تغيير كلمة المرور</DialogTitle>
+              <DialogDescription className="sr-only">تغيير كلمة المرور الخاصة بالمستخدم</DialogDescription>
             </DialogHeader>
             <div className="space-y-4 mt-4">
               <div className="space-y-2">

@@ -92,7 +92,7 @@ interface InstallationTeam {
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     return (
-      <div className="bg-slate-950/95 dark:bg-slate-900/95 border border-white/10 dark:border-amber-500/30 p-3 rounded-xl shadow-xl text-right dir-rtl font-numbers">
+      <div className="bg-popover text-popover-foreground border border-border/80 p-3 rounded-xl shadow-xl text-right dir-rtl font-numbers">
         <p className="text-xs font-bold text-muted-foreground mb-1.5">{label}</p>
         {payload.map((entry: any, index: number) => (
           <p key={index} className="text-xs font-bold" style={{ color: entry.stroke || entry.color }}>
@@ -162,10 +162,10 @@ export default function Dashboard() {
 
   const getGreeting = () => {
     const hour = currentTime.getHours();
- if (hour < 5) return 'يسعد مساؤك ';
- if (hour < 12) return 'صباح الخير والبركة ️';
- if (hour < 17) return 'أهلاً بك، طاب يومك ';
- return 'مساء الخير والأنوار ';
+    if (hour < 5) return 'يسعد مساؤك';
+    if (hour < 12) return 'صباح الخير والبركة';
+    if (hour < 17) return 'أهلاً بك، طاب يومك';
+    return 'مساء الخير والأنوار';
   };
 
   const openWhatsAppDialog = useCallback(async (
@@ -1185,7 +1185,7 @@ return removalTasks.filter(t => {
           {/* Clock & Action button row */}
           <div className="flex flex-wrap items-center gap-2 sm:gap-4 shrink-0">
             {/* Live digital ticking clock widget */}
-            <div className="bg-slate-950/80 dark:bg-slate-900/90 border border-white/10 dark:border-amber-500/20 px-2.5 sm:px-4 py-1 sm:py-2 rounded-xl sm:rounded-2xl shadow-inner flex items-center gap-2 sm:gap-3">
+            <div className="bg-card/90 dark:bg-slate-900/90 border border-border/80 dark:border-amber-500/20 px-2.5 sm:px-4 py-1 sm:py-2 rounded-xl sm:rounded-2xl shadow-sm flex items-center gap-2 sm:gap-3">
               <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-amber-500 animate-ping shrink-0" />
               <span className="font-mono text-xs sm:text-base font-bold text-amber-500 tracking-wider font-numbers">
                 {format(currentTime, 'hh:mm:ss a')}

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { Merge, AlertTriangle, Check } from 'lucide-react';
@@ -385,6 +385,9 @@ export default function CustomerMerge() {
               <AlertTriangle className="h-5 w-5 text-orange-500" />
               تأكيد دمج العملاء: {selectedGroup?.name}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              تأكيد دمج حسابات العملاء المكررة وتوحيد العقود والمدفوعات
+            </DialogDescription>
           </DialogHeader>
 
           {selectedGroup && (

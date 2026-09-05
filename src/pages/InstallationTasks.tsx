@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import {
   Plus,
@@ -2737,6 +2737,7 @@ export default function InstallationTasks() {
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>إدارة التصاميم</DialogTitle>
+              <DialogDescription className="sr-only">إدارة وتعيين التصاميم لمهمة التركيب</DialogDescription>
             </DialogHeader>
             <TaskDesignManager
               taskId={selectedTaskForDesign}
@@ -2955,9 +2956,9 @@ export default function InstallationTasks() {
               <Camera className="h-5 w-5 text-primary" />
               إضافة صور التركيب
             </DialogTitle>
-            <p className="text-sm text-muted-foreground">
+            <DialogDescription>
               ارفع صور التركيب أو أدخل الروابط مباشرة
-            </p>
+            </DialogDescription>
           </DialogHeader>
           {(() => {
             // Build folder path and image name for installed photos
@@ -3432,6 +3433,7 @@ export default function InstallationTasks() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>إنشاء مهمة مجمعة للتركيب</DialogTitle>
+            <DialogDescription className="sr-only">نموذج إنشاء مهمة مجمعة لعمليات التركيب</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             {selectedTaskForComposite && (

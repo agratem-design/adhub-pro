@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -34,6 +34,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import { BillboardImage } from '@/components/BillboardImage';
 import { useBillboardStatuses } from '@/hooks/useBillboardStatuses';
 import { BillboardStatusBadges } from '@/components/billboards/BillboardStatusBadges';
@@ -216,6 +217,8 @@ export function EnhancedAddInstallationTaskDialog({
       c.company?.toLowerCase().includes(searchTerm)
     ).slice(0, 20);
   }, [customers, customerSearchTerm, customerAdTypeSearch, allContracts]);
+
+  const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 
   // Fetch installation tasks count for contracts
   const { data: contractTasksInfo = {} } = useQuery({
@@ -597,7 +600,8 @@ export function EnhancedAddInstallationTaskDialog({
     }
 
     // توليد الاسم التلقائي إذا لم يتم إدخال اسم مخصص
-    const selectedContractsList = contracts.filter(c => selectedContractIds.includes(c.Contract_Number));
+    const availableContracts = customerContracts.length > 0 ? customerContracts : allContracts;
+    const selectedContractsList = availableContracts.filter(c => selectedContractIds.includes(c.Contract_Number));
     const adTypes = [...new Set(selectedContractsList.map(c => c['Ad Type']).filter(Boolean))].join(' / ');
     const custName = selectedCustomer?.name || selectedContractsList[0]?.['Customer Name'] || '';
     const typeLabel = taskType === 'reinstallation' ? 'إعادة تركيب' : 'تركيب جديد';
@@ -613,8 +617,6 @@ export function EnhancedAddInstallationTaskDialog({
       task_name: finalTaskName
     });
   };
-
-  const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 
   // Stepper steps
   const steps = [
@@ -684,6 +686,9 @@ export function EnhancedAddInstallationTaskDialog({
               </button>
             </div>
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            نموذج إضافة وجدولة مهمة تركيب لوحات إعلانية جديدة
+          </DialogDescription>
         </DialogHeader>
 
         {/* Stepper Progress Bar */}
@@ -747,7 +752,8 @@ export function EnhancedAddInstallationTaskDialog({
                       variant="ghost"
                       size="sm"
                       onClick={() => {
-                        const selectedContractsList = contracts.filter(c => selectedContractIds.includes(c.Contract_Number));
+                        const availableContracts = customerContracts.length > 0 ? customerContracts : allContracts;
+                        const selectedContractsList = availableContracts.filter(c => selectedContractIds.includes(c.Contract_Number));
                         const adTypes = [...new Set(selectedContractsList.map(c => c['Ad Type']).filter(Boolean))].join(' / ');
                         const custName = selectedCustomer?.name || selectedContractsList[0]?.['Customer Name'] || '';
                         const typeLabel = taskType === 'reinstallation' ? 'إعادة تركيب' : 'تركيب جديد';

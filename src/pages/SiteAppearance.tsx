@@ -30,6 +30,15 @@ const AVAILABLE_FONTS = [
   { name: 'Manrope', label: 'مانروب (Manrope)' },
 ];
 
+const sanitizeHexColor = (val: string | undefined): string => {
+  if (!val) return '#000000';
+  if (/^#[0-9a-fA-F]{3}$/.test(val)) {
+    return `#${val[1]}${val[1]}${val[2]}${val[2]}${val[3]}${val[3]}`;
+  }
+  if (/^#[0-9a-fA-F]{6}$/.test(val)) return val;
+  return '#000000';
+};
+
 const SiteAppearance = () => {
   const { theme, loading, saving, updateThemeSetting, saveTheme, resetToDefaults } = useSiteTheme();
   const [uploading, setUploading] = useState(false);
@@ -136,7 +145,7 @@ const SiteAppearance = () => {
                   <div className="flex items-center gap-3">
                     <input
                       type="color"
-                      value={theme.primary_color}
+                      value={sanitizeHexColor(theme.primary_color)}
                       onChange={(e) => updateThemeSetting('primary_color', e.target.value)}
                       className="w-12 h-10 rounded-lg border border-border cursor-pointer"
                     />
@@ -170,7 +179,7 @@ const SiteAppearance = () => {
                     <div className="flex items-center gap-2">
                       <input
                         type="color"
-                        value={(theme[key] as string) || '#000000'}
+                        value={sanitizeHexColor(theme[key] as string)}
                         onChange={(e) => updateThemeSetting(key, e.target.value)}
                         className="w-10 h-9 rounded border border-border cursor-pointer shrink-0"
                       />
