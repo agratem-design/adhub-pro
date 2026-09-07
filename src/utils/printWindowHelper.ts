@@ -163,7 +163,7 @@ export function injectPrintActionBar(
   const escapedTitle = displayTitle.replace(/"/g, '&quot;');
   const escapedSafeFileName = safeFileName.replace(/"/g, '\\"');
 
-  const hasExplicitPageCards = /class=["'][^"']*\bpage\b[^"']*["']|data-print-page|data-contract-page|\.background/i.test(html);
+  const hasExplicitPageCards = /class=["'][^"']*\b(page|print-page)\b[^"']*["']|data-print-page|data-contract-page|\.background/i.test(html);
   const hasZeroMarginInHtml = /@page\s*\{[^}]*margin\s*:\s*0\s*(mm|cm|px|!|;|\})/i.test(html);
   const explicitMarginMatch = html.match(/@page\s*\{[^}]*margin\s*:\s*([^;!}]+)/i);
 
@@ -728,12 +728,65 @@ export function injectPrintActionBar(
           overflow: visible !important;
           position: static !important;
         }
-        body.print-portrait .page,
-        body.print-portrait [data-print-page] {
+        /* Canvas 2D Print Output Layout */
+        body.printing-via-canvas2d #canvas2d-print-root {
+          display: block !important;
+          position: static !important;
           width: 100% !important;
-          max-width: 100% !important;
-          height: auto !important;
-          min-height: auto !important;
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+        body.printing-via-canvas2d .canvas2d-print-page {
+          display: block !important;
+          width: ${landscape ? '297mm' : '210mm'} !important;
+          height: ${landscape ? '210mm' : '297mm'} !important;
+          min-height: ${landscape ? '210mm' : '297mm'} !important;
+          max-height: ${landscape ? '210mm' : '297mm'} !important;
+          page-break-after: always !important;
+          break-after: page !important;
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          overflow: hidden !important;
+          box-sizing: border-box !important;
+        }
+        body.printing-via-canvas2d .canvas2d-print-page:last-child {
+          page-break-after: auto !important;
+          break-after: auto !important;
+        }
+        body.printing-via-canvas2d .canvas2d-print-page img {
+          width: 100% !important;
+          height: 100% !important;
+          display: block !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          object-fit: fill !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        /* Hide original DOM pages during Canvas 2D printing */
+        body.printing-via-canvas2d .page-scale-wrapper,
+        body.printing-via-canvas2d .page-scaler,
+        body.printing-via-canvas2d .page,
+        body.printing-via-canvas2d [data-print-page],
+        body.printing-via-canvas2d [data-contract-page],
+        body.printing-via-canvas2d .print-page,
+        body.printing-via-canvas2d .print-container,
+        body.printing-via-canvas2d [data-invoice-print],
+        body.printing-via-canvas2d .page-top-indicator {
+          display: none !important;
+        }
+
+        /* Fallback Print Layout (when Canvas 2D is bypassed or not loaded) */
+        body.print-portrait .page,
+        body.print-portrait [data-print-page],
+        body.print-portrait .print-page {
+          width: 210mm !important;
+          min-width: 210mm !important;
+          max-width: 210mm !important;
+          height: 297mm !important;
+          min-height: 297mm !important;
           max-height: 297mm !important;
           box-shadow: none !important;
           margin: 0 !important;
@@ -744,17 +797,20 @@ export function injectPrintActionBar(
           break-after: page !important;
           page-break-inside: avoid !important;
           break-inside: avoid !important;
-          overflow: visible !important;
+          overflow: hidden !important;
           box-sizing: border-box !important;
+          position: relative !important;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
         body.print-landscape .page,
-        body.print-landscape [data-print-page] {
-          width: 100% !important;
-          max-width: 100% !important;
-          height: auto !important;
-          min-height: auto !important;
+        body.print-landscape [data-print-page],
+        body.print-landscape .print-page {
+          width: 297mm !important;
+          min-width: 297mm !important;
+          max-width: 297mm !important;
+          height: 210mm !important;
+          min-height: 210mm !important;
           max-height: 210mm !important;
           box-shadow: none !important;
           margin: 0 !important;
@@ -765,8 +821,9 @@ export function injectPrintActionBar(
           break-after: page !important;
           page-break-inside: avoid !important;
           break-inside: avoid !important;
-          overflow: visible !important;
+          overflow: hidden !important;
           box-sizing: border-box !important;
+          position: relative !important;
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
@@ -839,14 +896,14 @@ export function injectPrintActionBar(
 
         // Helper: Official Page Contract (Prevents selecting nested containers)
         function getPrintPages(onlyActive) {
-          var rawCandidates = Array.from(document.querySelectorAll('[data-print-page], .page, [data-contract-page]'));
+          var rawCandidates = Array.from(document.querySelectorAll('[data-print-page], .page, [data-contract-page], .print-page'));
           var pages = rawCandidates.filter(function(el) {
-            if (el.classList.contains('page-scale-wrapper') || el.classList.contains('page-scaler') || el.classList.contains('no-print')) {
+            if (el.classList.contains('page-scale-wrapper') || el.classList.contains('page-scaler') || el.classList.contains('no-print') || el.classList.contains('canvas2d-print-page')) {
               return false;
             }
             var parent = el.parentElement;
             while (parent && parent !== document.body) {
-              if (parent.hasAttribute('data-print-page') || parent.classList.contains('page') || parent.hasAttribute('data-contract-page')) {
+              if (parent.hasAttribute('data-print-page') || parent.classList.contains('page') || parent.hasAttribute('data-contract-page') || parent.classList.contains('print-page')) {
                 return false;
               }
               parent = parent.parentElement;
@@ -1144,26 +1201,89 @@ export function injectPrintActionBar(
           initPageSelector();
         }, 350);
         
-        // 1. Native Print Trigger with suggested document title for Windows Microsoft Print to PDF
-        window.__triggerNativePrint = function() {
-          try {
-            var activePages = getPrintPages(true);
-            if (activePages.length === 0) {
-              window.__pageSelectAll();
-              activePages = getPrintPages(true);
-            }
-            document.title = safeFileName;
-            window.focus();
-            setTimeout(function() {
-              document.title = safeFileName;
-              window.print();
-            }, 80);
-          } catch(e) {
-            console.error('Trigger print failed:', e);
+        // Common helper to ensure fonts, images and SVG overlays are fully ready
+        async function waitForFontsAndImages() {
+          if (document.fonts) {
+            var fontTimeoutId;
+            var fontTimeoutPromise = new Promise(function(resolve) {
+              fontTimeoutId = setTimeout(function() {
+                if (document.fonts.status !== 'loaded') {
+                  console.warn('[Print Engine] Fonts took longer than expected to load. Current status:', document.fonts.status);
+                }
+                resolve();
+              }, 3000);
+            });
+            await Promise.race([
+              document.fonts.ready.then(function() { clearTimeout(fontTimeoutId); }),
+              fontTimeoutPromise
+            ]);
+            await new Promise(function(r) { setTimeout(r, 100); });
           }
+
+          var imgs = Array.from(document.querySelectorAll('img'));
+          await Promise.all(imgs.map(function(img) {
+            if (img.complete && img.naturalWidth > 0) {
+              if (typeof img.decode === 'function') {
+                return img.decode().catch(function() { return Promise.resolve(); });
+              }
+              return Promise.resolve();
+            }
+            return new Promise(function(resolve) {
+              var done = function() { resolve(); };
+              img.addEventListener('load', done, { once: true });
+              img.addEventListener('error', function() {
+                console.warn('[Print Engine] Image failed to load:', img.src);
+                resolve();
+              }, { once: true });
+            });
+          }));
+
+          if (typeof adjustOverlayPositions === 'function') {
+            adjustOverlayPositions();
+          }
+        }
+
+        var isPrintInProgress = false;
+
+        // 1. Native Print Trigger: Instant and Dynamic Browser Print Dialog
+        window.__triggerNativePrint = function() {
+          if (isPrintInProgress) return;
+          isPrintInProgress = true;
+
+          var activePages = getPrintPages(true);
+          if (activePages.length === 0) {
+            window.__pageSelectAll();
+            activePages = getPrintPages(true);
+          }
+          if (activePages.length === 0) {
+            alert('لا توجد صفحات محددة للطباعة');
+            isPrintInProgress = false;
+            return;
+          }
+
+          // Apply current page selection
+          applyPageVisibility();
+
+          document.title = safeFileName;
+          window.focus();
+
+          // Immediate direct native print (instant and dynamic)
+          setTimeout(function() {
+            document.title = safeFileName;
+            window.print();
+            isPrintInProgress = false;
+          }, 40);
         };
 
-        // 2. DOM rasterization through html2canvas using its Canvas renderer (foreignObjectRendering disabled)
+        // Intercept Ctrl+P / Cmd+P to trigger direct native print immediately
+        window.addEventListener('keydown', function(e) {
+          if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) {
+            e.preventDefault();
+            window.__triggerNativePrint();
+          }
+        });
+
+        // 2. Canvas 2D Engine with High-Resolution Backgrounds for PDF Download
         window.__triggerDownloadPdf = async function() {
           var progress = document.getElementById('pdf-progress-indicator');
           var btnPdf = document.getElementById('btn-download-pdf');
@@ -1199,51 +1319,15 @@ export function injectPrintActionBar(
             return;
           }
 
-          if (progress) progress.style.display = 'flex';
+          if (progress) {
+            progress.style.display = 'flex';
+            var pSpan = progress.querySelector('span');
+            if (pSpan) pSpan.textContent = 'جاري معالجة الصفحات بدقة عالية عبر Canvas 2D لإنشاء ملف PDF...';
+          }
           if (btnPdf) btnPdf.disabled = true;
 
           try {
-            // Wait for fonts to load with timeout tracking
-            if (document.fonts) {
-              var fontTimeoutId;
-              var fontTimeoutPromise = new Promise(function(resolve) {
-                fontTimeoutId = setTimeout(function() {
-                  if (document.fonts.status !== 'loaded') {
-                    console.warn('[Print PDF] Fonts took longer than expected to load. Current status:', document.fonts.status);
-                  }
-                  resolve();
-                }, 3000);
-              });
-              await Promise.race([
-                document.fonts.ready.then(function() { clearTimeout(fontTimeoutId); }),
-                fontTimeoutPromise
-              ]);
-              await new Promise(function(r) { setTimeout(r, 100); });
-            }
-
-            // Wait for all images to complete loading with decode verification
-            var imgs = Array.from(document.querySelectorAll('img'));
-            await Promise.all(imgs.map(function(img) {
-              if (img.complete && img.naturalWidth > 0) {
-                if (typeof img.decode === 'function') {
-                  return img.decode().catch(function() { return Promise.resolve(); });
-                }
-                return Promise.resolve();
-              }
-              return new Promise(function(resolve) {
-                var done = function() { resolve(); };
-                img.addEventListener('load', done, { once: true });
-                img.addEventListener('error', function() {
-                  console.warn('[Print PDF] Image failed to load:', img.src);
-                  resolve();
-                }, { once: true });
-              });
-            }));
-
-            // Execute 3D cutout overlay calculations if present
-            if (typeof adjustOverlayPositions === 'function') {
-              adjustOverlayPositions();
-            }
+            await waitForFontsAndImages();
 
             var pages = getPrintPages(true);
             if (pages.length === 0) {
@@ -1251,37 +1335,74 @@ export function injectPrintActionBar(
             }
 
             var jsPDFClass = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
-            var html2canvasFunc = window.html2canvas;
+            var html2canvasFunc = window.html2canvas || (window.opener && window.opener.html2canvas);
 
             if (!jsPDFClass || !html2canvasFunc) {
               throw new Error('مكتبات Canvas 2D غير محملة');
             }
 
-            var orientation = isLandscape ? 'landscape' : 'portrait';
-            var a4W = isLandscape ? 297 : 210;
-            var a4H = isLandscape ? 210 : 297;
+            var isLandscapeDoc = document.body.classList.contains('print-landscape') || isLandscape;
+            var orientation = isLandscapeDoc ? 'landscape' : 'portrait';
+            var a4W = isLandscapeDoc ? 297 : 210;
+            var a4H = isLandscapeDoc ? 210 : 297;
+
+            // Target high-definition dimensions for A4 background (300 DPI: 2480 x 3508)
+            var printW = isLandscapeDoc ? 3508 : 2480;
+            var printH = isLandscapeDoc ? 2480 : 3508;
+
+            // Pre-rasterize SVG backgrounds to 300 DPI for ultra crisp Canvas 2D rendering
+            var allImgs = Array.from(document.querySelectorAll('img'));
+            await Promise.all(allImgs.map(function(img) {
+              if (!img.src || (img.src.indexOf('.svg') === -1 && img.src.indexOf('image/svg+xml') === -1 && img.src.indexOf('data:image/svg+xml') === -1)) {
+                return Promise.resolve();
+              }
+              return new Promise(function(resolve) {
+                var tempImg = new Image();
+                tempImg.crossOrigin = 'anonymous';
+                tempImg.onload = function() {
+                  try {
+                    var c = document.createElement('canvas');
+                    var isBg = (img.closest && img.closest('.background')) || img.classList.contains('background') || (img.parentElement && img.parentElement.classList.contains('background'));
+                    var targetW = isBg ? printW : Math.max((tempImg.naturalWidth || 800) * 3, 1600);
+                    var targetH = isBg ? printH : Math.max((tempImg.naturalHeight || 1100) * 3, 1600);
+                    c.width = targetW;
+                    c.height = targetH;
+                    var ctx = c.getContext('2d');
+                    if (ctx) {
+                      ctx.imageSmoothingEnabled = true;
+                      ctx.imageSmoothingQuality = 'high';
+                      ctx.drawImage(tempImg, 0, 0, targetW, targetH);
+                      img.src = c.toDataURL('image/png');
+                    }
+                  } catch(e) {}
+                  resolve();
+                };
+                tempImg.onerror = function() { resolve(); };
+                tempImg.src = img.src;
+              });
+            }));
 
             var pdf = new jsPDFClass({ unit: 'mm', format: 'a4', orientation: orientation, compress: true });
 
             for (var i = 0; i < pages.length; i++) {
               var pageEl = pages[i];
 
-              // html2canvas CanvasRenderer path (foreignObjectRendering disabled)
+              // Canvas 2D rendering with high DPI scale (3.0 for 300 DPI print quality)
               var canvas = await html2canvasFunc(pageEl, {
-                scale: 2.5,
+                scale: 3.0,
                 useCORS: true,
                 allowTaint: false,
                 logging: false,
                 backgroundColor: '#ffffff',
-                foreignObjectRendering: false, // html2canvas CanvasRenderer path
-                imageTimeout: 15000,
+                foreignObjectRendering: false, // Pure Canvas 2D engine
+                imageTimeout: 25000,
                 scrollX: 0,
                 scrollY: 0,
               });
 
-              var imgData = canvas.toDataURL('image/jpeg', 0.96);
+              var imgData = canvas.toDataURL('image/jpeg', 0.98);
               if (i > 0) pdf.addPage('a4', orientation);
-              pdf.addImage(imgData, 'JPEG', 0, 0, a4W, a4H, undefined, 'FAST');
+              pdf.addImage(imgData, 'JPEG', 0, 0, a4W, a4H, undefined, 'SLOW');
 
               // Free memory immediately
               canvas.width = 1;

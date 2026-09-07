@@ -25,7 +25,7 @@ export default defineConfig(({ mode }) => ({
         globPatterns: ["**/*.{js,css,html,ico,svg}"],
         globIgnores: ["**/*.{png,jpg,jpeg,otf,ttf,sql,csv,bat,ps1}"],
         navigateFallbackDenylist: [/^\/~oauth/],
-        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+        maximumFileSizeToCacheInBytes: 7 * 1024 * 1024,
         runtimeCaching: [
           {
             urlPattern: /\.(?:png|jpg|jpeg|svg|gif|otf|ttf|woff2)$/i,

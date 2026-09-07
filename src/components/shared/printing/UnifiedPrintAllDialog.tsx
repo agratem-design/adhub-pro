@@ -718,6 +718,13 @@ export function UnifiedPrintAllDialog({
       const sizeCutoutUrl = sizeCutoutMap[sizeKey] || sizeCutoutMap[sizeKey.replace(/×/g, 'x').replace(/X/g, 'x')] || null;
       const activeCutout = isCutoutEnabled ? (ov?.cutout_image_url || sizeCutoutUrl || null) : null;
       
+      const allowedImageHeight = (includeDesigns && hasDesigns)
+        ? (s.installed_image_height || '85mm')
+        : (s.main_image_height || '140mm');
+      const maxAllowedWidth = (s.main_image_width && parseFloat(s.main_image_width) > 190)
+        ? s.main_image_width
+        : '190mm';
+
       let imageSection = '';
       if (hasMainImage && isImageActive) {
         if (isOverlayActive) {
@@ -731,8 +738,8 @@ export function UnifiedPrintAllDialog({
           const transformOrigin = isV2 ? 'bottom center' : 'center center';
           
           imageSection = `
-            <div class="overlay-container" style="position: relative; width: 100%; height: 100%; overflow: hidden; background: #fafafa;">
-              <img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" style="width: 100%; height: 100%; object-fit: contain; display: block;" />
+            <div class="overlay-container" style="position: relative; max-width: ${maxAllowedWidth}; max-height: ${allowedImageHeight}; display: inline-block; overflow: visible;">
+              <img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" style="max-height: ${allowedImageHeight}; max-width: ${maxAllowedWidth}; width: auto; height: auto; object-fit: contain; display: block;" />
               ${activeCutout ? `
                 <img src="${activeCutout}" class="overlay-cutout" data-x="${x}" data-y="${y}" data-scale="${scale}" data-rot="${rot}" data-anchor="${isV2 ? 'v2' : 'v1'}" style="
                   position: absolute;
@@ -751,17 +758,17 @@ export function UnifiedPrintAllDialog({
             </div>
           `;
         } else {
-          imageSection = `<img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" />`;
+          imageSection = `<img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" style="max-height: ${allowedImageHeight}; max-width: ${maxAllowedWidth}; width: auto; height: auto; object-fit: contain; display: block;" />`;
         }
+      } else if (hasMainImage) {
+        imageSection = `<img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" style="max-height: ${allowedImageHeight}; max-width: ${maxAllowedWidth}; width: auto; height: auto; object-fit: contain; display: block;" />`;
       } else if (showPinFallback) {
-        imageSection = `<img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" />`;
-      } else if (showPinFallback) {
-        imageSection = `<div class="pin-fallback">
+        imageSection = `<div class="pin-fallback" style="width: ${s.main_image_width || '120mm'}; height: ${allowedImageHeight};">
             <img src="${pinSvgDataUrl}" alt="دبوس اللوحة" style="width: 80px; height: auto; margin-bottom: 8px;" />
             <div style="font-size: 11px; color: #666; direction: ltr;">${coords || 'لا توجد إحداثيات'}</div>
           </div>`;
       } else {
-        imageSection = `<div class="pin-fallback">
+        imageSection = `<div class="pin-fallback" style="width: ${s.main_image_width || '120mm'}; height: ${allowedImageHeight};">
             <div style="font-size: 13px; color: #999; direction: rtl;">لا توجد صورة</div>
             <div style="font-size: 11px; color: #666; direction: ltr; margin-top: 4px;">${coords || 'لا توجد إحداثيات'}</div>
           </div>`;
@@ -817,22 +824,22 @@ export function UnifiedPrintAllDialog({
           ` : ''}
 
           ${installedImageFaceA && installedImageFaceB ? `
-            <div class="absolute-field" style="top: ${s.installed_images_top}; left: calc(${s.installed_images_left} - ${s.installed_images_width} / 2); width: ${s.installed_images_width}; display: flex; gap: ${s.installed_images_gap};">
-              <div style="flex: 1; text-align: center;">
+            <div class="absolute-field installed-images-container" style="top: ${s.installed_images_top}; left: ${s.installed_images_left || '50%'}; transform: translateX(-50%); width: ${s.installed_images_width || '180mm'}; max-width: ${maxAllowedWidth}; display: flex; gap: ${s.installed_images_gap || '5mm'}; justify-content: center; align-items: flex-start;">
+              <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${s.installed_images_gap || '5mm'} / 2)); text-align: center; display: flex; flex-direction: column; align-items: center;">
                 <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 3mm;">الوجه الأمامي</div>
-                <div style="height: ${s.installed_image_height}; overflow: hidden; border: 2px solid #000; border-radius: 8px;">
-                  <img src="${installedImageFaceA}" alt="الوجه الأمامي" style="width: 100%; height: 100%; object-fit: contain;" />
+                <div class="installed-image-box" style="max-height: ${s.installed_image_height || '85mm'}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
+                  <img src="${installedImageFaceA}" alt="الوجه الأمامي" class="billboard-image installed-image" style="max-height: ${s.installed_image_height || '85mm'}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" />
                 </div>
               </div>
-              <div style="flex: 1; text-align: center;">
+              <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${s.installed_images_gap || '5mm'} / 2)); text-align: center; display: flex; flex-direction: column; align-items: center;">
                 <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 3mm;">الوجه الخلفي</div>
-                <div style="height: ${s.installed_image_height}; overflow: hidden; border: 2px solid #000; border-radius: 8px;">
-                  <img src="${installedImageFaceB}" alt="الوجه الخلفي" style="width: 100%; height: 100%; object-fit: contain;" />
+                <div class="installed-image-box" style="max-height: ${s.installed_image_height || '85mm'}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
+                  <img src="${installedImageFaceB}" alt="الوجه الخلفي" class="billboard-image installed-image" style="max-height: ${s.installed_image_height || '85mm'}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" />
                 </div>
               </div>
             </div>
           ` : `
-            <div class="absolute-field image-container" style="top: ${s.main_image_top}; left: calc(${s.main_image_left} - ${s.main_image_width} / 2); width: ${s.main_image_width}; height: ${includeDesigns && hasDesigns ? s.installed_image_height : s.main_image_height};">
+            <div class="absolute-field image-container" style="top: ${s.main_image_top}; left: ${s.main_image_left || '50%'}; transform: translateX(-50%); max-width: ${maxAllowedWidth}; max-height: ${allowedImageHeight}; display: flex; align-items: center; justify-content: center;">
               ${imageSection}
             </div>
           `}
@@ -974,16 +981,33 @@ export function UnifiedPrintAllDialog({
           .location-info, .landmark-info { font-family: 'Doran', Arial, sans-serif; font-size: 16px; line-height: 1.2; }
 
           .image-container {
-            overflow: hidden;
-            background: rgba(255,255,255,0.8);
-            border: 3px solid #000;
-            border-radius: 0 0 0 8px;
+            overflow: visible;
+            background: transparent;
+            border: none;
             display: flex;
             align-items: center;
             justify-content: center;
+            box-sizing: border-box;
           }
 
-          .billboard-image { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; display: block; }
+          .installed-images-container {
+            overflow: visible;
+            background: transparent;
+            border: none;
+            box-sizing: border-box;
+          }
+
+          .billboard-image, .installed-image {
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            display: block;
+            border: 2px solid #000;
+            border-radius: 8px;
+            box-sizing: border-box;
+          }
           .qr-code { width: 100%; height: 100%; object-fit: contain; }
 
           .sequential-number {
@@ -1011,7 +1035,18 @@ export function UnifiedPrintAllDialog({
           .designs-section { flex-wrap: wrap; }
           .design-item { flex: 1; min-width: 70mm; text-align: center; display: flex; flex-direction: column; align-items: center; }
           .design-label { font-family: 'Doran', Arial, sans-serif; font-size: 13px; font-weight: 500; margin-bottom: 2mm; color: #333; line-height: 1; white-space: nowrap; }
-          .design-image { width: 100%; height: auto; max-height: 42mm; object-fit: contain; border: 1px solid #ddd; border-radius: 4px; }
+          .design-image {
+            max-width: 100%;
+            max-height: 42mm;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            border: 2px solid #000;
+            border-radius: 8px;
+            box-sizing: border-box;
+            display: block;
+            margin: 0 auto;
+          }
           .designs-section { overflow: hidden; }
 
           @page { size: A4 portrait; margin: 0; }
@@ -1026,9 +1061,12 @@ export function UnifiedPrintAllDialog({
             .page { 
               page-break-after: always; 
               box-shadow: none; 
-              height: 297mm;
-              overflow: hidden;
-              margin: 0;
+              width: 210mm !important;
+              height: 297mm !important;
+              min-height: 297mm !important;
+              position: relative !important;
+              overflow: hidden !important;
+              margin: 0 !important;
             }
             .page:last-child { page-break-after: auto; }
           }
@@ -1578,6 +1616,41 @@ export function UnifiedPrintAllDialog({
         });
       }));
 
+      // Pre-rasterize SVG backgrounds at 300 DPI (2480x3508) for ultra-sharp Canvas 2D PDF print
+      const printW = isLandscape ? 3508 : 2480;
+      const printH = isLandscape ? 2480 : 3508;
+      await Promise.all(images.map((img) => {
+        if (!img.src || (img.src.indexOf('.svg') === -1 && img.src.indexOf('image/svg+xml') === -1 && !img.src.startsWith('data:image/svg+xml'))) {
+          return Promise.resolve();
+        }
+        return new Promise<void>((resolve) => {
+          const tempImg = new Image();
+          tempImg.crossOrigin = 'anonymous';
+          tempImg.onload = () => {
+            try {
+              const c = document.createElement('canvas');
+              const isBg = (img.closest && img.closest('.background')) || img.classList.contains('background') || img.parentElement?.classList.contains('background');
+              const targetW = isBg ? printW : Math.max((tempImg.naturalWidth || 800) * 3, 1600);
+              const targetH = isBg ? printH : Math.max((tempImg.naturalHeight || 1100) * 3, 1600);
+              c.width = targetW;
+              c.height = targetH;
+              const ctx = c.getContext('2d');
+              if (ctx) {
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(tempImg, 0, 0, targetW, targetH);
+                img.src = c.toDataURL('image/png');
+              }
+            } catch (e) {
+              console.warn('SVG high-res rasterization notice:', e);
+            }
+            resolve();
+          };
+          tempImg.onerror = () => resolve();
+          tempImg.src = img.src;
+        });
+      }));
+
       // Trigger overlay calculations if any overlay containers exist
       try {
         const containers = iframeDoc.querySelectorAll('.overlay-container');
@@ -1655,22 +1728,26 @@ export function UnifiedPrintAllDialog({
       for (let i = 0; i < pages.length; i++) {
         const pageEl = pages[i];
         
-        // html2canvas CanvasRenderer path (foreignObjectRendering disabled)
+        // Canvas 2D rendering with high DPI scale (3.0 for 300 DPI print quality)
         const canvas = await html2canvas(pageEl, {
-          scale: 2.5,
+          scale: 3.0,
           useCORS: true,
           allowTaint: false,
           logging: false,
           backgroundColor: '#ffffff',
-          foreignObjectRendering: false, // html2canvas CanvasRenderer path
-          imageTimeout: 15000,
+          foreignObjectRendering: false, // Pure Canvas 2D engine
+          imageTimeout: 25000,
           scrollX: 0,
           scrollY: 0,
         });
 
-        const imgData = canvas.toDataURL('image/jpeg', 0.96);
+        const imgData = canvas.toDataURL('image/jpeg', 0.98);
         if (i > 0) pdf.addPage('a4', orientation);
-        pdf.addImage(imgData, 'JPEG', 0, 0, a4W, a4H, undefined, 'FAST');
+        pdf.addImage(imgData, 'JPEG', 0, 0, a4W, a4H, undefined, 'SLOW');
+
+        // Free memory immediately
+        canvas.width = 1;
+        canvas.height = 1;
       }
 
       return pdf.output('blob');

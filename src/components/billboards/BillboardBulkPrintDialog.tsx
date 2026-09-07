@@ -332,7 +332,7 @@ export function BillboardBulkPrintDialog({
           // ✅ دعم أسماء حقول متعددة للصورة الافتراضية
           const defaultImage = billboard.Image_URL || (billboard as any).image_url || (billboard as any).image || (billboard as any).billboard_image || '';
           const imgUrl = billboard.installed_image_url || defaultImage || '/placeholder.svg';
-          const borderStyle = `border: ${element.borderWidth || '2px'} solid ${element.borderColor || '#000'}; border-radius: ${borderRadius};`;
+          const borderStyle = `border: ${element.borderWidth || '0px'} solid ${element.borderColor || 'transparent'}; border-radius: ${borderRadius};`;
           content = `<img src="${imgUrl}" style="max-width: 100%; max-height: 100%; object-fit: ${objectFit}; object-position: ${objectPosition}; ${borderStyle}" />`;
           break;
         }
@@ -342,7 +342,7 @@ export function BillboardBulkPrintDialog({
         case 'designs': {
           const designA = billboard.design_face_a;
           const designB = billboard.design_face_b;
-          const designBorderStyle = `border: ${element.borderWidth || '1px'} solid ${element.borderColor || '#ddd'}; border-radius: ${borderRadius};`;
+          const designBorderStyle = `border: ${element.borderWidth || '0px'} solid ${element.borderColor || 'transparent'}; border-radius: ${borderRadius};`;
           content = `
             <div style="display: flex; gap: ${element.gap || '12px'}; height: 100%; align-items: center; justify-content: center;">
               <div style="flex: 1; display: flex; align-items: center; justify-content: center; height: 100%;">
@@ -357,7 +357,7 @@ export function BillboardBulkPrintDialog({
         }
         case 'cutoutImage':
           if (billboard.cutout_image_url) {
-            const cutoutBorderStyle = `border: ${element.borderWidth || '2px'} solid ${element.borderColor || '#000'}; border-radius: ${borderRadius};`;
+            const cutoutBorderStyle = `border: ${element.borderWidth || '0px'} solid ${element.borderColor || 'transparent'}; border-radius: ${borderRadius};`;
             content = `<img src="${billboard.cutout_image_url}" style="max-width: 100%; max-height: 100%; object-fit: ${objectFit}; object-position: ${objectPosition}; ${cutoutBorderStyle}" />`;
           }
           break;
@@ -365,7 +365,7 @@ export function BillboardBulkPrintDialog({
           // ✅ دعم أسماء حقول متعددة للصورة الافتراضية
           const defaultImg = billboard.Image_URL || (billboard as any).image_url || (billboard as any).image || '';
           const singleInstallUrl = billboard.installed_image_face_a_url || billboard.installed_image_url || defaultImg || '/placeholder.svg';
-          const singleBorderStyle = `border: ${element.borderWidth || '3px'} solid ${element.borderColor || '#ccc'}; border-radius: ${borderRadius};`;
+          const singleBorderStyle = `border: ${element.borderWidth || '0px'} solid ${element.borderColor || 'transparent'}; border-radius: ${borderRadius};`;
           content = `<img src="${singleInstallUrl}" style="max-width: 100%; max-height: 100%; object-fit: ${objectFit}; object-position: ${objectPosition}; ${singleBorderStyle}" />`;
           break;
         }
@@ -374,7 +374,7 @@ export function BillboardBulkPrintDialog({
           // ✅ دعم أسماء حقول متعددة للصورة الافتراضية
           const defaultImgA = billboard.Image_URL || (billboard as any).image_url || (billboard as any).image || '';
           const faceAUrl = billboard.installed_image_face_a_url || billboard.installed_image_url || defaultImgA || '/placeholder.svg';
-          const faceABorderStyle = `border: ${element.borderWidth || '3px'} solid ${element.borderColor || '#ccc'}; border-radius: ${borderRadius};`;
+          const faceABorderStyle = `border: ${element.borderWidth || '0px'} solid ${element.borderColor || 'transparent'}; border-radius: ${borderRadius};`;
           content = `<img src="${faceAUrl}" style="max-width: 100%; max-height: 100%; object-fit: ${objectFit}; object-position: ${objectPosition}; ${faceABorderStyle}" />`;
           break;
         }
@@ -383,7 +383,7 @@ export function BillboardBulkPrintDialog({
           // ✅ دعم أسماء حقول متعددة للصورة الافتراضية للوجه الخلفي
           const defaultImgB = billboard.Image_URL || (billboard as any).image_url || (billboard as any).image || '';
           const faceBUrl = billboard.installed_image_face_b_url || (billboard.Faces_Count > 1 ? defaultImgB : null) || '/placeholder.svg';
-          const faceBBorderStyle = `border: ${element.borderWidth || '3px'} solid ${element.borderColor || '#ccc'}; border-radius: ${borderRadius};`;
+          const faceBBorderStyle = `border: ${element.borderWidth || '0px'} solid ${element.borderColor || 'transparent'}; border-radius: ${borderRadius};`;
           content = `<img src="${faceBUrl}" style="max-width: 100%; max-height: 100%; object-fit: ${objectFit}; object-position: ${objectPosition}; ${faceBBorderStyle}" />`;
           break;
         }
@@ -393,7 +393,7 @@ export function BillboardBulkPrintDialog({
           const defaultImgTwo = billboard.Image_URL || (billboard as any).image_url || (billboard as any).image || '/placeholder.svg';
           const faceAUrl = billboard.installed_image_face_a_url || billboard.installed_image_url || defaultImgTwo;
           const faceBUrl = billboard.installed_image_face_b_url || (billboard.Faces_Count > 1 ? defaultImgTwo : null);
-          const containerBorderStyle = `border: ${element.borderWidth || '3px'} solid ${element.borderColor || '#ccc'}; border-radius: ${borderRadius};`;
+          const containerBorderStyle = `border: ${element.borderWidth || '0px'} solid ${element.borderColor || 'transparent'}; border-radius: ${borderRadius};`;
           const gapValue = element.gap || '20px';
           
           content = `
@@ -481,6 +481,14 @@ export function BillboardBulkPrintDialog({
             }
             @media print {
               body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+              .print-page {
+                width: 210mm !important;
+                height: 297mm !important;
+                min-height: 297mm !important;
+                position: relative !important;
+                overflow: hidden !important;
+                margin: 0 !important;
+              }
             }
           </style>
         </head>

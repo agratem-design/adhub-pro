@@ -308,17 +308,17 @@ export const BillboardPrintIndividual: React.FC<BillboardPrintIndividualProps> =
               <!-- صورة اللوحة أو صور التركيب للوجهين -->
               ${installedImageFaceA && installedImageFaceB ? `
                 <!-- عرض صورتي التركيب بجانب بعض -->
-                <div class="absolute-field" style="top: 88mm; left: 50%; transform: translateX(-50%); width: 180mm; display: flex; gap: 5mm;">
-                  <div style="flex: 1; text-align: center;">
+                <div class="absolute-field installed-images-container" style="top: 88mm; left: 50%; transform: translateX(-50%); width: 180mm; max-width: 190mm; display: flex; gap: 5mm; justify-content: center; align-items: flex-start;">
+                  <div class="installed-image-column" style="flex: 1; max-width: calc(50% - 2.5mm); text-align: center; display: flex; flex-direction: column; align-items: center;">
                     <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 3mm;">التركيب - الوجه الأمامي</div>
-                    <div style="height: ${imageHeight}; overflow: hidden; border: 2px solid #000; border-radius: 8px;">
-                      <img src="${installedImageFaceA}" alt="التركيب - الوجه الأمامي" style="width: 100%; height: 100%; object-fit: contain;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
+                    <div class="installed-image-box" style="max-height: ${imageHeight}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
+                      <img src="${installedImageFaceA}" alt="التركيب - الوجه الأمامي" class="billboard-image installed-image" style="max-height: ${imageHeight}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
                     </div>
                   </div>
-                  <div style="flex: 1; text-align: center;">
+                  <div class="installed-image-column" style="flex: 1; max-width: calc(50% - 2.5mm); text-align: center; display: flex; flex-direction: column; align-items: center;">
                     <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 3mm;">التركيب - الوجه الخلفي</div>
-                    <div style="height: ${imageHeight}; overflow: hidden; border: 2px solid #000; border-radius: 8px;">
-                      <img src="${installedImageFaceB}" alt="التركيب - الوجه الخلفي" style="width: 100%; height: 100%; object-fit: contain;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
+                    <div class="installed-image-box" style="max-height: ${imageHeight}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
+                      <img src="${installedImageFaceB}" alt="التركيب - الوجه الخلفي" class="billboard-image installed-image" style="max-height: ${imageHeight}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
                     </div>
                   </div>
                 </div>
@@ -475,11 +475,23 @@ export const BillboardPrintIndividual: React.FC<BillboardPrintIndividualProps> =
               border-radius: 0 0 0 8px; /* اختياري: زوايا سفلية فقط */
             }
 
-            .billboard-image {
-              width: 100%;
-              height: 100%;
+            .installed-images-container {
+              overflow: visible;
+              background: transparent;
+              border: none;
+              box-sizing: border-box;
+            }
+
+            .billboard-image, .installed-image {
+              width: auto;
+              max-width: 100%;
+              height: auto;
+              max-height: 100%;
               object-fit: contain;
               display: block;
+              border: 2px solid #000;
+              border-radius: 8px;
+              box-sizing: border-box;
             }
 
             .qr-code {
@@ -507,11 +519,16 @@ export const BillboardPrintIndividual: React.FC<BillboardPrintIndividualProps> =
             }
 
             .design-image {
-              width: 100%;
+              max-width: 100%;
               max-height: 42mm;
+              width: auto;
+              height: auto;
               object-fit: contain;
-              border: 1px solid #ddd;
-              border-radius: 4px;
+              border: 2px solid #000;
+              border-radius: 8px;
+              box-sizing: border-box;
+              display: block;
+              margin: 0 auto;
             }
             
             .installed-image-label {

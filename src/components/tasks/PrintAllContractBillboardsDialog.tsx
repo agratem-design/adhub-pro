@@ -638,27 +638,27 @@ export function PrintAllContractBillboardsDialog({
 
           <!-- صورة اللوحة أو صور التركيب -->
           ${showInstalledImages && effectiveInstalledA && effectiveInstalledB ? `
-            <div class="absolute-field" style="top: ${s.installed_images_top}; left: calc(${s.installed_images_left} - ${s.installed_images_width} / 2); width: ${s.installed_images_width}; display: flex; gap: ${s.installed_images_gap};">
-              <div style="flex: 1; text-align: center;">
+            <div class="absolute-field installed-images-container" style="top: ${s.installed_images_top}; left: ${s.installed_images_left || '50%'}; transform: translateX(-50%); width: ${s.installed_images_width || '180mm'}; max-width: ${(s.main_image_width && parseFloat(s.main_image_width) > 190) ? s.main_image_width : (s.main_image_width || '190mm')}; display: flex; gap: ${s.installed_images_gap || '5mm'}; justify-content: center; align-items: flex-start;">
+              <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${s.installed_images_gap || '5mm'} / 2)); text-align: center; display: flex; flex-direction: column; align-items: center;">
                 <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 3mm;">التركيب - الوجه الأمامي</div>
-                <div style="height: ${s.installed_image_height}; overflow: hidden; border: 2px solid #000; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
-                  <img src="${effectiveInstalledA}" alt="التركيب - الوجه الأمامي" style="max-width: 100%; max-height: 100%; width: auto; height: auto; display: block;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
+                <div class="installed-image-box" style="max-height: ${s.installed_image_height || '85mm'}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
+                  <img src="${effectiveInstalledA}" alt="التركيب - الوجه الأمامي" class="billboard-image installed-image" style="max-height: ${s.installed_image_height || '85mm'}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
                 </div>
               </div>
-              <div style="flex: 1; text-align: center;">
+              <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${s.installed_images_gap || '5mm'} / 2)); text-align: center; display: flex; flex-direction: column; align-items: center;">
                 <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 3mm;">التركيب - الوجه الخلفي</div>
-                <div style="height: ${s.installed_image_height}; overflow: hidden; border: 2px solid #000; border-radius: 8px; display: flex; align-items: center; justify-content: center;">
-                  <img src="${effectiveInstalledB}" alt="التركيب - الوجه الخلفي" style="max-width: 100%; max-height: 100%; width: auto; height: auto; display: block;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
+                <div class="installed-image-box" style="max-height: ${s.installed_image_height || '85mm'}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
+                  <img src="${effectiveInstalledB}" alt="التركيب - الوجه الخلفي" class="billboard-image installed-image" style="max-height: ${s.installed_image_height || '85mm'}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
                 </div>
               </div>
             </div>
           ` : showInstalledImages && effectiveInstalledA ? `
-            <div class="absolute-field image-container" style="top: ${s.main_image_top}; left: calc(${s.main_image_left} - ${s.main_image_width} / 2); width: ${s.main_image_width}; height: ${includeDesigns && hasDesigns ? s.installed_image_height : s.main_image_height};">
-              <img src="${effectiveInstalledA}" alt="صورة التركيب" class="billboard-image" onerror="this.onerror=null;this.src='/placeholder.svg'" />
+            <div class="absolute-field image-container" style="top: ${s.main_image_top}; left: ${s.main_image_left || '50%'}; transform: translateX(-50%); max-width: ${(s.main_image_width && parseFloat(s.main_image_width) > 190) ? s.main_image_width : '190mm'}; max-height: ${includeDesigns && hasDesigns ? s.installed_image_height : s.main_image_height}; display: flex; justify-content: center; align-items: center;">
+              <img src="${effectiveInstalledA}" alt="صورة التركيب" class="billboard-image" style="max-height: ${includeDesigns && hasDesigns ? s.installed_image_height : s.main_image_height}; max-width: ${(s.main_image_width && parseFloat(s.main_image_width) > 190) ? s.main_image_width : '190mm'}; width: auto; height: auto; object-fit: contain; display: block;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
             </div>
           ` : mainImage ? `
-            <div class="absolute-field image-container" style="top: ${s.main_image_top}; left: calc(${s.main_image_left} - ${s.main_image_width} / 2); width: ${s.main_image_width}; height: ${includeDesigns && hasDesigns ? s.installed_image_height : s.main_image_height};">
-              <img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" onerror="this.onerror=null;this.src='/placeholder.svg'" />
+            <div class="absolute-field image-container" style="top: ${s.main_image_top}; left: ${s.main_image_left || '50%'}; transform: translateX(-50%); max-width: ${(s.main_image_width && parseFloat(s.main_image_width) > 190) ? s.main_image_width : '190mm'}; max-height: ${includeDesigns && hasDesigns ? s.installed_image_height : s.main_image_height}; display: flex; justify-content: center; align-items: center;">
+              <img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" style="max-height: ${includeDesigns && hasDesigns ? s.installed_image_height : s.main_image_height}; max-width: ${(s.main_image_width && parseFloat(s.main_image_width) > 190) ? s.main_image_width : '190mm'}; width: auto; height: auto; object-fit: contain; display: block;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
             </div>
           ` : ''}
 
@@ -847,15 +847,22 @@ export function PrintAllContractBillboardsDialog({
 
           .image-container {
             overflow: visible;
-            background: rgba(255,255,255,0.8);
-            border: 3px solid #000;
-            border-radius: 0 0 0 8px;
+            background: transparent;
+            border: none;
             display: flex;
             align-items: center;
             justify-content: center;
+            box-sizing: border-box;
           }
 
-          .billboard-image {
+          .installed-images-container {
+            overflow: visible;
+            background: transparent;
+            border: none;
+            box-sizing: border-box;
+          }
+
+          .billboard-image, .installed-image {
             max-width: 100%;
             max-height: 100%;
             width: auto;
@@ -863,6 +870,9 @@ export function PrintAllContractBillboardsDialog({
             object-fit: contain;
             object-position: center center;
             display: block;
+            border: 2px solid #000;
+            border-radius: 8px;
+            box-sizing: border-box;
           }
 
           .qr-code {
@@ -901,8 +911,11 @@ export function PrintAllContractBillboardsDialog({
             height: auto;
             object-fit: contain;
             object-position: center center;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            border: 2px solid #000;
+            border-radius: 8px;
+            box-sizing: border-box;
+            display: block;
+            margin: 0 auto;
           }
 
           @page {
