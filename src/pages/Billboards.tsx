@@ -64,13 +64,7 @@ export default function Billboards() {
   const [selectedCustomers, setSelectedCustomers] = usePersistedState<string[]>('billboards.customers', []);
   const [selectedContractNumbers, setSelectedContractNumbers] = usePersistedState<string[]>('billboards.contractNumbers', []);
   const [selectedOwnerCompanies, setSelectedOwnerCompanies] = usePersistedState<string[]>('billboards.ownerCompanies', []);
-  const [ownerCompanies, setOwnerCompanies] = useState<{id: string, name: string}[]>([]);
-
-  // Load owner companies
-  useEffect(() => {
-    supabase.from('friend_companies').select('id, name').eq('company_type', 'own').order('name')
-      .then(({ data }) => setOwnerCompanies(data || []));
-  }, []);
+  const [ownerCompanies, setOwnerCompanies] = useState<Array<{ id: string; name: string; brand_color?: string | null; logo_url?: string | null }>>([]);
   
   // ✅ Marketer: load billboard IDs from their customer's contracts
   const [marketerBillboardIds, setMarketerBillboardIds] = useState<Set<string>>(new Set());
@@ -175,6 +169,52 @@ export default function Billboards() {
   useEffect(() => { billboardsRef.current = billboards; }, [billboards]);
   useEffect(() => { updateBillboardLocalRef.current = updateBillboardLocal; }, [updateBillboardLocal]);
   useEffect(() => { updateBillboardVisibilityLocalRef.current = updateBillboardVisibilityLocal; }, [updateBillboardVisibilityLocal]);
+
+  // Load owner companies and merge with any present on billboards
+  useEffect(() => {
+    const fetchCompanies = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('friend_companies')
+          .select('id, name, brand_color, logo_url')
+          .eq('company_type', 'own')
+          .order('name');
+
+        const map = new Map<string, { id: string; name: string; brand_color?: string | null; logo_url?: string | null }>();
+
+        if (!error && data) {
+          data.forEach((c: any) => {
+            map.set(String(c.id), {
+              id: String(c.id),
+              name: c.name,
+              brand_color: c.brand_color,
+              logo_url: c.logo_url,
+            });
+          });
+        }
+
+        (billboards || []).forEach((b: any) => {
+          if (b.own_company && b.own_company.id && b.own_company.name) {
+            const cid = String(b.own_company.id);
+            if (!map.has(cid)) {
+              map.set(cid, {
+                id: cid,
+                name: b.own_company.name,
+                brand_color: b.own_company.brand_color,
+                logo_url: b.own_company.logo_url,
+              });
+            }
+          }
+        });
+
+        setOwnerCompanies(Array.from(map.values()));
+      } catch (err) {
+        console.error('Error loading owner companies:', err);
+      }
+    };
+
+    fetchCompanies();
+  }, [billboards]);
 
   const handleMapRightClick = async (lat: number, lng: number, mode?: 'quick' | 'full') => {
     const coordsStr = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
@@ -595,6 +635,18 @@ export default function Billboards() {
     });
   };
 
+  // ✅ دالة التحقق من تطابق الشركة المالكة مع دعم خيار "بدون شركة"
+  const matchesOwnerCompanyCheck = (billboard: any, selectedCompanies: string[]) => {
+    if (!selectedCompanies || selectedCompanies.length === 0) return true;
+    const ownId = String(billboard.own_company_id || billboard.own_company?.id || '').trim();
+    return selectedCompanies.some(selected => {
+      if (selected === 'none' || selected === 'unassigned' || selected === '') {
+        return !ownId;
+      }
+      return ownId === String(selected).trim();
+    });
+  };
+
   // ✅ ENHANCED: Enhanced filtering with "منتهي" status support
   const filteredBillboards = useMemo(() => {
     const searched = enhancedSearchBillboards(billboards, searchQuery);
@@ -710,7 +762,7 @@ export default function Billboards() {
         }
       }
       
-      const matchesOwnerCompany = selectedOwnerCompanies.length === 0 || selectedOwnerCompanies.includes((billboard as any).own_company_id || '');
+      const matchesOwnerCompany = matchesOwnerCompanyCheck(billboard, selectedOwnerCompanies);
       const result = matchesStatus && matchesCity && matchesSize && matchesMunicipality && matchesDistrict && matchesAdType && matchesCustomer && matchesContractNo && matchesOwnerCompany;
       
       return result;
@@ -1015,7 +1067,7 @@ export default function Billboards() {
         }
       }
       
-      const matchesOwnerCompany = selectedOwnerCompanies.length === 0 || selectedOwnerCompanies.includes((billboard as any).own_company_id || '');
+      const matchesOwnerCompany = matchesOwnerCompanyCheck(billboard, selectedOwnerCompanies);
       const result = matchesStatus && matchesCity && matchesSize && matchesMunicipality && matchesDistrict && matchesAdType && matchesCustomer && matchesContractNo && matchesOwnerCompany;
       
       return result;
@@ -1418,6 +1470,7 @@ export default function Billboards() {
         selectedOwnerCompanies={selectedOwnerCompanies}
         setSelectedOwnerCompanies={setSelectedOwnerCompanies}
         ownerCompanies={ownerCompanies}
+        billboards={billboards}
         isMapOpen={mapOpen}
       />
 

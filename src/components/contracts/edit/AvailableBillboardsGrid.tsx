@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -683,6 +683,9 @@ export function AvailableBillboardsGrid({
               <Pencil className="h-5 w-5 text-primary" />
               تعديل سريع - {editingBillboard?.Billboard_Name}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              تعديل سريع لسعر ومستوى اللوحة
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
@@ -729,9 +732,9 @@ export function AvailableBillboardsGrid({
                 <DialogTitle className="text-base font-extrabold text-amber-400">
                   تنبيه: اللوحة مرتبطة بعقد آخر
                 </DialogTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
                   هذه اللوحة مؤجرة حالياً، ولكن يمكنك فك القفل وتحديدها للعقد الجاري
-                </p>
+                </DialogDescription>
               </div>
             </div>
           </DialogHeader>

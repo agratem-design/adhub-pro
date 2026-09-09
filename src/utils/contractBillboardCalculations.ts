@@ -64,13 +64,13 @@ export function calculateRemainingBillboardValue(
   const remainingDays = Math.max(0, totalDays - elapsedDays);
 
   // التكاليف غير المسترجعة (الطباعة والتركيب خدمات فعلية تم تنفيذها مسبقاً)
-  const nonRefundableCosts = (includePrint ? 0 : printCost) + (includeInstall ? 0 : installCost);
+  const nonRefundableCosts = Math.min(Math.max(0, contractedPrice), Math.max(0, printCost) + Math.max(0, installCost));
   const rentalBase = Math.max(0, contractedPrice - printCost - installCost);
 
   const dailyRate = totalDays > 0 ? rentalBase / totalDays : 0;
   
   // حساب المتبقي والمستهلك من الإيجار الصافي
-  const remainingValue = Math.min(rentalBase, Math.round(dailyRate * remainingDays));
+  const remainingValue = Math.min(rentalBase, Math.round(dailyRate * remainingDays * 100) / 100);
   const consumedValue = Math.max(0, rentalBase - remainingValue) + nonRefundableCosts;
 
   return {

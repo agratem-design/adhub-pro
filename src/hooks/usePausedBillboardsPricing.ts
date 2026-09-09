@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { listPausedBillboards, PausedBillboard } from '@/services/pausedBillboardsService';
+import { historicalPauseContribution } from '@/utils/pausedReplacementAccounting';
 import { calculateDaysBetween } from '@/utils/contractBillboardCalculations';
 
 export interface PausedItemWithPricing {
@@ -110,7 +111,8 @@ export function usePausedBillboardsPricing(
   const [rows, setRows] = useState<PausedBillboard[]>([]);
   const [billboardsMap, setBillboardsMap] = useState<Record<number, any>>({});
   const [replacementsByPausedId, setReplacementsByPausedId] = useState<Record<string, { allocated: number; replacementId: number; replacementName?: string }>>({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchPausedData = useCallback(async () => {
     if (!contractNumber) {
@@ -120,6 +122,7 @@ export function usePausedBillboardsPricing(
       return;
     }
     setLoading(true);
+    setError(null);
     try {
       const [pausedRows, replacements] = await Promise.all([
         listPausedBillboards(Number(contractNumber)),
@@ -129,6 +132,7 @@ export function usePausedBillboardsPricing(
           .eq('contract_number', Number(contractNumber)),
       ]);
 
+      if (replacements.error) throw replacements.error;
       const replMap: Record<string, { allocated: number; replacementId: number; replacementName?: string }> = {};
       for (const r of (replacements.data || []) as any[]) {
         replMap[String(r.paused_billboard_id)] = {
@@ -154,6 +158,7 @@ export function usePausedBillboardsPricing(
       }
     } catch (e) {
       console.error('Error fetching paused billboards pricing:', e);
+      setError('تعذر تحميل سجل الإيقافات؛ لا يمكن اعتماد الإجمالي حتى يكتمل التحميل');
     } finally {
       setLoading(false);
     }
@@ -161,7 +166,13 @@ export function usePausedBillboardsPricing(
 
   useEffect(() => {
     fetchPausedData();
-  }, [fetchPausedData]);
+    const handler = (event: Event) => {
+      const cn = (event as CustomEvent).detail?.contractNumber;
+      if (!cn || Number(cn) === Number(contractNumber)) fetchPausedData();
+    };
+    window.addEventListener('paused-billboards-changed', handler);
+    return () => window.removeEventListener('paused-billboards-changed', handler);
+  }, [fetchPausedData, contractNumber]);
 
   const refetch = fetchPausedData;
 
@@ -194,6 +205,38 @@ export function usePausedBillboardsPricing(
       const bbId = String(r.billboard_id);
       const bb = billboardsMap[Number(r.billboard_id)] || null;
       const isSingleFace = singleFace.has(bbId);
+      // Historical prices are immutable: editing today's catalog cannot reprice a pause.
+      if (options?.useStoredPrices !== false) {
+        const snapshot = (r as any).price_snapshot || {};
+        const fullPrice = Number(r.full_price ?? (r as any).net_after_discount ?? r.original_price ?? 0) || Number(r.consumed_amount || 0) + Number(r.refund_amount || 0);
+        const printCost = Number(snapshot.printCost || 0);
+        const installPrice = Number(snapshot.installationCost || 0);
+        const rentalBase = Math.max(0, fullPrice - printCost - installPrice);
+        const start = r.original_start_date || contractStartDate;
+        const end = r.original_end_date || contractEndDate;
+        const totalDays = calculateDaysBetween(start, end);
+        const elapsedDays = Math.max(0, Math.min(totalDays, calculateDaysBetween(start, r.pause_date) - 1));
+        const refund = Math.max(0, Number(r.manual_refund ?? r.refund_amount ?? 0));
+        const replacement = replacementsByPausedId[String(r.id)];
+        const consumed = historicalPauseContribution(r, fullPrice, refund, replacement?.allocated);
+        const discountApplied = Number(snapshot.discountPerBillboard || 0);
+        return { raw: r, billboard: bb, isSingleFace,
+          baseRental: fullPrice + discountApplied, baseRentalBeforeDiscount: rentalBase + discountApplied,
+          discountApplied, hasDistributedDiscount: discountApplied > 0,
+          printCost, installPrice, includedPrintCost: Number(snapshot.includedPrintCost || 0),
+          includedInstallCost: Number(snapshot.includedInstallCost || 0), extraPrintCost: 0, extraInstallCost: 0,
+          netRentalAfterDiscount: rentalBase, totalForBoard: fullPrice, fullPrice, rentalBase,
+          consumedRental: Math.max(0, consumed - printCost - installPrice), printAdded: printCost, installAdded: installPrice,
+          netRentalWithExtras: consumed, totalDays, elapsedDays, remainingDays: Math.max(0,totalDays-elapsedDays),
+          dailyRate: totalDays ? rentalBase / totalDays : 0, consumedAuto: consumed, refundAuto: refund,
+          refund: replacement ? 0 : refund, effectiveRefund: replacement ? 0 : refund,
+          allocatedForReplacement: Number(replacement?.allocated || 0),
+          replacementDifference: replacement ? Number(replacement.allocated || 0) - refund : 0,
+          hasReplacement: !!replacement, status: replacement ? 'replaced' : 'paused', consumed,
+          isManualRefund: r.manual_refund != null, effectivePauseDate: r.pause_date,
+        };
+      }
+
 
       let baseRental = 0;
       if (options?.useStoredPrices) {
@@ -261,7 +304,7 @@ export function usePausedBillboardsPricing(
       const allocatedForReplacement = replInfo ? Number(replInfo.allocated) || 0 : 0;
 
       const rawRemainingValue = (rentalBase * remainingDays) / Math.max(1, totalDays);
-      const refundAuto = Math.min(rentalBase, roundToBucket(rawRemainingValue, 50));
+      const refundAuto = Math.min(rentalBase, Math.round(rawRemainingValue * 100) / 100);
       const consumedRentalAuto = Math.max(0, rentalBase - refundAuto);
       const consumedAuto = consumedRentalAuto + nonRefundable;
 
@@ -341,14 +384,14 @@ export function usePausedBillboardsPricing(
       effectiveRefundSum: purePaused.reduce((s, i) => s + (i.effectiveRefund || 0), 0),
       replacementDifferencesSum: replaced.reduce((s, i) => s + (i.replacementDifference || 0), 0),
       allocatedSum: replaced.reduce((s, i) => s + (i.allocatedForReplacement || 0), 0),
-      printSum: purePaused.reduce((s, i) => s + (i.printCost || 0), 0),
-      installSum: purePaused.reduce((s, i) => s + (i.installPrice || 0), 0),
+      printSum: items.reduce((s, i) => s + (i.printCost || 0), 0),
+      installSum: items.reduce((s, i) => s + (i.installPrice || 0), 0),
       baseRentalSum: purePaused.reduce((s, i) => s + (i.baseRental || 0), 0),
-      discountSum: purePaused.reduce((s, i) => s + (i.discountApplied || 0), 0),
+      discountSum: items.reduce((s, i) => s + (i.discountApplied || 0), 0),
       includedPrintSum: purePaused.reduce((s, i) => s + (i.includedPrintCost || 0), 0),
       includedInstallSum: purePaused.reduce((s, i) => s + (i.includedInstallCost || 0), 0),
     };
   }, [items]);
 
-  return { items, totals, loading, refetch };
+  return { items, totals, loading, error, refetch };
 }

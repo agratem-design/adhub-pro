@@ -1,12 +1,13 @@
-// @ts-nocheck
-import React, { useState, useMemo } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { parsePriceSnapshot, priceId, type ContractPriceSnapshot } from '@/utils/contractEditMoney';
+import { useState, useMemo, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { PauseCircle, Calendar, Clock, DollarSign, AlertCircle, Loader2 } from 'lucide-react';
+import { PauseCircle, Loader2 } from 'lucide-react';
 import { calculateRemainingBillboardValue } from '@/utils/contractBillboardCalculations';
 import { executeQuickPause } from '@/services/contractBillboardSwapService';
 import { toast } from 'sonner';
@@ -14,13 +15,29 @@ import { toast } from 'sonner';
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  billboard: any;
+  billboard: {
+    ID: number | string;
+    Billboard_Name?: string | null;
+    Size?: string | null;
+    City?: string | null;
+    Rent_Start_Date?: string | null;
+    Rent_End_Date?: string | null;
+  };
   contractNumber: number;
   contractStartDate: string;
   contractEndDate: string;
   contractedPrice?: number;
   onPaused?: (result: { pauseRefund: number; newBillboardIds: string[] }) => void;
 }
+
+type SavedPausePrice = ContractPriceSnapshot & {
+  currency: string;
+  start: string;
+  end: string;
+  revision: number;
+};
+
+const errorMessage = (error: unknown) => error instanceof Error ? error.message : 'حدث خطأ غير متوقع';
 
 export function QuickPauseBillboardDialog({
   open,
@@ -41,19 +58,41 @@ export function QuickPauseBillboardDialog({
   const [notes, setNotes] = useState('');
   const [isExecuting, setIsExecuting] = useState(false);
 
-  const effectivePrice = Number(contractedPrice || billboard?.Price || 0);
+  const [saved, setSaved] = useState<SavedPausePrice | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setSaved(null);
+    (async () => {
+      const { data, error } = await supabase.from('Contract').select('*').eq('Contract_Number', contractNumber).single();
+      if (!active) return;
+      if (error) { toast.error('تعذر تحميل السعر المحفوظ'); return; }
+      const contractRecord = data as unknown as Record<string, unknown>;
+      const price = parsePriceSnapshot(data.billboard_prices).find(p => priceId(p) === String(billboard.ID));
+      if (!price) { toast.error('احفظ سعر اللوحة قبل إيقافها'); return; }
+      const start = String(price.startDate || billboard.Rent_Start_Date || data['Contract Date']);
+      const end = String(price.endDate || billboard.Rent_End_Date || data['End Date']);
+      setSaved({ ...price, currency: String(contractRecord.contract_currency || price.currency || 'LYD'), start, end, revision: Number(contractRecord.edit_revision || 0) });
+      setPauseDate(todayStr >= start && todayStr <= end ? todayStr : start);
+    })();
+    return () => { active = false; };
+  }, [open, contractNumber, billboard.ID, billboard.Rent_Start_Date, billboard.Rent_End_Date, todayStr]);
+  const currencySymbol = ({ LYD: 'د.ل', USD: '$', EUR: '€' } as Record<string, string>)[saved?.currency] || saved?.currency || 'د.ل';
+  const effectivePrice = Number(saved?.finalPrice ?? saved?.priceAfterDiscount ?? saved?.contractPrice ?? 0);
 
   const remainingCalc = useMemo(() => {
     return calculateRemainingBillboardValue({
-      startDate: contractStartDate,
-      endDate: contractEndDate,
+      startDate: saved?.start,
+      endDate: saved?.end,
       effectiveDate: pauseDate,
       contractedPrice: effectivePrice,
+      printCost: Number(saved?.printCost || 0),
+      installCost: Number(saved?.installationCost || 0),
     });
-  }, [contractStartDate, contractEndDate, pauseDate, effectivePrice]);
+  }, [saved, pauseDate, effectivePrice]);
 
   const handleExecute = async () => {
-    if (!billboard) return;
+    if (!billboard || !saved || isExecuting || !pauseDate || pauseDate < saved.start || pauseDate > saved.end) return;
 
     setIsExecuting(true);
     try {
@@ -61,11 +100,12 @@ export function QuickPauseBillboardDialog({
         contractNumber,
         billboardId: Number(billboard.ID),
         pauseDate,
+        expectedRevision: saved.revision,
         notes: notes.trim() || undefined,
       });
 
       if (result.success) {
-        toast.success(`تم إيقاف اللوحة #${billboard.ID} بنجاح وخصم المسترجع (${result.pauseRefund.toLocaleString('ar-LY')} د.ل) من العقد`);
+        toast.success(`تم إيقاف اللوحة #${billboard.ID} بنجاح وخصم المسترجع (${result.pauseRefund.toLocaleString('ar-LY')} ${currencySymbol}) من العقد`);
         onOpenChange(false);
         if (onPaused) {
           onPaused(result);
@@ -73,8 +113,8 @@ export function QuickPauseBillboardDialog({
       } else {
         toast.error(result.error || 'تعذر إيقاف اللوحة');
       }
-    } catch (err: any) {
-      toast.error(err.message || 'حدث خطأ غير متوقع');
+    } catch (error: unknown) {
+      toast.error(errorMessage(error));
     } finally {
       setIsExecuting(false);
     }
@@ -91,7 +131,7 @@ export function QuickPauseBillboardDialog({
             <div>
               <DialogTitle className="text-base font-bold text-foreground">إيقاف اللوحة (بدون بديل)</DialogTitle>
               <p className="text-xs text-muted-foreground">
-                سيتم تحرير اللوحة لتصبح متاحة وخصم قيمة الأيام المتبقية من العقد
+                يُنفّذ الإيقاف فور التأكيد، وتُخصم قيمة الإيجار المتبقي مع الاحتفاظ بتكاليف الخدمات
               </p>
             </div>
           </div>
@@ -105,7 +145,7 @@ export function QuickPauseBillboardDialog({
               <Badge variant="outline" className="text-[11px]">{billboard?.Size} • {billboard?.City}</Badge>
             </div>
             <div className="grid grid-cols-2 gap-2 pt-1 text-muted-foreground">
-              <div>السعر الإجمالي: <strong className="text-foreground">{effectivePrice.toLocaleString('ar-LY')} د.ل</strong></div>
+              <div>السعر الإجمالي: <strong className="text-foreground">{effectivePrice.toLocaleString('ar-LY')} {currencySymbol}</strong></div>
               <div>الأيام المتبقية: <strong className="text-foreground">{remainingCalc.remainingDays} يوم</strong></div>
             </div>
           </div>
@@ -116,8 +156,8 @@ export function QuickPauseBillboardDialog({
             <Input
               type="date"
               value={pauseDate}
-              min={contractStartDate}
-              max={contractEndDate}
+              min={saved?.start}
+              max={saved?.end}
               onChange={(e) => setPauseDate(e.target.value)}
               className="text-xs bg-background"
             />
@@ -127,11 +167,11 @@ export function QuickPauseBillboardDialog({
           <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs space-y-1">
             <div className="flex justify-between items-center text-emerald-500 font-bold">
               <span>المبلغ المسترجع للعميل (يُخصم من العقد):</span>
-              <span className="text-sm">{remainingCalc.remainingValue.toLocaleString('ar-LY')} د.ل</span>
+              <span className="text-sm">{remainingCalc.remainingValue.toLocaleString('ar-LY')} {currencySymbol}</span>
             </div>
             <div className="flex justify-between items-center text-muted-foreground text-[11px] pt-1">
               <span>المبلغ المستهلك للأيام المنقضية ({remainingCalc.elapsedDays} يوم):</span>
-              <span>{remainingCalc.consumedValue.toLocaleString('ar-LY')} د.ل</span>
+              <span>{remainingCalc.consumedValue.toLocaleString('ar-LY')} {currencySymbol}</span>
             </div>
           </div>
 
@@ -149,14 +189,14 @@ export function QuickPauseBillboardDialog({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={isExecuting}>
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={isExecuting} className="min-h-10 cursor-pointer transition-all duration-200">
             إلغاء
           </Button>
           <Button
             size="sm"
             onClick={handleExecute}
-            disabled={isExecuting}
-            className="bg-amber-500 hover:bg-amber-600 text-white font-bold"
+            disabled={isExecuting || !saved || !pauseDate || pauseDate < saved.start || pauseDate > saved.end}
+            className="min-h-10 cursor-pointer bg-amber-500 text-white font-bold transition-all duration-200 hover:bg-amber-600 active:scale-95"
           >
             {isExecuting ? (
               <>

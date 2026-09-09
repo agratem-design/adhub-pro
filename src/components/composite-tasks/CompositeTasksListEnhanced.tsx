@@ -25,6 +25,7 @@ import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchContractDesignUrls } from '@/lib/contractDesignUtils';
+import { batchInQuery } from '@/utils/supabaseBatch';
 import {
   getCompositeTaskOperationKey,
   getCurrentOperationInstallationCost,
@@ -90,13 +91,38 @@ interface InstallationWorkflowData {
   billboards: Record<number, any>;
   installationTasks: any[];
   teamNames?: Record<string, string>;
+  allTeams?: Record<string, any>;
 }
 
 const fetchInstallationWorkflowData = async (
   primaryTaskId: string,
   relatedTaskIds: string[],
+  contractId?: number | null,
 ): Promise<InstallationWorkflowData> => {
-  const taskIds = [...new Set([primaryTaskId, ...relatedTaskIds].filter(Boolean))];
+  let taskIds = [...new Set([primaryTaskId, ...relatedTaskIds].filter(Boolean))];
+
+  // إذا تم تمرير رقم العقد، نجمع جميع مهام التركيب التابعة لنفس العقد والعملية لتجميع كل الفرق
+  if (contractId) {
+    try {
+      const { data: contractTasks } = await supabase
+        .from('installation_tasks')
+        .select('id, task_type, reinstallation_number')
+        .eq('contract_id', contractId);
+      if (contractTasks && contractTasks.length > 0) {
+        const primaryTask = contractTasks.find(t => t.id === primaryTaskId);
+        const targetType = primaryTask?.task_type || 'installation';
+        const targetReinstall = primaryTask?.reinstallation_number ?? null;
+        const matchingTasks = contractTasks.filter(t =>
+          (t.task_type || 'installation') === targetType &&
+          (t.reinstallation_number ?? null) === targetReinstall
+        );
+        taskIds = [...new Set([...taskIds, ...matchingTasks.map(t => t.id)])];
+      }
+    } catch (err) {
+      console.warn('Could not expand contract installation tasks:', err);
+    }
+  }
+
   const [itemsResult, designsResult, tasksResult, teamsResult] = await Promise.all([
     supabase
       .from('installation_task_items')
@@ -113,7 +139,7 @@ const fetchInstallationWorkflowData = async (
       .in('id', taskIds),
     supabase
       .from('installation_teams')
-      .select('id, team_name'),
+      .select('id, team_name, cities, sizes'),
   ]);
 
   if (itemsResult.error) throw itemsResult.error;
@@ -121,8 +147,12 @@ const fetchInstallationWorkflowData = async (
   if (tasksResult.error) throw tasksResult.error;
 
   const teamNames: Record<string, string> = {};
+  const allTeams: Record<string, any> = {};
   (teamsResult.data || []).forEach((tm: any) => {
-    if (tm.id && tm.team_name) teamNames[tm.id] = tm.team_name;
+    if (tm.id) {
+      allTeams[tm.id] = tm;
+      if (tm.team_name) teamNames[tm.id] = tm.team_name;
+    }
   });
 
   const items = itemsResult.data || [];
@@ -151,6 +181,7 @@ const fetchInstallationWorkflowData = async (
     billboards,
     installationTasks: tasksResult.data || [],
     teamNames,
+    allTeams,
   };
 };
 
@@ -1977,7 +2008,10 @@ const ContractGroupCard = ({
                                 loadInstallationWorkflow(workflowTask, relatedTaskIds, 'distribution');
                               }}
                               onPrintInstallationTask={(workflowTask: any) => {
-                                loadInstallationWorkflow(workflowTask, [workflowTask.installation_task_id], 'print');
+                                const opInstallTaskIds = operation.tasks
+                                  .map((t: any) => t.installation_task_id)
+                                  .filter(Boolean);
+                                loadInstallationWorkflow(workflowTask, opInstallTaskIds, 'print');
                               }}
                               onOpenInstallationTask={(workflowTask: any) => {
                                 navigate(`/admin/installation-tasks?task=${encodeURIComponent(workflowTask.installation_task_id)}&from=hub`);
@@ -2190,13 +2224,14 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     const taskIds = (relatedTaskIds && relatedTaskIds.length > 0)
       ? [...new Set([primaryTaskId, ...relatedTaskIds].filter(Boolean))]
       : [primaryTaskId];
-    const queryKey = ['installation-workflow', ...taskIds.sort()];
+    const contractId = normalizeContractId(task.contract_id);
+    const queryKey = ['installation-workflow', ...taskIds.sort(), contractId || 'none'];
 
     setWorkflowLoadingTaskId(primaryTaskId);
     try {
       const data = await queryClient.fetchQuery({
         queryKey,
-        queryFn: () => fetchInstallationWorkflowData(primaryTaskId, taskIds),
+        queryFn: () => fetchInstallationWorkflowData(primaryTaskId, taskIds, contractId),
         staleTime: 30_000,
       });
       setInstallationWorkflowData(data);
@@ -2227,19 +2262,21 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
 
   const refreshInstallationWorkflow = useCallback(async () => {
     if (!installationWorkflowData) return;
-    const queryKey = ['installation-workflow', ...[...installationWorkflowData.taskIds].sort()];
+    const contractId = installationWorkflowTask?.contract_id ? normalizeContractId(installationWorkflowTask.contract_id) : null;
+    const queryKey = ['installation-workflow', ...[...installationWorkflowData.taskIds].sort(), contractId || 'none'];
     await queryClient.invalidateQueries({ queryKey });
     const refreshed = await queryClient.fetchQuery({
       queryKey,
       queryFn: () => fetchInstallationWorkflowData(
         installationWorkflowData.primaryTaskId,
         installationWorkflowData.taskIds,
+        contractId,
       ),
     });
     setInstallationWorkflowData(refreshed);
     queryClient.invalidateQueries({ queryKey: ['composite-task-extras'] });
     queryClient.invalidateQueries({ queryKey: ['composite-tasks'] });
-  }, [installationWorkflowData, queryClient]);
+  }, [installationWorkflowData, installationWorkflowTask, queryClient]);
 
   const handleOpenCreatePrintTask = async (installationTaskId: string) => {
     setFetchingItems(true);
@@ -2356,10 +2393,15 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       );
 
       if (installationTaskIds.length > 0) {
-        const { data: installTasksData } = await supabase
-          .from('installation_tasks')
-          .select('id, task_type, reinstallation_number, contract_id, contract_ids')
-          .in('id', installationTaskIds);
+        const installTasksData = await batchInQuery(
+          installationTaskIds,
+          35,
+          (chunk) =>
+            supabase
+              .from('installation_tasks')
+              .select('id, task_type, reinstallation_number, contract_id, contract_ids')
+              .in('id', chunk)
+        );
 
         const reinstallInfoMap = new Map<string, { number: number | null; taskType: string; contractId: number | null; contractIds: number[] }>();
         (installTasksData || []).forEach((it: any) => {
@@ -2417,7 +2459,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
 
   // 2. Fetch design images, ad types, and operations data with strict normalization
   const { data: taskExtras = {} } = useQuery({
-    queryKey: ['composite-task-extras', compositeTasks.map(t => t.id).join(',')],
+    queryKey: ['composite-task-extras', compositeTasks.map(t => t.id)],
     enabled: compositeTasks.length > 0,
     queryFn: async () => {
       const extras: Record<string, { 
@@ -2465,19 +2507,39 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         promises.push(
           (async () => {
             try {
-              let installQuery = supabase
-                .from('installation_tasks')
-                .select('id, task_type, reinstallation_number, contract_id, status, team:installation_teams!installation_tasks_team_id_fkey(team_name)');
-              if (installIds.length > 0 && allContractIdsArray.length > 0) {
-                installQuery = installQuery.or(`id.in.(${installIds.join(',')}),contract_id.in.(${allContractIdsArray.join(',')})`);
-              } else if (installIds.length > 0) {
-                installQuery = installQuery.in('id', installIds);
-              } else {
-                installQuery = installQuery.in('contract_id', allContractIdsArray);
+              let fetchedTasks: any[] = [];
+              if (installIds.length > 0) {
+                const byId = await batchInQuery(
+                  installIds,
+                  35,
+                  (chunk) =>
+                    supabase
+                      .from('installation_tasks')
+                      .select('id, task_type, reinstallation_number, contract_id, status, team:installation_teams!installation_tasks_team_id_fkey(team_name)')
+                      .in('id', chunk)
+                );
+                fetchedTasks.push(...byId);
+              }
+              if (allContractIdsArray.length > 0) {
+                const byContract = await batchInQuery(
+                  allContractIdsArray,
+                  35,
+                  (chunk) =>
+                    supabase
+                      .from('installation_tasks')
+                      .select('id, task_type, reinstallation_number, contract_id, status, team:installation_teams!installation_tasks_team_id_fkey(team_name)')
+                      .in('contract_id', chunk)
+                );
+                fetchedTasks.push(...byContract);
               }
 
-              const { data: iTasks } = await installQuery;
-              installTasks = iTasks || [];
+              const seenIds = new Set<string>();
+              installTasks = fetchedTasks.filter(it => {
+                if (!it?.id || seenIds.has(it.id)) return false;
+                seenIds.add(it.id);
+                return true;
+              });
+
               (installTasks || []).forEach(it => {
                 const c = normalizeContractId(it.contract_id);
                 if (c) allContractIdsSet.add(c);
@@ -2489,15 +2551,25 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
               ]));
 
               if (allFetchedInstallIds.length > 0) {
-                const [{ data: itemsData }, { data: designsData }] = await Promise.all([
-                  supabase
-                    .from('installation_task_items')
-                    .select('id, task_id, billboard_id, status, installation_date, installed_image_face_a_url, installed_image_face_b_url, design_face_a, design_face_b, selected_design_id')
-                    .in('task_id', allFetchedInstallIds),
-                  supabase
-                    .from('task_designs')
-                    .select('id, task_id, design_face_a_url, design_face_b_url')
-                    .in('task_id', allFetchedInstallIds)
+                const [itemsData, designsData] = await Promise.all([
+                  batchInQuery(
+                    allFetchedInstallIds,
+                    35,
+                    (chunk) =>
+                      supabase
+                        .from('installation_task_items')
+                        .select('id, task_id, billboard_id, status, installation_date, installed_image_face_a_url, installed_image_face_b_url, design_face_a, design_face_b, selected_design_id')
+                        .in('task_id', chunk)
+                  ),
+                  batchInQuery(
+                    allFetchedInstallIds,
+                    35,
+                    (chunk) =>
+                      supabase
+                        .from('task_designs')
+                        .select('id, task_id, design_face_a_url, design_face_b_url')
+                        .in('task_id', chunk)
+                  )
                 ]);
                 installDesigns = itemsData || [];
                 taskDesignsData = designsData || [];
@@ -2511,16 +2583,24 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
 
       if (printIds.length > 0) {
         promises.push(
-          supabase.from('print_task_items')
-            .select('task_id, design_face_a, design_face_b')
-            .in('task_id', printIds)
-            .then(({ data }) => { printDesigns = data || []; })
+          batchInQuery(
+            printIds,
+            35,
+            (chunk) =>
+              supabase.from('print_task_items')
+                .select('task_id, design_face_a, design_face_b')
+                .in('task_id', chunk)
+          ).then(data => { printDesigns = data || []; })
         );
         promises.push(
-          supabase.from('print_tasks')
-            .select('id, printer:printers!print_tasks_printer_id_fkey(name)')
-            .in('id', printIds)
-            .then(({ data }) => { printTasksData = data || []; })
+          batchInQuery(
+            printIds,
+            35,
+            (chunk) =>
+              supabase.from('print_tasks')
+                .select('id, printer:printers!print_tasks_printer_id_fkey(name)')
+                .in('id', chunk)
+          ).then(data => { printTasksData = data || []; })
         );
       }
 
@@ -2532,25 +2612,41 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
 
       let customerContracts: any[] = [];
       if (customerIds.length > 0 || customerNames.length > 0) {
-        let custQuery = supabase
-          .from('Contract')
-          .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price');
         if (customerIds.length > 0) {
-          custQuery = custQuery.in('customer_id', customerIds);
+          customerContracts = await batchInQuery(
+            customerIds,
+            35,
+            (chunk) =>
+              supabase
+                .from('Contract')
+                .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price')
+                .in('customer_id', chunk)
+          );
         } else {
-          custQuery = custQuery.in('Customer Name', customerNames);
+          customerContracts = await batchInQuery(
+            customerNames,
+            35,
+            (chunk) =>
+              supabase
+                .from('Contract')
+                .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price')
+                .in('Customer Name', chunk)
+          );
         }
-        const { data: custData } = await custQuery;
-        customerContracts = custData || [];
       }
 
       // Now query Contract table for ALL gathered contract numbers
       const finalUniqueContractIds = Array.from(allContractIdsSet);
       if (finalUniqueContractIds.length > 0) {
-        const { data: contractsData } = await supabase
-          .from('Contract')
-          .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price')
-          .in('Contract_Number', finalUniqueContractIds);
+        const contractsData = await batchInQuery(
+          finalUniqueContractIds,
+          35,
+          (chunk) =>
+            supabase
+              .from('Contract')
+              .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price')
+              .in('Contract_Number', chunk)
+        );
         const combinedContracts = [...(contractsData || []), ...customerContracts];
         const seenC = new Set<number>();
         contracts = combinedContracts.filter((c: any) => {
@@ -2603,10 +2699,15 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       // Real installation costs
       const realInstallCostMap = new Map<string, number>();
       if (installIds.length > 0) {
-        const { data: realItems } = await supabase
-          .from('installation_task_items')
-          .select('task_id, customer_installation_cost, reinstall_count, customer_original_install_cost, customer_reinstall_cost')
-          .in('task_id', installIds);
+        const realItems = await batchInQuery(
+          installIds,
+          35,
+          (chunk) =>
+            supabase
+              .from('installation_task_items')
+              .select('task_id, customer_installation_cost, reinstall_count, customer_original_install_cost, customer_reinstall_cost')
+              .in('task_id', chunk)
+        );
 
         (realItems || []).forEach((item: any) => {
           const itemCost = getCurrentOperationInstallationCost(
@@ -2790,18 +2891,23 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
 
   // 3. Fetch payments distributed to composite tasks
   const { data: taskPayments = {} } = useQuery({
-    queryKey: ['composite-task-payments', compositeTasks.map(t => t.id).join(',')],
+    queryKey: ['composite-task-payments', compositeTasks.map(t => t.id)],
     enabled: compositeTasks.length > 0,
     queryFn: async () => {
       const taskIds = compositeTasks.map(t => t.id);
       if (taskIds.length === 0) return {};
 
-      const { data } = await supabase
-        .from('customer_payments')
-        .select('id, amount, payment_date, entry_type, notes, composite_task_id, distributed_payment_id')
-        .in('composite_task_id', taskIds)
-        .eq('entry_type', 'payment')
-        .order('payment_date', { ascending: true });
+      const data = await batchInQuery(
+        taskIds,
+        35,
+        (chunk) =>
+          supabase
+            .from('customer_payments')
+            .select('id, amount, payment_date, entry_type, notes, composite_task_id, distributed_payment_id')
+            .in('composite_task_id', chunk)
+            .eq('entry_type', 'payment')
+            .order('payment_date', { ascending: true })
+      );
 
       const map: Record<string, any[]> = {};
       (data || []).forEach((p: any) => {
@@ -2862,7 +2968,6 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         ? (task._reinstallationNumber ?? task.reinstallationNumber ?? extra.reinstallationNumber ?? 1)
         : null,
       taskDesignCount: extra.taskDesignCount || 0,
-      installationItemCount: extra.installationItemCount || 0,
       assignedDesignCount: extra.assignedDesignCount || 0,
       accent,
       contractIds,
@@ -3754,40 +3859,60 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       )}
 
       {installationWorkflowData && installationWorkflowTask && (() => {
-        const primaryItems = installationWorkflowData.items.filter(
-          item => item.task_id === installationWorkflowData.primaryTaskId,
-        );
-        const printItems: BillboardPrintItem[] = primaryItems.map(item => ({
-          id: item.id,
-          billboard_id: Number(item.billboard_id),
-          design_face_a: item.design_face_a,
-          design_face_b: item.design_face_b,
-          faces_to_install: item.faces_to_install,
-          installed_image_face_a_url: item.installed_image_face_a_url,
-          installed_image_face_b_url: item.installed_image_face_b_url,
-          installation_date: item.installation_date,
-          team_id: installationWorkflowData.installationTasks.find(
+        // تجميع كافة بنود اللوحات لجميع الفرق والمهام التابعة لنفس العقد والعملية
+        const printItems: BillboardPrintItem[] = installationWorkflowData.items.map(item => {
+          const itemTask = installationWorkflowData.installationTasks.find(
             installationTask => installationTask.id === item.task_id,
-          )?.team_id,
-          has_cutout: item.has_cutout,
-          contract_number: installationWorkflowTask.contract_id,
-          ad_type: installationWorkflowTask.adType || null,
-          overlay_config: item.overlay_config
-            || installationWorkflowData.billboards[Number(item.billboard_id)]?.overlay_config,
-        }));
-        const teams = Object.fromEntries(
-          installationWorkflowData.installationTasks
-            .filter(installationTask => installationTask.team_id)
-            .map(installationTask => [
-              installationTask.team_id,
-              {
-                id: installationTask.team_id,
-                team_name: (installationWorkflowData as any).teamNames?.[installationTask.team_id]
-                  || (installationTask.id === installationWorkflowData.primaryTaskId ? installationWorkflowTask.teamName : null)
-                  || 'فريق التركيب',
+          );
+          let itemTeamId = itemTask?.team_id || (item as any).team_id;
+
+          // إذا لم يكن حقل الفرقة معيناً في المهمة، نحاول مطابقة الفرقة تلقائياً بمدينة ومقاس اللوحة
+          if (!itemTeamId && installationWorkflowData.allTeams) {
+            const bb = installationWorkflowData.billboards[Number(item.billboard_id)];
+            if (bb?.City) {
+              const matchedTeam = Object.values(installationWorkflowData.allTeams).find(
+                (t: any) => Array.isArray(t.cities) && t.cities.includes(bb.City)
+              );
+              if (matchedTeam) {
+                itemTeamId = (matchedTeam as any).id;
               }
-            ]),
-        );
+            }
+          }
+
+          return {
+            id: item.id,
+            billboard_id: Number(item.billboard_id),
+            design_face_a: item.design_face_a,
+            design_face_b: item.design_face_b,
+            faces_to_install: item.faces_to_install,
+            installed_image_face_a_url: item.installed_image_face_a_url,
+            installed_image_face_b_url: item.installed_image_face_b_url,
+            installation_date: item.installation_date,
+            team_id: itemTeamId,
+            has_cutout: item.has_cutout,
+            contract_number: itemTask?.contract_id || installationWorkflowTask.contract_id,
+            ad_type: installationWorkflowTask.adType || null,
+            overlay_config: item.overlay_config
+              || installationWorkflowData.billboards[Number(item.billboard_id)]?.overlay_config,
+          };
+        });
+
+        // تمرير جميع الفرق المتاحة مع مدنها ومقاساتها لتمكين الفلترة الكاملة
+        const teams = (installationWorkflowData.allTeams && Object.keys(installationWorkflowData.allTeams).length > 0)
+          ? installationWorkflowData.allTeams
+          : Object.fromEntries(
+              installationWorkflowData.installationTasks
+                .filter(installationTask => installationTask.team_id)
+                .map(installationTask => [
+                  installationTask.team_id,
+                  {
+                    id: installationTask.team_id,
+                    team_name: (installationWorkflowData as any).teamNames?.[installationTask.team_id]
+                      || (installationTask.id === installationWorkflowData.primaryTaskId ? installationWorkflowTask.teamName : null)
+                      || 'فريق التركيب',
+                  }
+                ]),
+            );
 
         return (
           <UnifiedPrintAllDialog

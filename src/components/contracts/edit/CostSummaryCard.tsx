@@ -24,12 +24,15 @@ interface CostSummaryCardProps {
   setDiscountValue: (value: number) => void;
   baseTotal: number;
   discountAmount: number;
+  activeDiscountBase?: number;
+  discountDistributionPreserved?: boolean;
+  onRedistributeDiscount?: () => void;
   finalTotal: number;
   installationCost: number;
   rentalCostOnly: number;
   operatingFee: number;
   operatingFeeRate?: number;
-  currentContract: any;
+  currentContract: Record<string, unknown> | null;
   originalTotal: number;
   onSave: () => void;
   onCancel: () => void;
@@ -88,6 +91,9 @@ export function CostSummaryCard({
   setDiscountValue,
   baseTotal,
   discountAmount,
+  activeDiscountBase,
+  discountDistributionPreserved = false,
+  onRedistributeDiscount,
   finalTotal,
   installationCost,
   rentalCostOnly,
@@ -137,7 +143,7 @@ export function CostSummaryCard({
   const pausedFullSum = Number(pausedTotals?.fullSum || 0);
   // ✅ نستخدم refundSum (الخصم الخام) ليطابق الإجمالي المعروض الإجمالي الفعلي المحفوظ في DB.
   const pausedRefundSum = Number(pausedTotals?.refundSum || 0);
-  const pausedAllocatedSum = Number((pausedTotals as any)?.allocatedSum || 0);
+  const pausedAllocatedSum = Number(pausedTotals?.allocatedSum || 0);
   const pausedRawRefundSum = Number(pausedTotals?.refundSum || 0);
   const pausedBaseRentalSum = Number(pausedTotals?.baseRentalSum || 0);
   const pausedDiscountSum = Number(pausedTotals?.discountSum || 0);
@@ -145,9 +151,8 @@ export function CostSummaryCard({
   const pausedIncludedInstallSum = Number(pausedTotals?.includedInstallSum || 0);
 
   // ✅ الإجمالي قبل الخصم = (المختارة قبل الخصم) + (الموقوفة قبل الخصم) — متجانس
-  const combinedBaseTotal = React.useMemo(() => {
-    return (baseTotal || 0) + pausedBaseRentalSum;
-  }, [baseTotal, pausedBaseRentalSum]);
+  const eligibleDiscountBase = activeDiscountBase ?? baseTotal;
+  const combinedBaseTotal = eligibleDiscountBase + pausedDiscountSum;
 
   // ✅ مجموع الخصم العام = القيمة الكلية التي أدخلها المستخدم (موزَّعة فعلياً على المختارة + الموقوفة)
   // pausedDiscountSum أصبح جزءاً من discountAmount (وليس إضافة عليه) بعد توحيد القاعدة في ContractEdit
@@ -157,39 +162,9 @@ export function CostSummaryCard({
 
   // الإيجار بعد الخصم العام وبعد خصم الإيقاف (للعرض وللإجمالي النهائي للعميل)
   // = (الإجمالي قبل الخصم) − (خصم الإيقاف الديناميكي) − (الخصم العام)
-  const rentalAfterDiscount = React.useMemo(() => {
-    return combinedBaseTotal - pausedRefundSum - combinedDiscountAmount;
-  }, [combinedBaseTotal, combinedDiscountAmount, pausedRefundSum]);
-
-  // حساب صافي الإيجار الفعلي
-  // إذا كانت التكلفة مضمنة = مخصومة من صافي الإيجار (مجانية للعميل)
-  // إذا كانت التكلفة غير مضمنة = تضاف للإجمالي (يدفعها العميل)
-  const netRental = React.useMemo(() => {
-    let net = rentalAfterDiscount;
-    
-    // خصم التركيب إذا كان مضمناً (مجاني للعميل)
-    if (installationEnabled && includeInstallationInPrice && installationCost > 0) {
-      net -= installationCost;
-    }
-    
-    // خصم الطباعة إذا كانت مضمنة (مجانية للعميل)
-    if (printCostEnabled && includePrintInPrice && printCost > 0) {
-      net -= printCost;
-    }
-    
-    // خصم تكاليف الطباعة/التركيب المضمَّنة داخل اللوحات الموقوفة (تتحملها الشركة)
-    net -= pausedIncludedPrintSum + pausedIncludedInstallSum;
-    
-    // خصم تكاليف الشركات الصديقة
-    net -= totalFriendCosts;
-    
-    return Math.max(0, net);
-  }, [rentalAfterDiscount, installationCost, printCost, installationEnabled, printCostEnabled, includeInstallationInPrice, includePrintInPrice, totalFriendCosts, pausedIncludedPrintSum, pausedIncludedInstallSum]);
-
-  // حساب رسوم التشغيل على صافي الإيجار الفعلي
-  const calculatedOperatingFee = React.useMemo(() => {
-    return Math.round(netRental * (operatingFeeRate / 100) * 100) / 100;
-  }, [netRental, operatingFeeRate]);
+  const rentalAfterDiscount = finalTotal - (includePrintInPrice ? 0 : printCost) - (includeInstallationInPrice ? 0 : installationCost);
+  const netRental = rentalCostOnly - totalFriendCosts;
+  const calculatedOperatingFee = operatingFee;
 
   // حساب الإجمالي النهائي للعميل — يستخدم نفس القيمة التي ستُحفظ في قاعدة البيانات
   // لضمان تطابق ما يراه المستخدم مع ما يُخزَّن فعلاً
@@ -197,21 +172,6 @@ export function CostSummaryCard({
     return Math.max(0, Number(finalTotal) || 0);
   }, [finalTotal]);
   
-  // ✅ قيم افتراضية: ماذا سيكون الإجمالي لو لم توجد أي لوحات موقوفة
-  const discountWithoutPause = React.useMemo(() => {
-    if (discountType === 'percent') {
-      return (combinedBaseTotal * (Number(discountValue) || 0)) / 100;
-    }
-    return Number(discountValue) || 0;
-  }, [discountType, discountValue, combinedBaseTotal]);
-
-  const totalAfterDiscountWithoutPause = React.useMemo(() => {
-    let total = Math.max(0, combinedBaseTotal - discountWithoutPause);
-    if (!includePrintInPrice && printCostEnabled && printCost > 0) total += printCost;
-    if (!includeInstallationInPrice && installationEnabled && installationCost > 0) total += installationCost;
-    return total;
-  }, [combinedBaseTotal, discountWithoutPause, includePrintInPrice, printCostEnabled, printCost, includeInstallationInPrice, installationEnabled, installationCost]);
-
   const totalPaid = Number(currentContract?.['Total Paid'] || 0);
   const remaining = adjustedFinalTotal - totalPaid;
   const priceDifference = adjustedFinalTotal - originalTotal;
@@ -232,6 +192,8 @@ export function CostSummaryCard({
             variant="ghost"
             size="sm"
             onClick={() => setShowDetails(!showDetails)}
+            aria-label={showDetails ? "إخفاء تفاصيل التكاليف" : "إظهار تفاصيل التكاليف"}
+            aria-expanded={showDetails}
             className="text-muted-foreground"
           >
             {showDetails ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -376,7 +338,7 @@ export function CostSummaryCard({
               <label className="text-xs text-muted-foreground">القيمة ({currencySymbol})</label>
               <Input
                 type="number"
-                value={discountType === 'amount' ? discountValue : (combinedBaseTotal > 0 ? Math.round((combinedBaseTotal * discountValue) / 100) : 0)}
+                value={discountAmount}
                 onChange={(e) => {
                   const val = Number(e.target.value) || 0;
                   setDiscountType('amount');
@@ -393,7 +355,7 @@ export function CostSummaryCard({
                 min="0"
                 max="100"
                 step="0.1"
-                value={discountType === 'percent' ? discountValue : (combinedBaseTotal > 0 ? ((discountValue / combinedBaseTotal) * 100).toFixed(1) : 0)}
+                value={discountType === 'percent' ? discountValue : (eligibleDiscountBase > 0 ? (Math.max(0, discountValue - pausedDiscountSum) / eligibleDiscountBase * 100).toFixed(2) : 0)}
                 onChange={(e) => {
                   const val = Number(e.target.value) || 0;
                   setDiscountType('percent');
@@ -404,6 +366,23 @@ export function CostSummaryCard({
               />
             </div>
           </div>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            يتوزع الخصم بنسبة صافي إيجار كل لوحة بعد خصمها الفردي، مع حماية تكاليف الطباعة والتركيب والأسعار الثابتة.
+            تبقى الأسعار بعد الخصم قيماً مقفلة قدر الإمكان، ويُسوّى الفرق المتبقي على أقل عدد من اللوحات دون تغيير إجمالي الخصم.
+          </p>
+          <div className="flex flex-wrap justify-between gap-2 text-xs">
+            <span>الإيجار القابل للخصم: {eligibleDiscountBase.toLocaleString('ar-LY')} {currencySymbol}</span>
+            {pausedDiscountSum > 0 && <span>خصم تاريخي محفوظ ضمن المبلغ: {pausedDiscountSum.toLocaleString('ar-LY')} {currencySymbol}</span>}
+          </div>
+          {discountDistributionPreserved && combinedDiscountAmount > 0 && (
+            <p className="rounded-lg border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary">
+              يجري الاحتفاظ بتوزيع الخصم المحفوظ على اللوحات ما دامت الأسعار والخدمات لم تتغير.
+            </p>
+          )}
+          {onRedistributeDiscount && <Button type="button" variant="outline" size="sm" className="w-full min-h-10 cursor-pointer transition-all duration-200" onClick={onRedistributeDiscount} disabled={saving || eligibleDiscountBase <= 0}>
+            <RefreshCw className="h-4 w-4 ml-2" /> توزيع ذكي بقيم مقفلة
+          </Button>}
+          {discountAmount > combinedBaseTotal && <p role="alert" className="text-xs text-destructive">الخصم أكبر من الإيجار المتاح. خفّضه قبل الحفظ.</p>}
           {combinedDiscountAmount > 0 && (
             <p className="text-xs text-green-600 dark:text-green-400">
               خصم {combinedBaseTotal > 0 ? ((combinedDiscountAmount / combinedBaseTotal) * 100).toFixed(1) : 0}% = {combinedDiscountAmount.toLocaleString('ar-LY')} {currencySymbol}
@@ -592,89 +571,17 @@ export function CostSummaryCard({
                 </h4>
               </div>
               
-              {/* Step 1: Base Rental (شامل اللوحات الموقوفة) */}
-              <div className="p-3 border-b border-border bg-background">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">1</Badge>
-                  إيجار اللوحات الأساسي
-                  {pausedFullSum > 0 && (
-                    <span className="text-[10px] text-amber-600 mr-auto">يشمل اللوحات الموقوفة</span>
-                  )}
+              <div className="p-3 border-b border-border space-y-2">
+                <div className="flex justify-between gap-3 text-sm">
+                  <span>اللوحات المختارة بعد الخصومات والخدمات</span>
+                  <strong>{(finalTotal - Number(pausedTotals?.consumedSum || 0)).toLocaleString('ar-LY')} {currencySymbol}</strong>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-foreground">إجمالي الإيجار</span>
-                  <span className="font-bold text-lg font-manrope">{combinedBaseTotal.toLocaleString('ar-LY')} {currencySymbol}</span>
-                </div>
-                {pausedBaseRentalSum > 0 && (
-                  <div className="flex justify-between items-center mt-1 text-[11px] text-muted-foreground">
-                    <span>منها اللوحات المختارة: {(baseTotal || 0).toLocaleString('ar-LY')}</span>
-                    <span>الموقوفة (قبل الخصم): {pausedBaseRentalSum.toLocaleString('ar-LY')}</span>
-                  </div>
-                )}
+                {pausedTotals && pausedTotals.count > 0 && <div className="flex justify-between gap-3 text-sm">
+                  <span>المستحق المحفوظ عن فترات الإيقاف السابقة</span>
+                  <strong>{pausedTotals.consumedSum.toLocaleString('ar-LY')} {currencySymbol}</strong>
+                </div>}
+                <p className="text-xs text-muted-foreground">الخدمات أدناه تفاصيل للمبالغ المحتسبة ضمن الإجمالي. يحتفظ سجل الإيقافات بأسعاره وخصوماته السابقة.</p>
               </div>
-
-              {/* Step 1.5: Pause Discount (Pure Paused Only) */}
-              {pausedRefundSum > 0 && (
-                <div className="p-3 border-b border-border bg-amber-500/5">
-                  <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400 mb-2">
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-amber-500/50 text-amber-600">إيقاف</Badge>
-                    خصم إيقاف اللوحات (غير المستبدلة)
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-amber-600 flex items-center gap-1">
-                      <Minus className="h-3 w-3" />
-                      المسترجع للأيام غير المستخدمة
-                    </span>
-                    <span className="font-bold text-lg text-amber-600 font-manrope">-{pausedRefundSum.toLocaleString('ar-LY')} {currencySymbol}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Step 1.6: Replacement Difference (if any) */}
-              {Number((pausedTotals as any)?.replacementDifferencesSum || 0) !== 0 && (
-                <div className="p-3 border-b border-border bg-blue-500/5">
-                  <div className="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 mb-2">
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-blue-500/50 text-blue-600">استبدال</Badge>
-                    فارق أسعار الاستبدال
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-foreground">
-                      {Number((pausedTotals as any)?.replacementDifferencesSum) > 0 ? 'إضافة فارق الترقية' : 'خصم فارق الاستبدال'}
-                    </span>
-                    <span className={`font-bold text-lg font-manrope ${Number((pausedTotals as any)?.replacementDifferencesSum) > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                      {Number((pausedTotals as any)?.replacementDifferencesSum) > 0 ? '+' : ''}
-                      {Number((pausedTotals as any)?.replacementDifferencesSum).toLocaleString('ar-LY')} {currencySymbol}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* Step 2: Discount (المختارة + الموزَّع على الموقوفة) */}
-              {combinedDiscountAmount > 0 && (
-                <div className="p-3 border-b border-border bg-red-500/5">
-                  <div className="flex items-center gap-2 text-xs text-red-500 mb-2">
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-red-500/50 text-red-500">2</Badge>
-                    الخصم المطبق
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-red-600 flex items-center gap-1">
-                      <Minus className="h-3 w-3" />
-                      خصم {combinedBaseTotal > 0 ? ((combinedDiscountAmount / combinedBaseTotal) * 100).toFixed(1) : 0}%
-                    </span>
-                    <span className="font-bold text-lg text-red-600 font-manrope">-{combinedDiscountAmount.toLocaleString('ar-LY')} {currencySymbol}</span>
-                  </div>
-                  {pausedDiscountSum > 0 && (
-                    <div className="flex justify-between items-center mt-1 text-[11px] text-muted-foreground">
-                      <span>المختارة: -{Math.max(0, combinedDiscountAmount - pausedDiscountSum).toLocaleString('ar-LY')}</span>
-                      <span>الموقوفة: -{pausedDiscountSum.toLocaleString('ar-LY')}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between items-center mt-2 pt-2 border-t border-red-500/20">
-                    <span className="text-xs text-muted-foreground">= بعد الخصم</span>
-                    <span className="font-semibold text-sm font-manrope">{rentalAfterDiscount.toLocaleString('ar-LY')} {currencySymbol}</span>
-                  </div>
-                </div>
-              )}
 
               {/* Step 3: Installation */}
               {installationEnabled && installationCost > 0 && (
@@ -919,76 +826,6 @@ export function CostSummaryCard({
 
         {/* Final Total */}
         <div className="p-5 rounded-2xl bg-gradient-to-br from-green-500/15 via-emerald-500/10 to-teal-500/5 border-2 border-green-500/40 shadow-lg">
-          {/* تسلسل واضح: السعر الكامل ← خصم الإيقاف ← الأساس قبل الخصم العام ← الخصم العام ← الإجمالي للعميل */}
-          {(pausedFullSum > 0 || discountAmount > 0 || (!includeInstallationInPrice && installationCost > 0) || (!includePrintInPrice && printCost > 0)) && (
-            <div className="mb-3 rounded-lg border border-border bg-muted/40 divide-y divide-border/60 overflow-hidden">
-              <div className="flex justify-between items-center px-3 py-1.5">
-                <span className="text-xs text-muted-foreground">السعر الكامل قبل الخصومات</span>
-                <span className="text-sm font-bold text-foreground tabular-nums font-manrope" dir="ltr">
-                  {combinedBaseTotal.toLocaleString('ar-LY')} {currencySymbol}
-                </span>
-              </div>
-
-              {pausedRefundSum > 0 && (
-                <>
-                  <div className="flex justify-between items-center px-3 py-1.5 bg-amber-500/5">
-                    <span className="text-xs text-amber-700 dark:text-amber-400">
-                      − خصم الإيقاف
-                      {pausedAllocatedSum > 0 && (
-                        <span className="text-[10px] text-muted-foreground mr-1">
-                          (منها {pausedAllocatedSum.toLocaleString('ar-LY')} مخصصة للوحات بديلة)
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-sm font-bold text-amber-600 tabular-nums font-manrope" dir="ltr">
-                      − {pausedRefundSum.toLocaleString('ar-LY')} {currencySymbol}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center px-3 py-1.5 bg-background/60">
-                    <span className="text-xs font-medium text-foreground">= الأساس قبل الخصم العام</span>
-                    <span className="text-sm font-bold text-foreground tabular-nums font-manrope" dir="ltr">
-                      {(combinedBaseTotal - pausedRefundSum).toLocaleString('ar-LY')} {currencySymbol}
-                    </span>
-                  </div>
-                </>
-              )}
-
-              {discountAmount > 0 && (
-                <div className="flex justify-between items-center px-3 py-1.5 bg-red-500/5">
-                  <span className="text-xs text-red-600">
-                    − الخصم العام
-                    {(combinedBaseTotal - pausedRefundSum) > 0 && (
-                      <span className="text-[10px] text-muted-foreground mr-1">
-                        ({((discountAmount / (combinedBaseTotal - pausedRefundSum)) * 100).toFixed(1)}% من الأساس)
-                      </span>
-                    )}
-                  </span>
-                  <span className="text-sm font-bold text-red-600 tabular-nums font-manrope" dir="ltr">
-                    − {discountAmount.toLocaleString('ar-LY')} {currencySymbol}
-                  </span>
-                </div>
-              )}
-
-              {!includePrintInPrice && printCost > 0 && (
-                <div className="flex justify-between items-center px-3 py-1.5 bg-blue-500/5">
-                  <span className="text-xs text-blue-700 dark:text-blue-400">+ تكلفة الطباعة (تُضاف للعميل)</span>
-                  <span className="text-sm font-bold text-blue-600 tabular-nums font-manrope" dir="ltr">
-                    + {printCost.toLocaleString('ar-LY')} {currencySymbol}
-                  </span>
-                </div>
-              )}
-
-              {!includeInstallationInPrice && installationCost > 0 && (
-                <div className="flex justify-between items-center px-3 py-1.5 bg-blue-500/5">
-                  <span className="text-xs text-blue-700 dark:text-blue-400">+ تكلفة التركيب (تُضاف للعميل)</span>
-                  <span className="text-sm font-bold text-blue-600 tabular-nums font-manrope" dir="ltr">
-                    + {installationCost.toLocaleString('ar-LY')} {currencySymbol}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-
           <div className="flex justify-between items-center mb-1">
             <span className="font-bold text-lg text-foreground">الإجمالي للعميل</span>
             <span className="text-3xl font-bold text-green-600 font-manrope">{adjustedFinalTotal.toLocaleString('ar-LY')} {currencySymbol}</span>
@@ -1000,27 +837,6 @@ export function CostSummaryCard({
               {!includePrintInPrice && printCost > 0 && `(شامل الطباعة ${printCost.toLocaleString('ar-LY')})`}
             </p>
           ) : null}
-
- {/* الإجمالي الافتراضي بدون احتساب الإيقاف — للمرجعية فقط */}
-          {pausedRefundSum > 0 && (
-            <div className="mt-3 p-3 rounded-lg border border-dashed border-border bg-muted/30 space-y-1.5">
-              <div className="text-[11px] font-semibold text-muted-foreground mb-1">
-                لو لم يوجد إيقاف في العقد:
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-muted-foreground">الإجمالي بدون إيقاف</span>
-                <span className="text-sm font-bold text-foreground tabular-nums font-manrope" dir="ltr">
-                  {combinedBaseTotal.toLocaleString('ar-LY')} {currencySymbol}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-muted-foreground">الإجمالي بعد الخصم بدون إيقاف</span>
-                <span className="text-sm font-bold text-foreground tabular-nums font-manrope" dir="ltr">
-                  {totalAfterDiscountWithoutPause.toLocaleString('ar-LY')} {currencySymbol}
-                </span>
-              </div>
-            </div>
-          )}
 
           {/* Previous Total - الإجمالي السابق - More Prominent */}
           {originalTotal > 0 && (
@@ -1120,7 +936,8 @@ export function CostSummaryCard({
                 <AlertTriangle className="h-5 w-5" />
                 تأكيد تغيير الإجمالي
               </AlertDialogTitle>
-              <AlertDialogDescription className="space-y-4 pt-2">
+              <AlertDialogDescription asChild>
+              <div className="space-y-4 pt-2">
                 <p className="text-foreground font-medium">
                   يوجد فرق في إجمالي العقد عن القيمة السابقة:
                 </p>
@@ -1150,6 +967,7 @@ export function CostSummaryCard({
                 <p className="text-sm text-muted-foreground">
                   هل أنت متأكد من حفظ هذه التعديلات؟
                 </p>
+              </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter className="gap-2">

@@ -56,7 +56,7 @@ const parsePX = (val: string): number => { const n = parseFloat(val); return isN
 const toPX = (n: number): string => `${n}px`;
 const parsePercent = (val: string): number => { const n = parseFloat(val); return isNaN(n) ? 50 : n; };
 const toPercent = (n: number): string => `${n}%`;
-const parseRaw = (val: string): number => { const n = parseFloat(val); return isNaN(n) ? 80 : n; };
+const parseRaw = (val: string, defaultVal = 1): number => { const n = parseFloat(val); return isNaN(n) ? defaultVal : n; };
 
 const parseDimensions = (sizeStr: string) => {
   if (!sizeStr) return { length: '', width: '', height: '' };
@@ -231,7 +231,7 @@ const settingGroups: SettingGroup[] = [
         { value: 'hybrid', label: 'قمر صناعي + مسميات' },
         { value: 'satellite', label: 'قمر صناعي فقط' },
       ]},
-      { key: 'map_label_scale' as any, label: 'حجم خط مسميات الخريطة', type: 'raw', min: 1, max: 3, step: 0.25 },
+      { key: 'map_label_scale' as any, label: 'تكبير المسميات ونصوص الخريطة', type: 'raw', min: 1, max: 3, step: 0.25 },
       { key: 'pin_size', label: 'حجم دبوس الخريطة (بكسل)', type: 'raw', min: 30, max: 200, step: 5 },
       { key: 'pin_color', label: 'لون الدبوس', type: 'text' },
       { key: 'pin_text_color', label: 'لون كتابة المقاس على الدبوس', type: 'text' },
@@ -458,7 +458,10 @@ export default function MunicipalityPrintSettingsDialog({
     if (type === 'mm') return parseMM(val);
     if (type === 'px') return parsePX(val);
     if (type === 'percent') return parsePercent(val);
-    if (type === 'raw') return parseRaw(val);
+    if (type === 'raw') {
+      const def = key === 'map_label_scale' ? 1 : key === 'map_zoom' ? 16 : key === 'pin_size' ? 80 : 1;
+      return parseRaw(val, def);
+    }
     return 0;
   };
 
@@ -741,7 +744,9 @@ export default function MunicipalityPrintSettingsDialog({
                             <Label className="text-[11.5px] font-semibold text-slate-300">{field.label}</Label>
                             {field.type !== 'text' && field.type !== 'select' && (
                               <span className="text-[10px] text-slate-400 font-mono bg-white/5 px-2 py-0.5 rounded-md border border-white/5">
-                                {localSettings[field.key] as string}
+                                {field.key === 'map_label_scale'
+                                  ? `${localSettings[field.key] || '1'}x`
+                                  : (localSettings[field.key] as string)}
                               </span>
                             )}
                           </div>

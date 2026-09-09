@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import type { Billboard } from '@/types';
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { BillboardImage } from '@/components/BillboardImage';
 import { ZoomIn, X } from 'lucide-react';
 
 interface Props {
-  billboard: any;
+  billboard: Billboard;
   alt?: string;
   className?: string;
   containerClassName?: string;
+  thumbnailObjectFit?: 'cover' | 'contain' | 'fill';
 }
 
 export const BillboardImageZoom: React.FC<Props> = ({
@@ -15,6 +17,7 @@ export const BillboardImageZoom: React.FC<Props> = ({
   alt = 'صورة اللوحة',
   className = 'w-full h-full object-cover',
   containerClassName = '',
+  thumbnailObjectFit = 'cover',
 }) => {
   const [open, setOpen] = useState(false);
   if (!billboard) {
@@ -44,13 +47,15 @@ export const BillboardImageZoom: React.FC<Props> = ({
         className={`group/zoom relative w-full h-full block overflow-hidden cursor-pointer ${containerClassName}`}
         title="تكبير الصورة"
       >
-        <BillboardImage billboard={billboard} alt={alt} className={className} />
-        <div className="absolute top-2 left-2 bg-black/55 text-white rounded-full p-1.5 opacity-0 group-hover/zoom:opacity-100 transition-opacity pointer-events-none z-10">
+        <BillboardImage billboard={billboard} alt={alt} className={className} objectFit={thumbnailObjectFit} />
+        <div className="absolute top-3 left-3 rounded-lg border border-white/30 bg-black/60 p-2 text-white opacity-100 shadow-lg backdrop-blur-sm transition-all duration-200 pointer-events-none z-10 sm:opacity-0 sm:group-hover/zoom:opacity-100">
           <ZoomIn className="h-4 w-4" />
         </div>
       </div>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-5xl p-3 bg-background/95 backdrop-blur border border-border shadow-2xl relative [&>button]:hidden">
+          <DialogTitle className="sr-only">{alt || 'معاينة صورة اللوحة'}</DialogTitle>
+          <DialogDescription className="sr-only">عرض صورة اللوحة بحجم مكبر</DialogDescription>
           <button
             type="button"
             onClick={(e) => {

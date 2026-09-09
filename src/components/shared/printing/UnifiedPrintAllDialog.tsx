@@ -271,7 +271,9 @@ export function UnifiedPrintAllDialog({
   const [showTeamName, setShowTeamName] = useState(true);
   const [hideCustomerName, setHideCustomerName] = useState(true);
   const [hideInstallDate, setHideInstallDate] = useState(true);
-  const [printType, setPrintType] = useState<'client' | 'installation'>('client');
+  const [printType, setPrintType] = useState<'client' | 'installation'>(
+    contextType === 'installation' || contextType === 'removal' ? 'installation' : 'client'
+  );
   const [printMode, setPrintMode] = useState<'cards' | 'table'>('cards');
   const [loading, setLoading] = useState(false);
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<string>>(new Set());
@@ -359,17 +361,32 @@ export function UnifiedPrintAllDialog({
     saving: savingTableSettings
   } = useTablePrintSettings();
 
+  // دالة مساعدة لتحديد معرف الفرقة للبند مع مطابقة احتياطية بمدينة اللوحة
+  const resolveItemTeamId = (item: BillboardPrintItem): string => {
+    if (item.team_id) return item.team_id;
+    if (teams && billboards) {
+      const bb = billboards[item.billboard_id];
+      if (bb?.City) {
+        const matchedTeam = Object.values(teams).find(
+          (t: any) => Array.isArray(t?.cities) && t.cities.includes(bb.City)
+        );
+        if (matchedTeam) return (matchedTeam as any).id;
+      }
+    }
+    return 'unknown';
+  };
+
   // تجميع العناصر حسب الفريق
   const itemsByTeam = useMemo(() => {
     if (!showTeamFilter) return { 'all': items };
     const groups: Record<string, BillboardPrintItem[]> = {};
     items.forEach(item => {
-      const teamId = item.team_id || 'unknown';
+      const teamId = resolveItemTeamId(item);
       if (!groups[teamId]) groups[teamId] = [];
       groups[teamId].push(item);
     });
     return groups;
-  }, [items, showTeamFilter]);
+  }, [items, showTeamFilter, teams, billboards]);
 
   useEffect(() => {
     if (open) {
@@ -383,78 +400,124 @@ export function UnifiedPrintAllDialog({
     (async () => {
       const { data } = await supabase
         .from('maintenance_statuses')
-        .select('name,label,color');
-      const map: Record<string, { label: string; color: string }> = {};
-      (data || []).forEach((s: any) => {
-        map[s.name] = { label: s.label || s.name, color: s.color || '#6b7280' };
-      });
-      setMaintenanceStatusesMap(map);
+        .select('name, color, display_name');
+      if (data) {
+        const map: Record<string, { label: string; color: string }> = {};
+        data.forEach((st: any) => {
+          map[st.name] = {
+            label: st.display_name || st.name,
+            color: st.color || '#b91c1c'
+          };
+        });
+        setMaintenanceStatusesMap(map);
+      }
     })();
   }, [open]);
 
-  // جلب صور التركيب من قاعدة البيانات (مرتبة تنازلياً للحصول على الأحدث)
-  useEffect(() => {
-    if (!showInstalledImages || !open) return;
-    const fetchInstalledImages = async () => {
-      const billboardIds = [...new Set(items.map(i => i.billboard_id))];
-      if (billboardIds.length === 0) return;
-      
-      const { data } = await supabase
-        .from('installation_task_items')
-        .select('billboard_id, installed_image_face_a_url, installed_image_face_b_url, created_at')
-        .in('billboard_id', billboardIds)
-        .or('installed_image_face_a_url.not.is.null,installed_image_face_b_url.not.is.null')
-        .order('created_at', { ascending: false });
-      
-      if (data) {
-        const map: Record<number, { face_a?: string; face_b?: string }> = {};
-        data.forEach((row: any) => {
-          // نأخذ آخر (أحدث) صورة تركيب مسجلة لكل لوحة
-          if (!map[row.billboard_id]) {
-            map[row.billboard_id] = {
-              face_a: row.installed_image_face_a_url || undefined,
-              face_b: row.installed_image_face_b_url || undefined,
-            };
-          }
-        });
-        setInstalledImagesData(map);
-      }
-    };
-    fetchInstalledImages();
-  }, [showInstalledImages, open, items]);
-
-  // جلب التصاميم المتوفرة والإعلانات السابقة للوحات
+  // جلب الصور المركبة والبيانات عند فتح النافذة
   useEffect(() => {
     if (!open) return;
-    let isMounted = true;
+    (async () => {
+      const bbIds = [...new Set(items.map(i => i.billboard_id))];
+      if (!bbIds.length) return;
 
-    const fetchExtraData = async () => {
       try {
-        const [prevAds, designs] = await Promise.all([
-          resolveBillboardPreviousAds(items, contextNumber, billboards),
-          resolveBillboardDesigns(items, billboards)
-        ]);
-        if (isMounted) {
-          setPreviousAdsData(prevAds);
-          setDynamicDesignsMap(designs);
+        const { data: itemsWithImages } = await supabase
+          .from('installation_task_items')
+          .select('billboard_id, installed_image_face_a_url, installed_image_face_b_url, installed_image_url, design_face_a, design_face_b')
+          .in('billboard_id', bbIds)
+          .not('installed_image_face_a_url', 'is', null);
+
+        if (itemsWithImages && itemsWithImages.length > 0) {
+          const imgMap: Record<number, { face_a?: string; face_b?: string }> = {};
+          itemsWithImages.forEach((row: any) => {
+            if (!imgMap[row.billboard_id]) {
+              imgMap[row.billboard_id] = {
+                face_a: row.installed_image_face_a_url || row.installed_image_url || undefined,
+                face_b: row.installed_image_face_b_url || undefined,
+              };
+            }
+          });
+          setInstalledImagesData(imgMap);
         }
-      } catch (err) {
-        console.error('Error fetching extra billboard data:', err);
+      } catch (e) {
+        console.error('Error fetching installed images:', e);
       }
-    };
+    })();
+  }, [open, items]);
 
-    fetchExtraData();
+  const sortBillboardsBySize = async (itemsToSort: BillboardPrintItem[]) => {
+    try {
+      const { data: sizes } = await supabase
+        .from('sizes')
+        .select('name, display_order')
+        .order('display_order', { ascending: true });
 
-    return () => {
-      isMounted = false;
-    };
-  }, [open, items, contextNumber, billboards]);
+      if (!sizes || sizes.length === 0) return itemsToSort;
 
-  const blobToBase64 = (blob: Blob) =>
-    new Promise<string>((resolve, reject) => {
+      const sizeOrderMap = new Map<string, number>();
+      sizes.forEach((s: any, idx: number) => {
+        if (s.name) sizeOrderMap.set(s.name.trim(), s.display_order ?? idx);
+      });
+
+      return [...itemsToSort].sort((a, b) => {
+        const billboardA = billboards[a.billboard_id];
+        const billboardB = billboards[b.billboard_id];
+        const sizeA = (billboardA?.Size || '').trim();
+        const sizeB = (billboardB?.Size || '').trim();
+        const orderA = sizeOrderMap.has(sizeA) ? sizeOrderMap.get(sizeA)! : 9999;
+        const orderB = sizeOrderMap.has(sizeB) ? sizeOrderMap.get(sizeB)! : 9999;
+        if (orderA !== orderB) return orderA - orderB;
+        return (billboardA?.Billboard_Name || '').localeCompare(billboardB?.Billboard_Name || '', 'ar');
+      });
+    } catch {
+      return itemsToSort;
+    }
+  };
+
+  const getContextLabel = () => {
+    switch (contextType) {
+      case 'installation': return 'تركيب';
+      case 'removal': return 'إزالة';
+      case 'contract': return 'عقد';
+      case 'offer': return 'عرض';
+      default: return 'عنصر';
+    }
+  };
+
+  const imageToDataUrl = async (url: string): Promise<string> => {
+    try {
+      const response = await fetch(url, { mode: 'cors' });
+      const blob = await response.blob();
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return url;
+    }
+  };
+
+  const svgToPngDataUrl = (svgDataUrl: string): Promise<string> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || 80;
+        canvas.height = img.naturalHeight || 80;
+        const ctx = canvas.getContext('2d');
+        if (ctx) ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = () => resolve(svgDataUrl);
+      img.src = svgDataUrl;
+    });
+
+  const blobToDataUrl = (blob: Blob): Promise<string> =>
+    new Promise((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
 
@@ -466,7 +529,7 @@ export function UnifiedPrintAllDialog({
     // فلتر حسب الفرق المختارة
     if (selectedTeamIds.size > 0) {
       result = result.filter(item => {
-        const teamId = item.team_id || 'unknown';
+        const teamId = resolveItemTeamId(item);
         return selectedTeamIds.has(teamId);
       });
     } else {
@@ -476,7 +539,7 @@ export function UnifiedPrintAllDialog({
     // فلتر حسب حدود مدن الفرق
     if (respectCityLimits && selectedTeamIds.size > 0) {
       result = result.filter(item => {
-        const teamId = item.team_id || 'unknown';
+        const teamId = resolveItemTeamId(item);
         const team = teams[teamId];
         const billboard = billboards[item.billboard_id];
         if (!team || !billboard) return true;
@@ -503,50 +566,6 @@ export function UnifiedPrintAllDialog({
 
   const selectAllTeams = () => setSelectedTeamIds(new Set(Object.keys(itemsByTeam)));
   const clearTeamSelection = () => setSelectedTeamIds(new Set());
-
-  // ترتيب اللوحات
-  const sortBillboardsBySize = async (items: BillboardPrintItem[]) => {
-    try {
-      const [sizesRes, municipalitiesRes, levelsRes] = await Promise.all([
-        supabase.from('sizes').select('name, sort_order').order('sort_order', { ascending: true }),
-        supabase.from('municipalities').select('name, sort_order').order('sort_order', { ascending: true }),
-        supabase.from('billboard_levels').select('level_code, sort_order').order('sort_order', { ascending: true })
-      ]);
-      
-      const sizeOrderMap = new Map((sizesRes.data || []).map((s: any) => [s.name, s.sort_order ?? 999]));
-      const municipalityOrderMap = new Map((municipalitiesRes.data || []).map((m: any) => [m.name, m.sort_order ?? 999]));
-      const levelOrderMap = new Map((levelsRes.data || []).map((l: any) => [l.level_code, l.sort_order ?? 999]));
-      
-      return [...items].sort((a, b) => {
-        const billboardA = billboards[a.billboard_id];
-        const billboardB = billboards[b.billboard_id];
-        
-        const sizeOrderA = sizeOrderMap.get(billboardA?.Size) ?? 999;
-        const sizeOrderB = sizeOrderMap.get(billboardB?.Size) ?? 999;
-        if (sizeOrderA !== sizeOrderB) return sizeOrderA - sizeOrderB;
-        
-        const municipalityOrderA = municipalityOrderMap.get(billboardA?.Municipality) ?? 999;
-        const municipalityOrderB = municipalityOrderMap.get(billboardB?.Municipality) ?? 999;
-        if (municipalityOrderA !== municipalityOrderB) return municipalityOrderA - municipalityOrderB;
-        
-        const levelOrderA = levelOrderMap.get(billboardA?.Level) ?? 999;
-        const levelOrderB = levelOrderMap.get(billboardB?.Level) ?? 999;
-        return levelOrderA - levelOrderB;
-      });
-    } catch (e) {
-      return items;
-    }
-  };
-
-  const getContextLabel = () => {
-    switch (contextType) {
-      case 'installation': return 'تركيب';
-      case 'removal': return 'إزالة';
-      case 'contract': return 'عقد';
-      case 'offer': return 'عرض';
-      default: return '';
-    }
-  };
 
   const getCleanDocumentTitle = () => {
     const label = getContextLabel();
@@ -694,7 +713,8 @@ export function UnifiedPrintAllDialog({
       const billboardStatusFontSize = (s as any).billboard_status_font_size || '14px';
       const billboardStatusOffsetY = (s as any).billboard_status_offset_y || '6mm';
 
-      const itemTeamName = item.team_id && teams[item.team_id]?.team_name ? teams[item.team_id].team_name : '';
+      const resolvedTId = resolveItemTeamId(item);
+      const itemTeamName = resolvedTId && teams[resolvedTId]?.team_name ? teams[resolvedTId].team_name : '';
       const displayTeamNames = itemTeamName || (showTeamFilter 
         ? Array.from(selectedTeamIds).map(id => teams[id]?.team_name).filter(Boolean).join(' - ')
         : '');
@@ -1902,7 +1922,7 @@ export function UnifiedPrintAllDialog({
                         {isSelected && <Check className="h-3 w-3 text-primary-foreground" />}
                       </div>
                       <Users className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium text-sm">{teams[teamId]?.team_name || 'غير محدد'}</span>
+                      <span className="font-medium text-sm">{teams[teamId]?.team_name || (teamId === 'unknown' ? 'بدون فرقة محددة' : 'غير محدد')}</span>
                       <Badge variant="secondary" className="text-xs">
                         {respectCityLimits && cityFilteredCount !== teamItems.length
                           ? `${cityFilteredCount}/${teamItems.length}`

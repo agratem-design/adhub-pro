@@ -7,9 +7,12 @@ import { VitePWA } from "vite-plugin-pwa";
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   base: '/',
+  // Keep the live dependency graph separate from production/preview builds.
+  cacheDir: mode === 'development' ? 'node_modules/.vite-development' : 'node_modules/.vite-build',
   server: {
     host: "::",
     port: 8080,
+    strictPort: true,
     hmr: { overlay: false },
   },
   plugins: [
@@ -44,8 +47,7 @@ export default defineConfig(({ mode }) => ({
   ].filter(Boolean),
   optimizeDeps: {
     exclude: ["@supabase/supabase-js"],
-    include: ["react", "react-dom"],
-    force: true
+    include: ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime", "@tanstack/react-query"],
   },
   build: {
     chunkSizeWarningLimit: 1000,

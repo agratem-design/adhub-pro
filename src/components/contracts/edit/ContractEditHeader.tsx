@@ -18,16 +18,16 @@ export function ContractEditHeader({
   saving
 }: ContractEditHeaderProps) {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 lg:px-5">
       <div>
-        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-primary mb-2">
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground mb-1">
           تعديل عقد {contractNumber && `#${contractNumber}`}
         </h1>
         <p className="text-xs sm:text-sm text-muted-foreground">
-          تعديل عقد إيجار موجود مع نظام دفعات ديناميكي
+          راجع التغييرات والأسعار والدفعات قبل حفظ العقد
         </p>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2 [&_button]:min-h-10 [&_button]:cursor-pointer [&_button]:transition-all [&_button]:duration-200">
         <Button 
           variant="outline" 
           onClick={onBack}

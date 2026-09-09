@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { ResumePausedBillboardDialog } from './ResumePausedBillboardDialog';
 import React, { useEffect, useRef, useState, useDeferredValue } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -62,6 +63,7 @@ function PausedBillboardCardImpl({
 }: Props) {
   const { confirm } = useSystemDialog();
   const raw = item.raw;
+  const [resumeOpen, setResumeOpen] = useState(false);
   const bb = item.billboard || {};
   const billboardId = String(raw.billboard_id);
 
@@ -149,16 +151,17 @@ function PausedBillboardCardImpl({
   })();
   const previewRemaining = Math.max(0, item.totalDays - previewElapsed);
   // ✅ Refund is calculated on RENTAL ONLY. Print & install are non-refundable.
-  const rentalBase = Math.max(0, Math.round((item as any).rentalBase ?? item.netRentalAfterDiscount ?? 0));
+  const rentalBase = Math.max(0, (item as any).rentalBase ?? item.netRentalAfterDiscount ?? 0);
   const nonRefundable = Math.max(0, ((item as any).printAdded || 0) + ((item as any).installAdded || 0));
   const previewRefundAutoRaw = (rentalBase * previewRemaining) / Math.max(1, item.totalDays);
-  const previewRefundAuto = Math.min(rentalBase, roundToBucket(previewRefundAutoRaw, 50));
+  const previewRefundAuto = Math.min(rentalBase, Math.round(previewRefundAutoRaw * 100) / 100);
   const previewConsumedAuto = Math.max(0, rentalBase - previewRefundAuto) + nonRefundable;
-  const effectiveRefund = deferredManualRefund === null
+  const previewChanged = deferredPauseDate !== (raw.pause_date || '') || deferredManualRefund !== (item.isManualRefund ? Number(raw.manual_refund) : null);
+  const effectiveRefund = !previewChanged ? item.effectiveRefund : deferredManualRefund === null
     ? previewRefundAuto
     : Math.min(rentalBase, Math.max(0, Number(deferredManualRefund)));
   const effectiveConsumedRental = Math.max(0, rentalBase - effectiveRefund);
-  const effectiveConsumed = effectiveConsumedRental + nonRefundable;
+  const effectiveConsumed = previewChanged ? effectiveConsumedRental + nonRefundable : item.consumed;
 
   const dirty =
     pauseDate !== (raw.pause_date || '') ||
@@ -197,65 +200,6 @@ function PausedBillboardCardImpl({
     }
   };
 
-  // 🔄 Auto-persist computed pause pricing whenever the stored DB values
-  // drift from the live calculation (not just when they're zero). This
-  // ensures stale legacy rows (e.g. consumed=7250, full=8700 from old
-  // pricing logic) get rewritten with the correct values that match the
-  // billboard card so the print/PDF table reads matching numbers.
-  const autoSyncedRef = useRef<string | null>(null);
-  const autoSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (item.fullPrice <= 0) return;
-    if (item.isManualRefund) return; // respect manual override
-    const dbConsumed = Number((raw as any).consumed_amount) || 0;
-    const dbFull = Number((raw as any).full_price) || 0;
-    const dbRefund = Number((raw as any).refund_amount) || 0;
-    const dbBefore = Number((raw as any).price_before_discount) || 0;
-    const dbNetAfter = Number((raw as any).net_after_discount) || 0;
-    // ✅ منع تذبذب قيمة الإيقاف بين الزيارات:
-    // الـ Auto-sync لا يعمل إلا للصفوف القديمة التي لم تُكتب فيها أي قيمة من قبل
-    // (legacy rows). بمجرد أن تُحفظ القيم، تبقى ثابتة في DB ولا يُعاد حسابها
-    // تلقائياً عند كل فتح للعقد. أي تعديل لاحق يجب أن يتم يدوياً.
-    const hasPersistedValues = dbFull > 0 || dbConsumed > 0 || dbRefund > 0;
-    if (hasPersistedValues) return;
-    const newBefore = Math.round(item.baseRental || 0);
-    // Middle strikethrough in print = "Final Total" (totalForBoard / fullPrice), not netRentalAfterDiscount.
-    const newNetAfter = Math.round((item as any).totalForBoard || item.fullPrice || 0);
-    const drift =
-      Math.abs(dbConsumed - effectiveConsumed) > 1 ||
-      Math.abs(dbFull - item.fullPrice) > 1 ||
-      Math.abs(dbRefund - effectiveRefund) > 1 ||
-      Math.abs(dbBefore - newBefore) > 1 ||
-      Math.abs(dbNetAfter - newNetAfter) > 1;
-    if (!drift) return;
-    const syncKey = `${raw.id}|${Math.round(item.fullPrice)}|${Math.round(effectiveConsumed)}|${Math.round(effectiveRefund)}|${newBefore}|${newNetAfter}`;
-    if (autoSyncedRef.current === syncKey) return;
-    // ✅ Debounce auto-sync — avoids hammering the DB on every keystroke and
-    // breaks the re-fetch loop that caused the page to "vibrate" while typing.
-    if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current);
-    autoSyncTimerRef.current = setTimeout(async () => {
-      autoSyncedRef.current = syncKey;
-      try {
-        await updatePausedBillboard(raw.id, {
-          pause_date: deferredPauseDate,
-          manual_refund: deferredManualRefund,
-          refund_amount: effectiveRefund,
-          consumed_amount: effectiveConsumed,
-          full_price: item.fullPrice,
-          price_before_discount: newBefore,
-          net_after_discount: newNetAfter,
-        });
-        // ✅ لا نستدعي onChanged هنا — الـ auto-sync يكتب نفس القيم المعروضة،
-        // واستدعاء onChanged كان يسبب refetch لكل اللوحات الموقوفة عند الكتابة.
-      } catch (e) {
-        console.warn('Auto-sync paused pricing failed:', e);
-      }
-    }, 700);
-    return () => {
-      if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current);
-    };
-  }, [raw.id, item.fullPrice, item.baseRental, (item as any).totalForBoard, item.isManualRefund, effectiveConsumed, effectiveRefund, deferredPauseDate, deferredManualRefund, onChanged]);
-
   const handleDelete = async () => {
     const ok = await confirm({
       title: 'حذف اللوحة الموقوفة',
@@ -275,6 +219,7 @@ function PausedBillboardCardImpl({
   };
 
   const canResume = (() => {
+    if ((raw as any).lifecycle_state === 'resumed') return false;
     const status = String(bb?.Status || '').trim();
     const otherCN = bb?.Contract_Number;
     if (!bb) return true; // optimistic — server will validate
@@ -283,23 +228,7 @@ function PausedBillboardCardImpl({
     return true;
   })();
 
-  const handleResume = async () => {
-    const ok = await confirm({
-      title: 'استئناف اللوحة',
-      message: `هل تريد إعادة اللوحة ${name} إلى العقد كلوحة فعّالة؟`,
-      confirmText: 'استئناف',
-      cancelText: 'إلغاء',
-      variant: 'default',
-    });
-    if (!ok) return;
-    try {
-      await resumePausedBillboard(raw.id);
-      toast.success('تم استئناف اللوحة');
-      onChanged?.();
-    } catch (e: any) {
-      toast.error(e?.message || 'فشل الاستئناف');
-    }
-  };
+  const handleResume = () => setResumeOpen(true);
 
   const getDisplaySize = (b: any) => b?.Size || b?.size || raw.size || '-';
   const getFacesCount = (b: any) =>
@@ -309,8 +238,14 @@ function PausedBillboardCardImpl({
   const hasExtraCosts = item.extraPrintCost > 0 || item.extraInstallCost > 0;
   const showFinalTotal = item.discountApplied > 0 || hasExtraCosts;
 
+  if ((raw as any).lifecycle_state === 'resumed') return <div className="rounded-xl border border-border bg-card p-4 space-y-2">
+    <p className="font-semibold">{name} — تم الاستئناف بتاريخ {(raw as any).resumed_at}</p>
+    <p className="text-sm text-muted-foreground">سجل الفترة السابقة محفوظ. الفترة الجديدة تظهر ضمن اللوحات الفعّالة.</p>
+    <p className="text-sm">المستهلك قبل الإيقاف: {formatAmount(item.consumed)} {currencySymbol}</p>
+  </div>;
   return (
     <div
+      data-immediate-operation
       data-paused-bb={raw.billboard_id}
       className={`group relative h-full flex flex-col bg-card border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 min-w-0 ${
         highlight
@@ -320,6 +255,7 @@ function PausedBillboardCardImpl({
             : 'border-amber-500/40 bg-gradient-to-br from-amber-500/[0.01] to-transparent'
       }`}
     >
+      {resumeOpen && <ResumePausedBillboardDialog row={raw} currency={currencySymbol} onClose={() => setResumeOpen(false)} onChanged={() => onChanged?.()} />}
       {/* Header: Billboard Name, ID & Action Buttons */}
       <div className="px-4 py-3 flex items-center justify-between border-b border-border bg-muted/20 shrink-0">
         <div className="flex items-center gap-1.5 overflow-hidden">
@@ -342,7 +278,7 @@ function PausedBillboardCardImpl({
           <Button
             variant="ghost"
             size="sm"
-            disabled={!dirty || saving}
+            disabled={!dirty || saving || (raw as any).lifecycle_state === 'resumed'}
             onClick={handleSave}
             className={`h-7 w-7 p-0 rounded-full cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 ${
               dirty 
@@ -361,7 +297,8 @@ function PausedBillboardCardImpl({
               size="sm"
               onClick={handleResume}
               className="h-7 w-7 p-0 text-amber-500 hover:text-amber-600 hover:bg-amber-500/10 rounded-full cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200"
-              title={`إيقاف اللوحة من العقد الآخر رقم ${bb.Contract_Number}`}
+              disabled
+              title={`اللوحة مرتبطة بالعقد ${bb.Contract_Number}؛ استخدم أمر النقل المخصص`}
             >
               <PauseCircle className="h-4 w-4" />
             </Button>
@@ -461,6 +398,7 @@ function PausedBillboardCardImpl({
             size="sm"
             onClick={handleDelete}
             className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10 rounded-full cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200"
+            disabled={(raw as any).lifecycle_state === "resumed"}
             title="حذف اللوحة الموقوفة"
           >
             <Trash2 className="h-4 w-4" />
@@ -852,4 +790,3 @@ export const PausedBillboardCard = React.memo(PausedBillboardCardImpl, (prev, ne
   if (pb.Contract_Number !== nb.Contract_Number) return false;
   return true;
 });
-

@@ -52,76 +52,13 @@ export interface CreateReplacementPayload {
 }
 
 export async function createReplacement(payload: CreateReplacementPayload) {
-  // Upsert: if a replacement exists for this paused row, replace it (free old billboard first).
-  const existing = await getReplacementByPausedId(payload.paused_billboard_id);
-  if (existing) {
-    await removeReplacement(existing.id);
-  }
-
-  const { data, error } = await supabase
-    .from('paused_billboard_replacements' as any)
-    .insert({
-      paused_billboard_id: payload.paused_billboard_id,
-      contract_number: payload.contract_number,
-      replacement_billboard_id: payload.replacement_billboard_id,
-      replacement_billboard_name: payload.replacement_billboard_name || null,
-      start_date: payload.start_date,
-      end_date: payload.end_date,
-      allocated_amount: Number(payload.allocated_amount) || 0,
-    });
+  const { data, error } = await (supabase as any).rpc('replace_paused_billboard_atomic', {
+    p_pause_id: payload.paused_billboard_id, p_replacement_id: payload.replacement_billboard_id,
+    p_start: payload.start_date, p_end: payload.end_date, p_amount: payload.allocated_amount,
+  });
   if (error) throw error;
-
-  // Mark the paused billboard row as having 0 refund because it has been replaced
-  try {
-    await supabase
-      .from('paused_billboards' as any)
-      .update({
-        refund_amount: 0,
-        deducted_from_contract: false,
-      })
-      .eq('id', payload.paused_billboard_id);
-  } catch (e) {
-    console.warn('Failed to update paused_billboard refund_amount:', e);
-  }
-
-  // Attach replacement billboard to the contract (status only — kept separate from main billboard_ids).
-  try {
-    await supabase
-      .from('billboards')
-      .update({
-        Contract_Number: payload.contract_number,
-        Customer_Name: payload.customerName || null,
-        Ad_Type: payload.adType || null,
-        Rent_Start_Date: payload.start_date,
-        Rent_End_Date: payload.end_date,
-        Status: 'مؤجرة',
-      })
-      .eq('ID', payload.replacement_billboard_id);
-  } catch (e) {
-    console.warn('Failed to update replacement billboard status:', e);
-  }
-
-  // Sync Contract.billboard_ids + billboard_prices so the replacement
-  // appears in "Selected Billboards" with its allocated amount as price.
-  try {
-    await syncContractForReplacement(payload.contract_number, {
-      addId: payload.replacement_billboard_id,
-      allocated_amount: Number(payload.allocated_amount) || 0,
-      replacement_of_paused_id: payload.paused_billboard_id,
-    });
-  } catch (e) {
-    console.warn('Failed to sync contract for replacement:', e);
-  }
-
-  try {
-    window.dispatchEvent(
-      new CustomEvent('paused-billboards-changed', {
-        detail: { contractNumber: payload.contract_number, action: 'replacement-added' },
-      }),
-    );
-  } catch {}
-
-  return data as unknown as PausedBillboardReplacement;
+  window.dispatchEvent(new CustomEvent('paused-billboards-changed', { detail: { ...data, action: 'replacement-added' } }));
+  return data as PausedBillboardReplacement;
 }
 
 /**
@@ -199,53 +136,11 @@ export async function syncContractForReplacement(
 }
 
 export async function removeReplacement(id: string) {
-  // Free the billboard
-  const { data: row } = await supabase
-    .from('paused_billboard_replacements' as any)
-    .select('replacement_billboard_id, contract_number')
-    .eq('id', id)
-    .single();
-
-  const { error } = await supabase
-    .from('paused_billboard_replacements' as any)
-    .delete()
-    .eq('id', id);
+  const { data: row, error: readError } = await supabase.from('paused_billboard_replacements' as any).select('paused_billboard_id').eq('id',id).single();
+  if (readError) throw readError;
+  const { data, error } = await (supabase as any).rpc('replace_paused_billboard_atomic', {
+    p_pause_id: (row as any).paused_billboard_id, p_replacement_id: null, p_start: null, p_end: null, p_amount: null,
+  });
   if (error) throw error;
-
-  if (row?.replacement_billboard_id) {
-    try {
-      await supabase
-        .from('billboards')
-        .update({
-          Contract_Number: null,
-          Customer_Name: null,
-          Ad_Type: null,
-          Rent_Start_Date: null,
-          Rent_End_Date: null,
-          Status: 'متاح',
-        })
-        .eq('ID', row.replacement_billboard_id);
-    } catch (e) {
-      console.warn('Failed to free replacement billboard:', e);
-    }
-
-    // Remove from Contract.billboard_ids + billboard_prices
-    try {
-      if (row.contract_number) {
-        await syncContractForReplacement(Number(row.contract_number), {
-          removeId: Number(row.replacement_billboard_id),
-        });
-      }
-    } catch (e) {
-      console.warn('Failed to sync contract for replacement removal:', e);
-    }
-  }
-
-  try {
-    window.dispatchEvent(
-      new CustomEvent('paused-billboards-changed', {
-        detail: { contractNumber: Number(row?.contract_number || 0), action: 'replacement-removed' },
-      }),
-    );
-  } catch {}
+  window.dispatchEvent(new CustomEvent('paused-billboards-changed', { detail: { ...data, action: 'replacement-removed' } }));
 }

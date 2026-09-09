@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { supabase } from '@/integrations/supabase/client';
-import { autoPauseBillboardFromActiveContract } from './billboardPauseService';
 
 /**
  * Paused billboards service.
@@ -32,6 +31,10 @@ export interface PausedBillboard {
   notes: string | null;
   created_at?: string;
   updated_at?: string;
+  size?: string;
+  lifecycle_state?: "paused" | "resumed" | "cancelled";
+  resumed_at?: string;
+  price_snapshot?: Record<string, any>;
 }
 
 export async function listPausedBillboards(contractNumber: number): Promise<PausedBillboard[]> {
@@ -40,8 +43,10 @@ export async function listPausedBillboards(contractNumber: number): Promise<Paus
     .select('*')
     .eq('contract_number', contractNumber)
     .order('pause_date', { ascending: false });
+  // SELECT * works before and after the migration. Filter the optional lifecycle
+  // in memory so legacy databases do not receive a failing query on every read.
   if (error) throw error;
-  return (data || []) as unknown as PausedBillboard[];
+  return ((data || []) as unknown as PausedBillboard[]).filter(row => row.lifecycle_state !== 'cancelled');
 }
 
 /**
@@ -56,7 +61,7 @@ export async function listPausedBillboards(contractNumber: number): Promise<Paus
  *   allocated_amount as fixed price.
  * - Only writes when something actually changed.
  */
-export async function syncContractIdsWithPaused(contractNumber: number): Promise<string[]> {
+export async function syncContractIdsWithPaused(contractNumber: number, persist = true): Promise<string[]> {
   if (!contractNumber) return [];
   const { data: contract } = await supabase
     .from('Contract')
@@ -80,10 +85,8 @@ export async function syncContractIdsWithPaused(contractNumber: number): Promise
   const originalPricesJson = JSON.stringify(prices);
 
   // 1. Remove every paused billboard_id from billboard_ids
-  const { data: pausedRows } = await supabase
-    .from('paused_billboards' as any)
-    .select('id, billboard_id')
-    .eq('contract_number', contractNumber);
+  const pausedRows = (await listPausedBillboards(contractNumber))
+    .filter(row => !row.lifecycle_state || row.lifecycle_state === 'paused');
   const pausedIds = new Set<string>(
     (pausedRows || []).map((r: any) => String(r.billboard_id)),
   );
@@ -127,7 +130,7 @@ export async function syncContractIdsWithPaused(contractNumber: number): Promise
     JSON.stringify(ids) !== JSON.stringify(originalIds) ||
     JSON.stringify(prices) !== originalPricesJson;
 
-  if (changed) {
+  if (changed && persist) {
     await supabase
       .from('Contract')
       .update({
@@ -187,50 +190,9 @@ export async function addPausedBillboard(payload: Omit<PausedBillboard, 'id' | '
 }
 
 export async function deletePausedBillboard(id: string) {
-  const { data: existing } = await supabase
-    .from('paused_billboards' as any)
-    .select('contract_number, billboard_id')
-    .eq('id', id)
-    .single();
-
-  const { error } = await supabase
-    .from('paused_billboards' as any)
-    .delete()
-    .eq('id', id);
+  const { data, error } = await (supabase as any).rpc('edit_paused_billboard_atomic', { p_pause_id: id, p_patch: {}, p_delete: true });
   if (error) throw error;
-
-  if (existing) {
-    const contractNumber = Number((existing as any).contract_number);
-    const billboardId = String((existing as any).billboard_id);
-    
-    // Read contract
-    const { data: contract } = await supabase
-      .from('Contract')
-      .select('billboard_ids')
-      .eq('Contract_Number', contractNumber)
-      .maybeSingle();
-      
-    if (contract) {
-      const idsStr: string = (contract as any).billboard_ids || '';
-      const ids = idsStr ? idsStr.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
-      const updatedIds = ids.filter((x) => String(x) !== billboardId);
-      
-      await supabase
-        .from('Contract')
-        .update({
-          billboard_ids: updatedIds.length > 0 ? updatedIds.join(',') : null
-        })
-        .eq('Contract_Number', contractNumber);
-    }
-  }
-
-  try {
-    if (typeof window !== 'undefined' && existing) {
-      window.dispatchEvent(new CustomEvent('paused-billboards-changed', {
-        detail: { contractNumber: Number((existing as any).contract_number), billboardId: Number((existing as any).billboard_id), action: 'removed' }
-      }));
-    }
-  } catch {}
+  window.dispatchEvent(new CustomEvent('paused-billboards-changed', { detail: { ...data, action: 'removed' } }));
 }
 
 export interface UpdatePausedPatch {
@@ -247,39 +209,10 @@ export interface UpdatePausedPatch {
 }
 
 export async function updatePausedBillboard(id: string, patch: UpdatePausedPatch) {
-  const updatePayload: any = {};
-  if (patch.consumed_amount !== undefined) updatePayload.consumed_amount = Number(patch.consumed_amount);
-  if (patch.refund_amount !== undefined) updatePayload.refund_amount = Number(patch.refund_amount);
-  if (patch.manual_refund !== undefined) {
-    updatePayload.manual_refund = patch.manual_refund === null ? null : Number(patch.manual_refund);
-  }
-  if (patch.pause_date !== undefined) updatePayload.pause_date = patch.pause_date;
-  if (patch.full_price !== undefined) updatePayload.full_price = Number(patch.full_price);
-  if (patch.price_before_discount !== undefined) updatePayload.price_before_discount = Number(patch.price_before_discount);
-  if (patch.net_after_discount !== undefined) updatePayload.net_after_discount = Number(patch.net_after_discount);
-  if (patch.notes !== undefined) updatePayload.notes = patch.notes;
-
-  const { data, error } = await supabase
-    .from('paused_billboards' as any)
-    .update(updatePayload)
-    .eq('id', id)
-    .select()
-    .single();
+  const { data, error } = await (supabase as any).rpc('edit_paused_billboard_atomic', { p_pause_id: id, p_patch: patch, p_delete: false });
   if (error) throw error;
-
-  try {
-    if (typeof window !== 'undefined' && data) {
-      window.dispatchEvent(new CustomEvent('paused-billboards-changed', {
-        detail: {
-          contractNumber: Number((data as any).contract_number),
-          billboardId: Number((data as any).billboard_id),
-          action: 'updated',
-        },
-      }));
-    }
-  } catch {}
-
-  return data as unknown as PausedBillboard;
+  window.dispatchEvent(new CustomEvent('paused-billboards-changed', { detail: { ...data, action: 'updated' } }));
+  return data;
 }
 
 /**
@@ -301,99 +234,11 @@ export async function listRemovedBillboardsHistory(contractNumber: number) {
  * still available and not booked elsewhere). Re-attaches the billboard to the
  * contract, restores its rental status, and removes the paused row.
  */
-export async function resumePausedBillboard(id: string): Promise<{ contractNumber: number; billboardId: number }> {
-  // 1. Read paused record
-  const { data: paused, error: pausedErr } = await supabase
-    .from('paused_billboards' as any)
-    .select('*')
-    .eq('id', id)
-    .single();
-  if (pausedErr || !paused) throw pausedErr || new Error('Paused billboard not found');
-  const contractNumber = Number((paused as any).contract_number);
-  const billboardId = Number((paused as any).billboard_id);
-
-  // 2. Read billboard + contract
-  const { data: bb, error: bbErr } = await supabase
-    .from('billboards')
-    .select('*')
-    .eq('ID', billboardId)
-    .single();
-  if (bbErr || !bb) throw bbErr || new Error('اللوحة غير موجودة');
-
-  let status = String((bb as any).Status || '').trim();
-  let otherContract = (bb as any).Contract_Number;
-  if (otherContract && Number(otherContract) !== contractNumber) {
-    const today = new Date().toISOString().split('T')[0];
-    await autoPauseBillboardFromActiveContract(
-      billboardId,
-      Number(otherContract),
-      today
-    );
-    // Refresh the billboard status to ensure it is updated
-    const { data: updatedBb } = await supabase
-      .from('billboards')
-      .select('*')
-      .eq('ID', billboardId)
-      .single();
-    if (updatedBb) {
-      status = String((updatedBb as any).Status || '').trim();
-      otherContract = (updatedBb as any).Contract_Number;
-    }
-  }
-  if (otherContract && Number(otherContract) !== contractNumber) {
-    throw new Error('اللوحة محجوزة حالياً في عقد آخر — لا يمكن استئنافها');
-  }
-  if (status && status !== 'متاح' && Number(otherContract) !== contractNumber) {
-    throw new Error('اللوحة غير متاحة للاستئناف');
-  }
-
-  const { data: contract, error: cErr } = await supabase
-    .from('Contract')
-    .select('"Customer Name", "Ad Type", "Contract Date", "End Date", billboard_ids')
-    .eq('Contract_Number', contractNumber)
-    .single();
-  if (cErr || !contract) throw cErr || new Error('العقد غير موجود');
-
-  // 3. Re-attach billboard
-  const { error: updBbErr } = await supabase
-    .from('billboards')
-    .update({
-      Contract_Number: contractNumber,
-      Customer_Name: (contract as any)['Customer Name'] || null,
-      Ad_Type: (contract as any)['Ad Type'] || null,
-      Rent_Start_Date: (contract as any)['Contract Date'] || null,
-      Rent_End_Date: (contract as any)['End Date'] || null,
-      Status: 'مؤجرة',
-    })
-    .eq('ID', billboardId);
-  if (updBbErr) throw updBbErr;
-
-  // 4. Update contract.billboard_ids (add if missing)
-  const ids = (contract as any).billboard_ids
-    ? String((contract as any).billboard_ids).split(',').map((s: string) => s.trim()).filter(Boolean)
-    : [];
-  if (!ids.map(String).includes(String(billboardId))) {
-    ids.push(String(billboardId));
-    await supabase
-      .from('Contract')
-      .update({ billboard_ids: ids.join(',') })
-      .eq('Contract_Number', contractNumber);
-  }
-
-  // 5. Delete paused row
-  const { error: delErr } = await supabase
-    .from('paused_billboards' as any)
-    .delete()
-    .eq('id', id);
-  if (delErr) throw delErr;
-
-  try {
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('paused-billboards-changed', {
-        detail: { contractNumber, billboardId, action: 'resumed' },
-      }));
-    }
-  } catch {}
-
-  return { contractNumber, billboardId };
+export async function resumePausedBillboard(id: string, resumeDate: string, cancel = false): Promise<{ contractNumber: number; billboardId: number }> {
+  const { data, error } = await (supabase as any).rpc('resume_contract_billboard_atomic', {
+    p_pause_id: id, p_resume_date: resumeDate, p_cancel: cancel,
+  });
+  if (error) throw error;
+  window.dispatchEvent(new CustomEvent('paused-billboards-changed', { detail: { ...data, action: cancel ? 'cancelled' : 'resumed' } }));
+  return data;
 }

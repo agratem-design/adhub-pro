@@ -14,9 +14,11 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-interface OwnerCompanyOption {
+export interface OwnerCompanyOption {
   id: string;
   name: string;
+  brand_color?: string | null;
+  logo_url?: string | null;
 }
 
 interface BillboardFiltersProps {
@@ -48,6 +50,7 @@ interface BillboardFiltersProps {
   uniqueAdTypes: string[];
   uniqueCustomers: string[];
   uniqueContractNumbers: string[];
+  billboards?: any[];
   isMapOpen?: boolean;
 }
 
@@ -165,9 +168,41 @@ export const BillboardFilters: React.FC<BillboardFiltersProps> = ({
   uniqueAdTypes = [],
   uniqueCustomers = [],
   uniqueContractNumbers = [],
+  billboards = [],
   isMapOpen = false,
 }) => {
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+
+  // ✅ حساب عدد لوحات كل شركة مالكة واللوحات غير المعينة
+  const { companyCounts, unassignedCount } = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    let unassigned = 0;
+    (billboards || []).forEach((b: any) => {
+      const ownId = String(b.own_company_id || b.own_company?.id || '').trim();
+      if (ownId) {
+        counts[ownId] = (counts[ownId] || 0) + 1;
+      } else {
+        unassigned++;
+      }
+    });
+    return { companyCounts: counts, unassignedCount: unassigned };
+  }, [billboards]);
+
+  // ✅ خيارات الشركات للقائمة المنسدلة المتقدمة مع أعداد اللوحات
+  const ownerCompanyOptions = React.useMemo(() => {
+    const opts: Array<{ label: string; value: string }> = [];
+    if (unassignedCount > 0 || ownerCompanies.length > 0) {
+      opts.push({ label: `بدون شركة مالكة (${unassignedCount})`, value: 'none' });
+    }
+    ownerCompanies.forEach(c => {
+      const count = companyCounts[c.id] || 0;
+      opts.push({
+        label: `${c.name}${count > 0 ? ` (${count})` : ''}`,
+        value: c.id
+      });
+    });
+    return opts;
+  }, [ownerCompanies, unassignedCount, companyCounts]);
 
   // ✅ طي الفلاتر تلقائياً عند فتح الخريطة لتوفير مساحة كاملة للخريطة
   React.useEffect(() => {
@@ -342,6 +377,139 @@ export const BillboardFilters: React.FC<BillboardFiltersProps> = ({
           </Button>
         )}
       </div>
+
+      {/* الفلاتر السريعة للشركات المالكة */}
+      {setSelectedOwnerCompanies && (ownerCompanies.length > 0 || unassignedCount > 0) && (
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap p-2 sm:p-3 rounded-xl sm:rounded-[1.5rem] bg-card/60 backdrop-blur-md border border-border/60 shadow-sm">
+          <span className="text-xs sm:text-sm font-bold text-muted-foreground flex items-center gap-1.5 ml-2 mr-1 shrink-0">
+            <Building2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary" />
+            الشركات المالكة:
+          </span>
+          <div className="flex flex-wrap gap-1.5 sm:gap-2 items-center flex-1">
+            {/* زر الكل */}
+            <button
+              onClick={() => setSelectedOwnerCompanies([])}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-medium transition-all duration-200 cursor-pointer",
+                "border hover:scale-[1.02] active:scale-[0.98]",
+                selectedOwnerCompanies.length === 0
+                  ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/25 font-bold"
+                  : "bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground border-border/40"
+              )}
+            >
+              <Building2 className="h-3.5 w-3.5" />
+              <span>الكل</span>
+              {billboards.length > 0 && (
+                <Badge
+                  variant="secondary"
+                  className={cn(
+                    "h-4 min-w-4 px-1 text-[10px] rounded-full font-manrope font-bold",
+                    selectedOwnerCompanies.length === 0 ? "bg-white/20 text-inherit" : "bg-foreground/10"
+                  )}
+                >
+                  {billboards.length}
+                </Badge>
+              )}
+            </button>
+
+            {/* أزرار الشركات المالكة */}
+            {ownerCompanies.map((company) => {
+              const isSelected = selectedOwnerCompanies.includes(company.id);
+              const count = companyCounts[company.id] || 0;
+              const brandColor = company.brand_color || '#d6ac40';
+
+              return (
+                <button
+                  key={company.id}
+                  onClick={() => {
+                    if (isSelected) {
+                      setSelectedOwnerCompanies(selectedOwnerCompanies.filter(id => id !== company.id));
+                    } else {
+                      setSelectedOwnerCompanies([...selectedOwnerCompanies.filter(id => id !== 'all'), company.id]);
+                    }
+                  }}
+                  className={cn(
+                    "inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-medium transition-all duration-200 cursor-pointer",
+                    "border hover:scale-[1.02] active:scale-[0.98]",
+                    isSelected
+                      ? "bg-primary/15 text-primary border-primary ring-1 ring-primary/30 font-bold shadow-sm"
+                      : "bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground border-border/40"
+                  )}
+                >
+                  {company.logo_url ? (
+                    <img src={company.logo_url} alt={company.name} className="w-4 h-4 rounded object-contain shrink-0" />
+                  ) : (
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0 border border-black/10"
+                      style={{ backgroundColor: brandColor }}
+                    />
+                  )}
+                  <span>{company.name}</span>
+                  {count > 0 && (
+                    <Badge
+                      variant="secondary"
+                      className={cn(
+                        "h-4 min-w-4 px-1 text-[10px] rounded-full font-manrope font-bold",
+                        isSelected ? "bg-primary/20 text-primary" : "bg-foreground/10"
+                      )}
+                    >
+                      {count}
+                    </Badge>
+                  )}
+                  {isSelected && <Check className="h-3 w-3 text-primary stroke-[2.5]" />}
+                </button>
+              );
+            })}
+
+            {/* زر بدون شركة مالكة */}
+            {unassignedCount > 0 && (
+              <button
+                onClick={() => {
+                  const isSelected = selectedOwnerCompanies.includes('none');
+                  if (isSelected) {
+                    setSelectedOwnerCompanies(selectedOwnerCompanies.filter(id => id !== 'none'));
+                  } else {
+                    setSelectedOwnerCompanies([...selectedOwnerCompanies.filter(id => id !== 'all'), 'none']);
+                  }
+                }}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-medium transition-all duration-200 cursor-pointer",
+                  "border hover:scale-[1.02] active:scale-[0.98]",
+                  selectedOwnerCompanies.includes('none')
+                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/50 ring-1 ring-amber-500/30 font-bold shadow-sm"
+                    : "bg-muted/40 hover:bg-muted text-muted-foreground hover:text-foreground border-border/40"
+                )}
+              >
+                <EyeOff className="h-3.5 w-3.5" />
+                <span>بدون شركة مالكة</span>
+                <Badge
+                  variant="secondary"
+                  className={cn(
+                    "h-4 min-w-4 px-1 text-[10px] rounded-full font-manrope font-bold",
+                    selectedOwnerCompanies.includes('none') ? "bg-amber-500/20 text-amber-600 dark:text-amber-400" : "bg-foreground/10"
+                  )}
+                >
+                  {unassignedCount}
+                </Badge>
+                {selectedOwnerCompanies.includes('none') && <Check className="h-3 w-3 stroke-[2.5]" />}
+              </button>
+            )}
+          </div>
+
+          {/* زر تفريغ فلتر الشركات عند تحديد أي منها */}
+          {selectedOwnerCompanies.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelectedOwnerCompanies([])}
+              className="gap-1 h-7 sm:h-8 px-2 rounded-lg text-muted-foreground hover:text-foreground mr-auto text-xs font-medium cursor-pointer"
+            >
+              <X className="h-3 w-3" />
+              إلغاء التحديد
+            </Button>
+          )}
+        </div>
+      )}
 
  {/* الفلاتر المتقدمة - قابلة للطي */}
       <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
@@ -600,16 +768,16 @@ export const BillboardFilters: React.FC<BillboardFiltersProps> = ({
                 </FilterField>
 
                 {/* فلتر الشركة المالكة */}
-                {ownerCompanies.length > 0 && setSelectedOwnerCompanies && (
+                {setSelectedOwnerCompanies && (
                   <FilterField
                     label="الشركة المالكة"
                     icon={<Building2 className="h-4 w-4" />}
                   >
                     <MultiSelect
-                      options={ownerCompanies.map(c => ({ label: c.name, value: c.id }))}
+                      options={ownerCompanyOptions}
                       value={selectedOwnerCompanies}
                       onChange={setSelectedOwnerCompanies}
-                      placeholder="جميع الشركات"
+                      placeholder={ownerCompanies.length === 0 && unassignedCount === 0 ? "لا توجد شركات مالكة مسجلة" : "جميع الشركات"}
                       className="rounded-xl"
                     />
                   </FilterField>
@@ -709,11 +877,21 @@ export const BillboardFilters: React.FC<BillboardFiltersProps> = ({
           ))}
           
           {selectedOwnerCompanies.map(companyId => {
+            if (companyId === 'none') {
+              return (
+                <ActiveFilterBadge
+                  key="none"
+                  label="بدون شركة مالكة"
+                  onRemove={() => setSelectedOwnerCompanies?.(selectedOwnerCompanies.filter(c => c !== 'none'))}
+                  variant="warning"
+                />
+              );
+            }
             const company = ownerCompanies.find(c => c.id === companyId);
             return company ? (
               <ActiveFilterBadge
                 key={companyId}
-                label={company.name}
+                label={`الشركة: ${company.name}`}
                 onRemove={() => setSelectedOwnerCompanies?.(selectedOwnerCompanies.filter(c => c !== companyId))}
                 variant="info"
               />

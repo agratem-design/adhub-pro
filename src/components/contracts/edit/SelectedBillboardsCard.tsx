@@ -83,6 +83,7 @@ interface PartnershipInfo {
 }
 
 interface SelectedBillboardsCardProps {
+  previousContractBillboardIds?: Set<string>;
   selected: string[];
   billboards: Billboard[];
   onRemoveSelected: (id: string) => void;
@@ -1058,15 +1059,17 @@ export function SelectedBillboardsCard({
           )}
         </CardHeader>
 
-        <CardContent className="p-4 space-y-4">
+        <CardContent className="p-3 space-y-3">
           {/* ملخص المقاسات والوجوه */}
           {selected.length > 0 && (
-            <div className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border border-primary/20 rounded-xl p-4">
+            <details className="border border-border rounded-lg p-3">
+              <summary className="cursor-pointer text-sm font-semibold">ملخص المقاسات والوجوه · {sizeSummary.totalCount} لوحة</summary>
+              <div className="pt-3">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center">
                   <TrendingUp className="h-4 w-4 text-primary" />
                 </div>
-                <h3 className="font-bold text-foreground">ملخص اللوحات</h3>
+                <h3 className="font-bold text-foreground">تفاصيل المقاسات</h3>
               </div>
               
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
@@ -1134,13 +1137,14 @@ export function SelectedBillboardsCard({
                   </div>
                 </div>
               )}
-            </div>
+              </div>
+            </details>
           )}
 
           {/* شريط البحث والفلترة */}
           {selected.length > 3 && (
-            <div className="bg-muted/30 rounded-lg p-3 space-y-3">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="bg-muted/30 rounded-lg p-2 space-y-2">
+              <div className="sr-only">
                 <Filter className="h-4 w-4" />
                 <span>بحث وفلترة اللوحات</span>
               </div>
@@ -1151,7 +1155,8 @@ export function SelectedBillboardsCard({
                     placeholder="بحث بالاسم أو الموقع..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pr-9 h-9 bg-background"
+                    aria-label="البحث في لوحات العقد"
+                    className="pr-9 h-10 bg-background"
                   />
                 </div>
                 {uniqueSizesForFilter.length > 1 && (
@@ -1195,7 +1200,7 @@ export function SelectedBillboardsCard({
           ) : filteredSelectedBillboards.length === 0 ? (
             <p className="text-muted-foreground text-center py-8 text-sm">لا توجد نتائج للبحث</p>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 auto-rows-fr gap-4 items-stretch">
+            <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-2 2xl:grid-cols-3">
               {filteredSelectedBillboards.map((b) => {
                 const billboardId = String((b as any).ID);
                 const originalFaces = getOriginalFacesCount(b);
@@ -1239,7 +1244,7 @@ export function SelectedBillboardsCard({
                 return (
                   <div 
                     key={(b as any).ID} 
-                    className={`group relative h-full flex flex-col bg-card border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 ${
+                    className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-xl hover:shadow-primary/10 ${
                       bulkSelectMode && bulkSelectedIds.has(billboardId) 
                         ? 'border-destructive ring-2 ring-destructive/30' 
                         : replacementsMap.has(billboardId)
@@ -1252,12 +1257,12 @@ export function SelectedBillboardsCard({
                     style={bulkSelectMode ? { cursor: 'pointer' } : undefined}
                   >
                     {/* Header: Prominent Size Badge, Billboard Code & Actions */}
-                    <div className="px-3.5 py-2.5 flex items-center justify-between border-b border-border/50 bg-[#0d0d1a] shrink-0" dir="rtl">
+                    <div className="flex flex-wrap min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border/70 bg-muted/40 px-3 py-2" dir="rtl">
                       <div className="flex items-center gap-2 overflow-hidden">
                         {/* Prominent Size Badge at Top Header */}
                         <Badge 
                           variant="outline"
-                          className="font-extrabold text-[#f4c25a] bg-[#1a172e] border border-[#d6ac40]/50 px-3 py-1 text-xs sm:text-sm font-manrope shadow-md shrink-0"
+                          className="shrink-0 border border-primary/40 bg-primary/10 px-3 py-1 font-manrope text-xs font-extrabold text-primary shadow-sm sm:text-sm"
                         >
                           {getDisplaySize(b)}
                         </Badge>
@@ -1298,7 +1303,7 @@ export function SelectedBillboardsCard({
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 w-7 p-0 text-primary hover:text-primary hover:bg-primary/10 rounded-full cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200"
+                          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg p-0 text-primary transition-all duration-200 hover:bg-primary/10 hover:text-primary"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (!b) return;
@@ -1314,7 +1319,7 @@ export function SelectedBillboardsCard({
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 w-7 p-0 text-amber-500 hover:text-amber-600 hover:bg-amber-500/10 rounded-full cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200"
+                          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg p-0 text-amber-500 transition-all duration-200 hover:bg-amber-500/10 hover:text-amber-600"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (!b) return;
@@ -1330,7 +1335,7 @@ export function SelectedBillboardsCard({
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10 rounded-full cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200"
+                          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg p-0 text-destructive transition-all duration-200 hover:bg-destructive/10 hover:text-destructive"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (!computeCanDelete(b)) {
@@ -1350,7 +1355,7 @@ export function SelectedBillboardsCard({
                             <Button 
                               variant="ghost" 
                               size="sm" 
-                              className="h-7 w-7 p-0 hover:bg-muted/80 rounded-full cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200"
+                              className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg p-0 transition-all duration-200 hover:bg-muted/80"
                               onClick={(e) => e.stopPropagation()}
                             >
                               <MoreVertical className="h-4 w-4" />
@@ -1399,13 +1404,14 @@ export function SelectedBillboardsCard({
                     })()}
 
                     {/* Image Section — click to zoom */}
-                    <div className="relative h-44 bg-muted overflow-hidden shrink-0">
+                    <div className="relative h-56 shrink-0 overflow-hidden border-b border-border bg-muted/30">
                       <BillboardImageZoom
                         billboard={b}
                         alt={(b as any).name || (b as any).Billboard_Name || 'لوحة'}
+                        className="h-full w-full transition-transform duration-300 group-hover/zoom:scale-[1.02]"
+                        thumbnailObjectFit="contain"
                       />
                       {/* Gradient Overlay */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent pointer-events-none" />
                       
                       {/* Badges overlayed on top-right of image */}
                       <div className="absolute top-3 right-3 z-10 flex flex-col gap-1.5 items-end max-w-[90%] pointer-events-none">
@@ -1416,7 +1422,7 @@ export function SelectedBillboardsCard({
                           </Badge>
                         )}
                         {isPartnership && partnershipInfo && partnershipInfo.partnerShares.length > 0 && (
-                          <Badge className="bg-purple-600/90 text-white text-[10px] font-bold px-2 py-0.5 shadow-md max-w-[150px] truncate border border-purple-500/20 backdrop-blur-sm">
+                          <Badge className="max-w-[150px] truncate border border-primary/30 bg-primary/90 px-2 py-0.5 text-[10px] font-bold text-primary-foreground shadow-md backdrop-blur-sm">
                             {partnershipInfo.partnerShares.map(ps => ps.partnerName).join(' • ')}
                           </Badge>
                         )}
@@ -1441,7 +1447,7 @@ export function SelectedBillboardsCard({
                     </div>
 
                     {/* Content Section */}
-                    <div className="p-4 flex-1 flex flex-col justify-between space-y-4" dir="rtl">
+                    <div className="flex flex-1 flex-col space-y-3 p-3" dir="rtl">
                       {/* Location / Nearest Landmark */}
                       <div className="flex items-start gap-2 bg-muted/30 p-2.5 rounded-xl border border-border/40 shrink-0 text-right" dir="rtl">
                         <MapPin className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
@@ -1461,7 +1467,7 @@ export function SelectedBillboardsCard({
                         const levelVal = (b as any).level || (b as any).Level || '-';
 
                         return (
-                          <div className="grid grid-cols-4 gap-1.5 shrink-0" dir="rtl">
+                          <div className="grid grid-cols-2 gap-2 shrink-0" dir="rtl">
                             <div className="text-center bg-amber-500/10 border border-amber-500/30 rounded-xl py-1.5 px-1">
                               <div className="text-[9px] text-amber-500/90 mb-0.5 font-bold">البلدية</div>
                               <div className="text-xs font-bold text-amber-400 truncate" title={muniName}>{muniName}</div>
@@ -1470,9 +1476,9 @@ export function SelectedBillboardsCard({
                               <div className="text-[9px] text-muted-foreground mb-0.5 font-medium">المنطقة</div>
                               <div className="text-xs font-bold text-foreground truncate" title={districtName}>{districtName}</div>
                             </div>
-                            <div className="text-center bg-[#0d0d1a] border border-[#d6ac40]/40 rounded-xl py-1.5 px-1">
-                              <div className="text-[9px] text-[#f4c25a]/70 mb-0.5 font-medium">المدينة</div>
-                              <div className="text-xs font-extrabold text-[#f4c25a] truncate" title={cityName}>{cityName}</div>
+                            <div className="text-center bg-muted/40 border border-border rounded-xl py-1.5 px-1">
+                              <div className="text-xs text-muted-foreground mb-0.5 font-medium">المدينة</div>
+                              <div className="text-sm font-semibold text-foreground break-words" title={cityName}>{cityName}</div>
                             </div>
                             <div className="text-center bg-amber-500/10 border border-amber-500/30 rounded-xl py-1.5 px-1">
                               <div className="text-[9px] text-amber-400/80 mb-0.5 font-medium">المستوى</div>
@@ -1520,6 +1526,20 @@ export function SelectedBillboardsCard({
                         </div>
                       )}
 
+                      <dl className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border border-border bg-muted/20 p-3 text-xs">
+                        <dt className="text-muted-foreground">السعر قبل الخصم</dt>
+                        <dd className="text-left font-semibold tabular-nums">{formatAmount(baseTotalForBoard + extraInstallCost + extraPrintCost)} {currencySymbol}</dd>
+                        <dt className="text-muted-foreground">الخصم الفردي</dt>
+                        <dd className="text-left font-semibold tabular-nums">{formatAmount(individualDiscountAmt)} {currencySymbol}</dd>
+                        <dt className="text-muted-foreground">نصيب اللوحة من خصم العقد</dt>
+                        <dd className="text-left font-semibold tabular-nums">{formatAmount(discountPerBillboard)} {currencySymbol}</dd>
+                        <dt className="border-t border-border pt-2 font-bold">السعر النهائي</dt>
+                        <dd className="border-t border-border pt-2 text-left font-bold text-primary tabular-nums">{formatAmount(priceAfterDiscount)} {currencySymbol}</dd>
+                      </dl>
+                    </div>
+                    <details className="group/details border-t border-border" dir="rtl">
+                      <summary className="min-h-10 cursor-pointer px-3 py-2 text-sm font-semibold hover:bg-muted/50 transition-all duration-200">تعديل الخصم والتواريخ وتفاصيل التكلفة</summary>
+                    <div className="flex flex-1 flex-col space-y-3 p-3" dir="rtl">
                       {/* عرض التواريخ المخصصة إذا تم تفعيلها */}
                       {billboardCustomDates[billboardId]?.startDate && (
                         <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 flex items-center justify-between text-[11px] font-bold text-amber-800 dark:text-amber-300 shrink-0">
@@ -1609,6 +1629,9 @@ export function SelectedBillboardsCard({
                           </div>
                         )}
 
+                        {Math.abs(pricingData?.roundingAdjustment || 0) >= 0.01 && (
+                          <p className="text-[11px] text-muted-foreground">يشمل الخصم تسوية القيم المقفلة مع الحفاظ على إجمالي العقد.</p>
+                        )}
                         {/* Net after discount */}
                         {discountPerBillboard > 0 && (
                           <div className="flex justify-between items-center bg-green-500/10 rounded-lg px-3 py-2 -mx-1 border border-green-500/20">
@@ -1834,6 +1857,7 @@ export function SelectedBillboardsCard({
                         </div>
                       )}
                     </div>
+                    </details>
                   </div>
                 );
               })}
@@ -1899,6 +1923,7 @@ export function SelectedBillboardsCard({
 
       {/* Paused Billboards List */}
       {contractNumber && (
+        <div id="contract-pauses" className="scroll-mt-20">
         <PausedBillboardsList
           contractNumber={contractNumber}
           contractStartDate={startDate}
@@ -1925,6 +1950,7 @@ export function SelectedBillboardsCard({
           previousContractNumber={previousContractNumber}
           previousContractBillboardIds={previousContractBillboardIds}
         />
+        </div>
       )}
 
       {/* Instant Billboard Swap Dialog */}
@@ -2095,13 +2121,13 @@ export function SelectedBillboardsCard({
             <Button
               onClick={() => {
                 if (deletingBillboard) {
-                  setPausingBillboard(deletingBillboard);
+                  setQuickPausingBillboard(deletingBillboard);
                   const billboardId = String(deletingBillboard.ID || deletingBillboard.id);
                   const pCost = printCostDetails.find(p => p.billboardId === billboardId)?.printCost || 0;
                   setPausingPrintCost(pCost);
                   const iCost = installationDetails.find(i => i.billboardId === billboardId)?.adjustedPrice || 0;
                   setPausingInstallCost(iCost);
-                  setPauseDialogOpen(true);
+                  setQuickPauseOpen(true);
                 }
                 setDeleteChoiceOpen(false);
                 setDeletingBillboard(null);

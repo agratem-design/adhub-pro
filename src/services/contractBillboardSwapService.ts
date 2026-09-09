@@ -1,3 +1,4 @@
+import { executePauseAtomic } from './contractEditService';
 /**
  * contractBillboardSwapService.ts
  * الخدمة المركزية الموحدة لعمليات التبديل الفوري 1:1 والإيقاف الذري للوحات
@@ -325,6 +326,7 @@ export async function executeQuickPause(params: {
   contractNumber: number;
   billboardId: number;
   pauseDate: string;
+  expectedRevision?: number;
   notes?: string;
   userId?: string;
 }): Promise<{
@@ -333,120 +335,12 @@ export async function executeQuickPause(params: {
   pauseRefund: number;
   newBillboardIds: string[];
 }> {
-  const { contractNumber, billboardId, pauseDate, notes, userId } = params;
-
   try {
-    const { data: contract, error: cErr } = await supabase
-      .from('Contract')
-      .select('*')
-      .eq('Contract_Number', contractNumber)
-      .single();
-
-    if (cErr || !contract) throw new Error('العقد غير موجود');
-
-    const contractStartDate = contract['Contract Date'] || contract.start_date || pauseDate;
-    const contractEndDate = contract['End Date'] || contract.end_date || pauseDate;
-
-    const { data: bb, error: bbErr } = await supabase
-      .from('billboards')
-      .select('*')
-      .eq('ID', billboardId)
-      .single();
-
-    if (bbErr || !bb) throw new Error('بيانات اللوحة غير موجودة');
-
-    // استخراج السعر المتفق عليه
-    let contractedPrice = Number(bb.Price) || 0;
-    try {
-      const rawPrices = contract.billboard_prices;
-      if (rawPrices) {
-        const pricesArray = typeof rawPrices === 'string' ? JSON.parse(rawPrices) : rawPrices;
-        const snapshot = pricesArray.find(
-          (p: any) => String(p.billboardId ?? p.billboard_id ?? p.ID ?? p.id) === String(billboardId)
-        );
-        if (snapshot) {
-          contractedPrice = Number(snapshot.contractPrice ?? snapshot.finalPrice ?? contractedPrice);
-        }
-      }
-    } catch {}
-
-    const remainingCalc = calculateRemainingBillboardValue({
-      startDate: contractStartDate,
-      endDate: contractEndDate,
-      effectiveDate: pauseDate,
-      contractedPrice,
-    });
-
-    const currentIds = (contract.billboard_ids || '').split(',').map((s: string) => s.trim()).filter(Boolean);
-    const updatedIds = currentIds.filter((id: string) => String(id) !== String(billboardId));
-
-    // 1. تسجيل الإيقاف
-    await supabase.from('paused_billboards').insert({
-      contract_number: contractNumber,
-      billboard_id: billboardId,
-      billboard_name: bb.Billboard_Name || `لوحة #${billboardId}`,
-      pause_date: pauseDate,
-      original_price: contractedPrice,
-      consumed_amount: remainingCalc.consumedValue,
-      refund_amount: remainingCalc.remainingValue,
-      deducted_from_contract: true,
-      net_rent: contractedPrice,
-      full_price: contractedPrice,
-      original_start_date: contractStartDate,
-      original_end_date: contractEndDate,
-      notes: notes || `إيقاف بدون بديل ابتداءً من ${pauseDate}`,
-    } as any);
-
-    // 2. تحرير اللوحة
-    await supabase.from('billboards').update({
-      Contract_Number: null,
-      Customer_Name: null,
-      Ad_Type: null,
-      Rent_Start_Date: null,
-      Rent_End_Date: null,
-      Status: 'متاح',
-      is_visible_in_available: true,
-    } as any).eq('ID', billboardId);
-
-    // 3. تحديث العقد
-    await supabase.from('Contract').update({
-      billboard_ids: updatedIds.length > 0 ? updatedIds.join(',') : null,
-      billboards_count: updatedIds.length,
-    } as any).eq('Contract_Number', contractNumber);
-
-    // 4. تسجيل النشاط
-    try {
-      await supabase.from('activity_log').insert({
-        action: 'billboard_paused',
-        entity_type: 'contract',
-        entity_id: String(contractNumber),
-        contract_number: contractNumber,
-        customer_name: contract['Customer Name'] || '',
-        description: `إيقاف اللوحة #${billboardId} من العقد #${contractNumber} بتاريخ ${pauseDate} (مسترجع: ${remainingCalc.remainingValue} د.ل)`,
-        details: {
-          billboardId,
-          pauseDate,
-          consumedValue: remainingCalc.consumedValue,
-          refundValue: remainingCalc.remainingValue,
-        },
-        user_id: userId || null,
-      } as any);
-    } catch {}
-
-    return {
-      success: true,
-      pauseRefund: remainingCalc.remainingValue,
-      newBillboardIds: updatedIds,
-    };
-  } catch (err: any) {
-    console.error('executeQuickPause failed:', err);
-    return {
-      success: false,
-      error: err.message || 'فشلت عملية إيقاف اللوحة',
-      pauseRefund: 0,
-      newBillboardIds: [],
-    };
+    return await executePauseAtomic(params.contractNumber, params.billboardId, params.pauseDate, params.notes, null, params.expectedRevision);
+  } catch (error: any) {
+    return { success: false, error: error.message || 'تعذر إيقاف اللوحة', pauseRefund: 0, newBillboardIds: [] };
   }
+
 }
 
 /**

@@ -1891,6 +1891,7 @@ export type Database = {
           Duration: string | null
           duration_days: number | null
           duration_months: number | null
+          edit_revision: number
           "End Date": string | null
           exchange_rate: string | null
           fee: string | null
@@ -1964,6 +1965,7 @@ export type Database = {
           Duration?: string | null
           duration_days?: number | null
           duration_months?: number | null
+          edit_revision?: number
           "End Date"?: string | null
           exchange_rate?: string | null
           fee?: string | null
@@ -2037,6 +2039,7 @@ export type Database = {
           Duration?: string | null
           duration_days?: number | null
           duration_months?: number | null
+          edit_revision?: number
           "End Date"?: string | null
           exchange_rate?: string | null
           fee?: string | null
@@ -5810,6 +5813,7 @@ export type Database = {
           deducted_from_contract: boolean
           full_price: number | null
           id: string
+          lifecycle_state: string
           manual_refund: number | null
           net_after_discount: number | null
           net_rent: number
@@ -5818,8 +5822,10 @@ export type Database = {
           original_price: number
           original_start_date: string | null
           pause_date: string
+          price_snapshot: Json | null
           price_before_discount: number | null
           refund_amount: number
+          resumed_at: string | null
           updated_at: string
         }
         Insert: {
@@ -5831,6 +5837,7 @@ export type Database = {
           deducted_from_contract?: boolean
           full_price?: number | null
           id?: string
+          lifecycle_state?: string
           manual_refund?: number | null
           net_after_discount?: number | null
           net_rent?: number
@@ -5839,8 +5846,10 @@ export type Database = {
           original_price?: number
           original_start_date?: string | null
           pause_date: string
+          price_snapshot?: Json | null
           price_before_discount?: number | null
           refund_amount?: number
+          resumed_at?: string | null
           updated_at?: string
         }
         Update: {
@@ -5852,6 +5861,7 @@ export type Database = {
           deducted_from_contract?: boolean
           full_price?: number | null
           id?: string
+          lifecycle_state?: string
           manual_refund?: number | null
           net_after_discount?: number | null
           net_rent?: number
@@ -5860,8 +5870,10 @@ export type Database = {
           original_price?: number
           original_start_date?: string | null
           pause_date?: string
+          price_snapshot?: Json | null
           price_before_discount?: number | null
           refund_amount?: number
+          resumed_at?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -9020,6 +9032,44 @@ export type Database = {
       }
     }
     Functions: {
+      edit_paused_billboard_atomic: {
+        Args: { p_pause_id: string; p_patch?: Json; p_delete?: boolean }
+        Returns: Json
+      }
+      pause_contract_billboard_atomic: {
+        Args: {
+          p_contract_number: number
+          p_billboard_id: number
+          p_pause_date: string
+          p_notes?: string
+          p_manual_refund?: number
+          p_expected_revision?: number
+        }
+        Returns: Json
+      }
+      replace_paused_billboard_atomic: {
+        Args: {
+          p_pause_id: string
+          p_replacement_billboard_id?: number
+          p_start_date?: string
+          p_end_date?: string
+          p_allocated_amount?: number
+        }
+        Returns: Json
+      }
+      resume_contract_billboard_atomic: {
+        Args: { p_pause_id: string; p_resume_date: string; p_cancel?: boolean }
+        Returns: Json
+      }
+      save_contract_edit_atomic: {
+        Args: {
+          p_contract_number: number
+          p_updates: Json
+          p_expected_revision: number
+          p_task_types?: Json
+        }
+        Returns: Json
+      }
       cleanup_expired_billboards: {
         Args: never
         Returns: {

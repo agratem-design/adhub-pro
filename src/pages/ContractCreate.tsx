@@ -79,7 +79,7 @@ export default function ContractCreate() {
     friendCompanyName: string;
     friendRentalCost: number;
   }>>([]);
-  const [friendRentalIncludesInstallation, setFriendRentalIncludesInstallation] = useState<boolean>(false);
+  const [friendRentalIncludesInstallation, setFriendRentalIncludesInstallation] = useState<boolean>(true);
   const [friendRentalOperatingFeeEnabled, setFriendRentalOperatingFeeEnabled] = useState<boolean>(false);
   const [friendRentalOperatingFeeRate, setFriendRentalOperatingFeeRate] = useState<number>(3);
   const [customerLinkedFriendCompanyId, setCustomerLinkedFriendCompanyId] = useState<string | null>(null);

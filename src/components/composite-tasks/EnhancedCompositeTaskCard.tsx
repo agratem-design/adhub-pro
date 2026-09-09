@@ -320,30 +320,10 @@ export const EnhancedCompositeTaskCard: React.FC<EnhancedCompositeTaskCardProps>
           } else {
             setContractInfo({ adTypes: [], contractIds: [] });
           }
-        } else {
-          // جلب نوع الإعلان من العقد مباشرة
-          const cNo = Number(task.contract_id);
-          if (Number.isFinite(cNo) && cNo > 0) {
-            contractIds = [cNo];
-            const { data: contract } = await supabase
-              .from('Contract')
-              .select('"Ad Type"')
-              .eq('Contract_Number', cNo)
-              .maybeSingle();
-            
-            const rawAd = (contract?.['Ad Type'] || '').trim();
-            setContractInfo({
-              adTypes: rawAd ? [{ contractId: cNo, adType: rawAd }] : [],
-              contractIds: [cNo]
-            });
-          } else {
-            setContractInfo({ adTypes: [], contractIds: [] });
-          }
-        }
-
         // جلب صور التصميم بآلية مطابقة لـ ContractCard.tsx
         const contractNumber = Number(task.contract_id);
         const images: Array<{ url: string; face: 'a' | 'b' }> = [];
+        const seen = new Set<string>();
         
         if (Number.isFinite(contractNumber)) {
           const urls = await fetchContractDesignUrls(contractNumber);

@@ -4,19 +4,13 @@
  * No API key needed - same technique as Esri but with Google tiles
  */
 
-// Convert lat/lng to tile coordinates
-function latLngToTileCoords(lat: number, lng: number, zoom: number) {
+// Convert continuous lat/lng to continuous tile coordinates
+function latLngToContinuousCoords(lat: number, lng: number, zoom: number) {
   const n = Math.pow(2, zoom);
-  const x = Math.floor(((lng + 180) / 360) * n);
+  const Tx = ((lng + 180) / 360) * n;
   const latRad = (lat * Math.PI) / 180;
-  const y = Math.floor(
-    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n
-  );
-
-  const pixelX = Math.floor(((lng + 180) / 360 * n - x) * 256);
-  const pixelY = Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n - y) * 256);
-
-  return { x, y, pixelX, pixelY };
+  const Ty = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+  return { Tx, Ty };
 }
 
 function loadImage(url: string): Promise<HTMLImageElement> {
@@ -36,7 +30,7 @@ export interface GoogleTilesMapOptions {
   width?: number;
   height?: number;
   mapType?: 'satellite' | 'hybrid' | 'roadmap';
-  /** Scale factor for text labels (1 = normal, 1.5/2/etc. enlarges labels). Only applies when mapType === 'hybrid'. */
+  /** Scale factor for text labels (1 = normal, 1.5/2/etc. enlarges labels). */
   labelScale?: number;
 }
 
@@ -45,7 +39,6 @@ export interface GoogleTilesMapOptions {
  * s = satellite only
  * y = hybrid (satellite + labels)
  * m = roadmap
- * p = terrain
  * h = labels overlay only (transparent)
  */
 function getLayerCode(mapType: string): string {
@@ -58,7 +51,7 @@ function getLayerCode(mapType: string): string {
 }
 
 /**
- * Generate a static Google Map image using direct tile stitching
+ * Generate a static Google Map image using direct tile stitching with enlarged Arabic labels support
  */
 export async function generateGoogleTilesMapDataUrl(options: GoogleTilesMapOptions): Promise<string> {
   const {
@@ -71,57 +64,70 @@ export async function generateGoogleTilesMapDataUrl(options: GoogleTilesMapOptio
     labelScale = 1,
   } = options;
 
-  const tileSize = 256;
-  // Support fractional zoom (e.g. 15.25, 15.5) by rendering at integer zoom
-  // then scaling tiles to simulate the fractional level.
-  const baseZoom = Math.floor(zoom);
-  const zoomFrac = zoom - baseZoom;
-  const zoomScale = Math.pow(2, zoomFrac); // 1.0 .. 2.0
-  const effectiveTileSize = tileSize * zoomScale;
-  const { x: centerTileX, y: centerTileY, pixelX: offsetXRaw, pixelY: offsetYRaw } = latLngToTileCoords(lat, lng, baseZoom);
-  const offsetX = offsetXRaw * zoomScale;
-  const offsetY = offsetYRaw * zoomScale;
+  if (typeof lat !== 'number' || typeof lng !== 'number' || isNaN(lat) || isNaN(lng)) {
+    throw new Error('Invalid coordinates');
+  }
 
-  const tilesX = Math.ceil(width / effectiveTileSize) + 2;
-  const tilesY = Math.ceil(height / effectiveTileSize) + 2;
-  const halfTilesX = Math.floor(tilesX / 2);
-  const halfTilesY = Math.floor(tilesY / 2);
+  const safeWidth = Math.max(100, Math.round(width));
+  const safeHeight = Math.max(100, Math.round(height));
+  const safeScale = Math.max(0.75, Math.min(3.5, Number(labelScale) || 1));
+
+  // Determine layers and zoom levels
+  // When safeScale > 1 in hybrid or roadmap mode:
+  // Adjust the effective zoom so that tile labels are rendered at larger scale by Google,
+  // while keeping the exact geographic bounding box and alignment 100% identical.
+  const hasLabels = mapType !== 'satellite';
+  const effectiveZoom = hasLabels && safeScale !== 1
+    ? zoom - Math.log2(safeScale)
+    : zoom;
+
+  const baseZoom = Math.max(1, Math.min(21, Math.floor(effectiveZoom)));
+  const zoomFrac = effectiveZoom - baseZoom;
+  const zoomScale = Math.pow(2, zoomFrac); // 1.0 .. 2.0
+  const displayTileSize = 256 * zoomScale * (hasLabels ? safeScale : 1);
+
+  const { Tx, Ty } = latLngToContinuousCoords(lat, lng, baseZoom);
+
+  const centerX = Math.floor(safeWidth / 2);
+  const centerY = Math.floor(safeHeight / 2);
+
+  const minX = Math.floor(Tx - centerX / displayTileSize);
+  const maxX = Math.floor(Tx + (safeWidth - centerX) / displayTileSize);
+  const minY = Math.floor(Ty - centerY / displayTileSize);
+  const maxY = Math.floor(Ty + (safeHeight - centerY) / displayTileSize);
 
   const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = safeWidth;
+  canvas.height = safeHeight;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Cannot create canvas context');
 
   ctx.fillStyle = '#1a1a2e';
-  ctx.fillRect(0, 0, width, height);
+  ctx.fillRect(0, 0, safeWidth, safeHeight);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
 
-  // For hybrid with custom labelScale: render satellite base then labels on top.
-  const useSeparateLabels = mapType === 'hybrid' && labelScale !== 1;
-  const baseLyrs = useSeparateLabels ? 's' : getLayerCode(mapType);
-  // Use multiple Google tile servers for parallel loading
+  // Request High-DPI 512x512 tiles whenever the displayed tile size is large for extra crispness
+  const scaleParam = displayTileSize >= 380 ? '&scale=2' : '';
+  const langParam = '&hl=ar&gl=LY';
+  const baseLyrs = getLayerCode(mapType);
   const servers = ['mt0', 'mt1', 'mt2', 'mt3'];
 
-  const startPixelX = Math.floor(width / 2) - offsetX - (halfTilesX * effectiveTileSize);
-  const startPixelY = Math.floor(height / 2) - offsetY - (halfTilesY * effectiveTileSize);
-
-  const tilePromises: Promise<{ img: HTMLImageElement; dx: number; dy: number } | null>[] = [];
+  const tilePromises: Promise<{ img: HTMLImageElement; dx: number; dy: number; dSize: number } | null>[] = [];
   let serverIdx = 0;
+  const dSize = Math.round(displayTileSize);
 
-  for (let ty = -halfTilesY; ty <= halfTilesY + 1; ty++) {
-    for (let tx = -halfTilesX; tx <= halfTilesX + 1; tx++) {
-      const tileX = centerTileX + tx;
-      const tileY = centerTileY + ty;
-      const dx = startPixelX + (tx + halfTilesX) * effectiveTileSize;
-      const dy = startPixelY + (ty + halfTilesY) * effectiveTileSize;
-
+  for (let ty = minY; ty <= maxY; ty++) {
+    for (let tx = minX; tx <= maxX; tx++) {
+      const dx = Math.round(centerX + (tx - Tx) * displayTileSize);
+      const dy = Math.round(centerY + (ty - Ty) * displayTileSize);
       const server = servers[serverIdx % servers.length];
       serverIdx++;
-      const url = `https://${server}.google.com/vt/lyrs=${baseLyrs}&x=${tileX}&y=${tileY}&z=${baseZoom}`;
+      const url = `https://${server}.google.com/vt/lyrs=${baseLyrs}${langParam}&x=${tx}&y=${ty}&z=${baseZoom}${scaleParam}`;
 
       tilePromises.push(
         loadImage(url)
-          .then(img => ({ img, dx, dy }))
+          .then(img => ({ img, dx, dy, dSize }))
           .catch(() => null)
       );
     }
@@ -131,36 +137,7 @@ export async function generateGoogleTilesMapDataUrl(options: GoogleTilesMapOptio
 
   for (const tile of tiles) {
     if (tile) {
-      ctx.drawImage(tile.img, tile.dx, tile.dy, effectiveTileSize, effectiveTileSize);
-    }
-  }
-
-  // Overlay labels at scaled size when requested
-  if (useSeparateLabels) {
-    const labelTileSize = effectiveTileSize * labelScale;
-    const labelStartPixelX = Math.floor(width / 2) - offsetX * labelScale - (halfTilesX * labelTileSize);
-    const labelStartPixelY = Math.floor(height / 2) - offsetY * labelScale - (halfTilesY * labelTileSize);
-    const labelTilesX = Math.ceil(width / labelTileSize) + 2;
-    const labelTilesY = Math.ceil(height / labelTileSize) + 2;
-    const halfLX = Math.floor(labelTilesX / 2);
-    const halfLY = Math.floor(labelTilesY / 2);
-    const labelPromises: Promise<{ img: HTMLImageElement; dx: number; dy: number } | null>[] = [];
-    let lsIdx = 0;
-    for (let ty = -halfLY; ty <= halfLY + 1; ty++) {
-      for (let tx = -halfLX; tx <= halfLX + 1; tx++) {
-        const tileX = centerTileX + tx;
-        const tileY = centerTileY + ty;
-        const dx = labelStartPixelX + (tx + halfLX) * labelTileSize;
-        const dy = labelStartPixelY + (ty + halfLY) * labelTileSize;
-        const server = servers[lsIdx % servers.length];
-        lsIdx++;
-        const url = `https://${server}.google.com/vt/lyrs=h&x=${tileX}&y=${tileY}&z=${baseZoom}`;
-        labelPromises.push(loadImage(url).then(img => ({ img, dx, dy })).catch(() => null));
-      }
-    }
-    const labelTiles = await Promise.all(labelPromises);
-    for (const t of labelTiles) {
-      if (t) ctx.drawImage(t.img, t.dx, t.dy, labelTileSize, labelTileSize);
+      ctx.drawImage(tile.img, tile.dx, tile.dy, tile.dSize, tile.dSize);
     }
   }
 
