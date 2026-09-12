@@ -1,3 +1,4 @@
+import { compositeTaskLabel, compositeTaskGroupKey } from '@/lib/compositeTaskLabel';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -88,6 +89,165 @@ export function DistributedPaymentDetailsDialog({
   const [loadingCustody, setLoadingCustody] = useState(false);
   const [showIntermediaryInReceipt, setShowIntermediaryInReceipt] = useState(true);
   const [customerPhone, setCustomerPhone] = useState('');
+  const [paymentsMeta, setPaymentsMeta] = useState<{
+    compositeTasks: Record<string, any>;
+    salesInvoices: Record<string, any>;
+    printedInvoices: Record<string, any>;
+    contracts: Record<number, any>;
+  }>({
+    compositeTasks: {},
+    salesInvoices: {},
+    printedInvoices: {},
+    contracts: {},
+  });
+
+  const loadPaymentEntitiesMeta = async () => {
+    if (!groupedPayments?.length) return;
+    try {
+      const compositeTaskIds = groupedPayments
+        .filter(p => p.composite_task_id)
+        .map(p => p.composite_task_id as string);
+
+      const salesInvoiceIds = groupedPayments
+        .filter(p => p.sales_invoice_id)
+        .map(p => p.sales_invoice_id as string);
+
+      const printedInvoiceIds = groupedPayments
+        .filter(p => p.printed_invoice_id)
+        .map(p => p.printed_invoice_id as string);
+
+      let tasksData: any[] = [];
+      const compositeTaskMap: Record<string, any> = {};
+      if (compositeTaskIds.length > 0) {
+        const { data } = await supabase
+          .from('composite_tasks')
+          .select('id, task_number, contract_id, task_type, customer_total, paid_amount, installation_task_id, print_task_id, cutout_task_id')
+          .in('id', compositeTaskIds);
+        tasksData = data || [];
+      }
+
+      const installTaskIds = tasksData
+        .map((t: any) => t.installation_task_id)
+        .filter(Boolean);
+
+      const installTaskMap: Record<string, any> = {};
+      if (installTaskIds.length > 0) {
+        const { data: itData, error: itErr } = await supabase
+          .from('installation_tasks')
+          .select('id, contract_id, task_type, reinstallation_number, team_id, installation_teams(team_name)')
+          .in('id', installTaskIds);
+        if (itErr) {
+          console.warn('Fallback loading installation_tasks without join:', itErr);
+          const { data: fallbackData } = await supabase
+            .from('installation_tasks')
+            .select('id, contract_id, task_type, reinstallation_number, team_id')
+            .in('id', installTaskIds);
+          const teamIds = (fallbackData || []).map((it: any) => it.team_id).filter(Boolean);
+          const teamsMap: Record<string, string> = {};
+          if (teamIds.length > 0) {
+            const { data: tData } = await supabase.from('installation_teams').select('id, team_name').in('id', teamIds);
+            (tData || []).forEach((t: any) => { teamsMap[t.id] = t.team_name; });
+          }
+          (fallbackData || []).forEach((it: any) => {
+            installTaskMap[it.id] = {
+              ...it,
+              installation_teams: it.team_id && teamsMap[it.team_id] ? { team_name: teamsMap[it.team_id] } : null,
+            };
+          });
+        } else {
+          (itData || []).forEach((it: any) => {
+            installTaskMap[it.id] = it;
+          });
+        }
+      }
+
+      tasksData.forEach((t: any) => {
+        const it = t.installation_task_id ? installTaskMap[t.installation_task_id] : null;
+        const contractId = t.contract_id || it?.contract_id || null;
+        const taskType = it?.task_type || t.task_type;
+        const reinstallationNumber = it?.reinstallation_number ?? (taskType === 'reinstallation' ? 1 : null);
+        const remaining = (Number(t.customer_total) || 0) - (Number(t.paid_amount) || 0);
+
+        compositeTaskMap[t.id] = {
+          ...t,
+          contract_id: contractId,
+          task_type: taskType,
+          reinstallation_number: reinstallationNumber,
+          team_name: it?.installation_teams?.team_name || null,
+          calculatedRemaining: Math.max(0, remaining),
+        };
+      });
+
+      const salesInvoiceMap: Record<string, any> = {};
+      if (salesInvoiceIds.length > 0) {
+        const { data: invoicesData } = await supabase
+          .from('sales_invoices')
+          .select('id, invoice_number, invoice_name, total_amount, paid_amount, notes')
+          .in('id', salesInvoiceIds);
+        (invoicesData || []).forEach((i: any) => {
+          const total = Number(i.total_amount) || 0;
+          const paid = Number(i.paid_amount) || 0;
+          salesInvoiceMap[i.id] = {
+            ...i,
+            calculatedRemaining: Math.max(0, total - paid),
+          };
+        });
+      }
+
+      const printedInvoiceMap: Record<string, any> = {};
+      if (printedInvoiceIds.length > 0) {
+        const { data: invoicesData } = await supabase
+          .from('printed_invoices')
+          .select('id, invoice_number, total_amount, paid_amount, notes')
+          .in('id', printedInvoiceIds);
+        (invoicesData || []).forEach((i: any) => {
+          const total = Number(i.total_amount) || 0;
+          const paid = Number(i.paid_amount) || 0;
+          printedInvoiceMap[i.id] = {
+            ...i,
+            calculatedRemaining: Math.max(0, total - paid),
+          };
+        });
+      }
+
+      const contractNumbers = Array.from(new Set([
+        ...groupedPayments.map(p => p.contract_number),
+        ...Object.values(compositeTaskMap).map((t: any) => t.contract_id),
+      ].filter(Boolean).map(v => Number(v)).filter(n => !Number.isNaN(n))));
+
+      const contractMap: Record<number, any> = {};
+      if (contractNumbers.length > 0) {
+        const { data: contractsData } = await supabase
+          .from('Contract')
+          .select('Contract_Number, "Ad Type", Total, "Total Paid"')
+          .in('Contract_Number', contractNumbers);
+        (contractsData || []).forEach((c: any) => {
+          const total = Number(c.Total) || 0;
+          const paid = Number(c['Total Paid']) || 0;
+          contractMap[c.Contract_Number] = {
+            ...c,
+            calculatedPaid: paid,
+            calculatedRemaining: Math.max(0, total - paid),
+          };
+        });
+      }
+
+      setPaymentsMeta({
+        compositeTasks: compositeTaskMap,
+        salesInvoices: salesInvoiceMap,
+        printedInvoices: printedInvoiceMap,
+        contracts: contractMap,
+      });
+    } catch (err) {
+      console.error('Error loading payment entities meta:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (open && groupedPayments?.length) {
+      loadPaymentEntitiesMeta();
+    }
+  }, [open, groupedPayments]);
 
   // جلب رقم هاتف العميل
   useEffect(() => {
@@ -1102,81 +1262,241 @@ export function DistributedPaymentDetailsDialog({
           )}
 
           {/* جدول المدفوعات */}
-          <div className="border rounded-lg">
+          <div className="border rounded-lg overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="text-right">المرجع</TableHead>
                   <TableHead className="text-right">البيان</TableHead>
-                  <TableHead className="text-right">المبلغ المدفوع</TableHead>
-                  <TableHead className="text-right">إجراءات</TableHead>
+                  <TableHead className="text-center">القيمة الإجمالية</TableHead>
+                  <TableHead className="text-center">المبلغ المدفوع</TableHead>
+                  <TableHead className="text-center">المتبقي</TableHead>
+                  <TableHead className="text-center">إجراءات</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {groupedPayments.map((payment) => {
-                  // تحديد نوع الدفعة
-                  const getPaymentInfo = () => {
+                {(() => {
+                  const rows: Array<{
+                    id: string;
+                    reference: string;
+                    description: string;
+                    Icon: any;
+                    totalAmount: number | null;
+                    amount: number;
+                    remaining: number | null;
+                    payment: PaymentRow;
+                  }> = [];
+                  const taskGroups = new Map<string, typeof rows[0] & { teamNames: Set<string>; countedTasks: Set<string>; baseDesc: string }>();
+
+                  for (const payment of groupedPayments) {
                     if (payment.composite_task_id) {
-                      const taskTypeLabels: { [key: string]: string } = {
-                        'طباعة_تركيب': 'طباعة وتركيب',
-                        'طباعة_قص_تركيب': 'طباعة وقص وتركيب',
-                        'installation': 'تركيب',
-                        'print': 'طباعة'
+                      const task = paymentsMeta.compositeTasks[payment.composite_task_id];
+                      const contract = task?.contract_id ? paymentsMeta.contracts[Number(task.contract_id)] : null;
+                      const rawAdType = contract?.['Ad Type'] || '';
+                      const adTypeClean = rawAdType && rawAdType !== 'لوحة إعلانية' ? rawAdType.trim() : '';
+
+                      const components: string[] = [];
+                      if (task?.print_task_id) components.push('طباعة');
+                      if (task?.cutout_task_id) components.push('قص');
+                      if (task?.installation_task_id) components.push('تركيب');
+                      const taskComponents = components.length > 0 ? components.join(' + ') : 'مهمة مجمعة';
+
+                      let baseDesc = taskComponents;
+                      if (adTypeClean) {
+                        if (adTypeClean.includes('طباعة') || adTypeClean.includes('تركيب')) {
+                          baseDesc = adTypeClean;
+                        } else {
+                          baseDesc = `${adTypeClean} (${taskComponents})`;
+                        }
+                      }
+
+                      const taskIdentity = {
+                        id: task?.id || payment.composite_task_id,
+                        task_number: task?.task_number,
+                        contract_id: task?.contract_id,
+                        task_type: task?.task_type,
+                        reinstallation_number: task?.reinstallation_number,
+                        installation_task_id: task?.installation_task_id,
+                        team_name: task?.team_name,
+                        remaining: task?.calculatedRemaining,
+                        total: task?.customer_total,
                       };
-                      return {
-                        reference: 'مهمة مجمعة',
-                        description: taskTypeLabels[payment.notes?.match(/نوع:\s*(\S+)/)?.[1] || ''] || 'مهمة مجمعة',
-                        Icon: Wrench
-                      };
-                    }
-                    if (payment.sales_invoice_id) {
-                      return {
-                        reference: 'فاتورة مبيعات',
-                        description: payment.notes || 'مبيعات',
-                        Icon: Receipt
-                      };
-                    }
-                    if (payment.printed_invoice_id) {
-                      return {
-                        reference: 'فاتورة طباعة',
-                        description: payment.notes || 'طباعة',
-                        Icon: Printer
-                      };
-                    }
-                    if (payment.entry_type === 'payment' && !payment.contract_number) {
-                      return {
+
+                      const groupKey = compositeTaskGroupKey(taskIdentity);
+                      const existing = taskGroups.get(groupKey);
+
+                      if (existing) {
+                        existing.amount += Number(payment.amount) || 0;
+                        if (task?.team_name) existing.teamNames.add(task.team_name);
+                        if (!existing.countedTasks.has(payment.composite_task_id)) {
+                          existing.countedTasks.add(payment.composite_task_id);
+                          if (task?.customer_total != null) {
+                            existing.totalAmount = (existing.totalAmount ?? 0) + Number(task.customer_total);
+                          }
+                          if (task?.calculatedRemaining != null) {
+                            existing.remaining = (existing.remaining ?? 0) + Number(task.calculatedRemaining);
+                          }
+                        }
+                        const teamsStr = Array.from(existing.teamNames).filter(Boolean).join(' + ');
+                        existing.description = existing.baseDesc;
+                        const isFullyPaid = existing.remaining !== null && Number(existing.remaining) <= 0.01 && existing.totalAmount !== null && Number(existing.totalAmount) > 0;
+                        if (isFullyPaid && !existing.reference.includes('(مسددة بالكامل)')) {
+                          existing.reference = `${existing.reference} (مسددة بالكامل)`;
+                        } else if (!isFullyPaid && existing.reference.includes('(مسددة بالكامل)')) {
+                          existing.reference = existing.reference.replace(' (مسددة بالكامل)', '');
+                        }
+                      } else {
+                        const teamNames = new Set<string>();
+                        if (task?.team_name) teamNames.add(task.team_name);
+                        const countedTasks = new Set<string>([payment.composite_task_id]);
+                        const totalAmount = task?.customer_total != null ? Number(task.customer_total) : null;
+                        const remaining = task?.calculatedRemaining != null ? Number(task.calculatedRemaining) : null;
+                        const description = baseDesc;
+                        const reference = compositeTaskLabel(taskIdentity);
+
+                        const newRow = {
+                          id: payment.id,
+                          reference,
+                          description,
+                          Icon: Wrench,
+                          totalAmount,
+                          amount: Number(payment.amount) || 0,
+                          remaining,
+                          payment,
+                          teamNames,
+                          countedTasks,
+                          baseDesc,
+                        };
+                        rows.push(newRow);
+                        taskGroups.set(groupKey, newRow);
+                      }
+                    } else if (payment.sales_invoice_id) {
+                      const inv = paymentsMeta.salesInvoices[payment.sales_invoice_id];
+                      const invTitle = inv?.invoice_name || (inv?.notes && !inv.notes.startsWith('توزيع على') ? inv.notes : '') || 'مبيعات';
+                      rows.push({
+                        id: payment.id,
+                        reference: `فاتورة مبيعات${inv?.invoice_number ? ` #${inv.invoice_number}` : ''}`,
+                        description: invTitle,
+                        Icon: Receipt,
+                        totalAmount: inv?.total_amount != null ? Number(inv.total_amount) : null,
+                        amount: Number(payment.amount) || 0,
+                        remaining: inv?.calculatedRemaining != null ? Number(inv.calculatedRemaining) : null,
+                        payment,
+                      });
+                    } else if (payment.printed_invoice_id) {
+                      const inv = paymentsMeta.printedInvoices[payment.printed_invoice_id];
+                      rows.push({
+                        id: payment.id,
+                        reference: `فاتورة طباعة${inv?.invoice_number ? ` #${inv.invoice_number}` : ''}`,
+                        description: inv?.notes || 'طباعة',
+                        Icon: Printer,
+                        totalAmount: inv?.total_amount != null ? Number(inv.total_amount) : null,
+                        amount: Number(payment.amount) || 0,
+                        remaining: inv?.calculatedRemaining != null ? Number(inv.calculatedRemaining) : null,
+                        payment,
+                      });
+                    } else if (payment.entry_type === 'payment' && !payment.contract_number) {
+                      rows.push({
+                        id: payment.id,
                         reference: 'رصيد فائض (غير موزع)',
-                        description: payment.notes || 'رصيد في الحساب العام للزبون',
-                        Icon: DollarSign
-                      };
+                        description: payment.notes?.replace(/^توزيع على.*?- /g, '') || 'فائض سداد متبقي في حساب العميل',
+                        Icon: DollarSign,
+                        totalAmount: null,
+                        amount: Number(payment.amount) || 0,
+                        remaining: null,
+                        payment,
+                      });
+                    } else {
+                      const cn = payment.contract_number ? Number(payment.contract_number) : null;
+                      const c = cn ? paymentsMeta.contracts[cn] : null;
+                      rows.push({
+                        id: payment.id,
+                        reference: `عقد رقم ${payment.contract_number}`,
+                        description: c?.['Ad Type'] || 'لوحة إعلانية',
+                        Icon: FileText,
+                        totalAmount: c?.Total != null ? Number(c.Total) : null,
+                        amount: Number(payment.amount) || 0,
+                        remaining: c?.calculatedRemaining != null ? Number(c.calculatedRemaining) : null,
+                        payment,
+                      });
                     }
-                    // Default: عقد
-                    return {
-                      reference: `عقد رقم ${payment.contract_number}`,
-                      description: 'لوحة إعلانية',
-                      Icon: FileText
+                  }
+
+                  rows.sort((a, b) => {
+                    const typeOrder = (row: typeof rows[0]) => {
+                      if (row.payment.contract_number && !row.payment.composite_task_id) return 1;
+                      if (row.payment.composite_task_id) return 2;
+                      if (row.payment.sales_invoice_id) return 3;
+                      if (row.payment.printed_invoice_id) return 4;
+                      return 5; // surplus credit
                     };
-                  };
-                  
-                  const paymentInfo = getPaymentInfo();
-                  
-                  return (
-                    <TableRow key={payment.id}>
-                      <TableCell className="font-semibold text-lg">
-                        <paymentInfo.Icon className="w-4 h-4 inline-block ml-2 text-primary" />
-                        {paymentInfo.reference}
+                    const orderA = typeOrder(a);
+                    const orderB = typeOrder(b);
+                    if (orderA !== orderB) return orderA - orderB;
+
+                    if (orderA === 1) {
+                      return (Number(a.payment.contract_number) || 0) - (Number(b.payment.contract_number) || 0);
+                    }
+                    if (orderA === 2) {
+                      const tA = paymentsMeta.compositeTasks[a.payment.composite_task_id!];
+                      const tB = paymentsMeta.compositeTasks[b.payment.composite_task_id!];
+                      const cA = Number(tA?.contract_id || 0);
+                      const cB = Number(tB?.contract_id || 0);
+                      if (cA !== cB) return cA - cB;
+                      const rA = Number(tA?.reinstallation_number || 0);
+                      const rB = Number(tB?.reinstallation_number || 0);
+                      if (rA !== rB) return rA - rB;
+                      return (Number(tA?.task_number) || 0) - (Number(tB?.task_number) || 0);
+                    }
+                    if (orderA === 3) {
+                      const iA = paymentsMeta.salesInvoices[a.payment.sales_invoice_id!];
+                      const iB = paymentsMeta.salesInvoices[b.payment.sales_invoice_id!];
+                      return String(iA?.invoice_number || '').localeCompare(String(iB?.invoice_number || ''), undefined, { numeric: true });
+                    }
+                    if (orderA === 4) {
+                      const iA = paymentsMeta.printedInvoices[a.payment.printed_invoice_id!];
+                      const iB = paymentsMeta.printedInvoices[b.payment.printed_invoice_id!];
+                      return String(iA?.invoice_number || '').localeCompare(String(iB?.invoice_number || ''), undefined, { numeric: true });
+                    }
+                    return 0;
+                  });
+
+                  return rows.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-semibold text-base">
+                        <item.Icon className="w-4 h-4 inline-block ml-2 text-primary" />
+                        {item.reference}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {paymentInfo.description}
+                        <div>{item.description}</div>
+                        {(item as any).teamNames && (item as any).teamNames.size > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {Array.from((item as any).teamNames as Set<string>).map(t => (
+                              <Badge key={t} variant="outline" className="text-[10px] text-muted-foreground border-dashed px-1 py-0 font-normal">
+                                {t}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                       </TableCell>
-                      <TableCell className="font-bold text-green-600 text-lg">
-                        {(Number(payment.amount) || 0).toLocaleString('ar-LY')} د.ل
+                      <TableCell className="text-center font-semibold text-foreground">
+                        {item.totalAmount !== null && item.totalAmount !== undefined
+                          ? `${Number(item.totalAmount).toLocaleString('ar-LY')} د.ل`
+                          : '—'}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="text-center font-bold text-green-600 text-base">
+                        {(Number(item.amount) || 0).toLocaleString('ar-LY')} د.ل
+                      </TableCell>
+                      <TableCell className="text-center font-semibold text-amber-600">
+                        {item.remaining !== null && item.remaining !== undefined
+                          ? `${Number(item.remaining).toLocaleString('ar-LY')} د.ل`
+                          : '—'}
+                      </TableCell>
+                      <TableCell className="text-center">
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => onPrintIndividual(payment)}
+                          onClick={() => onPrintIndividual({ ...item.payment, amount: item.amount })}
                           className="gap-2"
                         >
                           <Printer className="h-4 w-4" />
@@ -1184,8 +1504,8 @@ export function DistributedPaymentDetailsDialog({
                         </Button>
                       </TableCell>
                     </TableRow>
-                  );
-                })}
+                  ));
+                })()}
               </TableBody>
             </Table>
           </div>
@@ -1311,14 +1631,79 @@ export function DistributedPaymentDetailsDialog({
                     if (data) customerData = data;
                   }
 
-                  // جلب بيانات العقود (مرة واحدة) لإظهار نوع الإعلان + المتبقي لكل عقد
-                  const contractNumbers = Array.from(new Set(
-                    groupedPayments
-                      .map(p => p.contract_number)
-                      .filter(Boolean)
-                      .map(v => Number(v))
-                      .filter(n => !Number.isNaN(n))
-                  ));
+                  // ✅ جلب بيانات المهام المجمعة وفواتير المبيعات أولاً لتحديد كافة أرقام العقود
+                  const compositeTaskIds = groupedPayments
+                    .filter(p => p.composite_task_id)
+                    .map(p => p.composite_task_id as string);
+                  
+                  const salesInvoiceIds = groupedPayments
+                    .filter(p => p.sales_invoice_id)
+                    .map(p => p.sales_invoice_id as string);
+
+                  const printedInvoiceIds = groupedPayments
+                    .filter(p => p.printed_invoice_id)
+                    .map(p => p.printed_invoice_id as string);
+
+                  // جلب بيانات المهام المجمعة
+                  const compositeTaskMap: Record<string, any> = {};
+                  let tasksData: any[] = [];
+                  if (compositeTaskIds.length > 0) {
+                    const { data } = await supabase
+                      .from('composite_tasks')
+                      .select('id, task_number, contract_id, task_type, customer_total, paid_amount, installation_task_id, print_task_id, cutout_task_id')
+                      .in('id', compositeTaskIds);
+                    tasksData = data || [];
+                  }
+
+                  // جلب بيانات مهام التركيب المرتبطة لاستخراج رقم إعادة التركيب ونوع المهمة
+                  const installTaskIds = tasksData
+                    .map((t: any) => t.installation_task_id)
+                    .filter(Boolean);
+
+                  const installTaskMap: Record<string, any> = {};
+                  if (installTaskIds.length > 0) {
+                    const { data: itData, error: itErr } = await supabase
+                      .from('installation_tasks')
+                      .select('id, contract_id, task_type, reinstallation_number, team_id, installation_teams(team_name)')
+                      .in('id', installTaskIds);
+                    if (itErr) {
+                      console.warn('Fallback loading installation_tasks in print without join:', itErr);
+                      const { data: fallbackData } = await supabase
+                        .from('installation_tasks')
+                        .select('id, contract_id, task_type, reinstallation_number, team_id')
+                        .in('id', installTaskIds);
+                      (fallbackData || []).forEach((it: any) => {
+                        installTaskMap[it.id] = it;
+                      });
+                    } else {
+                      (itData || []).forEach((it: any) => {
+                        installTaskMap[it.id] = it;
+                      });
+                    }
+                  }
+
+                  tasksData.forEach((t: any) => {
+                    const it = t.installation_task_id ? installTaskMap[t.installation_task_id] : null;
+                    const contractId = t.contract_id || it?.contract_id || null;
+                    const taskType = it?.task_type || t.task_type;
+                    const reinstallationNumber = it?.reinstallation_number ?? (taskType === 'reinstallation' ? 1 : null);
+                    const remaining = (Number(t.customer_total) || 0) - (Number(t.paid_amount) || 0);
+
+                    compositeTaskMap[t.id] = {
+                      ...t,
+                      contract_id: contractId,
+                      task_type: taskType,
+                      reinstallation_number: reinstallationNumber,
+                      team_name: it?.installation_teams?.team_name || null,
+                      calculatedRemaining: Math.max(0, remaining),
+                    };
+                  });
+
+                  // جلب أرقام كافة العقود (سواء من الدفعات المباشرة أو المهام المجمعة)
+                  const contractNumbers = Array.from(new Set([
+                    ...groupedPayments.map(p => p.contract_number),
+                    ...Object.values(compositeTaskMap).map((t: any) => t.contract_id),
+                  ].filter(Boolean).map(v => Number(v)).filter(n => !Number.isNaN(n))));
 
                   const contractMap: Record<number, any> = {};
                   if (contractNumbers.length > 0) {
@@ -1353,32 +1738,6 @@ export function DistributedPaymentDetailsDialog({
                     });
                   }
 
-                  // ✅ جلب بيانات المهام المجمعة وفواتير المبيعات
-                  const compositeTaskIds = groupedPayments
-                    .filter(p => p.composite_task_id)
-                    .map(p => p.composite_task_id as string);
-                  
-                  const salesInvoiceIds = groupedPayments
-                    .filter(p => p.sales_invoice_id)
-                    .map(p => p.sales_invoice_id as string);
-
-                  const printedInvoiceIds = groupedPayments
-                    .filter(p => p.printed_invoice_id)
-                    .map(p => p.printed_invoice_id as string);
-                  
-                  // جلب بيانات المهام المجمعة
-                  const compositeTaskMap: Record<string, any> = {};
-                  if (compositeTaskIds.length > 0) {
-                    const { data: tasksData } = await supabase
-                      .from('composite_tasks')
-                      .select('id, task_type, customer_total, paid_amount, installation_task_id, print_task_id, cutout_task_id')
-                      .in('id', compositeTaskIds);
-                    (tasksData || []).forEach((t: any) => {
-                      const remaining = (Number(t.customer_total) || 0) - (Number(t.paid_amount) || 0);
-                      compositeTaskMap[t.id] = { ...t, calculatedRemaining: Math.max(0, remaining) };
-                    });
-                  }
-                  
                   // جلب بيانات فواتير المبيعات
                   const salesInvoiceMap: Record<string, any> = {};
                   if (salesInvoiceIds.length > 0) {
@@ -1409,29 +1768,66 @@ export function DistributedPaymentDetailsDialog({
                     // تحديد نوع الدفعة
                     if (p.composite_task_id) {
                       const task = compositeTaskMap[p.composite_task_id];
-                      // بناء وصف المهمة بناءً على المكونات الفعلية
+                      const contract = task?.contract_id ? contractMap[Number(task.contract_id)] : null;
+                      const rawAdType = contract?.['Ad Type'] || '';
+                      const adTypeClean = rawAdType && rawAdType !== 'لوحة إعلانية' ? rawAdType.trim() : '';
+
+                      // بناء وصف مكونات المهمة بناءً على المكونات الفعلية
                       const components: string[] = [];
                       if (task?.print_task_id) components.push('طباعة');
                       if (task?.cutout_task_id) components.push('قص');
                       if (task?.installation_task_id) components.push('تركيب');
-                      const taskDescription = components.length > 0 ? components.join(' + ') : 'مهمة مجمعة';
-                      
+                      const taskComponents = components.length > 0 ? components.join(' + ') : 'مهمة مجمعة';
+
+                      // وصف البيان: نوع الإعلان + مكونات الخدمة (بدون أسماء الفرق في الفاتورة للزبون)
+                      let finalDescription = taskComponents;
+                      if (adTypeClean) {
+                        if (adTypeClean.includes('طباعة') || adTypeClean.includes('تركيب')) {
+                          finalDescription = adTypeClean;
+                        } else {
+                          finalDescription = `${adTypeClean} (${taskComponents})`;
+                        }
+                      }
+
+                      const taskIdentity = {
+                        id: task?.id || p.composite_task_id,
+                        task_number: task?.task_number,
+                        contract_id: task?.contract_id,
+                        task_type: task?.task_type,
+                        reinstallation_number: task?.reinstallation_number,
+                        installation_task_id: task?.installation_task_id,
+                        team_name: task?.team_name,
+                        remaining: task?.calculatedRemaining,
+                        total: task?.customer_total,
+                      };
+
+                      const groupKey = compositeTaskGroupKey(taskIdentity);
+                      const refLabel = compositeTaskLabel(taskIdentity);
+
                       return {
-                        contractNumber: '—',
-                        adType: taskDescription,
+                        contractNumber: refLabel,
+                        compositeTaskId: p.composite_task_id,
+                        installationTaskId: task?.installation_task_id,
+                        adType: finalDescription,
+                        rawAdType: adTypeClean || undefined,
+                        taskComponents,
+                        teamName: task?.team_name || undefined,
+                        contractId: task?.contract_id ? Number(task.contract_id) : undefined,
+                        reinstallationNumber: task?.reinstallation_number ? Number(task.reinstallation_number) : undefined,
                         amount: Number(p.amount) || 0,
                         total: task?.customer_total ?? null,
                         totalPaid: task?.paid_amount ?? null,
                         remaining: task?.calculatedRemaining ?? null,
                         entityType: 'composite_task' as const,
-                        compositeTaskType: taskDescription,
+                        compositeTaskType: finalDescription,
+                        groupKey,
                       };
                     }
                     
                     if (p.sales_invoice_id) {
                       const invoice = salesInvoiceMap[p.sales_invoice_id];
                       return {
-                        contractNumber: invoice?.invoice_number || '—',
+                        contractNumber: invoice?.invoice_number ? (String(invoice.invoice_number).startsWith('فاتورة') ? String(invoice.invoice_number) : `فاتورة مبيعات #${invoice.invoice_number}`) : 'فاتورة مبيعات',
                         adType: invoice?.invoice_name || invoice?.notes || 'مبيعات',
                         amount: Number(p.amount) || 0,
                         total: invoice?.total_amount ?? null,
@@ -1444,7 +1840,7 @@ export function DistributedPaymentDetailsDialog({
                     if (p.printed_invoice_id) {
                       const invoice = printedInvoiceMap[p.printed_invoice_id];
                       return {
-                        contractNumber: invoice?.invoice_number || '—',
+                        contractNumber: invoice?.invoice_number ? (String(invoice.invoice_number).startsWith('فاتورة') ? String(invoice.invoice_number) : `فاتورة طباعة #${invoice.invoice_number}`) : 'فاتورة طباعة',
                         adType: invoice?.notes || 'طباعة',
                         amount: Number(p.amount) || 0,
                         total: invoice?.total_amount ?? null,
@@ -1453,12 +1849,26 @@ export function DistributedPaymentDetailsDialog({
                         entityType: 'printed_invoice' as const,
                       };
                     }
+
+                    // رصيد فائض (غير موزع)
+                    if (!p.contract_number && !p.composite_task_id && !p.sales_invoice_id && !p.printed_invoice_id) {
+                      return {
+                        contractNumber: 'رصيد فائض (غير موزع)',
+                        adType: p.notes?.replace(/^توزيع على.*?- /g, '') || 'فائض سداد متبقي في حساب العميل',
+                        amount: Number(p.amount) || 0,
+                        total: null,
+                        totalPaid: null,
+                        remaining: null,
+                        entityType: 'general_credit' as const,
+                      };
+                    }
                     
                     // Default: عقد
                     const cn = p.contract_number ? Number(p.contract_number) : null;
                     const c = cn ? contractMap[cn] : null;
                     return {
                       contractNumber: String(p.contract_number || '—'),
+                      contractId: cn || undefined,
                       adType: c?.['Ad Type'] || 'لوحة إعلانية',
                       amount: Number(p.amount) || 0,
                       total: c?.Total ?? null,

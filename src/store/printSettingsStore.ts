@@ -1,3 +1,4 @@
+import { applyOfficialInvoiceTemplate, officialTemplateFields, OFFICIAL_INVOICE_TEMPLATE } from '@/lib/officialInvoiceTemplate';
 /**
  * Redux-like Store لإعدادات الطباعة
  * يستخدم React Context + useReducer لإدارة الحالة
@@ -101,27 +102,10 @@ export function PrintSettingsProvider({ children }: PrintSettingsProviderProps) 
   // Selector: الحصول على إعدادات نوع مستند
   // ==========================================
   const selectPrintSettingsByType = useCallback((documentType: DocumentType): PrintSettings => {
-    const documentSettings = state.byDocumentType[documentType];
-    
-    if (documentSettings) {
-      // ✅ دمج الإعدادات المشتركة مع إعدادات المستند - القيم الفارغة تستخدم المشتركة
-      return {
-        ...documentSettings,
-        company_name: documentSettings.company_name || state.sharedDefaults.company_name || '',
-        company_subtitle: documentSettings.company_subtitle || state.sharedDefaults.company_subtitle || '',
-        company_address: documentSettings.company_address || state.sharedDefaults.company_address || '',
-        company_phone: documentSettings.company_phone || state.sharedDefaults.company_phone || '',
-        logo_path: documentSettings.logo_path || state.sharedDefaults.logo_path || '/logofaresgold.svg',
-        logo_size: documentSettings.logo_size || state.sharedDefaults.logo_size || 60,
-        footer_text: documentSettings.footer_text || state.sharedDefaults.footer_text || '',
-      };
-    }
-    
-    // إذا لم توجد إعدادات خاصة، استخدم الافتراضي
-    return {
-      document_type: documentType,
-      ...state.sharedDefaults,
-    };
+    return applyOfficialInvoiceTemplate(
+      { ...state.sharedDefaults, ...state.byDocumentType[documentType], document_type: documentType },
+      state.byDocumentType[OFFICIAL_INVOICE_TEMPLATE],
+    );
   }, [state.byDocumentType, state.sharedDefaults]);
 
   // ==========================================
@@ -393,27 +377,24 @@ export function PrintSettingsProvider({ children }: PrintSettingsProviderProps) 
         ...settings,
       };
       
-      dispatch({
-        type: 'SET_DOCUMENT_SETTINGS',
-        payload: { documentType, settings: fullSettings },
+      const official = {
+        ...state.sharedDefaults,
+        ...state.byDocumentType[OFFICIAL_INVOICE_TEMPLATE],
+        ...officialTemplateFields(settings),
+        document_type: OFFICIAL_INVOICE_TEMPLATE,
+      };
+      const rows = documentType === OFFICIAL_INVOICE_TEMPLATE ? [fullSettings] : [fullSettings, official];
+      const payload = rows.map(row => {
+        const { created_at, updated_at, id, ...fields } = row as any;
+        return fields;
       });
-      
-      // حفظ في جدول print_settings - جميع الحقول ديناميكياً
-      // نأخذ كل الحقول من fullSettings ونزيل الحقول غير الموجودة في الجدول
-      const { created_at: _ca, updated_at: _ua, ...dbFields } = fullSettings as any;
-      
-      const { error } = await supabase
-        .from('print_settings')
-        .upsert(dbFields, { onConflict: 'document_type' });
-      
+      const { error } = await supabase.from('print_settings').upsert(payload, { onConflict: 'document_type' });
       if (error) throw error;
-      
-      // مسح كاش الجسر
-      try {
-        const { clearPrintSettingsBridgeCache } = await import('@/utils/invoicePrintSettingsBridge');
-        clearPrintSettingsBridgeCache();
-      } catch { /* ignore */ }
-      
+      for (const row of rows) {
+        dispatch({ type: 'SET_DOCUMENT_SETTINGS', payload: { documentType: row.document_type, settings: row } });
+      }
+      const { clearInvoiceSettingsCache } = await import('@/hooks/useInvoiceSettingsSync');
+      clearInvoiceSettingsCache();
       return true;
     } catch (error) {
       console.error('Failed to save settings:', error);
@@ -458,32 +439,21 @@ export function PrintSettingsProvider({ children }: PrintSettingsProviderProps) 
       
       const allTypes = Object.values(DOCUMENT_TYPES);
       
-      // Update local state for all types
-      for (const docType of allTypes) {
-        const existing = state.byDocumentType[docType] || { document_type: docType, ...state.sharedDefaults };
-        const merged = { ...existing, ...fieldsToApply, document_type: docType };
-        dispatch({
-          type: 'SET_DOCUMENT_SETTINGS',
-          payload: { documentType: docType, settings: merged as PrintSettings },
-        });
-      }
-      
-      // Update shared defaults
-      dispatch({ type: 'SET_SHARED_DEFAULTS', payload: { ...state.sharedDefaults, ...fieldsToApply } });
-      
-      // Batch upsert to DB
-      const upsertPromises = allTypes.map(docType => {
-        const existing = state.byDocumentType[docType];
-        const merged = { ...state.sharedDefaults, ...existing, ...fieldsToApply, document_type: docType };
-        // ✅ إرسال جميع الحقول ديناميكياً بدلاً من القائمة اليدوية
-        const { created_at: _ca2, updated_at: _ua2, ...dbFields } = merged as any;
-        return supabase
-          .from('print_settings')
-          .upsert(dbFields, { onConflict: 'document_type' });
+      const rows = allTypes.map(docType => ({
+        ...state.sharedDefaults, ...state.byDocumentType[docType], ...fieldsToApply, document_type: docType,
+      }));
+      const payload = rows.map(row => {
+        const { created_at, updated_at, id, ...fields } = row as any;
+        return fields;
       });
-      
-      await Promise.all(upsertPromises);
-      
+      // One statement: either every document is saved or no document is changed.
+      const { error } = await supabase.from('print_settings').upsert(payload, { onConflict: 'document_type' });
+      if (error) throw error;
+      for (const row of rows) {
+        dispatch({ type: 'SET_DOCUMENT_SETTINGS', payload: { documentType: row.document_type, settings: row as PrintSettings } });
+      }
+      dispatch({ type: 'SET_SHARED_DEFAULTS', payload: { ...state.sharedDefaults, ...fieldsToApply } });
+
       // Clear caches
       try {
         const { clearPrintSettingsBridgeCache } = await import('@/utils/invoicePrintSettingsBridge');

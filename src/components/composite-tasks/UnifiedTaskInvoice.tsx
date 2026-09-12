@@ -2414,9 +2414,10 @@ export function UnifiedTaskInvoice({
     return raw || primaryColor;
   })();
   const headerSwap = mergedStyles?.headerSwap === true;
-  const logoSize = Math.min(140, Math.max(88, mergedStyles?.logoSize || shared.logoSize || 112));
+  const logoSize = mergedStyles?.logoSize ?? shared.logoSize ?? 112;
   const footerTextColor = mergedStyles?.footerTextColor || secondaryColor;
-  const unifiedStyles: PrintStyles = {
+  const unifiedStyles: UnifiedPrintStyles = {
+    ...mergedStyles,
     primaryColor,
     secondaryColor,
     headerBgColor,
@@ -2424,16 +2425,16 @@ export function UnifiedTaskInvoice({
     headerSwap,
     logoSize,
     headerFontSize: mergedStyles?.headerFontSize || 14,
-    invoiceTitleArFontSize: Math.min(22, mergedStyles?.invoiceTitleArFontSize || 20),
+    invoiceTitleArFontSize: mergedStyles?.invoiceTitleArFontSize ?? 20,
     invoiceTitleEnFontSize: mergedStyles?.invoiceTitleEnFontSize || 12,
     logoContainerWidth: mergedStyles?.logoContainerWidth,
     titleContainerWidth: mergedStyles?.titleContainerWidth,
     contactInfoFontSize: mergedStyles?.contactInfoFontSize || 10,
-    footerText: mergedStyles?.footerText || shared.footerText || 'شكراً لتعاملكم معنا',
+    footerText: mergedStyles?.footerText ?? shared.footerText ?? 'شكراً لتعاملكم معنا',
     footerAlignment: mergedStyles?.footerAlignment || 'center',
     footerTextColor,
     footerBgColor: mergedStyles?.footerBgColor || 'transparent',
-    footerPosition: mergedStyles?.footerPosition || 15,
+    footerPosition: mergedStyles?.footerPosition ?? 15,
     showFooter: mergedStyles?.showFooter !== false,
     showPageNumber: mergedStyles?.showPageNumber !== false,
   };

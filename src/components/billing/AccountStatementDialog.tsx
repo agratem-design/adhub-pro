@@ -225,6 +225,51 @@ export default function AccountStatementDialog({ open, onOpenChange, customerId,
         contractNumbers.includes(Number(pb.contract_number))
       );
 
+      // إثراء المهام المجمعة بأرقام إعادة التركيب والفرق المنفذة
+      const rawCompTasks = (compositeRes.data || []) as any[];
+      const compInstallIds = rawCompTasks.map((t: any) => t.installation_task_id).filter(Boolean);
+      const installMap: Record<string, any> = {};
+      if (compInstallIds.length > 0) {
+        const { data: itData, error: itErr } = await supabase
+          .from('installation_tasks')
+          .select('id, reinstallation_number, task_type, team_id, installation_teams(team_name)')
+          .in('id', compInstallIds);
+        if (itErr) {
+          const { data: fallbackData } = await supabase
+            .from('installation_tasks')
+            .select('id, reinstallation_number, task_type, team_id')
+            .in('id', compInstallIds);
+          const teamIds = (fallbackData || []).map((it: any) => it.team_id).filter(Boolean);
+          const teamsMap: Record<string, string> = {};
+          if (teamIds.length > 0) {
+            const { data: tData } = await supabase.from('installation_teams').select('id, team_name').in('id', teamIds);
+            (tData || []).forEach((t: any) => { teamsMap[t.id] = t.team_name; });
+          }
+          (fallbackData || []).forEach((it: any) => {
+            installMap[it.id] = {
+              ...it,
+              team_name: it.team_id && teamsMap[it.team_id] ? teamsMap[it.team_id] : null,
+            };
+          });
+        } else {
+          (itData || []).forEach((it: any) => {
+            installMap[it.id] = {
+              ...it,
+              team_name: it.installation_teams?.team_name || null,
+            };
+          });
+        }
+      }
+      const enrichedCompTasks = rawCompTasks.map((t: any) => {
+        const it = t.installation_task_id ? installMap[t.installation_task_id] : null;
+        return {
+          ...t,
+          reinstallation_number: it?.reinstallation_number ?? t.reinstallation_number ?? null,
+          task_type: it?.task_type ?? t.task_type,
+          team_name: it?.team_name ?? t.team_name ?? null,
+        };
+      });
+
       setRawSources({
         contracts,
         allContracts: allContractsList,
@@ -233,7 +278,7 @@ export default function AccountStatementDialog({ open, onOpenChange, customerId,
         printedInvoices: printedRes.data || [],
         purchaseInvoices: purchaseRes.data || [],
         generalDiscounts: discountsRes.data || [],
-        compositeTasks: compositeRes.data || [],
+        compositeTasks: enrichedCompTasks,
         printTasks: printTasksRes.data || [],
         cutoutTasks: cutoutTasksRes.data || [],
         pausedBillboards: pausedList,

@@ -1,3 +1,5 @@
+import { readablePrintColor } from '@/lib/printColorContrast';
+import { applyOfficialInvoiceTemplate, OFFICIAL_INVOICE_TEMPLATE } from '@/lib/officialInvoiceTemplate';
 /**
  * جسر بين نظام print_settings (صفحة تصميم الطباعة) ونظام invoice_templates (الفواتير)
  * يسمح لصفحة تصميم الطباعة بالتحكم الكامل في مظهر الفواتير
@@ -54,13 +56,16 @@ export async function fetchPrintSettingsForInvoice(invoiceType: InvoiceTemplateT
     const { data, error } = await supabase
       .from('print_settings')
       .select('*')
-      .eq('document_type', documentType)
-      .single();
+      .in('document_type', [...new Set([documentType, OFFICIAL_INVOICE_TEMPLATE])]);
 
     if (error || !data) return null;
 
     // تحويل أسماء الحقول من print_settings إلى صيغة الفواتير
-    const mapped = mapPrintSettingsToInvoiceStyles(data);
+    const document = data.find(row => row.document_type === documentType);
+    const official = data.find(row => row.document_type === OFFICIAL_INVOICE_TEMPLATE);
+    const mapped = mapPrintSettingsToInvoiceStyles(applyOfficialInvoiceTemplate(
+      { ...document, document_type: documentType } as any, official as any,
+    ));
     printSettingsCache[documentType] = mapped;
     printSettingsCacheTime = Date.now();
     return mapped;
@@ -72,7 +77,7 @@ export async function fetchPrintSettingsForInvoice(invoiceType: InvoiceTemplateT
 /**
  * تحويل حقول print_settings إلى الصيغة المستخدمة في getMergedInvoiceStyles
  */
-function mapPrintSettingsToInvoiceStyles(ps: any): Record<string, any> {
+export function mapPrintSettingsToInvoiceStyles(ps: any): Record<string, any> {
   const result: Record<string, any> = {};
 
   // بيانات الشركة - دائماً تُنسخ (حتى لو فارغة)
@@ -112,7 +117,7 @@ function mapPrintSettingsToInvoiceStyles(ps: any): Record<string, any> {
   // ألوان الجدول
   result.tableBorderColor = ps.table_border_color || '#e5e5e5';
   result.tableHeaderBgColor = ps.table_header_bg_color || '#D4AF37';
-  result.tableHeaderTextColor = ps.table_header_text_color || '#ffffff';
+  result.tableHeaderTextColor = readablePrintColor(result.tableHeaderBgColor, ps.table_header_text_color || '#ffffff');
   result.tableRowEvenColor = ps.table_row_even_color || '#f8f9fa';
   result.tableRowOddColor = ps.table_row_odd_color || '#ffffff';
   result.tableTextColor = ps.table_text_color || '#000000';
@@ -138,7 +143,7 @@ function mapPrintSettingsToInvoiceStyles(ps: any): Record<string, any> {
 
   // ألوان الإجماليات
   result.totalBgColor = ps.summary_bg_color || ps.primary_color || '#D4AF37';
-  result.totalTextColor = ps.summary_text_color || '#ffffff';
+  result.totalTextColor = readablePrintColor(result.totalBgColor, ps.summary_text_color || '#ffffff');
   result.subtotalBgColor = ps.totals_box_bg_color || '#f8f9fa';
   result.subtotalTextColor = ps.totals_box_text_color || '#333333';
   result.totalBorderColor = ps.totals_box_border_color || ps.primary_color || '#D4AF37';
@@ -156,7 +161,7 @@ function mapPrintSettingsToInvoiceStyles(ps: any): Record<string, any> {
   result.statValueFontSize = ps.stat_value_font_size || 28;
 
   // الفوتر
-  result.footerText = ps.footer_text || 'شكراً لتعاملكم معنا';
+  result.footerText = ps.footer_text ?? 'شكراً لتعاملكم معنا';
   result.footerAlignment = ps.footer_alignment || 'center';
   result.footerTextColor = ps.footer_text_color || '#666666';
   result.footerBgColor = ps.footer_bg_color || 'transparent';
@@ -170,7 +175,7 @@ function mapPrintSettingsToInvoiceStyles(ps: any): Record<string, any> {
   result.backgroundScale = ps.background_scale ?? 100;
 
   // المسافات
-  result.headerMarginBottom = ps.header_margin_bottom || 20;
+  result.headerMarginBottom = ps.header_margin_bottom ?? 20;
   result.pageMarginTop = ps.page_margin_top || 15;
   result.pageMarginBottom = ps.page_margin_bottom || 15;
   result.pageMarginLeft = ps.page_margin_left || 15;

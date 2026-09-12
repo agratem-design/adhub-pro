@@ -1,3 +1,4 @@
+import { unifiedHeaderHtml, unifiedFooterHtml, unifiedHeaderFooterCss } from './unifiedInvoiceBase';
 /**
  * Generate Measurements-Style HTML for Print
  * توليد HTML بنمط المقاسات للطباعة
@@ -286,6 +287,8 @@ export const generateMeasurementsCSS = (config: PrintConfig): string => {
     }
     
     .measurements-container {
+      display: flex;
+      flex-direction: column;
       width: ${page.width};
       max-width: ${page.width};
       min-height: ${page.minHeight};
@@ -296,6 +299,8 @@ export const generateMeasurementsCSS = (config: PrintConfig): string => {
       overflow: hidden;
     }
     
+    .measurements-container > .u-footer { margin-top: auto; padding-top: 10px; }
+
     /* Header Styles - Base */
     .measurements-header {
       display: flex;
@@ -671,13 +676,25 @@ const generatePaymentDetailsTable = (
 export const generateMeasurementsHTML = (options: MeasurementsHTMLOptions): string => {
   const { config, documentData, partyData, columns, rows, totals, totalsTitle, notes, statisticsCards, paymentDetailsTable, customHeaderHtml, additionalContent, headerSwap } = options;
 
-  const css = generateMeasurementsCSS(config);
-  const headerHTML = generateHeader(config, documentData, headerSwap);
+  const styles = config.officialStyles;
+  const css = generateMeasurementsCSS(config) + (styles ? unifiedHeaderFooterCss(styles) : '');
+  const metaLinesHtml = [
+    ...(documentData.date ? [{ label: 'التاريخ', value: documentData.date }] : []),
+    ...(documentData.documentNumber ? [{ label: documentData.documentNumberLabel || 'رقم المستند', value: documentData.documentNumber }] : []),
+    ...(documentData.additionalInfo || []),
+  ].map(info => `<div><span>${info.label}</span><strong>${info.value}</strong></div>`).join('');
+  const headerHTML = styles ? (config.header.enabled ? unifiedHeaderHtml({
+    styles: { ...styles, headerSwap: headerSwap ?? styles.headerSwap },
+    fullLogoUrl: config.header.logo.url,
+    titleAr: documentData.title || config.header.title.text,
+    titleEn: styles.invoiceTitleEn,
+    metaLinesHtml,
+  }) : '') : generateHeader(config, documentData, headerSwap);
   const partyHTML = generatePartySection(config, partyData, statisticsCards);
   const paymentDetailsHTML = generatePaymentDetailsTable(config, paymentDetailsTable);
   const tableHTML = generateTable(config, columns, rows, totals, totalsTitle);
   const notesHTML = generateNotes(config, notes);
-  const footerHTML = generateFooter(config);
+  const footerHTML = styles ? unifiedFooterHtml(styles) : generateFooter(config);
 
   return `
     <!DOCTYPE html>

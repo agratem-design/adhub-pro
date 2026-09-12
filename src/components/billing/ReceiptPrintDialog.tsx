@@ -8,6 +8,7 @@ import { showPrintPreview } from '@/components/print/PrintPreviewDialog';
 import { getMergedInvoiceStylesAsync, hexToRgba } from '@/hooks/useInvoiceSettingsSync';
 import { unifiedHeaderFooterCss, unifiedHeaderHtml, unifiedFooterHtml, formatDateForPrint } from '@/lib/unifiedInvoiceBase';
 import { numberToArabicWords } from '@/lib/printUtils';
+import { compositeTaskLabel } from '@/lib/compositeTaskLabel';
 interface ReceiptPrintDialogProps {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -253,15 +254,37 @@ export default function ReceiptPrintDialog({ open, onOpenChange, payment, custom
       const isPrintedInvoicePayment = !!(payment as any).printed_invoice_id;
       
       // جلب بيانات المهمة المجمعة
-      let compositeTaskInfo: { task_type?: string; customer_total?: number } | null = null;
+      let compositeTaskInfo: any = null;
       if (isCompositeTaskPayment) {
         try {
           const { data } = await supabase
             .from('composite_tasks')
-            .select('task_type, customer_total, contract_id')
+            .select('task_type, customer_total, contract_id, installation_task_id, task_number, print_task_id, cutout_task_id')
             .eq('id', (payment as any).composite_task_id)
             .single();
           compositeTaskInfo = data;
+
+          if (data?.installation_task_id) {
+            const { data: it } = await supabase
+              .from('installation_tasks')
+              .select('id, task_type, reinstallation_number')
+              .eq('id', data.installation_task_id)
+              .single();
+            if (it) {
+              compositeTaskInfo.reinstallation_number = it.reinstallation_number;
+              compositeTaskInfo.task_type = it.task_type || compositeTaskInfo.task_type;
+            }
+          }
+          if (data?.contract_id) {
+            const { data: c } = await supabase
+              .from('Contract')
+              .select('"Ad Type"')
+              .eq('Contract_Number', data.contract_id)
+              .single();
+            if (c) {
+              compositeTaskInfo.ad_type = c['Ad Type'];
+            }
+          }
         } catch (e) {
           console.error('Error fetching composite task:', e);
         }
@@ -320,13 +343,24 @@ export default function ReceiptPrintDialog({ open, onOpenChange, payment, custom
       const getPaymentDescription = () => {
         if (isDistributedPayment) return `دفعة موزعة على ${distributedContracts.length} عقود`;
         if (isCompositeTaskPayment && compositeTaskInfo) {
-          const taskTypeLabels: { [key: string]: string } = {
-            'طباعة_تركيب': 'مهمة طباعة وتركيب',
-            'طباعة_قص_تركيب': 'مهمة طباعة وقص وتركيب',
-            'installation': 'مهمة تركيب',
-            'print': 'مهمة طباعة'
-          };
-          return taskTypeLabels[compositeTaskInfo.task_type || ''] || 'مهمة مجمعة';
+          const components: string[] = [];
+          if (compositeTaskInfo.print_task_id) components.push('طباعة');
+          if (compositeTaskInfo.cutout_task_id) components.push('قص');
+          if (compositeTaskInfo.installation_task_id) components.push('تركيب');
+          const taskComponents = components.length > 0 ? components.join(' + ') : 'مهمة مجمعة';
+
+          const label = compositeTaskLabel({
+            id: (payment as any).composite_task_id,
+            task_number: compositeTaskInfo.task_number,
+            contract_id: compositeTaskInfo.contract_id,
+            task_type: compositeTaskInfo.task_type,
+            reinstallation_number: compositeTaskInfo.reinstallation_number,
+            installation_task_id: compositeTaskInfo.installation_task_id,
+          });
+
+          const rawAdType = compositeTaskInfo.ad_type ? String(compositeTaskInfo.ad_type).trim() : '';
+          const desc = rawAdType && rawAdType !== 'لوحة إعلانية' ? `${rawAdType} (${taskComponents})` : taskComponents;
+          return `${label} — ${desc}`;
         }
         if (isSalesInvoicePayment && salesInvoiceInfo) {
           return `فاتورة مبيعات${salesInvoiceInfo.invoice_number ? ` رقم ${salesInvoiceInfo.invoice_number}` : ''}${salesInvoiceInfo.notes ? ` - ${salesInvoiceInfo.notes}` : ''}`;

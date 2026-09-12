@@ -18,9 +18,24 @@ export function DistributionReview({ amount, fees, items, employees, custody, ex
     <div className="grid gap-4 md:grid-cols-2">
       <section className="rounded-2xl border bg-card p-4 sm:p-5 space-y-3">
         <h3 className="font-bold flex items-center gap-2"><FileText className="h-4 w-4 text-primary" />تسوية حساب العميل</h3>
-        <p className="text-sm text-muted-foreground">تُخصم هذه القيم من مديونية العميل.</p>
-        {selected.map(item => <div key={`${item.type}:${item.id}`} className="flex justify-between gap-4 text-sm border-b py-2"><span>{item.displayName}</span><strong className="shrink-0 tabular-nums">{format(item.allocatedAmount)}</strong></div>)}
-        {credit > 0 && <div className="flex justify-between text-sm py-2"><span>رصيد حساب غير موزع</span><strong>{format(credit)}</strong></div>}
+        {selected.map(item => (
+          <div key={`${item.type}:${item.id}`} className="flex justify-between items-center gap-4 text-sm border-b py-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="truncate">{item.displayName}</span>
+              {item.code && (
+                <span className="text-[10px] text-muted-foreground font-mono bg-muted/80 px-1.5 py-0.5 rounded shrink-0">
+                  {item.code}
+                </span>
+              )}
+              {item.adType && item.adType !== 'غير محدد' && (
+                <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded font-medium shrink-0">
+                  {item.adType}
+                </span>
+              )}
+            </div>
+            <strong className="shrink-0 tabular-nums">{format(item.allocatedAmount)}</strong>
+          </div>
+        ))}
       </section>
       <section className="rounded-2xl border bg-card p-4 sm:p-5 space-y-3">
         <h3 className="font-bold flex items-center gap-2"><Wallet className="h-4 w-4 text-primary" />أوجه صرف الأموال المستلمة</h3>

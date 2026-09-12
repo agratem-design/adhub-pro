@@ -251,6 +251,10 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
     loaded: false,
   });
 
+  const isFirstInstallation = primaryTask?.task_type === 'new_installation';
+  const isInstallFreeByContract = isFirstInstallation && (contractInclusion.loaded ? contractInclusion.includeInstallation : true);
+  const isPrintFreeByContract = isFirstInstallation && (contractInclusion.loaded ? contractInclusion.includePrint : false);
+
   // Batch pricing helpers
   const [batchPriceValue, setBatchPriceValue] = useState<number>(0);
   const [batchPricingMode, setBatchPricingMode] = useState<'piece' | 'meter'>('piece');
@@ -333,6 +337,9 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
 
       // 3. Fetch Installation Items
       let loadedBillboardIds: number[] = [];
+      let fetchedInstallItems: any[] = [];
+      let fetchedBillboardsData: any[] = [];
+      const isTaskRe = (primaryTask as any)?.task_type === 'reinstallation';
       if (allInstallIds.length > 0) {
         const { data: installItems } = await supabase
           .from('installation_task_items')
@@ -341,6 +348,7 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
           .neq('status', 'replaced');
 
         if (installItems?.length) {
+          fetchedInstallItems = installItems;
           const itemIds = installItems.map(i => i.id);
           const { data: photoHistory } = await supabase
             .from('installation_photo_history')
@@ -354,10 +362,9 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
           });
 
           const itemsWithTeams: TaskItem[] = (installItems as any[]).map(item => {
-            const autoIterations = Math.max(
-              item.reinstall_count || 0,
-              maxHistoryByItem[item.id] || (item.replacement_status === 'reinstalled' ? 2 : 1)
-            );
+            const autoIterations = isTaskRe
+              ? Math.max(item.reinstall_count || 0, maxHistoryByItem[item.id] || (item.replacement_status === 'reinstalled' ? 2 : 1))
+              : (item.reinstall_count || 0);
             return {
               ...item,
               reinstall_count: autoIterations,
@@ -385,6 +392,7 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
             .in('ID', loadedBillboardIds);
 
           if (billboardsData) {
+            fetchedBillboardsData = billboardsData;
             const bMap: Record<number, Billboard> = {};
             const pMap: Record<number, number> = {};
             billboardsData.forEach((b: any) => {
@@ -461,6 +469,73 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
         setCostAllocation({ ...createDefaultCostAllocation(), ...(primaryTask as any).cost_allocation });
       }
 
+      // 7. Load & Restore pricing mode, rates, and inputs
+      const loadedPricingConfig = (primaryTask as any)?.cost_allocation?.pricing_config;
+      let hasMeterInItems = false;
+      let detectedMeterPrice = 0;
+      const inferredInputs: Record<string, number> = {};
+
+      if (fetchedInstallItems.length > 0) {
+        hasMeterInItems = fetchedInstallItems.some((i: any) => i.pricing_type === 'meter');
+        const firstMeter = fetchedInstallItems.find((i: any) => i.pricing_type === 'meter' && Number(i.price_per_meter) > 0);
+        if (firstMeter) {
+          detectedMeterPrice = Number(firstMeter.price_per_meter);
+        }
+
+        fetchedInstallItems.forEach((item: any) => {
+          const bb = fetchedBillboardsData.find((b: any) => b.ID === item.billboard_id);
+          if (bb) {
+            const size = bb.Size || 'غير محدد';
+            const type = bb.billboard_type || bb.Billboard_Type || bb.type || 'برجية';
+            const key = `${size}__${type}`;
+            const tKey = `type__${type}`;
+
+            if (item.pricing_type === 'meter' && Number(item.price_per_meter) > 0) {
+              inferredInputs[tKey] = Number(item.price_per_meter);
+            } else if (Number(item.customer_installation_cost) > 0 || Number(item.customer_reinstall_cost) > 0) {
+              const totalFaces = bb.Faces_Count || 2;
+              const facesToInstall = item.faces_to_install || totalFaces;
+              const multiplier = totalFaces > 0 ? (facesToInstall / totalFaces) : 1;
+              const cost = Number(item.customer_installation_cost) || Number(item.customer_reinstall_cost) || 0;
+              const unitPrice = Math.round(cost / (multiplier || 1));
+              if (unitPrice > 0 && !inferredInputs[key]) {
+                inferredInputs[key] = unitPrice;
+              }
+            }
+          }
+        });
+      }
+
+      let taskDefaultPricingType: string | null = null;
+      let taskDefaultPricePerMeter = 0;
+      if (allInstallIds.length > 0) {
+        const { data: itData } = await supabase
+          .from('installation_tasks')
+          .select('default_pricing_type, default_price_per_meter')
+          .in('id', allInstallIds);
+        if (itData && itData.length > 0) {
+          const firstIt = itData[0];
+          taskDefaultPricingType = firstIt.default_pricing_type;
+          taskDefaultPricePerMeter = Number(firstIt.default_price_per_meter) || 0;
+        }
+      }
+
+      if (loadedPricingConfig) {
+        setBatchPricingMode(loadedPricingConfig.mode === 'meter' ? 'meter' : 'piece');
+        setBatchPriceValue(Number(loadedPricingConfig.batchPriceValue) || detectedMeterPrice || taskDefaultPricePerMeter || 0);
+        setGroupPriceInputs(loadedPricingConfig.groupPriceInputs && Object.keys(loadedPricingConfig.groupPriceInputs).length > 0
+          ? loadedPricingConfig.groupPriceInputs
+          : inferredInputs
+        );
+      } else if (taskDefaultPricingType === 'meter' || hasMeterInItems) {
+        setBatchPricingMode('meter');
+        setBatchPriceValue(detectedMeterPrice || taskDefaultPricePerMeter || 0);
+        setGroupPriceInputs(inferredInputs);
+      } else {
+        setBatchPricingMode('piece');
+        setGroupPriceInputs(inferredInputs);
+      }
+
     } catch (error) {
       console.error('Error loading task costs data:', error);
       toast.error('حدث خطأ أثناء تحميل بيانات التكاليف');
@@ -496,7 +571,7 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
         billboard: bb,
       });
 
-      const isTaskRe = (primaryTask as any)?.task_type === 'reinstallation' || (editingTask as any)?.task_type === 'reinstallation';
+      const isTaskRe = (primaryTask as any)?.task_type === 'reinstallation';
       const isReinstalled = isTaskRe && (item.reinstall_count || 0) > 0;
       const iterationsCount = isReinstalled ? Math.max(1, item.reinstall_count || 1) : 1;
       const itemTotalArea = singleFaceArea * faces * iterationsCount;
@@ -623,11 +698,12 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
   const handleUpdateItemPrice = (itemId: string, field: 'customerCost' | 'companyCost', value: number) => {
     setTaskItems(prev => prev.map(item => {
       if (item.id !== itemId) return item;
-      const isRe = (item.reinstall_count || 0) > 0;
       if (field === 'customerCost') {
-        return isRe
-          ? { ...item, customer_reinstall_cost: value }
-          : { ...item, customer_installation_cost: value };
+        return {
+          ...item,
+          customer_installation_cost: value,
+          customer_reinstall_cost: value
+        };
       } else {
         return { ...item, company_installation_cost: value };
       }
@@ -805,12 +881,100 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
         newPrice = Math.round(priceVal * faceMultiplier * iterationsCount);
       }
 
-      return isRe
-        ? { ...item, customer_reinstall_cost: newPrice }
-        : { ...item, customer_installation_cost: newPrice };
+      return {
+        ...item,
+        customer_installation_cost: newPrice,
+        customer_reinstall_cost: newPrice,
+        pricing_type: mode,
+        price_per_meter: mode === 'meter' ? priceVal : 0,
+      };
     }));
 
     toast.success(`تم تطبيق السعر (${priceVal} ${mode === 'meter' ? 'د.ل/م²' : 'د.ل'}) على ${groupLabel}`);
+  };
+
+  // تطبيق جميع أسعار المقاسات بالقطعة دفعة واحدة
+  const handleApplyAllPiecePrices = () => {
+    let appliedCount = 0;
+    setTaskItems(prev => {
+      let nextItems = [...prev];
+      sizeAndTypeGroups.forEach(grp => {
+        const priceVal = groupPriceInputs[grp.key];
+        if (priceVal && priceVal > 0) {
+          const idSet = new Set(grp.itemIds);
+          nextItems = nextItems.map(item => {
+            if (!idSet.has(item.id)) return item;
+            const isTaskRe = (primaryTask as any)?.task_type === 'reinstallation';
+            const isRe = isTaskRe && (item.reinstall_count || 0) > 0;
+            const iterationsCount = isRe ? Math.max(1, item.reinstall_count || 1) : 1;
+            const bb = billboards[item.billboard_id];
+            const totalFaces = bb?.Faces_Count || 2;
+            const facesToInstall = item.faces_to_install || totalFaces;
+            const faceMultiplier = totalFaces > 0 ? (facesToInstall / totalFaces) : 1;
+            const newPrice = Math.round(priceVal * faceMultiplier * iterationsCount);
+            return {
+              ...item,
+              customer_installation_cost: newPrice,
+              customer_reinstall_cost: newPrice,
+              pricing_type: 'piece' as const,
+              price_per_meter: 0,
+            };
+          });
+          appliedCount++;
+        }
+      });
+      return nextItems;
+    });
+
+    if (appliedCount > 0) {
+      toast.success(`تم تطبيق أسعار ${appliedCount} مقاسات بالقطعة بنجاح`);
+    } else {
+      toast.error('يرجى إدخال سعر واحد على الأقل للمقاسات قبل التطبيق');
+    }
+  };
+
+  // تطبيق أسعار المتر المخصصة لجميع الأنواع دفعة واحدة
+  const handleApplyAllTypeMeterPrices = () => {
+    let appliedCount = 0;
+    setTaskItems(prev => {
+      let nextItems = [...prev];
+      billboardTypeGroups.forEach(tGrp => {
+        const tKey = `type__${tGrp.type}`;
+        const priceVal = groupPriceInputs[tKey];
+        if (priceVal && priceVal > 0) {
+          const idSet = new Set(tGrp.itemIds);
+          nextItems = nextItems.map(item => {
+            if (!idSet.has(item.id)) return item;
+            const isTaskRe = (primaryTask as any)?.task_type === 'reinstallation';
+            const isRe = isTaskRe && (item.reinstall_count || 0) > 0;
+            const iterationsCount = isRe ? Math.max(1, item.reinstall_count || 1) : 1;
+            const bb = billboards[item.billboard_id];
+            const sizeName = bb?.Size || 'غير محدد';
+            const area = calculateEnhancedCompositeAreaFromSize(sizeName, sizesMap);
+            const faces = resolveInstallationFacesCount({
+              faces_to_install: item.faces_to_install,
+              billboard: bb,
+            });
+            const newPrice = Math.round(priceVal * area * faces * iterationsCount);
+            return {
+              ...item,
+              customer_installation_cost: newPrice,
+              customer_reinstall_cost: newPrice,
+              pricing_type: 'meter' as const,
+              price_per_meter: priceVal,
+            };
+          });
+          appliedCount++;
+        }
+      });
+      return nextItems;
+    });
+
+    if (appliedCount > 0) {
+      toast.success(`تم تطبيق أسعار المتر لـ ${appliedCount} أنواع بنجاح`);
+    } else {
+      toast.error('يرجى إدخال سعر المتر لنوع واحد على الأقل قبل التطبيق');
+    }
   };
 
   // Batch Pricing Handlers
@@ -820,6 +984,9 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
       return;
     }
     setTaskItems(prev => prev.map(item => {
+      if (selectedTeamFilter !== 'all' && item.task_id !== selectedTeamFilter && item.teamName !== selectedTeamFilter) {
+        return item;
+      }
       const isTaskRe = (primaryTask as any)?.task_type === 'reinstallation';
       const isRe = isTaskRe && (item.reinstall_count || 0) > 0;
       const iterationsCount = isRe ? Math.max(1, item.reinstall_count || 1) : 1;
@@ -834,11 +1001,15 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
         });
         newPrice = Math.round(batchPriceValue * area * faces * iterationsCount);
       }
-      return isRe
-        ? { ...item, customer_reinstall_cost: newPrice }
-        : { ...item, customer_installation_cost: newPrice };
+      return {
+        ...item,
+        customer_installation_cost: newPrice,
+        customer_reinstall_cost: newPrice,
+        pricing_type: 'meter' as const,
+        price_per_meter: batchPriceValue,
+      };
     }));
-    toast.success(`تم تطبيق السعر (${batchPriceValue} ${batchPricingMode === 'meter' ? 'د.ل/م²' : 'د.ل'}) على جميع اللوحات`);
+    toast.success(`تم تطبيق سعر المتر (${batchPriceValue} د.ل/م²) على ${selectedTeamFilter === 'all' ? 'جميع اللوحات' : 'لوحات الفريق المحدد'}`);
   };
 
   const handleSetAllBillboardsFree = () => {
@@ -868,14 +1039,70 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
     const saveToastId = toast.loading('جاري حفظ التكاليف والبيانات...');
 
     try {
+      // 0. Auto-apply any pending entered quick pricing before saving
+      let effectiveItems = [...taskItems];
+      if (batchPricingMode === 'meter' && batchPriceValue > 0) {
+        effectiveItems = effectiveItems.map(item => {
+          if (selectedTeamFilter !== 'all' && item.task_id !== selectedTeamFilter && item.teamName !== selectedTeamFilter) {
+            return item;
+          }
+          if (item.pricing_type !== 'meter' || !item.price_per_meter || item.price_per_meter === 0) {
+            const isTaskRe = (primaryTask as any)?.task_type === 'reinstallation';
+            const isRe = isTaskRe && (item.reinstall_count || 0) > 0;
+            const iterationsCount = isRe ? Math.max(1, item.reinstall_count || 1) : 1;
+            const bb = billboards[item.billboard_id];
+            const sizeName = bb?.Size || 'غير محدد';
+            const area = calculateEnhancedCompositeAreaFromSize(sizeName, sizesMap);
+            const faces = resolveInstallationFacesCount({
+              faces_to_install: item.faces_to_install,
+              billboard: bb,
+            });
+            const newPrice = Math.round(batchPriceValue * area * faces * iterationsCount);
+            return {
+              ...item,
+              customer_installation_cost: newPrice,
+              customer_reinstall_cost: newPrice,
+              pricing_type: 'meter' as const,
+              price_per_meter: batchPriceValue,
+            };
+          }
+          return item;
+        });
+      } else if (batchPricingMode === 'piece' && Object.values(groupPriceInputs).some(v => v > 0)) {
+        sizeAndTypeGroups.forEach(grp => {
+          const priceVal = groupPriceInputs[grp.key];
+          if (priceVal && priceVal > 0) {
+            const idSet = new Set(grp.itemIds);
+            effectiveItems = effectiveItems.map(item => {
+              if (!idSet.has(item.id)) return item;
+              const isTaskRe = (primaryTask as any)?.task_type === 'reinstallation';
+              const isRe = isTaskRe && (item.reinstall_count || 0) > 0;
+              const iterationsCount = isRe ? Math.max(1, item.reinstall_count || 1) : 1;
+              const bb = billboards[item.billboard_id];
+              const totalFaces = bb?.Faces_Count || 2;
+              const facesToInstall = item.faces_to_install || totalFaces;
+              const faceMultiplier = totalFaces > 0 ? (facesToInstall / totalFaces) : 1;
+              const newPrice = Math.round(priceVal * faceMultiplier * iterationsCount);
+              return {
+                ...item,
+                customer_installation_cost: newPrice,
+                customer_reinstall_cost: newPrice,
+                pricing_type: 'piece' as const,
+                price_per_meter: 0,
+              };
+            });
+          }
+        });
+      }
+
       // 1. Update installation_task_items in database
-      if (taskItems.length > 0) {
-        for (const item of taskItems) {
-          const isRe = (item.reinstall_count || 0) > 0;
+      if (effectiveItems.length > 0) {
+        for (const item of effectiveItems) {
+          const finalCustCost = item.customer_installation_cost ?? item.customer_reinstall_cost ?? 0;
           await supabase.from('installation_task_items').update({
-            customer_installation_cost: isRe ? (item.customer_reinstall_cost || item.customer_installation_cost) : item.customer_installation_cost,
+            customer_installation_cost: finalCustCost,
             customer_original_install_cost: item.customer_original_install_cost || 0,
-            customer_reinstall_cost: item.customer_reinstall_cost || item.customer_installation_cost || 0,
+            customer_reinstall_cost: finalCustCost,
             reinstall_count: item.reinstall_count ?? null,
             company_installation_cost: item.company_installation_cost,
             additional_cost: item.additional_cost || null,
@@ -891,9 +1118,21 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
             cutout_company_cost: item.cutout_company_cost || null,
             cutout_customer_cost: item.cutout_customer_cost || null,
             cutout_workshop_id: item.cutout_workshop_id || null,
-            cutout_notes: item.cutout_notes || null
+            cutout_notes: item.cutout_notes || null,
+            pricing_type: item.pricing_type || batchPricingMode || 'piece',
+            price_per_meter: item.pricing_type === 'meter' ? (item.price_per_meter || batchPriceValue || 0) : 0,
           }).eq('id', item.id);
         }
+      }
+
+      // 1.1 Update installation_tasks table default_pricing_type
+      const allInstallIds = allTasks.map(t => t.installation_task_id).filter(Boolean) as string[];
+      if (allInstallIds.length > 0) {
+        await supabase.from('installation_tasks').update({
+          default_pricing_type: batchPricingMode,
+          default_price_per_meter: batchPricingMode === 'meter' ? (batchPriceValue || 0) : 0,
+          updated_at: new Date().toISOString()
+        } as any).in('id', allInstallIds);
       }
 
       // 2. Handle Print Task Creation / Updating
@@ -981,12 +1220,11 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
       let primaryCompanyInstall = finalCompanyInstall;
       if (allTasks.length > 1) {
         for (const t of allTasks) {
-          const tItems = taskItems.filter(i => i.task_id === t.installation_task_id);
+          const tItems = effectiveItems.filter(i => i.task_id === t.installation_task_id);
           let tCustInstall = 0;
           let tCompInstall = 0;
           tItems.forEach(i => {
-            const isRe = (i.reinstall_count || 0) > 0;
-            tCustInstall += isRe ? ((i.customer_original_install_cost || 0) + (i.customer_reinstall_cost || i.customer_installation_cost || 0)) : (i.customer_installation_cost || 0);
+            tCustInstall += (i.customer_installation_cost || 0);
             tCompInstall += (i.company_installation_cost ?? installationPrices[i.billboard_id] ?? 0) + (i.company_additional_cost || 0);
           });
           const isPrimaryOperationTask = t.id === primaryTask.id;
@@ -1037,9 +1275,28 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
             await supabase.from('customer_payments').update({ amount: -tCustTot }).eq('printed_invoice_id', t.combined_invoice_id).eq('entry_type', 'invoice');
           }
         }
+      } else if (effectiveItems.length > 0) {
+        let recalcCustSum = 0;
+        let recalcCompSum = 0;
+        effectiveItems.forEach(i => {
+          recalcCustSum += (i.customer_installation_cost || 0) + (i.additional_cost || 0);
+          recalcCompSum += ((i.company_installation_cost ?? installationPrices[i.billboard_id] ?? 0) + (i.company_additional_cost || 0));
+        });
+        primaryCustomerInstall = recalcCustSum;
+        primaryCompanyInstall = recalcCompSum;
       }
 
-      // 4. Update Primary Task Costs
+      // 4. Update Primary Task Costs with pricing_config in cost_allocation
+      const updatedCostAllocation = {
+        ...costAllocation,
+        pricing_config: {
+          mode: batchPricingMode,
+          batchPriceValue: batchPriceValue || 0,
+          groupPriceInputs: groupPriceInputs || {},
+          updated_at: new Date().toISOString()
+        }
+      };
+
       await onSave({
         id: primaryTask.id,
         customer_installation_cost: primaryCustomerInstall,
@@ -1051,11 +1308,11 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
         discount_amount: discountAmount,
         discount_reason: discountReason.trim() || undefined,
         notes: notes.trim() || undefined,
-        cost_allocation: costAllocation
+        cost_allocation: updatedCostAllocation
       });
 
       toast.dismiss(saveToastId);
-      toast.success('تم حفظ وتحديث كافة التكاليف والطباعة بنجاح');
+      toast.success('تم حفظ وتحديث كافة التكاليف ونظام التسعير بنجاح');
       onOpenChange(false);
 
     } catch (err: any) {
@@ -1068,9 +1325,6 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
   };
 
   if (!primaryTask) return null;
-  const isFirstInstallation = primaryTask.task_type === 'new_installation';
-  const isInstallFreeByContract = isFirstInstallation && (contractInclusion.loaded ? contractInclusion.includeInstallation : true);
-  const isPrintFreeByContract = isFirstInstallation && (contractInclusion.loaded ? contractInclusion.includePrint : false);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -1267,9 +1521,28 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                 {/* Batch Control Toolbar */}
                 <div className="p-4 rounded-2xl bg-card/40 border border-border/25 space-y-3 shadow-xs" dir="rtl">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="h-4 w-4 text-amber-400 shrink-0" />
-                      <span className="text-xs font-black text-foreground">التسعير السريع والتطبيق الجماعي</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-amber-400 shrink-0" />
+                        <span className="text-xs font-black text-foreground">التسعير السريع والتطبيق الجماعي</span>
+                      </div>
+                      {/* Active / Saved Pricing System Badge */}
+                      {(() => {
+                        const hasMeter = taskItems.some(i => i.pricing_type === 'meter');
+                        const firstMeterVal = taskItems.find(i => i.pricing_type === 'meter' && (i.price_per_meter || 0) > 0)?.price_per_meter || batchPriceValue;
+                        if (hasMeter || batchPricingMode === 'meter') {
+                          return (
+                            <Badge variant="outline" className="text-[10px] font-bold bg-blue-500/10 text-blue-400 border-blue-500/30">
+                              النظام الحالي: بالمتر المربع {firstMeterVal ? `(${firstMeterVal} د.ل/م²)` : ''}
+                            </Badge>
+                          );
+                        }
+                        return (
+                          <Badge variant="outline" className="text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
+                            النظام الحالي: بالقطعة (مفصول حسب المقاس)
+                          </Badge>
+                        );
+                      })()}
                     </div>
 
                     {/* Team Filter */}
@@ -1348,7 +1621,7 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                           size="sm"
                           variant="ghost"
                           onClick={handleSetAllBillboardsFree}
-                          disabled={isFirstInstallation}
+                          disabled={isInstallFreeByContract}
                           className="h-8 px-3 text-xs font-bold text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 rounded-xl gap-1.5 shrink-0 cursor-pointer whitespace-nowrap"
                         >
                           <Gift className="h-3.5 w-3.5" />
@@ -1360,14 +1633,26 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                     {/* Section 1: By Piece Mode (Grouped & Separated by Size) */}
                     {batchPricingMode === 'piece' && (
                       <div className="p-3 bg-muted/20 border border-border/30 rounded-2xl space-y-2">
-                        <div className="flex items-center justify-between text-xs font-bold text-muted-foreground">
+                        <div className="flex items-center justify-between text-xs font-bold text-muted-foreground flex-wrap gap-2">
                           <span className="flex items-center gap-1.5 text-foreground">
                             <Box className="h-4 w-4 text-amber-400" />
                             <span>تطبيق السعر حسب المقاس والنوع (يُحسب الوجه الفردي بنصف سعر الوجهين تلقائياً):</span>
                           </span>
-                          <span className="text-[11px] text-muted-foreground">
-                            {sizeAndTypeGroups.length} مقاسات في هذه المهمة
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-muted-foreground">
+                              {sizeAndTypeGroups.length} مقاسات في هذه المهمة
+                            </span>
+                            <Button
+                              size="sm"
+                              type="button"
+                              onClick={handleApplyAllPiecePrices}
+                              disabled={isInstallFreeByContract || Object.values(groupPriceInputs).every(v => !v || v <= 0)}
+                              className="h-7 px-3 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black rounded-lg gap-1.5 shadow-xs cursor-pointer"
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                              <span>تطبيق جميع المقاسات للكل</span>
+                            </Button>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
@@ -1406,7 +1691,7 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                                   <Button
                                     size="sm"
                                     type="button"
-                                    disabled={!groupPriceInputs[grp.key] || isFirstInstallation}
+                                    disabled={!groupPriceInputs[grp.key] || isInstallFreeByContract}
                                     onClick={() => handleApplyPriceToGroup(grp.itemIds, groupPriceInputs[grp.key] || 0, 'piece', `مقاس ${grp.sizeName}`)}
                                     className="h-8 px-2.5 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black rounded-lg shrink-0 cursor-pointer shadow-xs"
                                   >
@@ -1443,59 +1728,74 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                             <Button
                               size="sm"
                               onClick={handleApplyBatchPricing}
-                              disabled={batchPriceValue <= 0 || isFirstInstallation}
+                              disabled={batchPriceValue <= 0 || isInstallFreeByContract}
                               className="h-9 px-4 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black rounded-xl gap-1.5 shrink-0 cursor-pointer whitespace-nowrap shadow-sm"
                             >
                               <Check className="h-3.5 w-3.5" />
-                              تطبيق سعر المتر على الكل
+                              تطبيق سعر المتر على {selectedTeamFilter === 'all' ? 'جميع اللوحات' : 'لوحات الفريق المحدد'}
                             </Button>
                           </div>
                         </div>
 
                         {/* Types meter pricing row if multiple types */}
                         {billboardTypeGroups.length > 1 && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 pt-2 border-t border-border/20">
-                            {billboardTypeGroups.map(tGrp => {
-                              const tKey = `type__${tGrp.type}`;
-                              const currentVal = groupPriceInputs[tKey] ?? '';
-                              return (
-                                <div
-                                  key={tKey}
-                                  className="flex items-center justify-between gap-2 p-2 rounded-xl bg-card/60 border border-border/25"
-                                >
-                                  <div className="min-w-0 flex-1">
-                                    <div className="font-bold text-xs text-foreground">
-                                      لوحات {tGrp.type}
+                          <div className="pt-2 border-t border-border/20 space-y-2">
+                            <div className="flex items-center justify-between text-xs font-bold text-muted-foreground flex-wrap gap-2">
+                              <span className="text-foreground">تسعير مخصص حسب نوع اللوحة:</span>
+                              <Button
+                                size="sm"
+                                type="button"
+                                onClick={handleApplyAllTypeMeterPrices}
+                                disabled={isInstallFreeByContract || Object.values(groupPriceInputs).every(v => !v || v <= 0)}
+                                className="h-7 px-3 text-xs font-bold bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-black rounded-lg gap-1.5 border border-amber-500/30 cursor-pointer shadow-xs"
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                                <span>تطبيق جميع أسعار الأنواع</span>
+                              </Button>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                              {billboardTypeGroups.map(tGrp => {
+                                const tKey = `type__${tGrp.type}`;
+                                const currentVal = groupPriceInputs[tKey] ?? '';
+                                return (
+                                  <div
+                                    key={tKey}
+                                    className="flex items-center justify-between gap-2 p-2 rounded-xl bg-card/60 border border-border/25"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <div className="font-bold text-xs text-foreground">
+                                        لوحات {tGrp.type}
+                                      </div>
+                                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                                        {tGrp.billboardCount} لوحة ({tGrp.totalArea.toFixed(1)} م²)
+                                      </div>
                                     </div>
-                                    <div className="text-[10px] text-muted-foreground mt-0.5">
-                                      {tGrp.billboardCount} لوحة ({tGrp.totalArea.toFixed(1)} م²)
-                                    </div>
-                                  </div>
 
-                                  <div className="flex items-center gap-1.5 shrink-0">
-                                    <Input
-                                      type="number"
-                                      placeholder="د.ل/م²"
-                                      value={currentVal}
-                                      onChange={e => setGroupPriceInputs(prev => ({
-                                        ...prev,
-                                        [tKey]: Number(e.target.value) || 0
-                                      }))}
-                                      className="h-8 w-20 text-xs font-bold text-center font-mono bg-background/80 border-border/30 rounded-lg p-1"
-                                    />
-                                    <Button
-                                      size="sm"
-                                      type="button"
-                                      disabled={!groupPriceInputs[tKey] || isFirstInstallation}
-                                      onClick={() => handleApplyPriceToGroup(tGrp.itemIds, groupPriceInputs[tKey] || 0, 'meter', `لوحات ${tGrp.type}`)}
-                                      className="h-8 px-2.5 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black rounded-lg shrink-0 cursor-pointer shadow-xs"
-                                    >
-                                      تطبيق
-                                    </Button>
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      <Input
+                                        type="number"
+                                        placeholder="د.ل/م²"
+                                        value={currentVal}
+                                        onChange={e => setGroupPriceInputs(prev => ({
+                                          ...prev,
+                                          [tKey]: Number(e.target.value) || 0
+                                        }))}
+                                        className="h-8 w-20 text-xs font-bold text-center font-mono bg-background/80 border-border/30 rounded-lg p-1"
+                                      />
+                                      <Button
+                                        size="sm"
+                                        type="button"
+                                        disabled={!groupPriceInputs[tKey] || isInstallFreeByContract}
+                                        onClick={() => handleApplyPriceToGroup(tGrp.itemIds, groupPriceInputs[tKey] || 0, 'meter', `لوحات ${tGrp.type}`)}
+                                        className="h-8 px-2.5 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-black rounded-lg shrink-0 cursor-pointer shadow-xs"
+                                      >
+                                        تطبيق
+                                      </Button>
+                                    </div>
                                   </div>
-                                </div>
-                              );
-                            })}
+                                );
+                              })}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1625,6 +1925,15 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                                     <span className="bg-amber-500/10 text-amber-300 border border-amber-500/20 px-1.5 py-0.5 rounded font-mono text-[10px]">
                                       {bb.Size}
                                     </span>
+                                    {item.pricing_type === 'meter' && item.price_per_meter ? (
+                                      <span className="bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 px-1.5 py-0.5 rounded text-[9px] font-bold" title="تسعير بالمتر المربع">
+                                        {item.price_per_meter} د.ل/م²
+                                      </span>
+                                    ) : item.pricing_type === 'piece' ? (
+                                      <span className="bg-blue-500/10 text-blue-300 border border-blue-500/25 px-1.5 py-0.5 rounded text-[9px] font-bold" title="تسعير بالقطعة">
+                                        بالقطعة
+                                      </span>
+                                    ) : null}
                                     {item.iterationsCount > 1 && (
                                       <span className="bg-orange-500/15 text-orange-400 border border-orange-500/30 px-1.5 py-0.5 rounded text-[9px] font-bold">
                                         تركيب {item.iterationsCount} مرات
@@ -1718,7 +2027,7 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                                   <QuickNumberStepper
                                     value={item.itemCustPrice}
                                     onChange={v => handleUpdateItemPrice(item.id, 'customerCost', v)}
-                                    disabled={isFirstInstallation}
+                                    disabled={isInstallFreeByContract}
                                     colorClass="text-emerald-400"
                                     step={10}
                                   />
@@ -1766,7 +2075,7 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                                     size="sm"
                                     variant="ghost"
                                     onClick={() => handleToggleItemFree(item.id)}
-                                    disabled={isFirstInstallation || item.itemCustPrice === 0}
+                                    disabled={isInstallFreeByContract || item.itemCustPrice === 0}
                                     className="h-7 px-2 text-[10px] font-bold text-rose-400 hover:bg-rose-500/10 rounded-lg"
                                     title="جعل هذه اللوحة مجانية"
                                   >
@@ -1889,6 +2198,15 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                                 <span className="text-[10px] font-black bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-md font-mono">
                                   {bb.Size}
                                 </span>
+                                {item.pricing_type === 'meter' && item.price_per_meter ? (
+                                  <span className="text-[9px] font-black bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-md" title="تسعير بالمتر المربع">
+                                    {item.price_per_meter} د.ل/م²
+                                  </span>
+                                ) : item.pricing_type === 'piece' ? (
+                                  <span className="text-[9px] font-black bg-blue-500/15 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-md" title="تسعير بالقطعة">
+                                    بالقطعة
+                                  </span>
+                                ) : null}
                                 <div className="inline-flex items-center gap-1 p-0.5 rounded-md bg-muted/40 border border-border/30">
                                   <button
                                     type="button"
@@ -1951,7 +2269,7 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                             size="sm"
                             variant="outline"
                             onClick={() => handleToggleItemFree(item.id)}
-                            disabled={isFirstInstallation || item.itemCustPrice === 0}
+                            disabled={isInstallFreeByContract || item.itemCustPrice === 0}
                             className="h-8 text-xs font-bold gap-1 rounded-xl border-border/30 hover:border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-400 text-muted-foreground shrink-0 cursor-pointer"
                           >
                             <Gift className="h-3.5 w-3.5 text-rose-400" />
@@ -1962,10 +2280,10 @@ export const EnhancedEditCompositeTaskCostsDialog: React.FC<EnhancedEditComposit
                         {/* Direct Pricing Steppers Row */}
                         <div className="mt-4 grid grid-cols-1 gap-3 border-t border-border/25 pt-4 sm:grid-cols-2">
                           <QuickNumberStepper
-                            label={isFirstInstallation ? "سعر الزبون (مقفل - تركيب جديد)" : "سعر الزبون للوحة (د.ل)"}
+                            label={isInstallFreeByContract ? "سعر الزبون (مجاني بالعقد)" : "سعر الزبون للوحة (د.ل)"}
                             value={item.itemCustPrice}
                             onChange={v => handleUpdateItemPrice(item.id, 'customerCost', v)}
-                            disabled={isFirstInstallation}
+                            disabled={isInstallFreeByContract}
                             colorClass="text-emerald-400"
                             step={10}
                             className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3"

@@ -1,3 +1,4 @@
+import { readablePrintColor } from './printColorContrast';
 /**
  * Unified Invoice Base - القاعدة الموحدة لجميع الفواتير
  * يستخدم fetchPrintSettingsForInvoice كمصدر وحيد للإعدادات
@@ -472,7 +473,7 @@ export function generateBaseCSS(t: ResolvedPrintStyles): string {
         size: A4;
         margin: 0;
         @bottom-center {
-          content: "صفحة " counter(page) " من " counter(pages);
+          content: ${t.showFooter !== false && t.showPageNumber !== false ? '"صفحة " counter(page) " من " counter(pages)' : 'none'};
           font-family: 'Cairo', 'Manrope', sans-serif;
           font-size: 10px;
           color: #666;
@@ -485,6 +486,7 @@ export function generateBaseCSS(t: ResolvedPrintStyles): string {
       .grand-total-row { background-color: ${t.totalBg} !important; }
       .page-number, .u-page-number { display: none !important; }
     }
+    ${unifiedHeaderFooterCss(t as UnifiedPrintStyles)}
   `;
 }
 
@@ -520,90 +522,13 @@ function buildCompanyInfo(t: ResolvedPrintStyles): string {
  */
 export function generateHeaderHTML(t: ResolvedPrintStyles, metaHtml: string): string {
   if (!t.showHeader) return '';
-
-  const logoBlock = t.showLogo ? `<div class="logo"><img src="${t.fullLogoUrl}" alt="Logo" onerror="this.style.display='none'"/></div>` : '';
-  const companyBlock = `
-    ${logoBlock}
-    ${buildCompanyInfo(t)}
-    ${buildContactInfo(t)}
-  `;
-  
-  const titleBlock = `
-    ${t.invoiceTitleAr ? `<div class="invoice-title-ar">${t.invoiceTitleAr}</div>` : ''}
-    <h1 class="invoice-title-en">${t.invoiceTitleEn}</h1>
-    <div class="invoice-meta">${metaHtml}</div>
-  `;
-
-  // ✅ Handle different header_style layouts
-  if (t.headerStyle === 'centered') {
-    return `
-    <div class="header" style="flex-direction:column;align-items:center;text-align:center;">
-      ${logoBlock}
-      ${buildCompanyInfo(t)}
-      ${t.invoiceTitleAr ? `<div class="invoice-title-ar" style="text-align:center;">${t.invoiceTitleAr}</div>` : ''}
-      <h1 class="invoice-title-en" style="text-align:center;">${t.invoiceTitleEn}</h1>
-      <div class="invoice-meta" style="text-align:center;">${metaHtml}</div>
-      ${buildContactInfo(t)}
-    </div>
-    `;
-  }
-
-  if (t.headerStyle === 'simple') {
-    return `
-    <div class="header" style="flex-direction:column;align-items:center;text-align:center;gap:6px;">
-      ${logoBlock}
-      ${t.showCompanyInfo && t.companyName ? `<div class="company-name" style="text-align:center;">${t.companyName}</div>` : ''}
-    </div>
-    `;
-  }
-
-  if (t.headerStyle === 'minimal') {
-    return `
-    <div class="header" style="flex-direction:row;align-items:center;gap:10px;padding-bottom:8px;">
-      ${t.showLogo ? `<div class="logo"><img src="${t.fullLogoUrl}" alt="Logo" style="height:24px;" onerror="this.style.display='none'"/></div>` : ''}
-      ${t.showCompanyInfo && t.companyName ? `<span class="company-name" style="font-size:12px;margin:0;">${t.companyName}</span>` : ''}
-      <span style="flex:1;"></span>
-      <span style="font-size:10px;color:#666;">
-        ${t.invoiceTitleAr || t.invoiceTitleEn}
-      </span>
-    </div>
-    `;
-  }
-
-  // 'classic' and 'modern' use the two-column layout
-  // 'modern' reverses the default order (logo left, title right)
-  const isModern = t.headerStyle === 'modern';
-  const effectiveSwap = isModern ? !t.headerSwap : t.headerSwap;
-
-  // RTL: first child in flex-row appears on the RIGHT visually.
-  // Default (swap=false): company/logo on RIGHT (first in RTL), title on LEFT
-  // Swapped (swap=true): title on RIGHT, company/logo on LEFT
-  const firstContent = effectiveSwap ? titleBlock : companyBlock;
-  const secondContent = effectiveSwap ? companyBlock : titleBlock;
-  const firstClass = effectiveSwap ? 'header-title-side' : 'header-company-side';
-  const secondClass = effectiveSwap ? 'header-company-side' : 'header-title-side';
-
-  // Title alignment
-  const titleOnRight = effectiveSwap;
-  const titleStyle = titleOnRight
-    ? 'align-items:flex-start;text-align:right;'
-    : 'align-items:flex-end;text-align:left;';
-
-  // Company side alignment: opposite of title
-  const companyStyle = titleOnRight
-    ? 'align-items:flex-end;text-align:left;'
-    : 'align-items:flex-start;text-align:right;';
-
-  return `
-  <div class="header">
-    <div class="${firstClass}" style="${firstClass === 'header-title-side' ? titleStyle : companyStyle}">
-      ${firstContent}
-    </div>
-    <div class="${secondClass}" style="${secondClass === 'header-title-side' ? titleStyle : companyStyle}">
-      ${secondContent}
-    </div>
-  </div>
-  `;
+  return unifiedHeaderHtml({
+    styles: t as UnifiedPrintStyles,
+    fullLogoUrl: t.fullLogoUrl,
+    metaLinesHtml: metaHtml,
+    titleAr: t.invoiceTitleAr,
+    titleEn: t.invoiceTitleEn,
+  });
 }
 
 /**
@@ -637,13 +562,7 @@ export function generateCustomerHTML(t: ResolvedPrintStyles, opts: {
  * Generate footer HTML
  */
 export function generateFooterHTML(t: ResolvedPrintStyles): string {
-  if (!t.showFooter) return '';
-  return `
-  <div class="footer">
-    <span>${t.footerText}</span>
-    ${t.showPageNumber ? '<span class="page-number">صفحة 1 من 1</span>' : ''}
-  </div>
-  `;
+  return unifiedFooterHtml(t as UnifiedPrintStyles);
 }
 
 /**
@@ -727,7 +646,7 @@ export interface UnifiedPrintStyles {
   logoPath?: string;
   logoSize?: number;
   logoPosition?: AlignmentOption;
-  headerAlignment?: AlignmentOption;
+  headerAlignment?: AlignmentOption | 'split';
   showLogo?: boolean;
   showContactInfo?: boolean;
   contactInfoFontSize?: number;
@@ -742,7 +661,7 @@ export interface UnifiedPrintStyles {
   showWebsite?: boolean;
   headerMarginBottom?: number;
   footerPosition?: number;
-  footerAlignment?: AlignmentOption;
+  footerAlignment?: AlignmentOption | string;
   footerText?: string;
   footerTextColor?: string;
   footerBgColor?: string;
@@ -770,7 +689,7 @@ export interface UnifiedPrintStyles {
   titleContainerWidth?: string;
 }
 
-const legacyFlexJustify = (a?: AlignmentOption) => (a === 'center' ? 'center' : a === 'left' ? 'flex-start' : 'flex-end');
+const legacyFlexJustify = (a?: string) => (a === 'center' ? 'center' : a === 'left' ? 'flex-start' : 'flex-end');
 
 export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
   const headerMarginBottom = styles.headerMarginBottom ?? 15;
@@ -781,21 +700,15 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
   const headerFontSize = styles.headerFontSize ?? 14;
   const titleArFontSize = styles.invoiceTitleArFontSize ?? 22;
   const titleEnFontSize = styles.invoiceTitleEnFontSize ?? 12;
-  let headerBgColor = styles.headerBgColor || 'transparent';
-  // Normalize legacy invalid black default to transparent (prevents black header background bug)
-  if (typeof headerBgColor === 'string' && /^#0{3,6}$/i.test(headerBgColor.trim())) {
-    headerBgColor = 'transparent';
-  }
-  const rawHeaderTextColor = styles.headerTextColor || 'inherit';
-  // Prevent white text on transparent/white background (contrast fix)
-  const headerTextColor = (headerBgColor === 'transparent' || headerBgColor === '#ffffff' || headerBgColor === '#fff')
-    && rawHeaderTextColor && /^#f[0-9a-f]{5}$/i.test(rawHeaderTextColor)
-    ? pc
-    : rawHeaderTextColor;
+  const headerBgColor = styles.headerBgColor || 'transparent';
+  const headerTextColor = readablePrintColor(
+    headerBgColor === 'transparent' ? '#fffdf8' : headerBgColor,
+    styles.headerTextColor || styles.primaryColor || '#3f3219',
+  );
   const logoContainerFlex = styles.logoContainerWidth ? `flex: 0 0 ${styles.logoContainerWidth};` : 'flex: 1;';
   const titleContainerFlex = styles.titleContainerWidth ? `flex: 0 0 ${styles.titleContainerWidth};` : 'flex: 1;';
   const resolvedHeaderBg = headerBgColor === 'transparent' ? '#fffdf8' : headerBgColor;
-  const resolvedLogoHeight = Math.min(86, Math.max(64, logoSize));
+  const resolvedLogoHeight = Math.min(200, Math.max(20, logoSize));
 
   return `
   .u-header {
@@ -813,6 +726,7 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
     background: ${resolvedHeaderBg} !important;
     color: ${headerTextColor};
     box-shadow: 0 3px 12px rgba(66, 51, 16, 0.06);
+    break-inside: avoid;
   }
   .u-invoice-info {
     direction: rtl;
@@ -820,7 +734,7 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
     min-width: 0;
   }
   .u-invoice-title {
-    font-size: ${Math.min(24, Math.max(18, titleArFontSize + 1))}px;
+    font-size: ${titleArFontSize}px;
     font-weight: bold;
     color: ${headerTextColor !== 'inherit' ? headerTextColor : pc};
     margin-bottom: 7px;
@@ -832,7 +746,7 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
     line-height: 1.3;
   }
   .u-invoice-subtitle {
-    font-size: ${titleArFontSize}px;
+    font-size: ${titleEnFontSize}px;
     color: ${sc};
     font-weight: bold;
     margin-bottom: 6px;
@@ -897,7 +811,7 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
   }
   .u-contact-info {
     font-size: ${styles.contactInfoFontSize ?? 10}px;
-    color: #666;
+    color: ${headerTextColor};
     line-height: 1.7;
     opacity: 0.8;
   }
@@ -920,7 +834,7 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
   @media print {
     @page {
       @bottom-center {
-        content: "صفحة " counter(page) " من " counter(pages);
+        content: ${styles.showFooter !== false && styles.showPageNumber !== false ? '"صفحة " counter(page) " من " counter(pages)' : 'none'};
         font-family: 'Cairo', 'Manrope', sans-serif;
         font-size: 10px;
         color: #666;
@@ -977,6 +891,8 @@ export function unifiedHeaderHtml(opts: {
     <div class="u-header" style="flex-direction:column;align-items:center;text-align:center;gap:6px;">
       ${logoBlock}
       ${styles.showCompanyInfo !== false && styles.showCompanyName && styles.companyName ? `<div class="u-company-name" style="text-align:center;">${styles.companyName}</div>` : ''}
+      <div class="u-invoice-title">${titleAr || titleEn}</div>
+      <div class="u-invoice-details">${metaLinesHtml}</div>
     </div>
     `;
   }
@@ -988,7 +904,7 @@ export function unifiedHeaderHtml(opts: {
       ${showLogo ? `<img src="${fullLogoUrl}" alt="Logo" class="u-logo" style="height:24px;max-width:none;" onerror="this.style.display='none'"/>` : ''}
       ${styles.showCompanyInfo !== false && styles.showCompanyName && styles.companyName ? `<span class="u-company-name" style="font-size:12px;margin:0;">${styles.companyName}</span>` : ''}
       <span style="flex:1;"></span>
-      <span style="font-size:10px;color:#666;">${titleAr || titleEn || ''}</span>
+      <div><div class="u-invoice-title">${titleAr || titleEn || ''}</div><div class="u-invoice-details">${metaLinesHtml}</div></div>
     </div>
     `;
   }
@@ -1027,8 +943,9 @@ export function unifiedHeaderHtml(opts: {
 
   // Alignment for text
   const titleOnRight = swap;
-  const titleAlign = titleOnRight ? 'text-align:right;' : 'text-align:left;';
-  const companyTextAlign = titleOnRight ? 'text-align:left;' : 'text-align:right;';
+  const explicitAlign = styles.headerAlignment && styles.headerAlignment !== 'split' ? styles.headerAlignment : null;
+  const titleAlign = `text-align:${explicitAlign || (titleOnRight ? 'right' : 'left')};`;
+  const companyTextAlign = `text-align:${explicitAlign || (titleOnRight ? 'left' : 'right')};`;
 
   const firstIsTitle = swap;
   const firstStyle = firstIsTitle ? titleAlign : companyTextAlign;
@@ -1036,8 +953,8 @@ export function unifiedHeaderHtml(opts: {
 
   return `
   <div class="u-header">
-    <div style="${firstStyle}">${firstContent}</div>
-    <div style="${secondStyle}">${secondContent}</div>
+    <div style="flex:1;min-width:0;${firstStyle}">${firstContent}</div>
+    <div style="flex:1;min-width:0;${secondStyle}">${secondContent}</div>
   </div>
   `;
 }

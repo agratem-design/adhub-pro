@@ -300,7 +300,7 @@ const SectionResetButton = ({ onClick, label = "إعادة تعيين" }: { onCl
 // =====================================================
 
 const PrintSettingsPage = () => {
-  const [selectedDocType, setSelectedDocType] = useState<DocumentType>(DOCUMENT_TYPES.ACCOUNT_STATEMENT);
+  const [selectedDocType, setSelectedDocType] = useState<DocumentType>(DOCUMENT_TYPES.COMBINED_TASK);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingDefaults, setIsSavingDefaults] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(0.45);
@@ -601,31 +601,34 @@ const PrintSettingsPage = () => {
  {/* وضع التحرير: عام أو خاص */}
               <div className="flex gap-1 p-1 bg-muted rounded-lg">
                 <button
-                  onClick={() => setEditMode('global')}
-                  className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  onClick={() => { setEditMode('global'); setSelectedDocType(DOCUMENT_TYPES.COMBINED_TASK); setInitializedDocType(null); }}
+                  className={`flex-1 cursor-pointer px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
                     editMode === 'global' ? "bg-primary text-primary-foreground shadow" : "hover:bg-background/80"
                   }`}
                 >
-                  إعدادات عامة (جميع الفواتير)
+                  القالب الرسمي (جميع الفواتير)
                 </button>
                 <button
                   onClick={() => setEditMode('per_document')}
-                  className={`flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  className={`flex-1 cursor-pointer px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
                     editMode === 'per_document' ? "bg-primary text-primary-foreground shadow" : "hover:bg-background/80"
                   }`}
                 >
-                  إعدادات خاصة بمستند
+                  بيانات وتنسيق الفاتورة
                 </button>
               </div>
 
               {editMode === 'global' && (
                 <div className="p-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
                   <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                    أي تغيير هنا سيُطبّق على <strong>جميع الفواتير</strong> عند الحفظ (الألوان، الشعار، الشركة، الخطوط، الهوامش...)
+                    القالب الرسمي مستمد من الفاتورة المجمعة. تعديل الشعار وبيانات الشركة والهيدر والفوتر والخطوط يُطبّق على <strong>جميع الفواتير</strong> عند الحفظ، مع الاحتفاظ بعنوان كل فاتورة.
                   </p>
                 </div>
               )}
 
+              {editMode === 'per_document' && (
+                <p className="text-xs text-muted-foreground leading-relaxed">عنوان الفاتورة ومحتواها خاصان بهذا المستند. إعدادات الهيدر والفوتر مشتركة وتتحدث في جميع الفواتير عند الحفظ.</p>
+              )}
               {editMode === 'per_document' && (
                 <div className="grid grid-cols-2 gap-2">
                   {/* Document Type Selector */}
@@ -1412,7 +1415,7 @@ const PrintSettingsPage = () => {
                     <div className="p-3 mb-3 bg-muted/50 border border-dashed rounded-lg">
                       <p className="text-xs text-muted-foreground text-center">
                         عنوان المستند وبيانات قسم العميل خاصة بكل مستند.<br/>
-                        انتقل لوضع <strong>"إعدادات خاصة بمستند"</strong> لتعديلها.
+                        انتقل لوضع <strong>"بيانات وتنسيق الفاتورة"</strong> لتعديلها.
                       </p>
                     </div>
                   )}

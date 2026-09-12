@@ -1,3 +1,4 @@
+import { usePrintSettingsByType } from '@/store';
 /**
  * UnifiedReceiptPrint - طباعة إيصال موحد
  * 
@@ -7,7 +8,7 @@
  * ✅ جدول العقود الموزعة
  */
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { formatArabicNumber } from '@/lib/printUtils';
@@ -59,6 +60,8 @@ interface Currency {
 }
 
 interface DistributedContract {
+  compositeTaskId?: string;
+  installationTaskId?: string | null;
   contractNumber: string;
   adType: string;
   amount?: number;
@@ -66,8 +69,14 @@ interface DistributedContract {
   totalPaid?: number | string | null;
   remaining?: number | string | null;
   // New fields for composite tasks and sales invoices
-  entityType?: 'contract' | 'composite_task' | 'sales_invoice' | 'printed_invoice';
+  entityType?: 'contract' | 'composite_task' | 'sales_invoice' | 'printed_invoice' | 'general_credit';
   compositeTaskType?: string; // 'طباعة_تركيب' | 'طباعة_قص_تركيب' | etc.
+  teamName?: string;
+  groupKey?: string;
+  rawAdType?: string;
+  taskComponents?: string;
+  contractId?: number;
+  reinstallationNumber?: number;
 }
 
 export interface PrintUnifiedReceiptOptions {
@@ -88,12 +97,102 @@ const formatDate = (dateString: string) => {
   });
 };
 
+export function groupReceiptTasks(items: DistributedContract[]): DistributedContract[] {
+  const distributedContracts: DistributedContract[] = [];
+  const taskGroups = new Map<string, DistributedContract & { teams?: Set<string> }>();
+  const countedTasks = new Set<string>();
+  for (const item of items) {
+    const key = item.entityType === 'composite_task'
+      ? item.groupKey || item.installationTaskId || item.compositeTaskId : undefined;
+    const existing = key ? taskGroups.get(key) : undefined;
+    if (existing) {
+      existing.amount = Number(existing.amount || 0) + Number(item.amount || 0);
+      if (item.teamName) {
+        existing.teams = existing.teams || new Set();
+        existing.teams.add(item.teamName);
+      }
+      // A task can have multiple allocations in the same receipt; count its balance once.
+      if (item.compositeTaskId && !countedTasks.has(item.compositeTaskId)) {
+        for (const field of ['total', 'totalPaid', 'remaining'] as const) {
+          existing[field] = existing[field] == null || item[field] == null
+            ? null : Number(existing[field]) + Number(item[field]);
+        }
+      }
+      const descriptions = new Set([existing.compositeTaskType, item.compositeTaskType].filter(Boolean));
+      existing.compositeTaskType = [...descriptions].join(' / ');
+      
+      // ✅ لا يتم ذكر الفرق في الفاتورة الرسمية للزبون
+      const cleanBase = (existing.rawAdType 
+        ? (existing.rawAdType.includes('طباعة') || existing.rawAdType.includes('تركيب') ? existing.rawAdType : `${existing.rawAdType} (${existing.taskComponents || 'طباعة + تركيب'})`)
+        : (existing.taskComponents || existing.adType)) || 'مهمة مجمعة';
+      existing.adType = cleanBase.replace(/\s*—\s*(?:فرقة|دانة|فريق).*$/g, '').trim();
+
+      const isFullyPaid = existing.remaining !== null && Number(existing.remaining) <= 0.01 && existing.total !== null && Number(existing.total) > 0;
+      if (isFullyPaid && !existing.contractNumber.includes('(مسددة بالكامل)')) {
+        existing.contractNumber = `${existing.contractNumber} (مسددة بالكامل)`;
+      } else if (!isFullyPaid && existing.contractNumber.includes('(مسددة بالكامل)')) {
+        existing.contractNumber = existing.contractNumber.replace(' (مسددة بالكامل)', '');
+      }
+    } else {
+      const row = { ...item };
+      // تنظيف البيان من أي أسماء فرق للزبون
+      if (row.entityType === 'composite_task') {
+        const cleanBase = (row.rawAdType 
+          ? (row.rawAdType.includes('طباعة') || row.rawAdType.includes('تركيب') ? row.rawAdType : `${row.rawAdType} (${row.taskComponents || 'طباعة + تركيب'})`)
+          : (row.taskComponents || row.adType)) || 'مهمة مجمعة';
+        row.adType = cleanBase.replace(/\s*—\s*(?:فرقة|دانة|فريق).*$/g, '').trim();
+      }
+      if (item.teamName) {
+        (row as any).teams = new Set([item.teamName]);
+      }
+      distributedContracts.push(row);
+      if (key) taskGroups.set(key, row as any);
+    }
+    if (item.compositeTaskId) countedTasks.add(item.compositeTaskId);
+  }
+
+  // ✅ ترتيب منطقي للبنود: عقود أولاً ثم مهام مجمعة مرتبة ثم فواتير مبيعات ثم فواتير طباعة ثم الفائض
+  distributedContracts.sort((a, b) => {
+    const typeOrder = (c: DistributedContract) => {
+      if (c.entityType === 'contract' && !c.contractNumber.includes('فائض') && c.contractNumber !== '—') return 1;
+      if (c.entityType === 'composite_task') return 2;
+      if (c.entityType === 'sales_invoice') return 3;
+      if (c.entityType === 'printed_invoice') return 4;
+      return 5; // general_credit / surplus
+    };
+    const orderA = typeOrder(a);
+    const orderB = typeOrder(b);
+    if (orderA !== orderB) return orderA - orderB;
+
+    if (orderA === 1) {
+      const numA = parseInt(a.contractNumber.replace(/\D/g, ''), 10) || 0;
+      const numB = parseInt(b.contractNumber.replace(/\D/g, ''), 10) || 0;
+      return numA - numB;
+    }
+    if (orderA === 2) {
+      const cA = a.contractId || parseInt(a.contractNumber.match(/عقد #?(\d+)/)?.[1] || '0', 10);
+      const cB = b.contractId || parseInt(b.contractNumber.match(/عقد #?(\d+)/)?.[1] || '0', 10);
+      if (cA !== cB) return cA - cB;
+      const rA = a.reinstallationNumber || parseInt(a.contractNumber.match(/إعادة تركيب(?: رقم)? (\d+)/)?.[1] || '0', 10);
+      const rB = b.reinstallationNumber || parseInt(b.contractNumber.match(/إعادة تركيب(?: رقم)? (\d+)/)?.[1] || '0', 10);
+      return rA - rB;
+    }
+    if (orderA === 3 || orderA === 4) {
+      return a.contractNumber.localeCompare(b.contractNumber, undefined, { numeric: true });
+    }
+    return 0;
+  });
+
+  return distributedContracts;
+}
+
 // === MAIN PRINT FUNCTION ===
 export async function printUnifiedReceipt(
   settingsOrTheme: any,
   options: PrintUnifiedReceiptOptions
 ): Promise<void> {
-  const { payment, customerData, currency, distributedContracts = [], balanceInfo } = options;
+  const { payment, customerData, currency, balanceInfo } = options;
+  const distributedContracts = groupReceiptTasks(options.distributedContracts || []);
 
   const receiptDate = formatDate(new Date().toISOString());
   const receiptNumber = `REC-${Date.now()}`;
@@ -166,13 +265,14 @@ export async function printUnifiedReceipt(
   }
 
   if (isDistributed && distributedContracts.length > 0) {
-    // Distributed payment - show contracts/tasks/invoices + remaining
+    // Distributed payment - show contracts/tasks/invoices + total + paid + remaining
     columns = [
-      { key: 'index', header: '#', width: '8%', align: 'center' },
+      { key: 'index', header: '#', width: '6%', align: 'center' },
       { key: 'reference', header: 'المرجع', width: '18%', align: 'center' },
-      { key: 'description', header: 'البيان', width: '32%', align: 'right' },
-      { key: 'amount', header: 'المسدد', width: '20%', align: 'center' },
-      { key: 'remaining', header: 'المتبقي', width: '22%', align: 'center' },
+      { key: 'description', header: 'البيان', width: '28%', align: 'right' },
+      { key: 'total', header: 'القيمة الإجمالية', width: '16%', align: 'center' },
+      { key: 'amount', header: 'المسدد', width: '16%', align: 'center' },
+      { key: 'remaining', header: 'المتبقي', width: '16%', align: 'center' },
     ];
 
     rows = distributedContracts.map((contract, index) => {
@@ -181,30 +281,45 @@ export async function printUnifiedReceipt(
       let description = contract.adType || 'لوحة إعلانية';
       
       if (contract.entityType === 'composite_task') {
-        reference = 'مهمة';
-        // استخدم الوصف المبني من المكونات الفعلية (طباعة + قص + تركيب)
-        description = contract.compositeTaskType || contract.adType || 'مهمة مجمعة';
+        reference = contract.contractNumber || 'مهمة مجمعة';
+        // البيان: نوع الإعلان مع مكونات المهمة (بدون أسماء الفرق للزبون)
+        const cleanBase = (contract.rawAdType 
+          ? (contract.rawAdType.includes('طباعة') || contract.rawAdType.includes('تركيب') ? contract.rawAdType : `${contract.rawAdType} (${contract.taskComponents || 'طباعة + تركيب'})`)
+          : (contract.taskComponents || contract.adType || contract.compositeTaskType)) || 'مهمة مجمعة';
+        description = cleanBase.replace(/\s*—\s*(?:فرقة|دانة|فريق).*$/g, '').trim();
       } else if (contract.entityType === 'sales_invoice') {
-        reference = 'فاتورة مبيعات';
-        // استخدم عنوان الفاتورة (invoice_name) أو الوصف المرسل
+        reference = contract.contractNumber && contract.contractNumber !== '—'
+          ? (contract.contractNumber.startsWith('فاتورة') ? contract.contractNumber : `فاتورة مبيعات #${contract.contractNumber}`)
+          : 'فاتورة مبيعات';
         description = contract.adType || 'مبيعات';
       } else if (contract.entityType === 'printed_invoice') {
-        reference = 'فاتورة طباعة';
+        reference = contract.contractNumber && contract.contractNumber !== '—'
+          ? (contract.contractNumber.startsWith('فاتورة') ? contract.contractNumber : `فاتورة طباعة #${contract.contractNumber}`)
+          : 'فاتورة طباعة';
         description = contract.adType || 'طباعة';
+      } else if (contract.entityType === 'general_credit' || contract.contractNumber.includes('فائض') || contract.contractNumber === '—') {
+        reference = 'رصيد فائض (غير موزع)';
+        description = contract.adType?.replace(/^توزيع على.*?- /g, '') || 'فائض سداد متبقي في حساب العميل';
       } else {
         // Default to contract
-        reference = `عقد ${contract.contractNumber}`;
+        reference = contract.contractNumber.startsWith('عقد') ? contract.contractNumber : `عقد #${contract.contractNumber}`;
       }
       
       return {
         index: index + 1,
         reference,
         description,
+        total:
+          contract.entityType === 'general_credit' || contract.contractNumber.includes('فائض') || contract.total === null || contract.total === undefined || contract.total === ''
+            ? '—'
+            : typeof contract.total === 'number'
+              ? `${currency.symbol} ${formatArabicNumber(contract.total)}`
+              : String(contract.total),
         amount: typeof contract.amount === 'number'
           ? `${currency.symbol} ${formatArabicNumber(contract.amount)}`
           : '—',
         remaining:
-          contract.remaining === null || contract.remaining === undefined || contract.remaining === ''
+          contract.entityType === 'general_credit' || contract.contractNumber.includes('فائض') || contract.remaining === null || contract.remaining === undefined || contract.remaining === ''
             ? '—'
             : typeof contract.remaining === 'number'
               ? `${currency.symbol} ${formatArabicNumber(contract.remaining)}`
@@ -250,7 +365,7 @@ export async function printUnifiedReceipt(
       ? 'المتبقي من إجمالي الديون' 
       : normalizedRemainingBalance < 0 
         ? 'رصيد دائن للعميل' 
- : 'مسدد بالكامل ';
+        : 'مسدد بالكامل ';
     
     totals.push({
       label: balanceLabel,
@@ -261,10 +376,11 @@ export async function printUnifiedReceipt(
   }
 
   // Statistics cards - count by entity type
-  const contractCount = distributedContracts.filter(c => !c.entityType || c.entityType === 'contract').length;
+  const contractCount = distributedContracts.filter(c => (c.entityType === 'contract' || !c.entityType) && c.contractNumber && c.contractNumber !== '—' && !c.contractNumber.includes('فائض')).length;
   const compositeTaskCount = distributedContracts.filter(c => c.entityType === 'composite_task').length;
   const salesInvoiceCount = distributedContracts.filter(c => c.entityType === 'sales_invoice').length;
   const printedInvoiceCount = distributedContracts.filter(c => c.entityType === 'printed_invoice').length;
+  const surplusCreditItem = distributedContracts.find(c => c.entityType === 'general_credit' || c.contractNumber.includes('فائض'));
   
   const statisticsCards: { label: string; value: number; unit: string }[] = [];
   if (isDistributed) {
@@ -272,6 +388,9 @@ export async function printUnifiedReceipt(
     if (compositeTaskCount > 0) statisticsCards.push({ label: 'مهمة', value: compositeTaskCount, unit: '' });
     if (salesInvoiceCount > 0) statisticsCards.push({ label: 'فاتورة مبيعات', value: salesInvoiceCount, unit: '' });
     if (printedInvoiceCount > 0) statisticsCards.push({ label: 'فاتورة طباعة', value: printedInvoiceCount, unit: '' });
+    if (surplusCreditItem && Number(surplusCreditItem.amount) > 0) {
+      statisticsCards.push({ label: 'فائض سداد', value: Number(surplusCreditItem.amount), unit: currency.symbol });
+    }
   }
 
   // Build notes (الملاحظات فقط بدون المبلغ بالكلمات)
@@ -358,14 +477,23 @@ export async function extractDistributedContracts(payment: PaymentData): Promise
   try {
     const { data: contracts } = await supabase
       .from('Contract')
-      .select('Contract_Number, "Ad Type"')
+      .select('Contract_Number, "Ad Type", Total, "Total Paid"')
       .in('Contract_Number', contractNumbers.map(Number));
     
     if (contracts) {
-      return contractNumbers.map(num => ({
-        contractNumber: num,
-        adType: contracts.find((c: any) => c.Contract_Number === Number(num))?.['Ad Type'] || 'لوحة إعلانية',
-      }));
+      return contractNumbers.map(num => {
+        const c = contracts.find((item: any) => item.Contract_Number === Number(num));
+        const total = c?.Total != null ? Number(c.Total) : null;
+        const paid = c?.['Total Paid'] != null ? Number(c['Total Paid']) : null;
+        const remaining = total != null && paid != null ? Math.max(0, total - paid) : null;
+        return {
+          contractNumber: num,
+          adType: c?.['Ad Type'] || 'لوحة إعلانية',
+          total,
+          totalPaid: paid,
+          remaining,
+        };
+      });
     }
   } catch (e) {
     console.error('Error fetching contracts:', e);
@@ -380,37 +508,7 @@ export async function extractDistributedContracts(payment: PaymentData): Promise
 // === HOOK - Fetches settings from print_settings table ===
 export function useUnifiedReceiptPrint() {
   const [isPrinting, setIsPrinting] = useState(false);
-  const [settings, setSettings] = useState<Partial<PrintSettings> | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Load settings on first use
-  useEffect(() => {
-    (async () => {
-      try {
-        const { data } = await supabase
-          .from('print_settings')
-          .select('*')
-          .eq('document_type', DOCUMENT_TYPES.PAYMENT_RECEIPT)
-          .maybeSingle();
-        
-        if (data) {
-          setSettings(data as any);
-        } else {
-          // Fallback: try first available settings
-          const { data: fallback } = await supabase
-            .from('print_settings')
-            .select('*')
-            .limit(1)
-            .maybeSingle();
-          setSettings((fallback as any) || DEFAULT_PRINT_SETTINGS);
-        }
-      } catch {
-        setSettings(DEFAULT_PRINT_SETTINGS as any);
-      } finally {
-        setIsLoading(false);
-      }
-    })();
-  }, []);
+  const { settings, isLoading } = usePrintSettingsByType(DOCUMENT_TYPES.PAYMENT_RECEIPT);
 
   const print = async (options: PrintUnifiedReceiptOptions) => {
     if (isLoading) {

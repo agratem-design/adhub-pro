@@ -1,3 +1,5 @@
+import { readablePrintColor } from './printColorContrast';
+import { mapPrintSettingsToInvoiceStyles } from '@/utils/invoicePrintSettingsBridge';
 /**
  * Measurements Style Configuration
  * تكوين نمط المقاسات - يقرأ من الإعدادات المحفوظة
@@ -18,6 +20,7 @@ export interface MeasurementsThemeSettings {
  */
 export const createMeasurementsConfigFromSettings = (settings: Partial<PrintSettings>): PrintConfig => {
   const config = createDefaultPrintConfig();
+  config.officialStyles = mapPrintSettingsToInvoiceStyles(settings);
 
   // Colors from saved settings
   const primaryColor = settings.primary_color || '#000000';
@@ -118,7 +121,7 @@ export const createMeasurementsConfigFromSettings = (settings: Partial<PrintSett
   config.table.border.color = borderColor;
 
   config.table.header.backgroundColor = settings.table_header_bg_color || '#f0f0f0';
-  config.table.header.textColor = settings.table_header_text_color || '#000000';
+  config.table.header.textColor = readablePrintColor(config.table.header.backgroundColor, settings.table_header_text_color || '#000000');
   config.table.header.fontSize = `${settings.table_header_font_size || 10}px`;
   config.table.header.fontWeight = settings.table_header_font_weight || 'bold';
   config.table.header.padding = settings.table_header_padding || '4px 8px';
@@ -140,7 +143,7 @@ export const createMeasurementsConfigFromSettings = (settings: Partial<PrintSett
   // Totals
   config.totals.enabled = true;
   config.totals.backgroundColor = settings.summary_bg_color || '#1a1a1a';
-  config.totals.textColor = settings.summary_text_color || settings.table_header_text_color || '#ffffff';
+  config.totals.textColor = readablePrintColor(config.totals.backgroundColor, settings.summary_text_color || settings.table_header_text_color || '#ffffff');
   config.totals.borderColor = settings.summary_border_color || borderColor;
   config.totals.borderRadius = '0';
   config.totals.padding = '6px 4px';

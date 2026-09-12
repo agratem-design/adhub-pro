@@ -1,3 +1,4 @@
+import { compositeTaskLabel, compositeTaskGroupKey } from './compositeTaskLabel';
 /**
  * تنسيق موحد لوصف العقد في كشف الحساب:
  * رقم العقد + نوع الإعلان (إن وجد)
@@ -418,7 +419,7 @@ export function buildCanonicalCustomerLedger(
       sourceTable: 'composite_tasks',
       sourceId: String(task.id),
       contractNumber: taskContractNum,
-      reference: `مهمة #${taskNum}`,
+      reference: compositeTaskLabel(task, cleanTaskAdType),
       description: `${invoiceTitle} #${taskNum}`,
       subtitle: taskSubtitle,
       notes: cleanNoteText(task.notes),
@@ -563,7 +564,11 @@ export function buildCanonicalCustomerLedger(
       let cleanPayAdType = '';
       const payContractNum = payment.contract_number ? Number(payment.contract_number) : null;
 
-      if (payContractNum) {
+      if (payment.composite_task_id) {
+        const task = compositeTasks.find(t => t.id === payment.composite_task_id);
+        const contract = task?.contract_id ? contractsMap.get(Number(task.contract_id)) : undefined;
+        targetRef = compositeTaskLabel(task || { id: payment.composite_task_id }, contract?.['Ad Type']);
+      } else if (payContractNum) {
         const linkedContract = contractsMap.get(payContractNum) || contractsMap.get(Number(payContractNum));
         const cAdType = linkedContract
           ? (linkedContract['Ad Type'] || linkedContract['Ad_Type'] || linkedContract.ad_type || '')
@@ -584,7 +589,7 @@ export function buildCanonicalCustomerLedger(
       let payDescription = `دفعة من العميل`;
       if (isGeneralCredit) {
         payDescription = `تسوية / رصيد دائن: ${payment.notes || targetRef}`;
-      } else if (payContractNum) {
+      } else if (payContractNum && !payment.composite_task_id) {
         payDescription = `دفعة من العميل (موزعة على عقد: #${payContractNum}${cleanPayAdType ? ` — ${cleanPayAdType}` : ''})`;
       } else if (targetRef && targetRef !== 'على الحساب') {
         payDescription = `دفعة من العميل (${targetRef})`;
@@ -983,7 +988,27 @@ export function buildCanonicalCustomerLedger(
       if (processedDistIds.has(distId)) continue;
       processedDistIds.add(distId);
 
-      const group = distributedGroups.get(distId) || [entry];
+      const originalGroup = distributedGroups.get(distId) || [entry];
+      const group: CanonicalLedgerEntry[] = [];
+      const installationGroups = new Map<string, CanonicalLedgerEntry>();
+      for (const child of originalGroup) {
+        const taskId = child.metadata?.payment?.composite_task_id;
+        const task = taskId ? compositeTasks.find(t => t.id === taskId) : undefined;
+        const key = task ? `${child.type}:${compositeTaskGroupKey(task)}` : undefined;
+        const existing = key ? installationGroups.get(key) : undefined;
+        if (existing) {
+          existing.displayReduction += child.displayReduction;
+          existing.displayCharge += child.displayCharge;
+          existing.balanceEffect += child.balanceEffect;
+          existing.cashPaymentEffect += child.cashPaymentEffect;
+          existing.nonCashAdjustmentEffect += child.nonCashAdjustmentEffect;
+          existing.debitEffect += child.debitEffect;
+        } else {
+          const row = { ...child };
+          group.push(row);
+          if (key) installationGroups.set(key, row);
+        }
+      }
       const groupTotalReduction = group.reduce((sum, g) => sum + g.displayReduction, 0);
       const groupTotalCharge = group.reduce((sum, g) => sum + g.displayCharge, 0);
       const groupBalanceEffect = group.reduce((sum, g) => sum + g.balanceEffect, 0);
@@ -997,6 +1022,10 @@ export function buildCanonicalCustomerLedger(
           new Set(
             group
               .map((g) => {
+                if (g.metadata?.payment?.composite_task_id) {
+                  const task = compositeTasks.find(t => t.id === g.metadata.payment.composite_task_id);
+                  return compositeTaskLabel(task || { id: g.metadata.payment.composite_task_id });
+                }
                 if (!g.contractNumber) return null;
                 const cNum = Number(g.contractNumber);
                 const linkedContract = contractsMap.get(cNum) || contractsMap.get(Number(cNum));
@@ -1004,7 +1033,7 @@ export function buildCanonicalCustomerLedger(
                   ? (linkedContract['Ad Type'] || linkedContract['Ad_Type'] || linkedContract.ad_type || '')
                   : (g.adType || '');
                 const cleanAdType = cAdType ? String(cAdType).trim() : '';
-                return cleanAdType ? `#${cNum} — ${cleanAdType}` : `#${cNum}`;
+                return cleanAdType ? `عقد #${cNum} — ${cleanAdType}` : `عقد #${cNum}`;
               })
               .filter(Boolean)
           )
@@ -1012,7 +1041,7 @@ export function buildCanonicalCustomerLedger(
 
         const isSingle = contractRefs.length === 1;
         const distDescription = contractRefs.length > 0
-          ? `دفعة من العميل (${isSingle ? 'موزعة على عقد: ' : 'موزعة على العقود: '}${contractRefs.join('، ')})`
+          ? `دفعة من العميل (${isSingle ? 'سداد: ' : 'موزعة على: '}${contractRefs.join('، ')})`
           : `دفعة من العميل`;
 
         displayedEntries.push({

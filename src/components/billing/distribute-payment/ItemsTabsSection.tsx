@@ -28,10 +28,10 @@ export function ItemsTabsSection({ items, setItems, onSelect, onAmountChange, re
   const salesInvoices = items.filter(i => i.type === 'sales_invoice');
   const compositeTasks = items.filter(i => i.type === 'composite_task');
 
-  const uniqueContractAdTypes = useMemo(() => {
-    const types = new Set(contracts.map(c => c.adType).filter(Boolean));
+  const uniqueAdTypes = useMemo(() => {
+    const types = new Set([...contracts, ...compositeTasks].map(c => c.adType).filter(Boolean));
     return Array.from(types) as string[];
-  }, [contracts]);
+  }, [contracts, compositeTasks]);
 
   const filteredContracts = useMemo(() => {
     return contracts.filter((c) => {
@@ -50,7 +50,8 @@ export function ItemsTabsSection({ items, setItems, onSelect, onAmountChange, re
       if (!globalSearch.trim()) return true;
       const term = normalizeDigits(globalSearch.trim().toLowerCase());
       const displayName = normalizeDigits(inv.displayName || '');
-      return displayName.includes(term);
+      const code = normalizeDigits((inv.code || '').toLowerCase());
+      return displayName.includes(term) || code.includes(term);
     });
   }, [printedInvoices, globalSearch]);
 
@@ -59,19 +60,24 @@ export function ItemsTabsSection({ items, setItems, onSelect, onAmountChange, re
       if (!globalSearch.trim()) return true;
       const term = normalizeDigits(globalSearch.trim().toLowerCase());
       const displayName = normalizeDigits(inv.displayName || '');
-      return displayName.includes(term);
+      const code = normalizeDigits((inv.code || '').toLowerCase());
+      return displayName.includes(term) || code.includes(term);
     });
   }, [salesInvoices, globalSearch]);
 
   const filteredCompositeTasks = useMemo(() => {
     return compositeTasks.filter((task) => {
+      if (contractAdTypeFilter !== 'all' && task.adType !== contractAdTypeFilter) return false;
       if (!globalSearch.trim()) return true;
       const term = normalizeDigits(globalSearch.trim().toLowerCase());
       const displayName = normalizeDigits(task.displayName || '');
+      const code = normalizeDigits((task.code || '').toLowerCase());
       const adType = normalizeDigits((task.adType || '').toLowerCase());
-      return displayName.includes(term) || adType.includes(term);
+      const teamName = normalizeDigits((task.teamName || '').toLowerCase());
+      const serviceType = normalizeDigits((task.serviceType || '').toLowerCase());
+      return displayName.includes(term) || code.includes(term) || adType.includes(term) || teamName.includes(term) || serviceType.includes(term);
     });
-  }, [compositeTasks, globalSearch]);
+  }, [compositeTasks, globalSearch, contractAdTypeFilter]);
 
   const selectAll = () => setItems(items.map(item => ({ ...item, selected: true })));
   const deselectAll = () => setItems(items.map(item => ({ ...item, selected: false, allocatedAmount: 0 })));
@@ -114,14 +120,14 @@ export function ItemsTabsSection({ items, setItems, onSelect, onAmountChange, re
               className="pr-8 h-8 text-xs bg-background" 
             />
           </div>
-          {uniqueContractAdTypes.length > 1 && (
+          {uniqueAdTypes.length > 1 && (
             <Select value={contractAdTypeFilter} onValueChange={setContractAdTypeFilter}>
               <SelectTrigger className="h-8 text-xs w-[120px] bg-background">
                 <SelectValue placeholder="نوع الإعلان" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">كل الإعلانات</SelectItem>
-                {uniqueContractAdTypes.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                {uniqueAdTypes.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
               </SelectContent>
             </Select>
           )}

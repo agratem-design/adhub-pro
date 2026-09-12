@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { 
@@ -13,7 +14,7 @@ import {
   Send, FileSpreadsheet, MoreHorizontal, Phone,
   TrendingUp, TrendingDown, Minus, ImageIcon, RefreshCw,
   Maximize2, X, MapPin, Landmark, ChevronDown, ChevronLeft, ChevronRight,
-  AlertTriangle, Ruler, Navigation, FileArchive
+  AlertTriangle, Ruler, Navigation, FileArchive, Pencil, Check
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -93,6 +94,72 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
     pending: number;
     tasks: Array<{ id: string; billboard_name: string; status: string; installation_date: string | null; nearest_landmark: string | null; district: string | null }>;
   }>({ total: 0, completed: 0, inProgress: 0, pending: 0, tasks: [] });
+
+  // تعديل سريع لنوع الإعلان
+  const [isEditingAdType, setIsEditingAdType] = useState(false);
+  const [editAdTypeVal, setEditAdTypeVal] = useState('');
+  const [isSavingAdType, setIsSavingAdType] = useState(false);
+  const [localAdType, setLocalAdType] = useState<string | null>(null);
+  const adTypeInputRef = useRef<HTMLInputElement>(null);
+
+  const currentAdType = localAdType ?? ((contract as any)['Ad Type'] || (contract as any).ad_type || (contract as any).Ad_Type || '');
+
+  useEffect(() => {
+    setLocalAdType((contract as any)['Ad Type'] || (contract as any).ad_type || (contract as any).Ad_Type || null);
+  }, [contract]);
+
+  useEffect(() => {
+    if (isEditingAdType) {
+      setTimeout(() => adTypeInputRef.current?.focus(), 50);
+    }
+  }, [isEditingAdType]);
+
+  const handleSaveAdType = async () => {
+    const trimmed = editAdTypeVal.trim();
+    if (!trimmed) {
+      toast.error('يرجى إدخال نوع الإعلان');
+      return;
+    }
+    const contractNum = Number(contract.Contract_Number ?? (contract as any)['Contract Number'] ?? contract.id);
+    if (!contractNum || isNaN(contractNum)) {
+      toast.error('رقم العقد غير صالح');
+      return;
+    }
+
+    setIsSavingAdType(true);
+    try {
+      // 1. تحديث جدول العقود
+      const { error: contractErr } = await supabase
+        .from('Contract')
+        .update({ 'Ad Type': trimmed })
+        .eq('Contract_Number', contractNum);
+
+      if (contractErr) throw contractErr;
+
+      // 2. تحديث اللوحات المرتبطة بالعقد في جدول billboards
+      await supabase
+        .from('billboards')
+        .update({ Ad_Type: trimmed } as any)
+        .eq('Contract_Number', contractNum);
+
+      // 3. تحديث الكائن المحلي
+      (contract as any)['Ad Type'] = trimmed;
+      (contract as any).ad_type = trimmed;
+      setLocalAdType(trimmed);
+      setIsEditingAdType(false);
+      toast.success('تم تحديث نوع الإعلان بنجاح');
+      onRefresh?.();
+    } catch (err: any) {
+      console.error('Error updating ad type:', err);
+      toast.error('فشل تحديث نوع الإعلان: ' + (err.message || 'خطأ غير متوقع'));
+    } finally {
+      setIsSavingAdType(false);
+    }
+  };
+
+  const handleCancelEditAdType = () => {
+    setIsEditingAdType(false);
+  };
 
   // Lazy loading: only fetch data when card is visible
   useEffect(() => {
@@ -1443,16 +1510,71 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
         
         {/* نوع الإعلان وإجمالي المساحة بالأمتار */}
         <div className="flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl border border-amber-500/30 dark:border-amber-400/30 bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-primary/10 dark:from-amber-500/20 dark:via-amber-400/10 dark:to-transparent shadow-sm">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             <div className="p-1 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-300 shrink-0">
               <PaintBucket className="h-4 w-4" />
             </div>
-            <div className="flex items-baseline gap-1.5 min-w-0">
-              <span className="text-[11px] font-medium text-muted-foreground dark:text-amber-200/70 shrink-0">نوع الإعلان:</span>
-              <span className="text-xs sm:text-[13px] font-extrabold text-foreground dark:text-amber-100 truncate tracking-wide">
-                {(contract as any)['Ad Type'] || (contract as any).ad_type || (contract as any).Ad_Type || 'غير محدد'}
-              </span>
-            </div>
+            {isEditingAdType ? (
+              <div className="flex items-center gap-1.5 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+                <Input
+                  ref={adTypeInputRef}
+                  value={editAdTypeVal}
+                  onChange={(e) => setEditAdTypeVal(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveAdType();
+                    if (e.key === 'Escape') handleCancelEditAdType();
+                  }}
+                  disabled={isSavingAdType}
+                  className="h-7 text-xs px-2 py-0 bg-background/90 border-amber-500/50 focus-visible:ring-1 focus-visible:ring-amber-500 font-bold"
+                  placeholder="أدخل نوع الإعلان..."
+                />
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  onClick={handleSaveAdType}
+                  disabled={isSavingAdType}
+                  className="h-7 w-7 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-500/10 shrink-0 cursor-pointer"
+                  title="حفظ"
+                >
+                  {isSavingAdType ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Check className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  onClick={handleCancelEditAdType}
+                  disabled={isSavingAdType}
+                  className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 cursor-pointer"
+                  title="إلغاء"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 min-w-0 flex-1 py-0.5">
+                <span className="text-[11px] font-medium text-muted-foreground dark:text-amber-200/70 shrink-0 leading-normal">نوع الإعلان:</span>
+                <span className="text-xs sm:text-[13px] font-extrabold text-foreground dark:text-amber-100 truncate tracking-wide leading-relaxed py-0.5" title={currentAdType || 'غير محدد'}>
+                  {currentAdType || 'غير محدد'}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditAdTypeVal(currentAdType || '');
+                    setIsEditingAdType(true);
+                  }}
+                  className="p-1 rounded-md text-amber-600/70 dark:text-amber-300/70 hover:text-amber-600 hover:bg-amber-500/20 transition-all shrink-0 cursor-pointer"
+                  title="تعديل نوع الإعلان بسرعة"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
           </div>
           {totalArea > 0 && (
             <Badge variant="outline" className="text-[11px] font-bold font-numbers px-2.5 py-0.5 shrink-0 bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">

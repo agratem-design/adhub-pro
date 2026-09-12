@@ -23,14 +23,33 @@ export interface EmployeePaymentDistribution {
   paymentType: 'from_balance' | 'advance';
 }
 
+export interface DistributableSubTask {
+  id: string;
+  total: number;
+  paid: number;
+  remaining: number;
+  editingAmount?: number;
+  teamName?: string;
+  serviceType?: string;
+}
+
 export interface DistributableItem {
   id: string | number;
   type: 'contract' | 'printed_invoice' | 'sales_invoice' | 'composite_task';
   displayName: string;
+  code?: string;
+  isFullyPaid?: boolean;
   adType?: string;
+  serviceType?: string;
+  teamName?: string;
+  contractNumber?: number;
+  reinstallationNumber?: number;
   totalAmount: number;
   paidAmount: number;
   remainingAmount: number;
   selected: boolean;
   allocatedAmount: number;
+  groupKey?: string;
+  subTasks?: DistributableSubTask[];
 }
+

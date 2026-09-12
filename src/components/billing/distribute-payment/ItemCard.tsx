@@ -42,9 +42,37 @@ export const ItemCard = memo(({ item, index, onSelect, onAmountChange, remaining
           onClick={(e) => e.stopPropagation()}
         />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span className="font-semibold text-sm truncate">{item.displayName}</span>
-            {item.adType && <Badge variant="outline" className="text-[10px] h-4 shrink-0">{item.adType}</Badge>}
+            {item.code && (
+              <span className="text-[10px] text-muted-foreground font-mono bg-muted/80 border border-border/50 px-1.5 py-0.5 rounded shrink-0">
+                {item.code}
+              </span>
+            )}
+            {item.isFullyPaid && (
+              <Badge variant="outline" className="text-[10px] h-4 shrink-0 bg-green-500/10 text-green-600 border-green-500/30 font-medium">
+                مسدد بالكامل
+              </Badge>
+            )}
+            {item.adType && (
+              <Badge 
+                variant="outline" 
+                className="text-[10px] h-4 shrink-0 bg-primary/10 text-primary border-primary/20 font-medium"
+                title="نوع الإعلان"
+              >
+                {item.adType}
+              </Badge>
+            )}
+            {item.serviceType && (
+              <Badge variant="secondary" className="text-[10px] h-4 shrink-0 text-muted-foreground">
+                {item.serviceType}
+              </Badge>
+            )}
+            {item.teamName && (
+              <Badge variant="outline" className="text-[10px] h-4 shrink-0 text-muted-foreground border-dashed">
+                {item.teamName}
+              </Badge>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0 text-xs">
@@ -86,6 +114,13 @@ export const ItemCard = memo(({ item, index, onSelect, onAmountChange, remaining
               <span className="font-bold text-red-500">{item.remainingAmount.toLocaleString('ar-LY', { maximumFractionDigits: 2 })}</span>
             </div>
           </div>
+          {(item.adType || item.serviceType || item.teamName) && (
+            <div className="mt-2 pt-2 border-t border-border/20 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              {item.adType && <span><strong className="text-foreground">نوع الإعلان:</strong> {item.adType}</span>}
+              {item.serviceType && <span><strong className="text-foreground">نوع العمل:</strong> {item.serviceType}</span>}
+              {item.teamName && <span><strong className="text-foreground">الفرقة:</strong> {item.teamName}</span>}
+            </div>
+          )}
         </div>
       )}
 

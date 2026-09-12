@@ -1,3 +1,4 @@
+import type { UnifiedPrintStyles } from './unifiedInvoiceBase';
 /**
  * Universal Print System - Configuration Types
  * نظام الطباعة الموحد - أنواع الإعدادات
@@ -11,6 +12,7 @@ export type Direction = 'rtl' | 'ltr';
  * إعدادات الطباعة الكاملة
  */
 export interface PrintConfig {
+  officialStyles?: UnifiedPrintStyles;
   // === Page Settings ===
   page: {
     direction: Direction;
