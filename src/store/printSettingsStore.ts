@@ -405,30 +405,6 @@ export function PrintSettingsProvider({ children }: PrintSettingsProviderProps) 
   // ==========================================
   // حفظ الإعدادات الافتراضية المشتركة (تطبيق على جميع المستندات)
   // ==========================================
-  const saveSharedDefaults = useCallback(async (settings: Omit<PrintSettings, 'document_type'>): Promise<boolean> => {
-    try {
-      dispatch({ type: 'SET_SHARED_DEFAULTS', payload: settings });
-      
-      // تحديث جميع السجلات في جدول print_settings ديناميكياً
-      const allTypes = Object.values(DOCUMENT_TYPES);
-      const { created_at: _ca, updated_at: _ua, document_type: _dt, ...cleanSettings } = settings as any;
-      
-      for (const docType of allTypes) {
-        await supabase
-          .from('print_settings')
-          .upsert({
-            document_type: docType,
-            ...cleanSettings,
-          }, { onConflict: 'document_type' });
-      }
-      
-      return true;
-    } catch (error) {
-      console.error('Failed to save shared defaults:', error);
-      return false;
-    }
-  }, []);
-
   // ==========================================
   // حفظ الإعدادات العامة على جميع المستندات دفعة واحدة
   // ==========================================
@@ -470,6 +446,11 @@ export function PrintSettingsProvider({ children }: PrintSettingsProviderProps) 
       return false;
     }
   }, [state]);
+
+  const saveSharedDefaults = useCallback(
+    (settings: Omit<PrintSettings, 'document_type'>) => saveGlobalToAll(settings),
+    [saveGlobalToAll],
+  );
 
   // ==========================================
   // جلب الإعدادات عند التحميل

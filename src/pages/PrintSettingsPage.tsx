@@ -1,3 +1,4 @@
+import { OFFICIAL_INVOICE_TEMPLATE, REFERENCE_INVOICE_STYLE } from '@/lib/officialInvoiceTemplate';
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -300,7 +301,7 @@ const SectionResetButton = ({ onClick, label = "إعادة تعيين" }: { onCl
 // =====================================================
 
 const PrintSettingsPage = () => {
-  const [selectedDocType, setSelectedDocType] = useState<DocumentType>(DOCUMENT_TYPES.COMBINED_TASK);
+  const [selectedDocType, setSelectedDocType] = useState<DocumentType>(OFFICIAL_INVOICE_TEMPLATE);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingDefaults, setIsSavingDefaults] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(0.45);
@@ -601,7 +602,7 @@ const PrintSettingsPage = () => {
  {/* وضع التحرير: عام أو خاص */}
               <div className="flex gap-1 p-1 bg-muted rounded-lg">
                 <button
-                  onClick={() => { setEditMode('global'); setSelectedDocType(DOCUMENT_TYPES.COMBINED_TASK); setInitializedDocType(null); }}
+                  onClick={() => { setEditMode('global'); setSelectedDocType(OFFICIAL_INVOICE_TEMPLATE); setInitializedDocType(null); }}
                   className={`flex-1 cursor-pointer px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
                     editMode === 'global' ? "bg-primary text-primary-foreground shadow" : "hover:bg-background/80"
                   }`}
@@ -621,11 +622,19 @@ const PrintSettingsPage = () => {
               {editMode === 'global' && (
                 <div className="p-2 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
                   <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                    القالب الرسمي مستمد من الفاتورة المجمعة. تعديل الشعار وبيانات الشركة والهيدر والفوتر والخطوط يُطبّق على <strong>جميع الفواتير</strong> عند الحفظ، مع الاحتفاظ بعنوان كل فاتورة.
+                    القالب الرسمي يعتمد تنسيق الإيصال المعتمد: هيدر عاجي، جداول سوداء وصفوف رمادية فاتحة. تعديل الشعار وبيانات الشركة والهيدر والفوتر والخطوط يُطبّق على <strong>جميع الفواتير</strong> عند الحفظ، مع الاحتفاظ بعنوان كل فاتورة.
                   </p>
                 </div>
               )}
 
+              {editMode === 'global' && (
+                <Button variant="outline" size="sm" className="w-full cursor-pointer transition-colors duration-200" onClick={() => {
+                  setSettings(current => ({ ...current, ...REFERENCE_INVOICE_STYLE }));
+                  toast.info('تم تحميل ألوان وتنسيق الإيصال المعتمد. اضغط حفظ لتطبيقها على جميع الفواتير.');
+                }}>
+                  <Palette className="h-4 w-4 ml-2" /> استعادة شكل الإيصال المعتمد
+                </Button>
+              )}
               {editMode === 'per_document' && (
                 <p className="text-xs text-muted-foreground leading-relaxed">عنوان الفاتورة ومحتواها خاصان بهذا المستند. إعدادات الهيدر والفوتر مشتركة وتتحدث في جميع الفواتير عند الحفظ.</p>
               )}

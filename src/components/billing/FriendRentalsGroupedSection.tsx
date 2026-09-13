@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRightLeft, Building2, ChevronDown, ChevronUp, Printer, ZoomIn, Calendar, Edit2, Loader2, ShoppingCart } from 'lucide-react';
+import { ArrowRightLeft, Building2, ChevronDown, ChevronUp, Printer, ZoomIn, Calendar, Edit2, Loader2, ShoppingCart, CheckCircle2, Link2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -42,7 +42,8 @@ interface FriendRentalsGroupedSectionProps {
   onUseAsPayment: (rentals: FriendRentalItem[]) => void;
   contracts?: any[];
   onUpdate?: () => void;
- customerId?: string; // أضفنا معرف العميل
+  customerId?: string;
+  payments?: any[];
 }
 
 function generateFriendInvoiceSerial(contractNumber: number): string {
@@ -75,7 +76,8 @@ export function FriendRentalsGroupedSection({
   onUseAsPayment,
   contracts,
   onUpdate,
- customerId, // 
+  customerId,
+  payments = [],
 }: FriendRentalsGroupedSectionProps) {
   const [openGroups, setOpenGroups] = useState<Set<number>>(new Set());
   const [zoomedImage, setZoomedImage] = useState<{ url: string; title: string } | null>(null);
@@ -339,8 +341,37 @@ export function FriendRentalsGroupedSection({
         const totalFriendCost = rentals.reduce((s, r) => s + (Number(r.friend_rental_cost) || 0), 0);
         const totalCustomerPrice = rentals.reduce((s, r) => s + (Number(r.customer_rental_price) || 0), 0);
         const totalProfit = rentals.reduce((s, r) => s + (Number(r.profit) || 0), 0);
-        const totalUsedAsPayment = rentals.reduce((s, r) => s + (Number(r.used_as_payment) || 0), 0);
+
+        // 1) Amount used recorded in friend_billboard_rentals
+        const dbUsed = rentals.reduce((s, r) => s + (Number(r.used_as_payment) || 0), 0);
+
+        // 2) Amount used recorded in barter payments matching contract or billboards
+        let paymentsBarterUsed = 0;
+        if (payments && payments.length > 0) {
+          const bbIds = new Set(rentals.map(r => String(r.billboard_id)));
+          const bbNames = rentals.map(r => r.billboards?.Billboard_Name).filter(Boolean) as string[];
+          payments.forEach(p => {
+            if (p.method === 'مقايضة') {
+              const note = p.notes || '';
+              const matchesContract = contractNumber > 0 && (
+                note.includes(`عقد ${contractNumber}`) ||
+                note.includes(`عقد #${contractNumber}`) ||
+                note.includes(`#${contractNumber}`) ||
+                Number(p.contract_number) === contractNumber
+              );
+              const matchesBb = Array.from(bbIds).some(id => id && note.includes(id)) || bbNames.some(name => name && note.includes(name));
+              if (matchesContract || matchesBb) {
+                paymentsBarterUsed += Number(p.amount) || 0;
+              }
+            }
+          });
+        }
+
+        const totalUsedAsPayment = Math.min(totalFriendCost, Math.max(dbUsed, paymentsBarterUsed));
         const remainingForPayment = Math.max(0, totalFriendCost - totalUsedAsPayment);
+        const isBarterUsed = totalUsedAsPayment > 0;
+        const isFullyUsed = isBarterUsed && remainingForPayment <= 0.01;
+        const isPartiallyUsed = isBarterUsed && remainingForPayment > 0.01;
 
         const contract = rentalsContracts[contractNumber] || contracts?.find((c: any) => Number(c.Contract_Number) === contractNumber);
         const contractAdType = contract?.["Ad Type"] || contract?.ad_type || "";
@@ -355,14 +386,33 @@ export function FriendRentalsGroupedSection({
           rentals.find((r) => r.billboards?.Image_URL)?.billboards?.Image_URL ||
           undefined;
         const isActive = rentals.some((r) => !r.end_date || new Date(r.end_date) >= now);
-        return { contractNumber, rentals, totalFriendCost, totalCustomerPrice, totalProfit, totalUsedAsPayment, remainingForPayment, designImage, isActive, contractAdType };
+        return {
+          contractNumber,
+          rentals,
+          totalFriendCost,
+          totalCustomerPrice,
+          totalProfit,
+          totalUsedAsPayment,
+          remainingForPayment,
+          isBarterUsed,
+          isFullyUsed,
+          isPartiallyUsed,
+          designImage,
+          isActive,
+          contractAdType,
+        };
       })
       .sort((a, b) => b.contractNumber - a.contractNumber);
-  }, [friendBillboardRentals, contracts, taskDesignImages, rentalsContracts]);
+  }, [friendBillboardRentals, contracts, taskDesignImages, rentalsContracts, payments]);
 
   const totalAll = useMemo(
     () => friendBillboardRentals.reduce((s, r) => s + (Number(r.friend_rental_cost) || 0), 0),
     [friendBillboardRentals],
+  );
+
+  const totalAllBarterUsed = useMemo(
+    () => contractGroups.reduce((s, g) => s + g.totalUsedAsPayment, 0),
+    [contractGroups],
   );
 
   const toggleGroup = (cn: number) => {
@@ -446,22 +496,28 @@ export function FriendRentalsGroupedSection({
 
   return (
     <Card className="border border-amber-500/20 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 shadow-2xl overflow-hidden relative group transition-all duration-300 hover:border-amber-500/30 rounded-2xl mt-6">
-      <CardHeader className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border-b border-amber-500/20 text-white py-5">
+      <CardHeader className="bg-gradient-to-r from-amber-500/10 via-purple-500/5 to-transparent border-b border-amber-500/20 text-white py-5">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 w-full">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-amber-500/15 border border-amber-500/30 rounded-xl flex items-center justify-center shadow-lg shadow-amber-500/10">
               <Building2 className="h-6 w-6 text-amber-500" />
             </div>
             <div>
-              <CardTitle className="text-xl font-bold text-white">إيجارات اللوحات (شركة صديقة)</CardTitle>
+              <CardTitle className="text-xl font-bold text-white">إيجارات اللوحات (شركة صديقة / مقايضة)</CardTitle>
               <p className="text-white/70 text-sm mt-0.5">{friendBillboardRentals.length} لوحة مؤجرة من شركات صديقة</p>
             </div>
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-sm font-bold px-3 py-1.5 rounded-lg shadow-sm">
-              إجمالي: {totalAll.toLocaleString('ar-LY')} د.ل
+              إجمالي التكلفة: {totalAll.toLocaleString('ar-LY')} د.ل
             </Badge>
+            {totalAllBarterUsed > 0 && (
+              <Badge className="bg-purple-500/15 text-purple-300 border border-purple-500/30 text-sm font-bold px-3 py-1.5 rounded-lg shadow-sm gap-1.5">
+                <ArrowRightLeft className="h-3.5 w-3.5 text-purple-400" />
+                مستعمل كمقايضة: {totalAllBarterUsed.toLocaleString('ar-LY')} د.ل
+              </Badge>
+            )}
           </div>
         </div>
       </CardHeader>
@@ -470,9 +526,21 @@ export function FriendRentalsGroupedSection({
           const isOpen = openGroups.has(group.contractNumber);
           const firstStart = group.rentals.reduce((min, r) => !r.start_date ? min : (!min || r.start_date < min ? r.start_date : min), '');
           const lastEnd = group.rentals.reduce((max, r) => !r.end_date ? max : (!max || r.end_date > max ? r.end_date : max), '');
+          const isBarter = group.isBarterUsed;
+          const isFullyUsed = group.isFullyUsed;
+          const isPartiallyUsed = group.isPartiallyUsed;
 
           return (
-            <div key={group.contractNumber} className="rounded-xl border border-white/10 bg-slate-900/40 overflow-hidden hover:border-amber-500/20 transition-colors duration-200">
+            <div
+              key={group.contractNumber}
+              className={`rounded-xl border overflow-hidden transition-all duration-200 ${
+                isFullyUsed
+                  ? 'border-purple-500/50 bg-gradient-to-r from-purple-950/35 via-slate-900/60 to-slate-900/40 shadow-lg shadow-purple-950/20 hover:border-purple-500/70'
+                  : isPartiallyUsed
+                    ? 'border-purple-500/35 bg-gradient-to-r from-purple-950/20 via-slate-900/50 to-slate-900/40 hover:border-purple-500/50'
+                    : 'border-white/10 bg-slate-900/40 hover:border-amber-500/20'
+              }`}
+            >
               <div className="flex flex-col gap-3 p-4 xl:flex-row xl:items-center xl:justify-between">
                 <button type="button" onClick={() => toggleGroup(group.contractNumber)} className="flex flex-1 items-start gap-4 text-right cursor-pointer hover:opacity-95">
                   {group.designImage && (
@@ -495,30 +563,74 @@ export function FriendRentalsGroupedSection({
                           الفترة: من {new Date(firstStart).toLocaleDateString('ar-LY')} إلى {new Date(lastEnd).toLocaleDateString('ar-LY')}
                         </Badge>
                       )}
+                      {/* شارات المقايضة المميزة */}
+                      {isFullyUsed ? (
+                        <Badge variant="outline" className="border-purple-500/60 bg-purple-500/25 text-purple-200 font-bold gap-1.5 px-2.5 py-1 text-xs shadow-sm">
+                          <ArrowRightLeft className="h-3.5 w-3.5 text-purple-300" />
+                          مقايضة (مستعملة كدفعة بالكامل)
+                        </Badge>
+                      ) : isPartiallyUsed ? (
+                        <Badge variant="outline" className="border-purple-500/60 bg-purple-500/25 text-purple-200 font-bold gap-1.5 px-2.5 py-1 text-xs shadow-sm">
+                          <ArrowRightLeft className="h-3.5 w-3.5 text-purple-300" />
+                          مقايضة (مستعمل منها {group.totalUsedAsPayment.toLocaleString('ar-LY')} د.ل)
+                        </Badge>
+                      ) : null}
                     </div>
                     <div className="grid grid-cols-1 gap-1 text-sm text-white/60 sm:grid-cols-3">
                       <span>التكلفة: <b className="text-white">{group.totalFriendCost.toLocaleString('ar-LY')} د.ل</b></span>
                       <span>سعر الزبون: <b className="text-white">{group.totalCustomerPrice.toLocaleString('ar-LY')} د.ل</b></span>
                       <span>الربح: <b className="text-emerald-400">{group.totalProfit.toLocaleString('ar-LY')} د.ل</b></span>
                     </div>
-                    {group.remainingForPayment > 0 && (
-                      <p className="text-sm font-semibold text-amber-400">المتاح كدفعة: {group.remainingForPayment.toLocaleString('ar-LY')} د.ل</p>
+                    {/* تفاصيل المتاح والمستعمل كدفعة ومقايضة */}
+                    {isFullyUsed ? (
+                      <div className="flex items-center gap-2 text-sm font-semibold text-purple-300 bg-purple-500/10 border border-purple-500/25 rounded-lg px-3 py-1.5 w-fit">
+                        <CheckCircle2 className="h-4 w-4 text-purple-400 shrink-0" />
+                        <span>تم استخدام كامل التكلفة (<b className="text-purple-200">{group.totalUsedAsPayment.toLocaleString('ar-LY')} د.ل</b>) كدفعة مقايضة</span>
+                      </div>
+                    ) : isPartiallyUsed ? (
+                      <div className="flex flex-wrap items-center gap-3 text-sm font-semibold pt-0.5">
+                        <span className="flex items-center gap-1.5 text-purple-300 bg-purple-500/10 border border-purple-500/25 rounded-lg px-2.5 py-1">
+                          <ArrowRightLeft className="h-3.5 w-3.5 text-purple-400" />
+                          المستخدم كمقايضة: <b className="text-purple-200">{group.totalUsedAsPayment.toLocaleString('ar-LY')} د.ل</b>
+                        </span>
+                        <span className="flex items-center gap-1.5 text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2.5 py-1">
+                          المتاح كدفعة متبقية: <b className="text-amber-300">{group.remainingForPayment.toLocaleString('ar-LY')} د.ل</b>
+                        </span>
+                      </div>
+                    ) : (
+                      group.remainingForPayment > 0 && (
+                        <p className="text-sm font-semibold text-amber-400">المتاح كدفعة: {group.remainingForPayment.toLocaleString('ar-LY')} د.ل</p>
+                      )
                     )}
                   </div>
                   <div className="pt-1 text-white/40">{isOpen ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}</div>
                 </button>
 
-                <div className="flex flex-wrap gap-2 xl:justify-end" onClick={(ev) => ev.stopPropagation()}>
+                <div className="flex flex-wrap gap-2 xl:justify-end items-center" onClick={(ev) => ev.stopPropagation()}>
                   <Button variant="outline" size="sm" className="gap-2 cursor-pointer border-white/10 text-white hover:bg-white/5 transition-all duration-200" onClick={() => handlePrintContractInvoice(group.contractNumber, group.rentals, group.designImage)}>
                     <Printer className="h-4 w-4" />
                     طباعة فاتورة
                   </Button>
-                  {group.remainingForPayment > 0 && (
-                    <Button variant="outline" size="sm" className="gap-2 cursor-pointer border-amber-500/50 text-amber-500 hover:bg-amber-500/10 transition-all duration-200" onClick={() => onUseAsPayment(group.rentals)}>
+                  {group.remainingForPayment > 0 ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={`gap-2 cursor-pointer transition-all duration-200 ${
+                        isPartiallyUsed 
+                          ? 'border-purple-500/60 text-purple-300 hover:bg-purple-500/15' 
+                          : 'border-amber-500/50 text-amber-500 hover:bg-amber-500/10'
+                      }`}
+                      onClick={() => onUseAsPayment(group.rentals)}
+                    >
                       <ArrowRightLeft className="h-4 w-4" />
-                      استخدام كدفعة ({group.remainingForPayment.toLocaleString('ar-LY')} د.ل)
+                      {isPartiallyUsed ? `استخدام المتبقي كدفعة (${group.remainingForPayment.toLocaleString('ar-LY')} د.ل)` : `استخدام كدفعة (${group.remainingForPayment.toLocaleString('ar-LY')} د.ل)`}
                     </Button>
-                  )}
+                  ) : isFullyUsed ? (
+                    <Badge variant="outline" className="h-9 px-3 border-purple-500/40 bg-purple-500/15 text-purple-300 font-bold gap-1.5 flex items-center">
+                      <CheckCircle2 className="h-4 w-4 text-purple-400" />
+                      مسددة بالكامل كمقايضة
+                    </Badge>
+                  ) : null}
                 </div>
               </div>
 
@@ -557,15 +669,23 @@ export function FriendRentalsGroupedSection({
                       const days = sd && ed ? Math.ceil((ed.getTime() - sd.getTime()) / 86400000) : 0;
                       const active = ed ? new Date() <= ed : true;
                       const isSelected = selectedRentalIds.has(rental.id);
+                      const rentalUsed = Number(rental.used_as_payment) || (isFullyUsed ? Number(rental.friend_rental_cost) || 0 : 0);
+                      const rentalCost = Number(rental.friend_rental_cost) || 0;
+                      const rentalIsFullyUsed = rentalUsed >= rentalCost && rentalCost > 0;
+                      const rentalIsUsed = rentalUsed > 0;
                       return (
                         <Card
                           key={rental.id}
                           className={`card-elegant border-2 relative w-full max-w-sm transition-all duration-300 hover:shadow-xl ${
                             isSelected 
                               ? 'border-amber-500 bg-amber-500/[0.04] ring-1 ring-amber-500 shadow-amber-500/[0.05]' 
-                              : active 
-                                ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/[0.04] to-transparent shadow-emerald-500/[0.02]' 
-                                : 'border-border bg-gradient-to-br from-muted/20 to-transparent'
+                              : rentalIsFullyUsed
+                                ? 'border-purple-500/50 bg-gradient-to-br from-purple-950/20 via-slate-900/50 to-slate-900/60 shadow-md shadow-purple-950/15'
+                                : rentalIsUsed
+                                  ? 'border-purple-500/35 bg-gradient-to-br from-purple-950/15 via-slate-900/40 to-slate-900/50'
+                                  : active 
+                                    ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/[0.04] to-transparent shadow-emerald-500/[0.02]' 
+                                    : 'border-border bg-gradient-to-br from-muted/20 to-transparent'
                           }`}
                         >
                           {/* صندوق التحديد المطلق فوق الكرت */}
@@ -632,9 +752,17 @@ export function FriendRentalsGroupedSection({
                                 )}
  {bb?.Nearest_Landmark && <p className="text-xs text-muted-foreground/80 flex items-center gap-1"> {bb.Nearest_Landmark}</p>}
                               </div>
-                              <Badge className={`text-xs font-semibold py-0.5 px-2.5 rounded-full ${active ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 hover:bg-emerald-500/20' : 'bg-muted text-muted-foreground border border-border'}`}>
-                                {active ? 'نشط' : 'منتهي'}
-                              </Badge>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <Badge className={`text-xs font-semibold py-0.5 px-2.5 rounded-full ${active ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20' : 'bg-muted text-muted-foreground border border-border'}`}>
+                                  {active ? 'نشط' : 'منتهي'}
+                                </Badge>
+                                {rentalIsUsed && (
+                                  <Badge variant="outline" className="text-xs font-bold py-0.5 px-2 rounded-full border-purple-500/50 bg-purple-500/20 text-purple-300 gap-1">
+                                    <ArrowRightLeft className="h-3 w-3 text-purple-400" />
+                                    مقايضة: {rentalUsed.toLocaleString('ar-LY')} د.ل
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
 
                             {/* التواريخ الفردية وإمكانية التعديل */}
@@ -686,6 +814,12 @@ export function FriendRentalsGroupedSection({
                                   {(Number(rental.profit) || 0).toLocaleString('ar-LY')} <span className="text-[9px] font-medium">د.ل</span>
                                 </span>
                               </div>
+                              {rentalIsUsed && (
+                                <div className="col-span-3 mt-1 rounded-xl border border-purple-500/30 bg-purple-500/15 p-1.5 text-center text-xs font-bold text-purple-200 flex items-center justify-center gap-1.5 shadow-sm">
+                                  <ArrowRightLeft className="h-3.5 w-3.5 text-purple-400" />
+                                  مستعملة كدفعة مقايضة: {rentalUsed.toLocaleString('ar-LY')} د.ل
+                                </div>
+                              )}
                             </div>
                           </CardContent>
                         </Card>

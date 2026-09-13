@@ -1,56 +1,125 @@
 import { supabase } from '@/integrations/supabase/client';
 
+export const contractDesignCache = new Map<number, string[]>();
+
 /**
- * جلب جميع تصاميم العقد مع الفولباك الكامل المطابق لكروت العقود واللوحات
+ * جلب جميع تصاميم العقد مع الفولباك الكامل المطابق تماماً لـ ContractCard
+ * يضمن نفس ترتيب الأولويات، والترتيب التصاعدي لتصاميم المهمة، ودعم الكاش.
  */
-export async function fetchContractDesignUrls(contractNumber: number): Promise<string[]> {
+export async function fetchContractDesignUrls(
+  contractNumber: number,
+  contractObj?: any
+): Promise<string[]> {
   if (!contractNumber || !Number.isFinite(contractNumber)) return [];
 
+  // 0. فحص الذاكرة المؤقتة (Cache)
+  if (contractDesignCache.has(contractNumber)) {
+    const cached = contractDesignCache.get(contractNumber) || [];
+    if (cached.length > 0) return cached;
+  }
+
   const allImages: string[] = [];
-  const addImage = (url: string | null | undefined) => {
-    if (typeof url === 'string' && url.trim() && !allImages.includes(url.trim())) {
-      allImages.push(url.trim());
+  const addImage = (url: unknown) => {
+    if (typeof url === 'string') {
+      const trimmed = url.trim();
+      if (
+        trimmed &&
+        (trimmed.startsWith('http') || trimmed.startsWith('/') || trimmed.startsWith('data:')) &&
+        !allImages.includes(trimmed)
+      ) {
+        allImages.push(trimmed);
+      }
     }
   };
 
   try {
-    // ✅ 1. مهام التركيب المباشرة لهذا العقد (الأحدث أولاً)
-    const { data: tasks } = await supabase
+    // 1. استخراج التصاميم المضمنة مباشرة في العقد (design_data)
+    let rawInlineDesigns = contractObj?.design_data;
+    if (rawInlineDesigns === undefined) {
+      const { data: contractRow } = await supabase
+        .from('Contract')
+        .select('design_data, billboard_ids')
+        .eq('Contract_Number', contractNumber)
+        .maybeSingle();
+
+      if (contractRow) {
+        rawInlineDesigns = contractRow.design_data;
+        if (!contractObj) contractObj = contractRow;
+        else if (!(contractObj as any).billboard_ids && contractRow.billboard_ids) {
+          (contractObj as any).billboard_ids = contractRow.billboard_ids;
+        }
+      }
+    }
+
+    if (rawInlineDesigns) {
+      try {
+        let parsed = typeof rawInlineDesigns === 'string'
+          ? JSON.parse(rawInlineDesigns)
+          : rawInlineDesigns;
+        // التعامل مع JSON مشفر مرتين (double-stringified)
+        if (typeof parsed === 'string') {
+          try {
+            parsed = JSON.parse(parsed);
+          } catch {}
+        }
+        if (Array.isArray(parsed)) {
+          parsed.forEach((design: any) => {
+            addImage(design?.designFaceA || design?.faceA || design?.design_face_a || design?.design_face_a_url || design?.designFaceAUrl);
+            addImage(design?.designFaceB || design?.faceB || design?.design_face_b || design?.design_face_b_url || design?.designFaceBUrl);
+          });
+        } else if (parsed && typeof parsed === 'object') {
+          addImage(parsed?.designFaceA || parsed?.faceA || parsed?.design_face_a || parsed?.design_face_a_url || parsed?.designFaceAUrl);
+          addImage(parsed?.designFaceB || parsed?.faceB || parsed?.design_face_b || parsed?.design_face_b_url || parsed?.designFaceBUrl);
+        }
+      } catch {
+        // Ignore parse errors
+      }
+    }
+
+    if (allImages.length > 0) {
+      contractDesignCache.set(contractNumber, allImages);
+      return allImages;
+    }
+
+    // 2. مهام التركيب المباشرة لهذا العقد (الأولوية القصوى - الأحدث أولاً)
+    const { data: directTasks } = await supabase
       .from('installation_tasks')
       .select('id, reinstallation_number, task_type')
       .eq('contract_id', contractNumber)
       .order('reinstallation_number', { ascending: false, nullsFirst: false });
 
-    if (tasks && tasks.length > 0) {
-      for (const task of tasks) {
-        const { data: items } = await supabase
+    if (directTasks && directTasks.length > 0) {
+      for (const task of directTasks) {
+        // أ) جلب التصاميم من جدول task_designs التابع للمهمة أولاً (مرتبة حسب الإدخال)
+        const { data: taskDesigns } = await supabase
+          .from('task_designs')
+          .select('design_face_a_url, design_face_b_url, cutout_image_url')
+          .eq('task_id', task.id)
+          .order('created_at', { ascending: true });
+
+        (taskDesigns || []).forEach(td => {
+          addImage(td.design_face_a_url);
+          addImage(td.design_face_b_url);
+          addImage(td.cutout_image_url);
+        });
+
+        // ب) جلب التصاميم من عناصر المهمة installation_task_items
+        const { data: taskItems } = await supabase
           .from('installation_task_items')
           .select('design_face_a, design_face_b')
           .eq('task_id', task.id)
           .or('design_face_a.not.is.null,design_face_b.not.is.null');
 
-        (items || []).forEach(item => {
+        (taskItems || []).forEach(item => {
           addImage(item.design_face_a);
           addImage(item.design_face_b);
-        });
-
-        if (allImages.length > 0) break;
-
-        const { data: taskDesigns } = await supabase
-          .from('task_designs')
-          .select('design_face_a_url, design_face_b_url')
-          .eq('task_id', task.id);
-
-        (taskDesigns || []).forEach(td => {
-          addImage(td.design_face_a_url);
-          addImage(td.design_face_b_url);
         });
 
         if (allImages.length > 0) break;
       }
     }
 
-    // ✅ 2. المهام المدمجة (contract_ids يتضمن رقم العقد)
+    // 3. المهام المدمجة (combined tasks - contract_ids يحتوي على رقم العقد)
     if (allImages.length === 0) {
       const { data: combinedTasks } = await supabase
         .from('installation_tasks')
@@ -59,27 +128,31 @@ export async function fetchContractDesignUrls(contractNumber: number): Promise<s
 
       if (combinedTasks && combinedTasks.length > 0) {
         const taskIds = combinedTasks.map(t => t.id);
-        const { data: items } = await supabase
+        const { data: combinedItems } = await supabase
           .from('installation_task_items')
-          .select(`design_face_a, design_face_b, billboard:billboards!installation_task_items_billboard_id_fkey(Contract_Number)`)
+          .select(`
+            design_face_a, design_face_b,
+            billboard:billboards!installation_task_items_billboard_id_fkey(Contract_Number)
+          `)
           .in('task_id', taskIds)
           .or('design_face_a.not.is.null,design_face_b.not.is.null');
 
-        (items || []).forEach(item => {
-          const billboard = item.billboard as any;
-          if (billboard?.Contract_Number === contractNumber) {
+        (combinedItems || []).forEach(item => {
+          const bb = item.billboard as any;
+          if (bb?.Contract_Number === contractNumber) {
             addImage(item.design_face_a);
             addImage(item.design_face_b);
           }
         });
 
         if (allImages.length === 0) {
-          const { data: taskDesigns } = await supabase
+          const { data: combinedDesigns } = await supabase
             .from('task_designs')
             .select('design_face_a_url, design_face_b_url')
-            .in('task_id', taskIds);
+            .in('task_id', taskIds)
+            .order('created_at', { ascending: true });
 
-          (taskDesigns || []).forEach(td => {
+          (combinedDesigns || []).forEach(td => {
             addImage(td.design_face_a_url);
             addImage(td.design_face_b_url);
           });
@@ -87,7 +160,7 @@ export async function fetchContractDesignUrls(contractNumber: number): Promise<s
       }
     }
 
-    // ✅ 2.5. المهام المجمعة عبر composite_tasks
+    // 4. المهام المجمعة (composite_tasks)
     if (allImages.length === 0) {
       const { data: compositeTasks } = await supabase
         .from('composite_tasks')
@@ -96,116 +169,78 @@ export async function fetchContractDesignUrls(contractNumber: number): Promise<s
         .not('installation_task_id', 'is', null);
 
       if (compositeTasks && compositeTasks.length > 0) {
-        const taskIds = compositeTasks.map(ct => ct.installation_task_id).filter((id): id is string => id !== null);
-        if (taskIds.length > 0) {
-          const { data: items } = await supabase
-            .from('installation_task_items')
-            .select(`design_face_a, design_face_b, billboard:billboards!installation_task_items_billboard_id_fkey(Contract_Number)`)
-            .in('task_id', taskIds)
-            .or('design_face_a.not.is.null,design_face_b.not.is.null');
+        const itIds = compositeTasks
+          .map(c => c.installation_task_id)
+          .filter((id): id is string => Boolean(id));
 
-          (items || []).forEach(item => {
-            const billboard = item.billboard as any;
-            if (billboard?.Contract_Number === contractNumber) {
-              addImage(item.design_face_a);
-              addImage(item.design_face_b);
-            }
+        if (itIds.length > 0) {
+          const { data: compDesigns } = await supabase
+            .from('task_designs')
+            .select('design_face_a_url, design_face_b_url')
+            .in('task_id', itIds)
+            .order('created_at', { ascending: true });
+
+          (compDesigns || []).forEach(td => {
+            addImage(td.design_face_a_url);
+            addImage(td.design_face_b_url);
           });
 
           if (allImages.length === 0) {
-            const { data: taskDesigns } = await supabase
-              .from('task_designs')
-              .select('design_face_a_url, design_face_b_url')
-              .in('task_id', taskIds);
+            const { data: compItems } = await supabase
+              .from('installation_task_items')
+              .select('design_face_a, design_face_b')
+              .in('task_id', itIds)
+              .or('design_face_a.not.is.null,design_face_b.not.is.null');
 
-            (taskDesigns || []).forEach(td => {
-              addImage(td.design_face_a_url);
-              addImage(td.design_face_b_url);
+            (compItems || []).forEach(item => {
+              addImage(item.design_face_a);
+              addImage(item.design_face_b);
             });
           }
         }
       }
     }
 
-    // ✅ 3. البحث عبر لوحات العقد (installation_task_items)
+    // 5. حالة فولباك من اللوحات المرتبطة بالعقد (فقط تصاميم اللوحات وليس صور الهياكل)
     if (allImages.length === 0) {
-      const { data: contractBillboards } = await supabase
-        .from('billboards')
-        .select('ID')
-        .eq('Contract_Number', contractNumber);
+      const bbIds = (contractObj as any)?.billboard_ids
+        ? String((contractObj as any).billboard_ids)
+            .split(',')
+            .map(s => Number(s.trim()))
+            .filter(n => Number.isFinite(n) && n > 0)
+        : [];
 
-      if (contractBillboards && contractBillboards.length > 0) {
-        const billboardIds = contractBillboards.map(b => b.ID);
-        const { data: designItems } = await supabase
+      if (bbIds.length > 0) {
+        const { data: latestPreviousItem } = await supabase
           .from('installation_task_items')
-          .select('design_face_a, design_face_b, task_id')
-          .in('billboard_id', billboardIds)
-          .or('design_face_a.not.is.null,design_face_b.not.is.null');
+          .select('design_face_a, design_face_b')
+          .in('billboard_id', bbIds)
+          .or('design_face_a.not.is.null,design_face_b.not.is.null')
+          .order('created_at', { ascending: false })
+          .limit(1);
 
-        if (designItems && designItems.length > 0) {
-          const dTaskIds = [...new Set(designItems.map(d => d.task_id).filter(Boolean))];
-          if (dTaskIds.length > 0) {
-            const { data: dTasks } = await supabase
-              .from('installation_tasks')
-              .select('id, contract_id, contract_ids')
-              .in('id', dTaskIds);
-
-            const taskMap = new Map((dTasks || []).map(t => [t.id, t]));
-            designItems.forEach(item => {
-              const task = taskMap.get(item.task_id);
-              if (!task) return;
-              if (task.contract_id === contractNumber ||
-                  (Array.isArray(task.contract_ids) && task.contract_ids.includes(contractNumber))) {
-                addImage(item.design_face_a);
-                addImage(item.design_face_b);
-              }
-            });
-          }
+        if (latestPreviousItem && latestPreviousItem.length > 0) {
+          addImage(latestPreviousItem[0].design_face_a);
+          addImage(latestPreviousItem[0].design_face_b);
         }
       }
-    }
 
-    // ✅ 4. design_data المحفوظة في العقد جدول Contract
-    if (allImages.length === 0) {
-      const { data: contractData } = await supabase
-        .from('Contract')
-        .select('design_data')
-        .eq('Contract_Number', contractNumber)
-        .maybeSingle();
+      if (allImages.length === 0) {
+        const { data: billboards } = await supabase
+          .from('billboards')
+          .select('design_face_a, design_face_b')
+          .eq('Contract_Number', contractNumber);
 
-      if (contractData?.design_data) {
-        try {
-          const designData = typeof contractData.design_data === 'string'
-            ? JSON.parse(contractData.design_data)
-            : contractData.design_data;
-
-          if (Array.isArray(designData)) {
-            for (const d of designData) {
-              const fA = typeof d?.designFaceA === 'string' && d.designFaceA.trim() ? d.designFaceA.trim() : null;
-              const fB = typeof d?.designFaceB === 'string' && d.designFaceB.trim() ? d.designFaceB.trim() : null;
-              const img = typeof d?.billboardImage === 'string' && d.billboardImage.trim() ? d.billboardImage.trim() : null;
-              addImage(fA || fB || img);
-            }
-          }
-        } catch (e) { /* ignore */ }
+        (billboards || []).forEach(b => {
+          addImage(b.design_face_a);
+          addImage(b.design_face_b);
+        });
       }
     }
 
-    // ✅ 5. فولباك مباشر من صور اللوحات في جدول billboards
-    if (allImages.length === 0) {
-      const { data: billboards } = await supabase
-        .from('billboards')
-        .select('Image_URL, design_face_a, design_face_b')
-        .eq('Contract_Number', contractNumber);
-
-      (billboards || []).forEach(b => {
-        addImage(b.design_face_a);
-        addImage(b.design_face_b);
-        addImage(b.Image_URL);
-      });
-    }
+    contractDesignCache.set(contractNumber, allImages);
   } catch (err) {
-    console.error('Error fetching contract design URLs:', err);
+    console.error('Error fetching contract design URLs:', contractNumber, err);
   }
 
   return allImages;

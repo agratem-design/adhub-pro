@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { writeFileSync } from 'node:fs';
-import { applyOfficialInvoiceTemplate } from '@/lib/officialInvoiceTemplate';
+import { applyOfficialInvoiceTemplate, REFERENCE_INVOICE_STYLE } from '@/lib/officialInvoiceTemplate';
 import { DEFAULT_PRINT_SETTINGS } from '@/types/print-settings';
 import { DOCUMENT_TYPES } from '@/types/document-types';
 
@@ -8,21 +8,25 @@ const { settingsRows } = vi.hoisted(() => ({ settingsRows: [] as any[] }));
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: { from: () => ({ select: () => ({ in: async () => ({ data: settingsRows, error: null }) }) }) },
 }));
-import { fetchPrintSettingsForInvoice, clearPrintSettingsBridgeCache } from '@/utils/invoicePrintSettingsBridge';
+import { fetchPrintSettingsForInvoice, clearPrintSettingsBridgeCache, mapPrintSettingsToInvoiceStyles } from '@/utils/invoicePrintSettingsBridge';
 import { generateHeaderHTML, generateBaseCSS, generateFooterHTML, resolveInvoiceStyles, unifiedHeaderHtml, unifiedHeaderFooterCss } from '@/lib/unifiedInvoiceBase';
 import { createMeasurementsConfigFromSettings } from '@/lib/printMeasurementsConfig';
 import { generateMeasurementsHTML } from '@/lib/printMeasurementsHTML';
 
 const official = {
-  ...DEFAULT_PRINT_SETTINGS, document_type: DOCUMENT_TYPES.COMBINED_TASK,
+  ...DEFAULT_PRINT_SETTINGS, ...REFERENCE_INVOICE_STYLE, document_type: DOCUMENT_TYPES.PAYMENT_RECEIPT,
   company_name: 'الفارس الذهبي للدعاية والإعلان', company_phone: '091 000 0000',
-  show_company_name: true, header_bg_color: '#fffdf8', header_text_color: '#3f3219',
-  primary_color: '#b8860b', logo_size: 72, invoice_title_ar_font_size: 22,
+  show_company_name: false, header_bg_color: '#fffdf8', header_text_color: '#000000',
+  primary_color: '#000000', logo_size: 86, invoice_title_ar_font_size: 22,
   invoice_title_en_font_size: 12, footer_text: 'شكراً لتعاملكم معنا',
-  document_title_ar: 'فاتورة مجمعة',
+  document_title_ar: 'إيصال استلام',
 };
 
-describe('official combined invoice stationery', () => {
+describe('official reference invoice stationery', () => {
+  it('uses the explicit shared header position over stale logo placement', () => {
+    expect(mapPrintSettingsToInvoiceStyles({ header_swap: false, logo_position: 'left' }).headerSwap).toBe(false);
+    expect(mapPrintSettingsToInvoiceStyles({ header_swap: true, logo_position: 'right' }).headerSwap).toBe(true);
+  });
   beforeEach(() => { settingsRows.splice(0); clearPrintSettingsBridgeCache(); });
 
   it('inherits stationery while keeping the invoice title and explicit hidden or empty values', () => {
@@ -38,7 +42,7 @@ describe('official combined invoice stationery', () => {
     settingsRows.push(official, { document_type: DOCUMENT_TYPES.SALES_INVOICE, document_title_ar: 'فاتورة مبيعات', logo_size: 20 });
     for (const type of ['sales_invoice', 'purchase_invoice', 'contract', 'print_invoice', 'receipt', 'composite_task'] as const) {
       const result = await fetchPrintSettingsForInvoice(type);
-      expect(result?.logoSize).toBe(72);
+      expect(result?.logoSize).toBe(86);
       expect(result?.companyName).toBe(official.company_name);
     }
     expect((await fetchPrintSettingsForInvoice('sales_invoice'))?.invoiceTitle).toBe('فاتورة مبيعات');

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Edit, Trash2, Plus, ChevronDown, ChevronUp, Send, Wallet, CreditCard, AlertCircle, DollarSign, Coins, Receipt } from 'lucide-react';
+import { Edit, Trash2, Plus, ChevronDown, ChevronUp, Send, Wallet, CreditCard, AlertCircle, DollarSign, Coins, Receipt, AlertTriangle, ArrowRightLeft } from 'lucide-react';
 import { PaymentRow } from './BillingTypes';
 import { DistributedPaymentDetailsDialog } from './DistributedPaymentDetailsDialog';
 import { supabase } from '@/integrations/supabase/client';
@@ -23,11 +23,12 @@ interface PaymentSectionProps {
   onAddPurchaseFromCustomer?: () => void;
   onDeleteDistributedPayment?: (distributedPaymentId: string) => void;
   onEditDistributedPayment?: (distributedPaymentId: string, payments: PaymentRow[]) => void;
+  onDistributePayment?: (payment: PaymentRow) => void;
   showCollectionDetails?: boolean;
- totalRemainingDebt?: number; // المتبقي من إجمالي الديون (اختياري للتوافق مع المكونات القديمة)
+  totalRemainingDebt?: number; // المتبقي من إجمالي الديون (اختياري للتوافق مع المكونات القديمة)
   contracts?: Array<{ Contract_Number: number | string; 'Ad Type'?: string; ad_type?: string }>;
   onRefresh?: () => void | Promise<void>;
- customerId?: string; // 
+  customerId?: string; // 
 }
 
 const getPaymentTypeStyle = (entryType: string): string => {
@@ -202,6 +203,23 @@ export const getPaymentTargetInfo = (
     };
   }
 
+  // 9. Unallocated surplus or unlinked payment
+  const isUnlinked = !contractNum && !compositeId && !salesInvId && !printedInvId && !purchInvId &&
+    (payment.entry_type === 'payment' || payment.entry_type === 'receipt' || payment.entry_type === 'account_payment');
+
+  if (isUnlinked) {
+    const isSurplus = Boolean(payment.distributed_payment_id);
+    return {
+      type: 'رصيد غير موزع',
+      targetNumber: isSurplus ? 'فائض دفعة' : 'غير محدد',
+      statement: (payment as any).statement_description || notes || 'رصيد مدفوع غير موزع على عقود أو فواتير — يحتاج توزيع أو استرداد',
+      badgeLabel: isSurplus
+        ? `رصيد غير موزع (${(Number(payment.amount) || 0).toLocaleString('ar-LY')} د.ل)`
+        : `رصيد غير موزع (${(Number(payment.amount) || 0).toLocaleString('ar-LY')} د.ل)`,
+      badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/50 shadow-xs font-bold'
+    };
+  }
+
   return {
     type: payment.entry_type === 'receipt' ? 'إيصال' : 'دفعة',
     targetNumber: '—',
@@ -226,11 +244,12 @@ export function PaymentSection({
   onAddPurchaseFromCustomer,
   onDeleteDistributedPayment,
   onEditDistributedPayment,
+  onDistributePayment,
   showCollectionDetails = false,
   totalRemainingDebt = 0,
   contracts = [],
   onRefresh,
- customerId, // 
+  customerId,
 }: PaymentSectionProps) {
   const [expandedDistributions, setExpandedDistributions] = useState<Set<string>>(new Set());
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
@@ -360,7 +379,6 @@ export function PaymentSection({
 
   const isUnlinkedPayment = (payment: PaymentRow): boolean => {
     if (payment.contract_number) return false;
-    if (payment.distributed_payment_id) return false;
     if ((payment as any).composite_task_id) return false;
     if (payment.sales_invoice_id || payment.printed_invoice_id || payment.purchase_invoice_id) return false;
     return payment.entry_type === 'receipt' || payment.entry_type === 'payment' || payment.entry_type === 'account_payment';
@@ -632,6 +650,23 @@ export function PaymentSection({
     return { groupedPayments: grouped, individualPayments: individual, previousDebts: debts };
   }, [paymentsWithBalance]);
 
+  // التوسيع التلقائي للدفعات الموزعة التي تحتوي على رصيد غير مستعمل/موزع لتنبيه المستخدم
+  useEffect(() => {
+    const unlinkedDistIds = new Set<string>();
+    groupedPayments.forEach((distPayments, distId) => {
+      if (distPayments.some(p => isUnlinkedPayment(p))) {
+        unlinkedDistIds.add(distId);
+      }
+    });
+    if (unlinkedDistIds.size > 0) {
+      setExpandedDistributions(prev => {
+        const next = new Set(prev);
+        unlinkedDistIds.forEach(id => next.add(id));
+        return next;
+      });
+    }
+  }, [groupedPayments]);
+
   const toggleDistribution = (distributionId: string) => {
     const newExpanded = new Set(expandedDistributions);
     if (newExpanded.has(distributionId)) {
@@ -789,7 +824,7 @@ export function PaymentSection({
         </div>
       )}
 
-      <div className="max-w-[96%] mx-auto px-6 mb-6">
+      <div id="payments-section" className="max-w-[96%] mx-auto px-6 mb-6">
         <Card className="border border-amber-500/20 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 shadow-2xl overflow-hidden relative group transition-all duration-300 hover:border-amber-500/30 rounded-2xl">
           <CardHeader className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border-b border-amber-500/20 text-white py-5">
             <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
@@ -955,9 +990,10 @@ export function PaymentSection({
                     return (
                       <React.Fragment key={distributionId}>
                         <TableRow
+                          id={`distribution-${distributionId}`}
                           className={`cursor-pointer transition-all duration-300 ${
                             hasUnlinkedChild
-                              ? 'bg-red-500/10 hover:bg-red-500/15 border-r-4 border-r-red-500/70 shadow-[inset_0_0_15px_rgba(239,68,68,0.15)]'
+                              ? 'bg-rose-950/40 hover:bg-rose-900/50 border-r-4 border-r-rose-500 shadow-[inset_0_0_20px_rgba(244,63,94,0.2)]'
                               : isInCustody 
                                 ? 'bg-amber-100 dark:bg-amber-950/30 hover:bg-amber-200 dark:hover:bg-amber-950/50' 
                                 : hasWithdrawal 
@@ -978,8 +1014,9 @@ export function PaymentSection({
                                 دفعة موزعة - {distributionPayments.length} بنود
                               </Badge>
                               {hasUnlinkedChild && (
-                                <Badge variant="outline" className="bg-red-500/20 text-red-400 border-red-500/40 gap-1.5 font-extrabold animate-pulse">
- ️ يوجد رصيد غير مستعمل: {unlinkedChildSum.toLocaleString('ar-LY')} د.ل
+                                <Badge variant="outline" className="bg-rose-500/20 text-rose-300 border-rose-500/50 gap-1.5 font-black animate-pulse shadow-sm">
+                                  <AlertTriangle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+                                  يوجد رصيد غير موزع: {unlinkedChildSum.toLocaleString('ar-LY')} د.ل (يحتاج توزيع)
                                 </Badge>
                               )}
                               {/* عرض بنود التوزيع الذكية مع نوع الإعلان وأرقام الفواتير */}
@@ -1089,7 +1126,7 @@ export function PaymentSection({
                               id={`payment-${payment.id}`} 
                               className={`transition-all duration-300 ${
                                 isUnlinked 
-                                  ? 'bg-red-500/10 hover:bg-red-500/15 border-r-4 border-r-red-500/70 shadow-[inset_0_0_15px_rgba(239,68,68,0.15)]' 
+                                  ? 'bg-rose-950/40 hover:bg-rose-900/50 border-r-4 border-r-rose-500 shadow-[inset_0_0_20px_rgba(244,63,94,0.2)]' 
                                   : 'bg-accent/30 hover:bg-accent/40'
                               }`}
                             >
@@ -1120,17 +1157,14 @@ export function PaymentSection({
                                   {getPaymentTypeText(payment.entry_type)}
                                 </span>
                                 {isUnlinked && (
-                                  <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse">
-                                    <span className="relative flex h-1.5 w-1.5">
-                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                                      <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
-                                    </span>
-                                    غير مستعملة
+                                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-black bg-rose-500/25 text-rose-300 border border-rose-500/50 animate-pulse shadow-xs">
+                                    <AlertTriangle className="h-3 w-3 text-rose-400 shrink-0" />
+                                    رصيد غير موزع
                                   </span>
                                 )}
                               </div>
                             </TableCell>
-                            <TableCell className="font-semibold stat-green">
+                            <TableCell className={`font-black ${isUnlinked ? 'text-rose-400 text-base' : 'stat-green'}`}>
                               {(Number(payment.amount) || 0).toLocaleString('ar-LY')} د.ل
                             </TableCell>
                             <TableCell>—</TableCell>
@@ -1142,7 +1176,24 @@ export function PaymentSection({
                             <TableCell>—</TableCell>
                             <TableCell>{payment.notes || '—'}</TableCell>
                             <TableCell>
-                              <div className="expenses-actions-cell">
+                              <div className="expenses-actions-cell flex items-center gap-1 flex-wrap">
+                                {isUnlinked && onEditDistributedPayment && (
+                                  <Button
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const distId = payment.distributed_payment_id;
+                                      if (distId) {
+                                        onEditDistributedPayment(distId, distributionPayments);
+                                      }
+                                    }}
+                                    className="bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer shadow-sm flex items-center gap-1"
+                                    title="توزيع الفائض"
+                                  >
+                                    <ArrowRightLeft className="h-3.5 w-3.5 ml-1" />
+                                    توزيع الفائض
+                                  </Button>
+                                )}
                                 <Button
                                   size="sm"
                                   onClick={() => onPrintReceipt(payment)}
@@ -1177,7 +1228,7 @@ export function PaymentSection({
                       <TableRow 
                         key={payment.id} 
                         id={`payment-${payment.id}`} 
-                        className={`transition-all duration-300 ${isUnlinked ? 'bg-red-500/5 hover:bg-red-500/10 border-r-4 border-r-red-500/70 shadow-[inset_0_0_15px_rgba(239,68,68,0.05)]' : ''}`}
+                        className={`transition-all duration-300 ${isUnlinked ? 'bg-rose-950/40 hover:bg-rose-900/50 border-r-4 border-r-rose-500 shadow-[inset_0_0_20px_rgba(244,63,94,0.2)]' : ''}`}
                       >
                       <TableCell className="font-bold text-primary">
                         <span className="inline-flex items-center justify-center min-w-[40px] h-8 px-3 rounded-lg bg-emerald-500 text-white text-base font-bold shadow-sm">
@@ -1206,17 +1257,14 @@ export function PaymentSection({
                             {getPaymentTypeText(payment.entry_type)}
                           </span>
                           {isUnlinked && (
-                            <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse">
-                              <span className="relative flex h-1.5 w-1.5">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-red-500" />
-                              </span>
-                              غير مستعملة
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-black bg-rose-500/25 text-rose-300 border border-rose-500/50 animate-pulse shadow-xs">
+                              <AlertTriangle className="h-3 w-3 text-rose-400 shrink-0" />
+                              رصيد غير موزع
                             </span>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="font-semibold stat-green">
+                      <TableCell className={`font-black ${isUnlinked ? 'text-rose-400 text-base' : 'stat-green'}`}>
                         {(Number(payment.amount) || 0).toLocaleString('ar-LY')} د.ل
                       </TableCell>
                       <TableCell className="font-bold text-blue-600">
@@ -1257,7 +1305,18 @@ export function PaymentSection({
                       </TableCell>
                       <TableCell>{payment.notes || '—'}</TableCell>
                       <TableCell>
-                        <div className="expenses-actions-cell">
+                        <div className="expenses-actions-cell flex items-center gap-1 flex-wrap">
+                          {isUnlinked && onDistributePayment && (
+                            <Button
+                              size="sm"
+                              className="bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer shadow-sm flex items-center gap-1"
+                              title="توزيع الدفعة"
+                              onClick={() => onDistributePayment(payment)}
+                            >
+                              <ArrowRightLeft className="h-3.5 w-3.5 ml-1" />
+                              توزيع
+                            </Button>
+                          )}
                           <Button
                             size="sm"
                             onClick={() => onPrintReceipt(payment)}

@@ -195,11 +195,6 @@ export function mapPrintSettingsToInvoiceStyles(ps: any): Record<string, any> {
     // logo_position=left في RTL يعني الشعار يسار والعنوان يمين = headerSwap=true
     result.headerSwap = true;
   }
-  // ✅ دعم logo_position كمرادف لـ header_swap
-  if (ps.logo_position === 'left' && !ps.header_swap) {
-    result.headerSwap = true;
-  }
-
   // ✅ نمط الهيدر (header_style)
   result.headerStyle = ps.header_style || 'classic';
 

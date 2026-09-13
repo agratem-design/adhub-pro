@@ -446,31 +446,190 @@ export function UnifiedPrintAllDialog({
     })();
   }, [open, items]);
 
+  // ترتيب اللوحات هرمياً: المقاس أولاً، ثم المدينة / البلدية، ثم المستوى
   const sortBillboardsBySize = async (itemsToSort: BillboardPrintItem[]) => {
     try {
-      const { data: sizes } = await supabase
-        .from('sizes')
-        .select('name, display_order')
-        .order('display_order', { ascending: true });
+      const [sizesRes, municipalitiesRes, levelsRes] = await Promise.all([
+        supabase
+          .from('sizes')
+          .select('name, sort_order')
+          .order('sort_order', { ascending: true }),
+        supabase
+          .from('municipalities')
+          .select('name, code, sort_order')
+          .order('sort_order', { ascending: true }),
+        supabase
+          .from('billboard_levels')
+          .select('level_code, level_name, sort_order')
+          .order('sort_order', { ascending: true }),
+      ]);
 
-      if (!sizes || sizes.length === 0) return itemsToSort;
+      const sizesData = sizesRes.data || [];
+      const municipalitiesData = municipalitiesRes.data || [];
+      const levelsData = levelsRes.data || [];
 
+      // 1. خريطة المقاسات مع تطبيع النصوص
       const sizeOrderMap = new Map<string, number>();
-      sizes.forEach((s: any, idx: number) => {
-        if (s.name) sizeOrderMap.set(s.name.trim(), s.display_order ?? idx);
+      const normalizeSizeStr = (str?: string | null) =>
+        String(str || '')
+          .toLowerCase()
+          .replace(/[×*]/g, 'x')
+          .replace(/\s+/g, '')
+          .trim();
+
+      sizesData.forEach((s: any, idx: number) => {
+        const rawName = String(s?.name || '').trim();
+        if (!rawName) return;
+        const rank = typeof s?.sort_order === 'number' && s.sort_order > 0 ? s.sort_order : idx + 1;
+        sizeOrderMap.set(rawName, rank);
+        sizeOrderMap.set(normalizeSizeStr(rawName), rank);
       });
+
+      // 2. خريطة البلديات والمدن مع تطبيع الحروف العربية والأسماء الشائعة
+      const normalizeArabicStr = (str?: string | null) =>
+        String(str || '')
+          .trim()
+          .replace(/[أإآ]/g, 'ا')
+          .replace(/ة/g, 'ه')
+          .replace(/[ىي]/g, 'ي')
+          .replace(/[\s\-_]/g, '');
+
+      const muniAliases: Record<string, string> = {
+        'قصر خيار': 'قصر الاخيار',
+        'قصرخيار': 'قصر الاخيار',
+        'طرابلس': 'طرابلس المركز',
+        'القره بولى': 'القره بوللي',
+        'القرهبولي': 'القره بوللي',
+        'القرهبوللي': 'القره بوللي',
+        'قره بوللي': 'القره بوللي',
+        'قرهبولي': 'القره بوللي',
+        'مسلاتة': 'امسلاتة',
+        'مسلاته': 'امسلاتة',
+        'إمسلاتة': 'امسلاتة',
+        'امسلاته': 'امسلاتة',
+      };
+
+      const muniOrderMap = new Map<string, number>();
+      municipalitiesData.forEach((m: any, idx: number) => {
+        const rawName = String(m?.name || '').trim();
+        if (!rawName) return;
+        const rank = typeof m?.sort_order === 'number' && m.sort_order > 0 ? m.sort_order : idx + 1;
+        muniOrderMap.set(rawName, rank);
+        muniOrderMap.set(normalizeArabicStr(rawName), rank);
+        if (m.code) {
+          muniOrderMap.set(String(m.code).trim().toUpperCase(), rank);
+        }
+      });
+
+      // تسجيل الأسماء المرادفة
+      Object.entries(muniAliases).forEach(([alias, targetName]) => {
+        const targetRank = muniOrderMap.get(targetName) ?? muniOrderMap.get(normalizeArabicStr(targetName));
+        if (targetRank !== undefined) {
+          muniOrderMap.set(alias, targetRank);
+          muniOrderMap.set(normalizeArabicStr(alias), targetRank);
+        }
+      });
+
+      // 3. خريطة المستويات
+      const levelOrderMap = new Map<string, number>();
+      levelsData.forEach((l: any, idx: number) => {
+        const code = String(l?.level_code || '').trim().toUpperCase();
+        const name = String(l?.level_name || '').trim();
+        const rank = typeof l?.sort_order === 'number' && l.sort_order > 0 ? l.sort_order : idx + 1;
+        if (code) levelOrderMap.set(code, rank);
+        if (name) {
+          levelOrderMap.set(name, rank);
+          levelOrderMap.set(normalizeArabicStr(name), rank);
+        }
+      });
+
+      const getSizeRank = (rawSize: string): number => {
+        const trimmed = String(rawSize || '').trim();
+        if (!trimmed) return 9999;
+        if (sizeOrderMap.has(trimmed)) return sizeOrderMap.get(trimmed)!;
+        const norm = normalizeSizeStr(trimmed);
+        if (sizeOrderMap.has(norm)) return sizeOrderMap.get(norm)!;
+        const match = norm.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/);
+        if (match) {
+          const w = parseFloat(match[1]);
+          const h = parseFloat(match[2]);
+          if (!isNaN(w) && !isNaN(h)) {
+            return 9000 - Math.round(w * h * 10);
+          }
+        }
+        return 9999;
+      };
+
+      const getMuniRank = (primaryVal: string, fallbackVal: string): number => {
+        const v1 = String(primaryVal || '').trim();
+        if (v1) {
+          if (muniOrderMap.has(v1)) return muniOrderMap.get(v1)!;
+          const norm1 = normalizeArabicStr(v1);
+          if (muniOrderMap.has(norm1)) return muniOrderMap.get(norm1)!;
+        }
+        const v2 = String(fallbackVal || '').trim();
+        if (v2) {
+          if (muniOrderMap.has(v2)) return muniOrderMap.get(v2)!;
+          const norm2 = normalizeArabicStr(v2);
+          if (muniOrderMap.has(norm2)) return muniOrderMap.get(norm2)!;
+        }
+        return 9999;
+      };
+
+      const getLevelRank = (rawLevel: string): number => {
+        const l = String(rawLevel || '').trim();
+        if (!l) return 9999;
+        const code = l.toUpperCase();
+        if (levelOrderMap.has(code)) return levelOrderMap.get(code)!;
+        if (levelOrderMap.has(l)) return levelOrderMap.get(l)!;
+        const norm = normalizeArabicStr(l);
+        if (levelOrderMap.has(norm)) return levelOrderMap.get(norm)!;
+
+        if (code.includes('S') || code.includes('VIP') || norm.includes('مميز')) return 1;
+        if (code.includes('A') || norm.includes('اول') || code === '1') return 2;
+        if (code.includes('B') || norm.includes('ثاني') || code === '2') return 4;
+        if (code.includes('C') || norm.includes('عادي') || norm.includes('ثالث') || code === '3') return 5;
+        if (code.includes('D') || norm.includes('رابع') || code === '4') return 6;
+        return 9999;
+      };
 
       return [...itemsToSort].sort((a, b) => {
         const billboardA = billboards[a.billboard_id];
         const billboardB = billboards[b.billboard_id];
-        const sizeA = (billboardA?.Size || '').trim();
-        const sizeB = (billboardB?.Size || '').trim();
-        const orderA = sizeOrderMap.has(sizeA) ? sizeOrderMap.get(sizeA)! : 9999;
-        const orderB = sizeOrderMap.has(sizeB) ? sizeOrderMap.get(sizeB)! : 9999;
-        if (orderA !== orderB) return orderA - orderB;
-        return (billboardA?.Billboard_Name || '').localeCompare(billboardB?.Billboard_Name || '', 'ar');
+
+        // 1. الترتيب الأول: المقاس
+        const sizeA = billboardA?.Size || (billboardA as any)?.size || '';
+        const sizeB = billboardB?.Size || (billboardB as any)?.size || '';
+        const sizeRankA = getSizeRank(sizeA);
+        const sizeRankB = getSizeRank(sizeB);
+        if (sizeRankA !== sizeRankB) return sizeRankA - sizeRankB;
+
+        // 2. الترتيب الثاني: المدينة / البلدية
+        const primaryA = printCityInsteadOfMunicipality ? (billboardA?.City || '') : (billboardA?.Municipality || '');
+        const fallbackA = printCityInsteadOfMunicipality ? (billboardA?.Municipality || '') : (billboardA?.City || '');
+        const primaryB = printCityInsteadOfMunicipality ? (billboardB?.City || '') : (billboardB?.Municipality || '');
+        const fallbackB = printCityInsteadOfMunicipality ? (billboardB?.Municipality || '') : (billboardB?.City || '');
+
+        const muniRankA = getMuniRank(primaryA, fallbackA);
+        const muniRankB = getMuniRank(primaryB, fallbackB);
+        if (muniRankA !== muniRankB) return muniRankA - muniRankB;
+
+        // 3. الترتيب الثالث: المستوى
+        const levelA = billboardA?.Level || (billboardA as any)?.level || billboardA?.Category_Level || '';
+        const levelB = billboardB?.Level || (billboardB as any)?.level || billboardB?.Category_Level || '';
+        const levelRankA = getLevelRank(levelA);
+        const levelRankB = getLevelRank(levelB);
+        if (levelRankA !== levelRankB) return levelRankA - levelRankB;
+
+        // 4. ترتيب ثانوي لضمان الثبات: رقم اللوحة ثم الاسم
+        const idA = Number(billboardA?.ID || a.billboard_id || 0);
+        const idB = Number(billboardB?.ID || b.billboard_id || 0);
+        if (idA !== idB && idA > 0 && idB > 0) return idA - idB;
+
+        return String(billboardA?.Billboard_Name || '').localeCompare(String(billboardB?.Billboard_Name || ''), 'ar');
       });
-    } catch {
+    } catch (err) {
+      console.error('Error in sortBillboardsBySize:', err);
       return itemsToSort;
     }
   };

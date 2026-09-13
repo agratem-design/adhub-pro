@@ -396,30 +396,167 @@ export default function BillboardPrintDialog({
     `;
   };
 
-  // ✅ Sort billboards by size sort_order
+  // ✅ Sort billboards by size sort_order, then municipality, then level
   const sortBillboardsBySize = async (billboards: Billboard[]) => {
     try {
-      // Get size sort orders from billboard_sizes table
-      const { data: sizes, error } = await supabase
-        .from('billboard_sizes' as any)
-        .select('size, sort_order');
+      const [sizesRes, municipalitiesRes, levelsRes] = await Promise.all([
+        supabase
+          .from('sizes')
+          .select('name, sort_order')
+          .order('sort_order', { ascending: true }),
+        supabase
+          .from('municipalities')
+          .select('name, code, sort_order')
+          .order('sort_order', { ascending: true }),
+        supabase
+          .from('billboard_levels')
+          .select('level_code, level_name, sort_order')
+          .order('sort_order', { ascending: true }),
+      ]);
 
-      if (error || !sizes) {
-        console.warn('Failed to load size sort orders, using original order');
-        return billboards;
-      }
+      const sizesData = sizesRes.data || [];
+      const municipalitiesData = municipalitiesRes.data || [];
+      const levelsData = levelsRes.data || [];
 
-      // Create a map of size to sort_order
       const sizeOrderMap = new Map<string, number>();
-      sizes.forEach((s: any) => {
-        sizeOrderMap.set(s.size, s.sort_order || 999);
+      const normalizeSizeStr = (str?: string | null) =>
+        String(str || '')
+          .toLowerCase()
+          .replace(/[×*]/g, 'x')
+          .replace(/\s+/g, '')
+          .trim();
+
+      sizesData.forEach((s: any, idx: number) => {
+        const rawName = String(s?.name || '').trim();
+        if (!rawName) return;
+        const rank = typeof s?.sort_order === 'number' && s.sort_order > 0 ? s.sort_order : idx + 1;
+        sizeOrderMap.set(rawName, rank);
+        sizeOrderMap.set(normalizeSizeStr(rawName), rank);
       });
 
-      // Sort billboards by their size's sort_order
+      const normalizeArabicStr = (str?: string | null) =>
+        String(str || '')
+          .trim()
+          .replace(/[أإآ]/g, 'ا')
+          .replace(/ة/g, 'ه')
+          .replace(/[ىي]/g, 'ي')
+          .replace(/[\s\-_]/g, '');
+
+      const muniAliases: Record<string, string> = {
+        'قصر خيار': 'قصر الاخيار',
+        'قصرخيار': 'قصر الاخيار',
+        'طرابلس': 'طرابلس المركز',
+        'القره بولى': 'القره بوللي',
+        'القرهبولي': 'القره بوللي',
+        'القرهبوللي': 'القره بوللي',
+        'قره بوللي': 'القره بوللي',
+        'قرهبولي': 'القره بوللي',
+        'مسلاتة': 'امسلاتة',
+        'مسلاته': 'امسلاتة',
+        'إمسلاتة': 'امسلاتة',
+        'امسلاته': 'امسلاتة',
+      };
+
+      const muniOrderMap = new Map<string, number>();
+      municipalitiesData.forEach((m: any, idx: number) => {
+        const rawName = String(m?.name || '').trim();
+        if (!rawName) return;
+        const rank = typeof m?.sort_order === 'number' && m.sort_order > 0 ? m.sort_order : idx + 1;
+        muniOrderMap.set(rawName, rank);
+        muniOrderMap.set(normalizeArabicStr(rawName), rank);
+        if (m.code) {
+          muniOrderMap.set(String(m.code).trim().toUpperCase(), rank);
+        }
+      });
+
+      Object.entries(muniAliases).forEach(([alias, targetName]) => {
+        const targetRank = muniOrderMap.get(targetName) ?? muniOrderMap.get(normalizeArabicStr(targetName));
+        if (targetRank !== undefined) {
+          muniOrderMap.set(alias, targetRank);
+          muniOrderMap.set(normalizeArabicStr(alias), targetRank);
+        }
+      });
+
+      const levelOrderMap = new Map<string, number>();
+      levelsData.forEach((l: any, idx: number) => {
+        const code = String(l?.level_code || '').trim().toUpperCase();
+        const name = String(l?.level_name || '').trim();
+        const rank = typeof l?.sort_order === 'number' && l.sort_order > 0 ? l.sort_order : idx + 1;
+        if (code) levelOrderMap.set(code, rank);
+        if (name) {
+          levelOrderMap.set(name, rank);
+          levelOrderMap.set(normalizeArabicStr(name), rank);
+        }
+      });
+
+      const getSizeRank = (rawSize: string): number => {
+        const trimmed = String(rawSize || '').trim();
+        if (!trimmed) return 9999;
+        if (sizeOrderMap.has(trimmed)) return sizeOrderMap.get(trimmed)!;
+        const norm = normalizeSizeStr(trimmed);
+        if (sizeOrderMap.has(norm)) return sizeOrderMap.get(norm)!;
+        const match = norm.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/);
+        if (match) {
+          const w = parseFloat(match[1]);
+          const h = parseFloat(match[2]);
+          if (!isNaN(w) && !isNaN(h)) {
+            return 9000 - Math.round(w * h * 10);
+          }
+        }
+        return 9999;
+      };
+
+      const getMuniRank = (primaryVal: string, fallbackVal: string): number => {
+        const v1 = String(primaryVal || '').trim();
+        if (v1) {
+          if (muniOrderMap.has(v1)) return muniOrderMap.get(v1)!;
+          const norm1 = normalizeArabicStr(v1);
+          if (muniOrderMap.has(norm1)) return muniOrderMap.get(norm1)!;
+        }
+        const v2 = String(fallbackVal || '').trim();
+        if (v2) {
+          if (muniOrderMap.has(v2)) return muniOrderMap.get(v2)!;
+          const norm2 = normalizeArabicStr(v2);
+          if (muniOrderMap.has(norm2)) return muniOrderMap.get(norm2)!;
+        }
+        return 9999;
+      };
+
+      const getLevelRank = (rawLevel: string): number => {
+        const l = String(rawLevel || '').trim();
+        if (!l) return 9999;
+        const code = l.toUpperCase();
+        if (levelOrderMap.has(code)) return levelOrderMap.get(code)!;
+        if (levelOrderMap.has(l)) return levelOrderMap.get(l)!;
+        const norm = normalizeArabicStr(l);
+        if (levelOrderMap.has(norm)) return levelOrderMap.get(norm)!;
+
+        if (code.includes('S') || code.includes('VIP') || norm.includes('مميز')) return 1;
+        if (code.includes('A') || norm.includes('اول') || code === '1') return 2;
+        if (code.includes('B') || norm.includes('ثاني') || code === '2') return 4;
+        if (code.includes('C') || norm.includes('عادي') || norm.includes('ثالث') || code === '3') return 5;
+        if (code.includes('D') || norm.includes('رابع') || code === '4') return 6;
+        return 9999;
+      };
+
       return [...billboards].sort((a, b) => {
-        const orderA = sizeOrderMap.get(a.Size) || 999;
-        const orderB = sizeOrderMap.get(b.Size) || 999;
-        return orderA - orderB;
+        const sizeRankA = getSizeRank(a.Size || (a as any).size || '');
+        const sizeRankB = getSizeRank(b.Size || (b as any).size || '');
+        if (sizeRankA !== sizeRankB) return sizeRankA - sizeRankB;
+
+        const muniRankA = getMuniRank(a.Municipality || '', a.City || '');
+        const muniRankB = getMuniRank(b.Municipality || '', b.City || '');
+        if (muniRankA !== muniRankB) return muniRankA - muniRankB;
+
+        const levelRankA = getLevelRank(a.Level || (a as any).level || '');
+        const levelRankB = getLevelRank(b.Level || (b as any).level || '');
+        if (levelRankA !== levelRankB) return levelRankA - levelRankB;
+
+        const idA = Number(a.ID || (a as any).id || 0);
+        const idB = Number(b.ID || (b as any).id || 0);
+        if (idA !== idB && idA > 0 && idB > 0) return idA - idB;
+
+        return String(a.Billboard_Name || '').localeCompare(String(b.Billboard_Name || ''), 'ar');
       });
     } catch (e) {
       console.warn('Error sorting billboards:', e);

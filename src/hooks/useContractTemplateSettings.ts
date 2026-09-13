@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { contractTemplateQueryOptions } from '@/lib/contractTemplateQuery';
 
 // الأنواع والقيم الافتراضية من ContractTermsSettings
 export interface TableColumnSettings {
@@ -237,16 +237,8 @@ export const DEFAULT_SECTION_SETTINGS: PageSectionSettings = {
 
 export function useContractTemplateSettings() {
   return useQuery({
-    queryKey: ['contract-template-settings'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('contract_template_settings')
-        .select('*')
-        .eq('setting_key', 'default')
-        .maybeSingle();
-      
-      if (error && error.code !== 'PGRST116') throw error;
-      
+    ...contractTemplateQueryOptions,
+    select: (data) => {
       if (!data) {
         return {
           settings: DEFAULT_SECTION_SETTINGS,

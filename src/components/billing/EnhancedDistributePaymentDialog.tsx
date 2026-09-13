@@ -1479,6 +1479,23 @@ export function EnhancedDistributePaymentDialog({
                         </div>
                       )}
 
+                      {friendRental && (
+                        <div className="flex flex-col gap-1.5 p-3.5 bg-purple-500/10 border border-purple-500/30 rounded-xl mb-3">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-purple-600 dark:text-purple-400">
+                            <ArrowRightLeft className="h-4 w-4 shrink-0" />
+                            مربوطة بإيجار لوحة شركة صديقة (مقايضة)
+                          </div>
+                          <div className="text-[11px] text-muted-foreground space-y-1 mt-1 font-medium text-right" dir="rtl">
+                            <div>المرجع: <span className="font-bold text-foreground">{billboardName}</span></div>
+                            <div>إجمالي تكلفة الإيجار: <span className="font-bold text-foreground">{rentalTotalCost.toLocaleString('ar-LY')} د.ل</span></div>
+                            {rentalUsedAsPayment > 0 && (
+                              <div>المستعمل سابقاً: <span className="font-bold text-purple-300">{rentalUsedAsPayment.toLocaleString('ar-LY')} د.ل</span></div>
+                            )}
+                            <div>الرصيد المتاح للاستعمال: <span className="font-bold text-emerald-400">{availableCredit.toLocaleString('ar-LY')} د.ل</span></div>
+                          </div>
+                        </div>
+                      )}
+
                       <PaymentInputSection
                         totalAmount={totalAmount}
                         setTotalAmount={setTotalAmount}

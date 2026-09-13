@@ -1,3 +1,5 @@
+import { contractTemplateQueryOptions } from '@/lib/contractTemplateQuery';
+import { ContractSettingsNav } from '@/components/contracts/ContractSettingsNav';
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
 import QRCode from 'qrcode';
@@ -16,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Save,
+  Search,
   Loader2,
   RotateCcw,
   Plus,
@@ -545,6 +548,8 @@ export default function ContractTermsSettings() {
   const [newTerm, setNewTerm] = useState<Partial<ContractTerm>>(DEFAULT_TERM);
   const [previewScale, setPreviewScale] = useState(0.25);
   const [activeTab, setActiveTab] = useState('terms');
+  const [termSearch, setTermSearch] = useState('');
+  const [termFilter, setTermFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<'page1' | 'page2'>('page1');
   const [, forceFontRerender] = useState(0);
@@ -786,19 +791,7 @@ export default function ContractTermsSettings() {
   }, [selectedContract, selectedContractId]);
 
   // Fetch template settings
-  const { data: templateSettings, isLoading: isLoadingSettings } = useQuery({
-    queryKey: ['contract-template-settings'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('contract_template_settings')
-        .select('*')
-        .eq('setting_key', 'default')
-        .maybeSingle();
-      
-      if (error && error.code !== 'PGRST116') throw error;
-      return data;
-    },
-  });
+  const { data: templateSettings, isLoading: isLoadingSettings, error: settingsError } = useQuery(contractTemplateQueryOptions);
 
   // Load saved settings
   useEffect(() => {
@@ -872,25 +865,12 @@ export default function ContractTermsSettings() {
   // Save settings mutation
   const saveSettingsMutation = useMutation({
     mutationFn: async () => {
-      // First check if record exists
-      const { data: existing } = await supabase
-        .from('contract_template_settings')
-        .select('id')
-        .eq('setting_key', 'default')
-        .maybeSingle();
-
       const settingsJson = JSON.parse(JSON.stringify({ ...sectionSettings, tableBackgroundUrl, noStampBgUrl, noStampTableBgUrl }));
+      const { error } = await supabase.from('contract_template_settings').upsert({
+        setting_key: 'default', setting_value: settingsJson, background_url: backgroundUrl,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'setting_key' });
 
-      // Always update (upsert behavior - since we already inserted default in migration)
-      const { error } = await supabase
-        .from('contract_template_settings')
-        .update({
-          setting_value: settingsJson,
-          background_url: backgroundUrl,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('setting_key', 'default');
-      
       if (error) throw error;
     },
     onSuccess: () => {
@@ -935,11 +915,11 @@ export default function ContractTermsSettings() {
       
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: (_data, changed) => {
       queryClient.invalidateQueries({ queryKey: ['contract-terms'] });
       toast.success('تم حفظ التعديلات بنجاح');
-      setSelectedTerm(null);
-      setEditedTerm(null);
+      setSelectedTerm(current => current?.id === changed.id ? { ...current, ...changed } : current);
+      setEditedTerm(current => current?.id === changed.id ? { ...current, ...changed } : current);
     },
     onError: (error) => {
       toast.error('حدث خطأ أثناء الحفظ: ' + error.message);
@@ -1026,19 +1006,34 @@ export default function ContractTermsSettings() {
     }
   };
 
+  const hasTermChanges = !!editedTerm && !!selectedTerm && JSON.stringify(editedTerm) !== JSON.stringify(selectedTerm);
+  const filteredTerms = terms.filter(term => {
+    const query = termSearch.trim().toLocaleLowerCase();
+    return (!query || `${term.term_title} ${term.term_content} ${term.term_key}`.toLocaleLowerCase().includes(query))
+      && (termFilter === 'all' || term.is_active === (termFilter === 'active'));
+  });
+
   const handleSelectTerm = (term: ContractTerm) => {
+    if (hasTermChanges && term.id !== selectedTerm?.id) {
+      toast.info('احفظ تعديل البند الحالي أو استعد قيمه قبل اختيار بند آخر');
+      return;
+    }
     setSelectedTerm(term);
     setEditedTerm({ ...term });
   };
 
   const handleSave = () => {
     if (editedTerm) {
+      if (!editedTerm.term_title?.trim() || !editedTerm.term_content?.trim()) {
+        toast.error('أدخل عنوان البند ونصه قبل الحفظ');
+        return;
+      }
       updateMutation.mutate(editedTerm);
     }
   };
 
   const handleAddTerm = () => {
-    if (!newTerm.term_key || !newTerm.term_title || !newTerm.term_content) {
+    if (!newTerm.term_key?.trim() || !newTerm.term_title?.trim() || !newTerm.term_content?.trim()) {
       toast.error('يرجى ملء جميع الحقول المطلوبة');
       return;
     }
@@ -1119,7 +1114,7 @@ export default function ContractTermsSettings() {
     });
   };
 
-  if (isLoading) {
+  if (isLoading || isLoadingSettings) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -1128,7 +1123,7 @@ export default function ContractTermsSettings() {
     );
   }
 
-  if (error) {
+  if (error || settingsError) {
     return (
       <div className="flex items-center justify-center h-96 text-destructive">
         حدث خطأ في تحميل البيانات
@@ -1240,18 +1235,19 @@ export default function ContractTermsSettings() {
 
   return (
     <div className="container mx-auto p-4 space-y-4" dir="rtl">
+      <ContractSettingsNav />
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-4 rounded-xl border bg-background/95 p-4 shadow-sm backdrop-blur print:static">
         <div>
           <h1 className="text-2xl font-bold text-primary flex items-center gap-2">
             <FileText className="h-6 w-6" />
-            إعدادات قالب العقد
+            إعدادات العقد والبنود
           </h1>
           <p className="text-muted-foreground text-sm">
             تعديل وتنسيق الصفحة الأولى (البنود) والصفحة الثانية (جدول اللوحات)
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Page Toggle */}
           <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
             <Button 
@@ -1567,8 +1563,13 @@ export default function ContractTermsSettings() {
             className="gap-2"
           >
             {saveSettingsMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            حفظ الإعدادات
+            حفظ تنسيق العقد
           </Button>
+          {hasTermChanges && (
+            <Button onClick={handleSave} disabled={updateMutation.isPending} className="cursor-pointer gap-2 transition-colors duration-200">
+              <Save className="h-4 w-4" /> حفظ البند المعدل
+            </Button>
+          )}
           {activePage === 'page1' && (
             <Button onClick={() => setIsAddDialogOpen(true)} variant="outline" className="gap-2">
               <Plus className="h-4 w-4" />
@@ -1578,6 +1579,11 @@ export default function ContractTermsSettings() {
         </div>
       </div>
 
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl border bg-card p-3"><p className="text-xs text-muted-foreground">البنود الظاهرة في العقد</p><p className="mt-1 text-xl font-bold text-primary">{terms.filter(t => t.is_active).length}</p></div>
+        <div className="rounded-xl border bg-card p-3"><p className="text-xs text-muted-foreground">البنود المعطلة</p><p className="mt-1 text-xl font-bold">{terms.filter(t => !t.is_active).length}</p></div>
+        <div className="rounded-xl border bg-card p-3"><p className="text-xs text-muted-foreground">بيانات المعاينة</p><p className="mt-1 text-sm font-semibold">{selectedContractId ? `عقد #${selectedContractId}` : 'عقد تجريبي'}</p></div>
+      </div>
       {/* Main Layout: Side by Side */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         {/* Left Side: Preview - Sticky */}
@@ -2667,13 +2673,20 @@ export default function ContractTermsSettings() {
                   <CardHeader className="py-2 px-3">
                     <CardTitle className="text-sm flex items-center gap-2">
                       <Settings className="h-4 w-4" />
-                      قائمة البنود ({terms.length})
+                      قائمة البنود ({filteredTerms.length} من {terms.length})
                     </CardTitle>
+                    <div className="relative mt-3">
+                      <Search className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-muted-foreground" />
+                      <Input aria-label="البحث في البنود" placeholder="ابحث بالعنوان أو نص البند" value={termSearch} onChange={e => setTermSearch(e.target.value)} className="pr-9" />
+                    </div>
+                    <div className="mt-2 flex gap-1">
+                      {(['all', 'active', 'inactive'] as const).map(filter => <Button key={filter} size="sm" variant={termFilter === filter ? 'default' : 'outline'} className="flex-1 cursor-pointer text-xs" onClick={() => setTermFilter(filter)}>{filter === 'all' ? 'الكل' : filter === 'active' ? 'مفعلة' : 'معطلة'}</Button>)}
+                    </div>
                   </CardHeader>
                   <CardContent className="p-2">
                     <ScrollArea className="h-[calc(100vh-320px)]">
                       <div className="space-y-1.5 pr-2">
-                        {terms.map((term, index) => (
+                        {filteredTerms.map((term) => (
                           <div
                             key={term.id}
                             className={`p-2 rounded-lg border cursor-pointer transition-all ${
@@ -2686,7 +2699,7 @@ export default function ContractTermsSettings() {
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
                                 <div className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold">
-                                  {index + 1}
+                                  {terms.findIndex(t => t.id === term.id) + 1}
                                 </div>
                                 <span className="font-medium text-xs">{term.term_title}</span>
                               </div>
@@ -2712,7 +2725,7 @@ export default function ContractTermsSettings() {
                                   size="icon"
                                   className="h-5 w-5"
                                   onClick={(e) => { e.stopPropagation(); moveTermOrder(term.id, 'up'); }}
-                                  disabled={index === 0}
+                                  disabled={terms[0]?.id === term.id || updateMutation.isPending}
                                 >
                                   <ArrowUp className="h-3 w-3" />
                                 </Button>
@@ -2721,7 +2734,7 @@ export default function ContractTermsSettings() {
                                   size="icon"
                                   className="h-5 w-5"
                                   onClick={(e) => { e.stopPropagation(); moveTermOrder(term.id, 'down'); }}
-                                  disabled={index === terms.length - 1}
+                                  disabled={terms.at(-1)?.id === term.id || updateMutation.isPending}
                                 >
                                   <ArrowDown className="h-3 w-3" />
                                 </Button>
@@ -2732,6 +2745,7 @@ export default function ContractTermsSettings() {
                             </p>
                           </div>
                         ))}
+                        {filteredTerms.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">{terms.length ? 'لا توجد بنود مطابقة للبحث' : 'أضف أول بند لبدء إعداد العقد'}</p>}
                       </div>
                     </ScrollArea>
                   </CardContent>

@@ -1,6 +1,9 @@
 import { Card, CardContent } from '@/components/ui/card';
-import { TrendingUp, TrendingDown, DollarSign, Wallet, Calendar, Receipt, Printer, Building2, CreditCard, Percent, Layers, Calculator } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { TrendingUp, TrendingDown, DollarSign, Wallet, Calendar, Receipt, Printer, Building2, CreditCard, Percent, Layers, Calculator, AlertTriangle, ArrowRightLeft, ExternalLink, Coins } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { PaymentRow } from './BillingTypes';
 
 interface SummaryCardsProps {
   totalRent: number;
@@ -18,6 +21,10 @@ interface SummaryCardsProps {
   totalCompositeTasks?: number;
   totalDebits?: number;
   unallocatedBalance?: number;
+  unallocatedPayments?: PaymentRow[];
+  allPayments?: PaymentRow[];
+  onDistributePayment?: (payment: PaymentRow) => void;
+  onScrollToPayment?: (paymentId: string) => void;
 }
 
 export function SummaryCards({
@@ -35,7 +42,11 @@ export function SummaryCards({
   totalFriendRentals = 0,
   totalCompositeTasks = 0,
   totalDebits = 0,
-  unallocatedBalance = 0
+  unallocatedBalance = 0,
+  unallocatedPayments = [],
+  allPayments = [],
+  onDistributePayment,
+  onScrollToPayment
 }: SummaryCardsProps) {
   // حساب نسبة السداد
   const paymentPercentage = totalRent > 0 ? Math.min(100, Math.round((totalCredits / totalRent) * 100)) : 0;
@@ -179,34 +190,160 @@ export function SummaryCards({
         </CardContent>
       </Card>
 
- {/* ️ تنبيه الرصيد غير المستعمل */}
+      {/* تنبيه الرصيد غير المستعمل وتفاصيل الدفعات غير الموزعة */}
       {unallocatedBalance > 0 && (
-        <div className="relative overflow-hidden rounded-2xl border-2 border-red-500/60 bg-gradient-to-r from-red-950/80 via-red-900/50 to-red-950/80 shadow-[0_0_30px_rgba(239,68,68,0.25)]">
+        <div className="relative overflow-hidden rounded-2xl border-2 border-rose-500/60 bg-gradient-to-r from-rose-950/90 via-rose-900/60 to-rose-950/90 shadow-[0_0_35px_rgba(244,63,94,0.3)] transition-all duration-300">
           {/* شريط أحمر متوهج على اليمين */}
-          <div className="absolute top-0 right-0 bottom-0 w-1.5 bg-gradient-to-b from-red-400 via-red-500 to-red-400 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.6)]" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(239,68,68,0.1),transparent_70%)]" />
-          <div className="relative flex items-center gap-4 px-6 py-4 pr-8">
-            <div className="flex-shrink-0 w-14 h-14 bg-red-500/20 border-2 border-red-500/50 rounded-2xl flex items-center justify-center shadow-lg shadow-red-500/20 animate-pulse">
-              <Wallet className="h-7 w-7 text-red-400" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <span className="relative inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-500/20 text-red-300 border border-red-500/40">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
-                  </span>
-                  تنبيه
-                </span>
-                <h4 className="text-base font-bold text-red-300">يوجد رصيد غير مستعمل!</h4>
+          <div className="absolute top-0 right-0 bottom-0 w-1.5 bg-gradient-to-b from-rose-400 via-rose-500 to-rose-400 animate-pulse shadow-[0_0_12px_rgba(244,63,94,0.7)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(244,63,94,0.12),transparent_70%)] pointer-events-none" />
+          
+          {/* الرأس الأساسي للتنبيه */}
+          <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4 px-6 py-5 pr-8 border-b border-rose-500/30">
+            <div className="flex items-center gap-4">
+              <div className="flex-shrink-0 w-14 h-14 bg-rose-500/20 border-2 border-rose-500/50 rounded-2xl flex items-center justify-center shadow-lg shadow-rose-500/20 animate-pulse">
+                <AlertTriangle className="h-7 w-7 text-rose-400" />
               </div>
-              <p className="text-sm text-red-200/70">هذا الرصيد مدفوع ولكن غير موزع على أي عقد أو فاتورة — يحتاج توزيع أو استرداد</p>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <span className="relative inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-black bg-rose-500/25 text-rose-300 border border-rose-500/40 shadow-xs">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500" />
+                    </span>
+                    تنبيه مالي
+                  </span>
+                  <h4 className="text-lg font-black text-rose-200">يوجد رصيد غير مستعمل!</h4>
+                </div>
+                <p className="text-sm text-rose-200/80 leading-relaxed">
+                  هذا الرصيد مدفوع ومحصّل ولكن غير موزع على أي عقد أو فاتورة — يتطلب توزيعاً على المستحقات أو استرداداً للزبون.
+                </p>
+              </div>
             </div>
-            <div className="flex-shrink-0 text-left">
-              <p className="text-3xl font-black text-red-400 tabular-nums drop-shadow-[0_0_8px_rgba(239,68,68,0.4)]">{unallocatedBalance.toLocaleString('en-US')}</p>
-              <p className="text-xs text-red-300/60 font-medium">دينار ليبي</p>
+
+            <div className="flex-shrink-0 text-right md:text-left bg-rose-950/60 border border-rose-500/30 rounded-xl px-5 py-2.5">
+              <p className="text-xs text-rose-300/75 font-medium mb-0.5">إجمالي الرصيد غير الموزع</p>
+              <div className="flex items-baseline gap-1.5 justify-end md:justify-start">
+                <span className="text-3xl font-black text-rose-400 tabular-nums drop-shadow-[0_0_10px_rgba(244,63,94,0.5)]">
+                  {unallocatedBalance.toLocaleString('en-US')}
+                </span>
+                <span className="text-xs text-rose-300 font-bold">د.ل</span>
+              </div>
             </div>
           </div>
+
+          {/* قائمة تفاصيل الدفعات غير الموزعة */}
+          {unallocatedPayments && unallocatedPayments.length > 0 && (
+            <div className="relative px-6 py-4 pr-8 bg-black/25">
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <Coins className="h-4 w-4 text-rose-400" />
+                  <span className="text-xs font-bold text-rose-200">
+                    الدفعات والأرصدة غير الموزعة ({unallocatedPayments.length})
+                  </span>
+                </div>
+                <span className="text-[11px] text-rose-300/70 font-medium">
+                  حدد الإجراء المناسب لكل دفعة أدناه
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2.5">
+                {unallocatedPayments.map((p, idx) => {
+                  const seqNum = allPayments && allPayments.length > 0
+                    ? (allPayments.findIndex(item => item.id === p.id) + 1)
+                    : (idx + 1);
+                  const isFromDistributed = Boolean(p.distributed_payment_id);
+                  const pAmount = Number(p.amount) || 0;
+
+                  return (
+                    <div 
+                      key={p.id || idx}
+                      className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-3.5 rounded-xl border border-rose-500/30 bg-rose-950/40 hover:bg-rose-950/60 hover:border-rose-500/50 transition-all duration-200 shadow-sm"
+                    >
+                      {/* بيانات الدفعة الأساسية */}
+                      <div className="flex items-start sm:items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-lg bg-rose-500/20 border border-rose-500/40 flex items-center justify-center shrink-0 text-rose-200 font-black text-sm">
+                          {seqNum > 0 ? `#${seqNum}` : `#${idx + 1}`}
+                        </div>
+
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-base font-black text-rose-300 tabular-nums">
+                              {pAmount.toLocaleString('en-US')} د.ل
+                            </span>
+
+                            {isFromDistributed ? (
+                              <Badge variant="outline" className="text-[11px] font-bold bg-amber-500/15 text-amber-300 border-amber-500/35 gap-1">
+                                <Layers className="h-3 w-3" />
+                                فائض دفعة موزعة مجمعة
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[11px] font-bold bg-cyan-500/15 text-cyan-300 border-cyan-500/35 gap-1">
+                                <Wallet className="h-3 w-3" />
+                                دفعة على الحساب العام
+                              </Badge>
+                            )}
+
+                            {p.method && (
+                              <Badge variant="outline" className="text-[10px] bg-white/5 text-slate-300 border-white/10">
+                                {p.method}
+                              </Badge>
+                            )}
+
+                            {p.reference && (
+                              <span className="text-[11px] font-mono text-slate-400 bg-black/30 px-1.5 py-0.5 rounded border border-white/5">
+                                مرجع: {p.reference}
+                              </span>
+                            )}
+
+                            {p.paid_at && (
+                              <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                                <Calendar className="h-3 w-3 text-slate-500" />
+                                {new Date(p.paid_at).toLocaleDateString('ar-LY')}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* الملاحظات أو البيان */}
+                          {p.notes && (
+                            <p className="text-xs text-slate-300/80 line-clamp-1">
+                              <span className="text-slate-500 ml-1">ملاحظات:</span>
+                              {p.notes}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* أزرار الإجراءات السريعة */}
+                      <div className="flex items-center gap-2 shrink-0 self-end lg:self-center">
+                        {onDistributePayment && (
+                          <Button
+                            size="sm"
+                            onClick={() => onDistributePayment(p)}
+                            className="bg-rose-600 hover:bg-rose-700 text-white font-bold shadow-md hover:shadow-rose-600/30 cursor-pointer h-8 px-3 text-xs flex items-center gap-1.5 transition-all duration-200"
+                          >
+                            <ArrowRightLeft className="h-3.5 w-3.5 ml-1" />
+                            توزيع الدفعة الآن
+                          </Button>
+                        )}
+
+                        {onScrollToPayment && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => onScrollToPayment(p.id)}
+                            className="border-rose-500/30 hover:bg-rose-500/20 text-rose-200 cursor-pointer h-8 px-3 text-xs flex items-center gap-1.5 transition-all duration-200"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5 ml-1" />
+                            عرض في الجدول
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

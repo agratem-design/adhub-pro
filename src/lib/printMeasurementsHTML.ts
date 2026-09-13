@@ -299,7 +299,7 @@ export const generateMeasurementsCSS = (config: PrintConfig): string => {
       overflow: hidden;
     }
     
-    .measurements-container > .u-footer { margin-top: auto; padding-top: 10px; }
+    .measurements-container > .u-footer { margin-top: 12px; padding-top: 10px; }
 
     /* Header Styles - Base */
     .measurements-header {

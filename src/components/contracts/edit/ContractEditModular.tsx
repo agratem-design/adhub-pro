@@ -1621,6 +1621,16 @@ export default function ContractEditModular() {
           ? Number(friendCost.friendRentalCost)
           : customerPrice;
 
+        const { data: existingRental } = await supabase
+          .from('friend_billboard_rentals')
+          .select('used_as_payment, selectable_for_payment')
+          .eq('contract_number', Number(contractNumber))
+          .eq('billboard_id', Number(billboardId))
+          .maybeSingle();
+
+        const preservedUsed = Number(existingRental?.used_as_payment) || 0;
+        const preservedSelectable = existingRental?.selectable_for_payment !== undefined ? existingRental.selectable_for_payment : true;
+
         await supabase
           .from('friend_billboard_rentals')
           .upsert({
@@ -1631,6 +1641,8 @@ export default function ContractEditModular() {
             end_date: endDate,
             customer_rental_price: customerPrice,
             friend_rental_cost: rentalCost,
+            used_as_payment: preservedUsed,
+            selectable_for_payment: preservedSelectable,
             notes: 'تحديث من تعديل العقد'
           }, {
             onConflict: 'contract_number,billboard_id'

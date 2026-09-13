@@ -827,6 +827,21 @@ export function injectPrintActionBar(
           -webkit-print-color-adjust: exact !important;
           print-color-adjust: exact !important;
         }
+        /* Invoices flow within the printable area; board posters keep fixed paper dimensions. */
+        body.print-portrait [data-invoice-print][data-print-page],
+        body.print-landscape [data-invoice-print][data-print-page] {
+          width: 100% !important;
+          min-width: 0 !important;
+          max-width: 100% !important;
+          height: auto !important;
+          min-height: 0 !important;
+          max-height: none !important;
+          overflow: visible !important;
+          break-inside: auto !important;
+          page-break-inside: auto !important;
+          break-after: auto !important;
+          page-break-after: auto !important;
+        }
         .page:last-child, [data-print-page]:last-child {
           page-break-after: avoid !important;
           break-after: avoid !important;

@@ -862,20 +862,21 @@ export default function CustomerBilling() {
     [payments]
   );
 
-  // ✅ حساب الرصيد غير الموزع (دفعات غير مرتبطة بأي عقد أو فاتورة أو مهمة)
-  const unallocatedBalance = useMemo(() => {
-    const sum = payments
-      .filter(p => 
-        (p.entry_type === 'payment' || p.entry_type === 'receipt' || p.entry_type === 'account_payment') &&
-        !p.contract_number &&
-        !p.sales_invoice_id &&
-        !p.printed_invoice_id &&
-        !p.purchase_invoice_id &&
-        !p.composite_task_id
-      )
-      .reduce((s, p) => s + (Number(p.amount) || 0), 0);
-    return sum;
+  // حساب الرصيد غير الموزع والدفعات غير الموزعة (غير مرتبطة بأي عقد أو فاتورة أو مهمة)
+  const unallocatedPaymentsList = useMemo(() => {
+    return payments.filter(p => 
+      (p.entry_type === 'payment' || p.entry_type === 'receipt' || p.entry_type === 'account_payment') &&
+      !p.contract_number &&
+      !p.sales_invoice_id &&
+      !p.printed_invoice_id &&
+      !p.purchase_invoice_id &&
+      !p.composite_task_id
+    );
   }, [payments]);
+
+  const unallocatedBalance = useMemo(() => {
+    return unallocatedPaymentsList.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  }, [unallocatedPaymentsList]);
 
   // ✅ FIXED: Calculate payments per contract using proper type conversion
   const getContractPayments = (contractNumber: number | string): number => {
@@ -1511,6 +1512,38 @@ export default function CustomerBilling() {
     setEnhancedDistributePaymentOpen(false);
   };
 
+  // توزيع دفعة غير موزعة (سواء كانت فائض دفعة مجمعة أو دفعة مستقلة)
+  const handleDistributeUnallocated = (payment: PaymentRow) => {
+    if (payment.distributed_payment_id) {
+      const group = payments.filter(p => p.distributed_payment_id === payment.distributed_payment_id);
+      openEditDistributedPayment(payment.distributed_payment_id, group.length > 0 ? group : [payment]);
+    } else {
+      setPreFilledAmountForDistribute(Number(payment.amount) || 0);
+      setSourceAccountPaymentIdForDistribute(payment.id);
+      setSelectedContractsForDistribute(new Set());
+      setEnhancedDistributePaymentOpen(true);
+    }
+  };
+
+  // الانتقال للدفعة غير الموزعة في جدول الدفعات مع إبرازها
+  const handleScrollToUnallocatedPayment = (paymentId: string) => {
+    const targetPayment = payments.find(p => p.id === paymentId);
+    setTimeout(() => {
+      const element = document.getElementById(`payment-${paymentId}`) || 
+        (targetPayment?.distributed_payment_id ? document.getElementById(`distribution-${targetPayment.distributed_payment_id}`) : null);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        element.classList.add('ring-4', 'ring-rose-500', 'ring-offset-2', 'bg-rose-500/20');
+        setTimeout(() => {
+          element.classList.remove('ring-4', 'ring-rose-500', 'ring-offset-2', 'bg-rose-500/20');
+        }, 3000);
+      } else {
+        const sec = document.getElementById('payments-section');
+        if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 100);
+  };
+
   const saveEditDistributedPayment = async (distributions: { contractNumber: number; amount: number }[]) => {
     if (!editingDistributedPaymentId) return;
 
@@ -1859,6 +1892,10 @@ export default function CustomerBilling() {
         totalCompositeTasks={totalCompositeTasks}
         totalDebits={totalDebits}
         unallocatedBalance={unallocatedBalance}
+        unallocatedPayments={unallocatedPaymentsList}
+        allPayments={payments}
+        onDistributePayment={handleDistributeUnallocated}
+        onScrollToPayment={handleScrollToUnallocatedPayment}
         lastContractDate={contracts.length > 0 ? contracts[0]['Contract Date'] : undefined}
         lastPaymentDate={
           payments
@@ -1984,8 +2021,7 @@ export default function CustomerBilling() {
         payments={payments.filter(p => 
           p.entry_type !== 'invoice' && 
           p.entry_type !== 'purchase_invoice' &&
-          p.entry_type !== 'printed_invoice' &&
-          p.entry_type !== 'account_payment'
+          p.entry_type !== 'printed_invoice'
         )}
         onEditReceipt={openEditReceipt}
         onDeleteReceipt={deleteReceipt}
@@ -1995,6 +2031,7 @@ export default function CustomerBilling() {
         onAddPurchaseFromCustomer={() => { setPurchaseFromCustomerOpen(true); setPurchaseAmount(''); setPurchaseNotes(''); setPurchaseDate(new Date().toISOString().slice(0,10)); }}
         onDeleteDistributedPayment={deleteDistributedPayment}
         onEditDistributedPayment={openEditDistributedPayment}
+        onDistributePayment={handleDistributeUnallocated}
         showCollectionDetails={showCollectionDetails}
         totalRemainingDebt={balance}
         customerId={customerId}
@@ -2054,6 +2091,7 @@ export default function CustomerBilling() {
           friendBillboardRentals={friendBillboardRentals}
           customerName={customerName}
           contracts={contracts}
+          payments={payments}
           onUpdate={loadData}
           customerId={customerId}
           onUseAsPayment={(rentals) => {
@@ -2061,6 +2099,11 @@ export default function CustomerBilling() {
             const totalCost = rentals.reduce((s: number, r: any) => s + (Number(r.friend_rental_cost) || 0), 0);
             const totalUsed = rentals.reduce((s: number, r: any) => s + (Number(r.used_as_payment) || 0), 0);
             
+            if (totalCost - totalUsed <= 0.01) {
+              toast.info('تم استهلاك كامل قيمة هذا الإيجار كدفعة مقايضة مسبقاً');
+              return;
+            }
+
             // ابحث عن نوع الإعلان من قائمة العقود
             const linkedContract = contracts.find((c: any) => c.Contract_Number === rentals[0].contract_number);
             const adType = linkedContract?.["Ad Type"] || linkedContract?.ad_type || "";
@@ -2070,7 +2113,7 @@ export default function CustomerBilling() {
               friend_rental_cost: totalCost,
               used_as_payment: totalUsed,
               _groupRentals: rentals,
- _contractAdType: adType, // نوع الإعلان للعقد المصدر
+              _contractAdType: adType, // نوع الإعلان للعقد المصدر
             });
             setUseRentalAsPaymentOpen(true);
           }}

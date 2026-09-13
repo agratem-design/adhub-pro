@@ -1,3 +1,4 @@
+import { ContractSettingsNav } from '@/components/contracts/ContractSettingsNav';
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
@@ -11,7 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { 
   Loader2, Settings, ZoomIn, ZoomOut, Eye, 
-  Search, ChevronLeft, ChevronRight, FileText, Printer, CheckSquare
+  Save, Search, ChevronLeft, ChevronRight, FileText, Printer, CheckSquare
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -390,7 +391,7 @@ export default function BillboardPrintSettingsNew() {
       {/* Header */}
       <div className="border-b bg-card/50 backdrop-blur sticky top-0 z-10">
         <div className="container mx-auto px-4 py-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-primary/10 rounded-lg">
                 <Settings className="h-5 w-5 text-primary" />
@@ -403,7 +404,8 @@ export default function BillboardPrintSettingsNew() {
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={handleSave} disabled={isSaving} className="cursor-pointer gap-2 transition-colors duration-200">{isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} حفظ إعدادات طباعة الكل</Button>
               <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1">
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setPreviewScale(Math.max(0.2, previewScale - 0.1))}>
                   <ZoomOut className="h-3 w-3" />
@@ -428,7 +430,9 @@ export default function BillboardPrintSettingsNew() {
       </div>
 
       {/* Main Content */}
-      <div className="container mx-auto px-4 py-4">
+      <div className="container mx-auto space-y-4 px-4 py-4">
+        <ContractSettingsNav />
+        <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm leading-relaxed">اختر عقدًا لمعاينة لوحاته، ثم اضبط نسخة العميل أو فريق التركيب. تُطبّق الإعدادات المحفوظة على خيار «طباعة الكل» في العقود والمهام.</div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Sidebar - الإعدادات */}
           <div className="lg:col-span-1 space-y-4">

@@ -2100,7 +2100,7 @@ export function UnifiedTaskInvoice({
       border: 1px solid #e4dac4 !important;
       border-right: 4px solid var(--invoice-gold) !important;
       border-radius: 10px !important;
-      background: #fffdf8 !important;
+      background: ${customerBg} !important;
       box-shadow: none !important;
     }
     [data-invoice-print] .invoice-recipient-label {
@@ -2170,10 +2170,14 @@ export function UnifiedTaskInvoice({
       font-weight: 700 !important;
     }
     [data-invoice-print] .invoice-items-table {
+      table-layout: fixed;
+      width: 100%;
       border: 1px solid var(--invoice-line) !important;
       border-top: 3px solid var(--invoice-gold) !important;
       margin-bottom: 8px !important;
     }
+    [data-invoice-print] .invoice-detail-table th,
+    [data-invoice-print] .invoice-detail-table td { width: auto !important; }
     [data-invoice-print] .invoice-items-table thead th {
       padding: 6px 3px !important;
       border-color: #5c5549 !important;
@@ -2182,14 +2186,16 @@ export function UnifiedTaskInvoice({
       font-weight: 700 !important;
     }
     [data-invoice-print] .invoice-items-table tbody td {
+      min-width: 0;
+      overflow-wrap: anywhere;
       border-color: var(--invoice-line) !important;
       line-height: 1.35 !important;
     }
     [data-invoice-print] .invoice-items-table tbody tr:nth-child(even) td {
-      background-color: #fbfaf7 !important;
+      background-color: ${tableRowEven} !important;
     }
     [data-invoice-print] .invoice-items-table tbody tr:nth-child(odd) td {
-      background-color: #ffffff !important;
+      background-color: ${tableRowOdd} !important;
     }
     [data-invoice-print] .invoice-items-table td img {
       border-radius: 5px !important;
@@ -2200,7 +2206,7 @@ export function UnifiedTaskInvoice({
       font-weight: 700 !important;
     }
     [data-invoice-print] .invoice-items-table tfoot tr:last-child td:last-child {
-      color: #f4c25a !important;
+      color: ${totalText} !important;
       font-size: 12px !important;
     }
     [data-invoice-print] .invoice-total-section {
@@ -2212,7 +2218,6 @@ export function UnifiedTaskInvoice({
     @media print {
       [data-invoice-print] .invoice-recipient-card,
       [data-invoice-print] .invoice-size-summary,
-      [data-invoice-print] .invoice-items-table,
       [data-invoice-print] .invoice-total-section {
         break-inside: avoid !important;
       }
@@ -2306,10 +2311,10 @@ export function UnifiedTaskInvoice({
     @page { size: A4 portrait; margin: 8mm 10mm; }
     * { box-sizing: border-box !important; }
     .print-container, .page, [data-print-page] { width: 100% !important; max-width: 100% !important; min-height: auto; padding: 0 !important; margin: 0 !important; display: block; box-sizing: border-box !important; }
-    .page { width: 100% !important; height: auto !important; min-height: auto !important; max-height: 297mm !important; }
+    .page { width: 100% !important; height: auto !important; min-height: auto !important; max-height: none !important; }
     .page:last-child { page-break-after: avoid !important; break-after: avoid !important; }
     .u-header { width: 100% !important; max-width: 100% !important; padding-top: 2px; }
-    .u-logo { max-height: 86px; width: auto; object-fit: contain; overflow: visible; }
+    .u-logo { width: auto; object-fit: contain; overflow: visible; }
     .u-footer { width: 100% !important; margin-top: 14px; page-break-inside: avoid !important; break-inside: avoid !important; }
     .total-section, .cost-section, .summary-section, .cost-summary, [data-no-break] {
       page-break-before: avoid !important;
@@ -2451,7 +2456,8 @@ export function UnifiedTaskInvoice({
   const customerText = mergedStyles?.customerSectionTextColor || individual.customerSectionTextColor || primaryColor;
   const customerSectionBorderColor = mergedStyles?.customerSectionBorderColor || individual.customerSectionBorderColor || primaryColor;
 
-  const fullLogoUrl = shared.logoPath?.startsWith('http') ? shared.logoPath : `${window.location.origin}${shared.logoPath || '/logofaresgold.svg'}`;
+  const logoPath = mergedStyles?.logoPath || shared.logoPath || '/logofares.svg';
+  const fullLogoUrl = /^(https?:|data:|blob:)/.test(logoPath) ? logoPath : `${window.location.origin}${logoPath}`;
 
   // Build dynamic invoice title
   const getInvoiceTitleAr = () => {
@@ -3204,8 +3210,20 @@ export function UnifiedTaskInvoice({
                   return total / installItems.length;
                 })();
 
+                const costColumnCount = !showCosts ? 0 :
+                  isCustomerLike && (invoiceType !== 'customer' || showServiceBreakdown)
+                    ? 1 + Number(hasPrintCost) + Number(hasInstallCost) + Number(hasCutoutCost)
+                    : 1;
+                const columnWeights = [3.5, ...(isCustomerLike ? [14] : []), 11,
+                  ...(isCustomerLike ? [20] : []), 10, ...(showDimensions ? [5, 5] : []),
+                  8, 11, 8.5, ...Array(costColumnCount).fill(12)];
+                const columnWeightTotal = columnWeights.reduce((sum, weight) => sum + weight, 0);
+
                 return (
-                  <table className="invoice-items-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px', marginBottom: '14px' }}>
+                  <table className="invoice-items-table invoice-detail-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px', marginBottom: '14px' }}>
+                    <colgroup>{columnWeights.map((weight, index) => (
+                      <col key={index} style={{ width: `${weight / columnWeightTotal * 100}%` }} />
+                    ))}</colgroup>
                     <thead>
                       <tr style={{ backgroundColor: tableHeaderBg }}>
                         <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '3.5%', fontSize: '10px', fontWeight: 'bold' }}>#</th>

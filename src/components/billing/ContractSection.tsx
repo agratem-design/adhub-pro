@@ -4,10 +4,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { FileText, CreditCard, Calendar, Clock, CheckCircle2, AlertCircle, ImageIcon, ZoomIn, Receipt, DollarSign, Coins, Wallet, Megaphone, LayoutGrid, Plus, Pencil } from 'lucide-react';
+import { FileText, CreditCard, Calendar, Clock, CheckCircle2, AlertCircle, ImageIcon, ZoomIn, Receipt, DollarSign, Coins, Wallet, Megaphone, LayoutGrid, Plus, Pencil, ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 import { useNavigate } from 'react-router-dom';
+import { cn } from '@/lib/utils';
+import { fetchContractDesignUrls } from '@/lib/contractDesignUtils';
 
 interface ContractSectionProps {
   contracts: ContractRow[];
@@ -109,202 +111,47 @@ export function ContractSection({
 }: ContractSectionProps) {
   const navigate = useNavigate();
   const [internalSelectedContracts, setInternalSelectedContracts] = useState<Set<number>>(new Set());
-  const [contractDesigns, setContractDesigns] = useState<Record<number, string>>({});
+  const [contractDesigns, setContractDesigns] = useState<Record<number, string[]>>({});
+  const [designIndices, setDesignIndices] = useState<Record<number, number>>({});
   const [contractColors, setContractColors] = useState<Record<number, { rgb: string; hsl: string }>>({});
   
   const selectedContracts = externalSelectedContracts ?? internalSelectedContracts;
   const setSelectedContracts = onSelectedContractsChange ?? setInternalSelectedContracts;
 
-  // جلب تصاميم العقود - منطق كامل مطابق لـ ContractCard
+  // جلب تصاميم العقود - باستخدام المحرك الموحد المطابق تماماً لـ ContractCard
   useEffect(() => {
+    let isMounted = true;
+
     const fetchDesigns = async () => {
-      const designs: Record<number, string> = {};
+      const designs: Record<number, string[]> = {};
       
       for (const contract of contracts) {
         const contractNumber = Number(contract.Contract_Number);
         if (!Number.isFinite(contractNumber)) continue;
-        
-        const allImages: string[] = [];
-        const addImage = (url: string | null | undefined) => {
-          if (typeof url === 'string' && url.trim() && !allImages.includes(url)) {
-            allImages.push(url);
-          }
-        };
 
-        // ✅ 1. مهام التركيب المباشرة
-        const { data: tasks } = await supabase
-          .from('installation_tasks')
-          .select('id, reinstallation_number, task_type')
-          .eq('contract_id', contractNumber)
-          .order('reinstallation_number', { ascending: false, nullsFirst: false });
-
-        if (tasks && tasks.length > 0) {
-          for (const task of tasks) {
-            const { data: items } = await supabase
-              .from('installation_task_items')
-              .select('design_face_a, design_face_b')
-              .eq('task_id', task.id)
-              .or('design_face_a.not.is.null,design_face_b.not.is.null');
-
-            (items || []).forEach(item => {
-              addImage(item.design_face_a);
-              addImage(item.design_face_b);
-            });
-
-            if (allImages.length > 0) break;
-
-            // ابحث في task_designs
-            const { data: taskDesigns } = await supabase
-              .from('task_designs')
-              .select('design_face_a_url, design_face_b_url')
-              .eq('task_id', task.id);
-
-            (taskDesigns || []).forEach(td => {
-              addImage(td.design_face_a_url);
-              addImage(td.design_face_b_url);
-            });
-
-            if (allImages.length > 0) break;
-          }
-        }
-
-        // ✅ 2. المهام المدمجة (contract_ids contains)
-        if (allImages.length === 0) {
-          const { data: combinedTasks } = await supabase
-            .from('installation_tasks')
-            .select('id')
-            .contains('contract_ids', [contractNumber]);
-
-          if (combinedTasks && combinedTasks.length > 0) {
-            const taskIds = combinedTasks.map(t => t.id);
-            const { data: items } = await supabase
-              .from('installation_task_items')
-              .select(`design_face_a, design_face_b, billboard:billboards!installation_task_items_billboard_id_fkey(Contract_Number)`)
-              .in('task_id', taskIds)
-              .or('design_face_a.not.is.null,design_face_b.not.is.null');
-
-            (items || []).forEach(item => {
-              const billboard = item.billboard as any;
-              if (billboard?.Contract_Number === contractNumber) {
-                addImage(item.design_face_a);
-                addImage(item.design_face_b);
-              }
-            });
-          }
-        }
-
-        // ✅ 2.5. المهام المجمعة (composite_tasks)
-        if (allImages.length === 0) {
-          const { data: compositeTasks } = await supabase
-            .from('composite_tasks')
-            .select('installation_task_id')
-            .eq('contract_id', contractNumber)
-            .not('installation_task_id', 'is', null);
-
-          if (compositeTasks && compositeTasks.length > 0) {
-            const taskIds = compositeTasks.map(ct => ct.installation_task_id).filter((id): id is string => id !== null);
-            if (taskIds.length > 0) {
-              const { data: items } = await supabase
-                .from('installation_task_items')
-                .select('design_face_a, design_face_b')
-                .in('task_id', taskIds)
-                .or('design_face_a.not.is.null,design_face_b.not.is.null');
-
-              (items || []).forEach(item => {
-                addImage(item.design_face_a);
-                addImage(item.design_face_b);
-              });
+        const urls = await fetchContractDesignUrls(contractNumber, contract);
+        if (urls.length > 0) {
+          designs[contractNumber] = urls;
+          extractColorFromImage(urls[0]).then(color => {
+            if (color && isMounted) {
+              setContractColors(prev => ({ ...prev, [contractNumber]: color }));
             }
-          }
-        }
-
-        // ✅ 3. البحث عبر لوحات العقد + تصاميم اللوحات المباشرة
-        if (allImages.length === 0) {
-          const { data: contractBillboards } = await supabase
-            .from('billboards')
-            .select('ID, design_face_a, design_face_b')
-            .eq('Contract_Number', contractNumber);
-
-          if (contractBillboards && contractBillboards.length > 0) {
-            const billboardIds = contractBillboards.map(b => b.ID);
-            const { data: designItems } = await supabase
-              .from('installation_task_items')
-              .select('design_face_a, design_face_b, task_id')
-              .in('billboard_id', billboardIds)
-              .or('design_face_a.not.is.null,design_face_b.not.is.null');
-
-            if (designItems && designItems.length > 0) {
-              const dTaskIds = [...new Set(designItems.map(d => d.task_id).filter(Boolean))];
-              if (dTaskIds.length > 0) {
-                const { data: dTasks } = await supabase
-                  .from('installation_tasks')
-                  .select('id, contract_id, contract_ids')
-                  .in('id', dTaskIds);
-
-                const taskMap = new Map((dTasks || []).map(t => [t.id, t]));
-                designItems.forEach(item => {
-                  const task = taskMap.get(item.task_id);
-                  if (!task) return;
-                  if (task.contract_id === contractNumber ||
-                      (Array.isArray(task.contract_ids) && task.contract_ids.includes(contractNumber))) {
-                    addImage(item.design_face_a);
-                    addImage(item.design_face_b);
-                  }
-                });
-              }
-            }
-
-            // تم إزالة fallback 3.5 لمنع عرض تصاميم من عقود أخرى
-
-            // ✅ 3.6 fallback: تصاميم اللوحات المباشرة من جدول billboards
-            if (allImages.length === 0) {
-              contractBillboards.forEach(b => {
-                addImage(b.design_face_a);
-                addImage(b.design_face_b);
-              });
-            }
-          }
-        }
-
-        // ✅ 4. design_data المحفوظة في العقد
-        if (allImages.length === 0) {
-          const { data: contractData } = await supabase
-            .from('Contract')
-            .select('design_data')
-            .eq('Contract_Number', contractNumber)
-            .single();
-
-          if (contractData?.design_data) {
-            try {
-              let designData = contractData.design_data;
-              if (typeof designData === 'string') {
-                designData = JSON.parse(designData);
-                if (typeof designData === 'string') {
-                  designData = JSON.parse(designData);
-                }
-              }
-
-              if (Array.isArray(designData)) {
-                for (const d of designData) {
-                  const dd = d as any;
-                  addImage(dd?.designFaceA || dd?.designFaceB || dd?.faceA || dd?.faceB || dd?.design_face_a || dd?.design_face_b);
-                }
-              }
-            } catch {}
-          }
-        }
-        
-        if (allImages.length > 0) {
-          designs[contractNumber] = allImages[0];
+          });
         }
       }
       
-      setContractDesigns(designs);
+      if (isMounted) {
+        setContractDesigns(designs);
+      }
     };
     
     if (contracts.length > 0) {
       fetchDesigns();
     }
+
+    return () => {
+      isMounted = false;
+    };
   }, [contracts]);
 
   const toggleContract = (contractNumber: number) => {
@@ -473,7 +320,9 @@ export function ContractSection({
                 const startDate = contract['Contract Date'] ? new Date(contract['Contract Date']) : null;
                 const isActive = Boolean(endDate && today <= endDate);
                 const contractNumber = Number(contract.Contract_Number);
-                const designImage = contractDesigns[contractNumber];
+                const images = contractDesigns[contractNumber] || [];
+                const curIdx = designIndices[contractNumber] || 0;
+                const designImage = images[curIdx] || images[0] || null;
                 const colorData = contractColors[contractNumber];
                 const isSelected = selectedContracts.has(contractNumber);
                 const cardStyle = colorData ? {
@@ -490,7 +339,7 @@ export function ContractSection({
                     style={cardStyle}
                   >
                     <div className="grid min-h-[188px] grid-cols-1 lg:grid-cols-[184px_minmax(230px,0.9fr)_minmax(390px,1.35fr)]">
-                      <div className="relative min-h-40 overflow-hidden border-b border-border/30 bg-slate-950/45 lg:min-h-full lg:border-b-0 lg:border-l">
+                      <div className="relative min-h-40 overflow-hidden border-b border-border/30 bg-slate-950/45 lg:min-h-full lg:border-b-0 lg:border-l group/design">
                         <div className="absolute right-3 top-3 z-20 rounded-lg border border-white/15 bg-black/65 p-2 shadow-lg backdrop-blur-md">
                           <Checkbox
                             checked={isSelected}
@@ -499,35 +348,138 @@ export function ContractSection({
                             aria-label={`تحديد العقد رقم ${contractNumber}`}
                           />
                         </div>
+
+                        {/* عداد التصاميم إذا كان هناك أكثر من تصميم */}
+                        {images.length > 1 && (
+                          <div className="absolute top-3 left-3 bg-black/75 backdrop-blur-md text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full z-20 border border-white/15 shadow-sm pointer-events-none">
+                            {curIdx + 1}/{images.length}
+                          </div>
+                        )}
+
                         {designImage ? (
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <button
-                                type="button"
-                                className="group/design relative h-full min-h-40 w-full cursor-pointer overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset lg:min-h-[188px]"
-                                aria-label={`تكبير تصميم العقد رقم ${contractNumber}`}
-                              >
-                                <img
-                                  src={designImage}
-                                  alt={`تصميم العقد رقم ${contractNumber}`}
-                                  className="h-full min-h-40 w-full object-cover transition-transform duration-200 motion-safe:group-hover/design:scale-105 lg:min-h-[188px]"
-                                  onLoad={() => {
-                                    if (!contractColors[contractNumber]) {
-                                      extractColorFromImage(designImage).then(color => {
-                                        if (color) setContractColors(previous => ({ ...previous, [contractNumber]: color }));
-                                      });
-                                    }
+                          <>
+                            <Dialog>
+                              <DialogTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="relative h-full min-h-40 w-full cursor-pointer overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset lg:min-h-[188px]"
+                                  aria-label={`تكبير تصميم العقد رقم ${contractNumber}`}
+                                >
+                                  <img
+                                    src={designImage}
+                                    alt={`تصميم العقد رقم ${contractNumber}`}
+                                    className="h-full min-h-40 w-full object-cover transition-transform duration-200 motion-safe:group-hover/design:scale-105 lg:min-h-[188px]"
+                                    loading="lazy"
+                                    onError={(e) => {
+                                      (e.target as HTMLImageElement).style.display = 'none';
+                                    }}
+                                  />
+                                  <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition-all duration-200 group-hover/design:bg-black/35 group-hover/design:opacity-100">
+                                    <ZoomIn className="h-6 w-6" />
+                                  </span>
+                                </button>
+                              </DialogTrigger>
+                              <DialogContent className="max-w-4xl p-4">
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between border-b pb-2">
+                                    <h3 className="text-sm font-semibold text-foreground">
+                                      تصميم العقد #{contractNumber} {images.length > 1 ? `(${curIdx + 1}/${images.length})` : ''}
+                                    </h3>
+                                    {images.length > 1 && (
+                                      <div className="flex items-center gap-2">
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => {
+                                            const newIdx = (curIdx - 1 + images.length) % images.length;
+                                            setDesignIndices(prev => ({ ...prev, [contractNumber]: newIdx }));
+                                            extractColorFromImage(images[newIdx]).then(color => {
+                                              if (color) setContractColors(prev => ({ ...prev, [contractNumber]: color }));
+                                            });
+                                          }}
+                                        >
+                                          <ChevronRight className="h-4 w-4 ml-1" /> السابق
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          variant="outline"
+                                          onClick={() => {
+                                            const newIdx = (curIdx + 1) % images.length;
+                                            setDesignIndices(prev => ({ ...prev, [contractNumber]: newIdx }));
+                                            extractColorFromImage(images[newIdx]).then(color => {
+                                              if (color) setContractColors(prev => ({ ...prev, [contractNumber]: color }));
+                                            });
+                                          }}
+                                        >
+                                          التالي <ChevronLeft className="h-4 w-4 mr-1" />
+                                        </Button>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center justify-center max-h-[75vh] overflow-hidden rounded-lg bg-black/10">
+                                    <img src={designImage} alt={`تصميم العقد رقم ${contractNumber}`} className="max-h-[75vh] w-auto object-contain rounded-lg shadow-md" />
+                                  </div>
+                                </div>
+                              </DialogContent>
+                            </Dialog>
+
+                            {/* أزرار التنقل بين التصاميم على الكرت */}
+                            {images.length > 1 && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/70 hover:bg-black/90 text-white opacity-0 group-hover/design:opacity-100 transition-opacity z-20 shadow-md"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const newIdx = (curIdx + 1) % images.length;
+                                    setDesignIndices(prev => ({ ...prev, [contractNumber]: newIdx }));
+                                    extractColorFromImage(images[newIdx]).then(color => {
+                                      if (color) setContractColors(prev => ({ ...prev, [contractNumber]: color }));
+                                    });
                                   }}
-                                />
-                                <span className="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition-all duration-200 group-hover/design:bg-black/35 group-hover/design:opacity-100">
-                                  <ZoomIn className="h-6 w-6" />
-                                </span>
-                              </button>
-                            </DialogTrigger>
-                            <DialogContent className="max-w-3xl p-2">
-                              <img src={designImage} alt={`تصميم العقد رقم ${contractNumber}`} className="h-auto w-full rounded-lg" />
-                            </DialogContent>
-                          </Dialog>
+                                  aria-label="التصميم التالي"
+                                >
+                                  <ChevronRight className="h-4 w-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/70 hover:bg-black/90 text-white opacity-0 group-hover/design:opacity-100 transition-opacity z-20 shadow-md"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const newIdx = (curIdx - 1 + images.length) % images.length;
+                                    setDesignIndices(prev => ({ ...prev, [contractNumber]: newIdx }));
+                                    extractColorFromImage(images[newIdx]).then(color => {
+                                      if (color) setContractColors(prev => ({ ...prev, [contractNumber]: color }));
+                                    });
+                                  }}
+                                  aria-label="التصميم السابق"
+                                >
+                                  <ChevronLeft className="h-4 w-4" />
+                                </button>
+                                {/* مؤشر النقاط */}
+                                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1 z-20 bg-black/40 px-2 py-0.5 rounded-full backdrop-blur-xs">
+                                  {images.map((_, i) => (
+                                    <button
+                                      key={i}
+                                      type="button"
+                                      className={cn(
+                                        "w-1.5 h-1.5 rounded-full transition-all",
+                                        i === curIdx ? 'bg-white scale-125 ring-1 ring-black/40' : 'bg-white/50 hover:bg-white/80'
+                                      )}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setDesignIndices(prev => ({ ...prev, [contractNumber]: i }));
+                                        extractColorFromImage(images[i]).then(color => {
+                                          if (color) setContractColors(prev => ({ ...prev, [contractNumber]: color }));
+                                        });
+                                      }}
+                                      aria-label={`تصميم ${i + 1}`}
+                                    />
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                          </>
                         ) : (
                           <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 text-muted-foreground lg:min-h-[188px]">
                             <ImageIcon className="h-8 w-8 opacity-45" />

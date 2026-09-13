@@ -128,8 +128,8 @@ export const ContractStats: React.FC<ContractStatsProps> = ({ contracts }) => {
       title: 'إجمالي الطباعة',
       value: `${stats.totalPrint.toLocaleString('ar-LY')} د.ل`,
       icon: PaintBucket,
-      color: 'text-purple-600',
-      bgColor: 'bg-purple-100 dark:bg-purple-900/30',
+      color: 'text-primary',
+      bgColor: 'bg-primary/10',
       isAmount: true
     },
     {
@@ -159,17 +159,17 @@ export const ContractStats: React.FC<ContractStatsProps> = ({ contracts }) => {
   ];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
       {statCards.map((stat, index) => (
-        <Card key={index} className="border-0 shadow-sm hover:shadow-md transition-shadow">
+        <Card key={index} className="rounded-2xl border border-border/60 bg-card shadow-none">
           <CardContent className="p-4">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
               <div className={`p-2 rounded-lg ${stat.bgColor}`}>
                 <stat.icon className={`h-5 w-5 ${stat.color}`} />
               </div>
               <div className="min-w-0">
-                <p className="text-xs text-muted-foreground truncate">{stat.title}</p>
-<p className={`text-lg font-bold font-manrope ${stat.color} ${stat.isAmount ? 'text-sm' : ''}`}>
+                <p className="text-xs text-muted-foreground">{stat.title}</p>
+<p className={`mt-1 break-words font-bold font-manrope tabular-nums text-foreground ${stat.isAmount ? 'text-base' : 'text-2xl'}`}>
                   {stat.value}
                 </p>
               </div>

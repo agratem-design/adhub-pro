@@ -83,6 +83,18 @@ interface CompositeTasksListEnhancedProps {
 const isEnabledContractFlag = (value: unknown): boolean =>
   value === true || value === 1 || value === '1' || String(value).toLowerCase() === 'true';
 
+const normalizeForSearch = (str?: string | null): string => {
+  return String(str || '')
+    .toLowerCase()
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/[ىي]/g, 'ي')
+    .replace(/[\u064B-\u065F]/g, '') // remove Arabic tashkeel / diacritics
+    .replace(/[#_\\/-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
 interface InstallationWorkflowData {
   primaryTaskId: string;
   taskIds: string[];
@@ -2046,11 +2058,43 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     filterStatus: 'all',
     page: 1,
   });
-  const [search, _setSearch] = useState(persistedFilters.search);
+  const [searchInput, setSearchInput] = useState(persistedFilters.search || '');
+  const [search, _setSearch] = useState(persistedFilters.search || '');
+  const [isSearching, setIsSearching] = useState(false);
   const [filterStatus, _setFilterStatus] = useState(persistedFilters.filterStatus);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'unpaid' | 'partial' | 'paid' | 'free'>('all');
   const [page, _setPage] = useState(persistedFilters.page as number);
-  const setSearch = (v: string) => { _setSearch(v); setPersisted('search', v); };
+
+  // تحديث البحث بتأخير زمني لتفادي تجميد الواجهة أثناء الكتابة (Smooth instant typing)
+  useEffect(() => {
+    if (searchInput === search) {
+      setIsSearching(false);
+      return;
+    }
+    setIsSearching(true);
+    const timer = setTimeout(() => {
+      _setSearch(searchInput);
+      setPersisted('search', searchInput);
+      _setPage(1);
+      setPersisted('page', 1);
+      setIsSearching(false);
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [searchInput, search, setPersisted]);
+
+  const handleImmediateSearch = useCallback((value: string) => {
+    setSearchInput(value);
+    _setSearch(value);
+    setPersisted('search', value);
+    _setPage(1);
+    setPersisted('page', 1);
+    setIsSearching(false);
+  }, [setPersisted]);
+
+  const setSearch = useCallback((v: string) => {
+    setSearchInput(v);
+  }, []);
   const setFilterStatus = (v: string) => { _setFilterStatus(v); setPersisted('filterStatus', v); };
   const setPage = (v: number) => { _setPage(v); setPersisted('page', v); };
   const { confirm: systemConfirm } = useSystemDialog();
@@ -2963,7 +3007,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       adType: extra.adType || '',
       teamName: extra.teamName || '',
       printerName: extra.printerName || '',
-      companyName: task.customer?.company || '',
+      companyName: task.customer?.company || (extra as any).companyName || '',
       reinstallationNumber: normalizedTaskType === 'reinstallation'
         ? (task._reinstallationNumber ?? task.reinstallationNumber ?? extra.reinstallationNumber ?? 1)
         : null,
@@ -2976,6 +3020,26 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       _payments: payments,
       _totalPaid: totalPaid,
       _paymentPercentage: paymentPercentage,
+      _searchableText: normalizeForSearch([
+        task.customer_name,
+        task.customer?.company,
+        (extra as any).companyName,
+        task.customer?.name,
+        task.customer?.phone,
+        task.contract_id ? `عقد ${task.contract_id} ${task.contract_id}` : '',
+        ...(contractIds || []).map((cid: any) => `عقد ${cid} ${cid}`),
+        extra.adType,
+        ...(extra.adTypes || []),
+        extra.teamName,
+        extra.printerName,
+        (task as any).task_name,
+        (task as any).task_number,
+        task.notes,
+        normalizedTaskType === 'reinstallation' ? 'اعادة تركيب اعادة دورة' : 'تركيب اول اولي',
+        task.id,
+        task.installation_task_id,
+        task.print_task_id,
+      ].filter(Boolean).join(' ')),
     };
   }), [compositeTasks, taskExtras, taskPayments]);
 
@@ -3020,17 +3084,16 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       r = r.filter(t => (t.customer_total || 0) === 0);
     }
 
-    if (search) {
-      const s = search.toLowerCase().trim();
-      r = r.filter(t =>
-        (t.customer_name || '').toLowerCase().includes(s) ||
-        String(t.contract_id).includes(s) ||
-        (t.adType || '').toLowerCase().includes(s) ||
-        (t.teamName || '').toLowerCase().includes(s) ||
-        (t.printerName || '').toLowerCase().includes(s) ||
-        ((t as any).task_name || '').toLowerCase().includes(s) ||
-        (t.contractIds || []).some((c: any) => String(c).includes(s))
-      );
+    if (search && search.trim()) {
+      const normalizedQuery = normalizeForSearch(search);
+      const rawTokens = normalizedQuery.split(' ').filter(Boolean);
+      // إذا كتب المستخدم كلمات متعددة تتضمن كلمة "عقد" (مثل "عقد 1178")، نستثني كلمة "عقد" لأن الأرقام والأسماء هي المحددة
+      const tokens = rawTokens.length > 1 ? rawTokens.filter(tok => tok !== 'عقد') : rawTokens;
+
+      r = r.filter(t => {
+        const text = (t as any)._searchableText || '';
+        return tokens.every(tok => text.includes(tok));
+      });
     }
     return r;
   }, [enriched, filterStatus, paymentFilter, search]);
@@ -3619,13 +3682,32 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         {/* Toolbar Control Center */}
         <div className="bg-card/45 backdrop-blur-md border border-border/30 rounded-[22px] p-3.5 flex flex-wrap gap-3 items-center shrink-0 shadow-sm">
           <div className="relative flex-1 min-w-[140px] sm:min-w-[220px]">
-            <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50" />
+            <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50 pointer-events-none" />
             <Input 
-              placeholder="بحث بالاسم، رقم العقد، نوع الإعلان..." 
-              value={search} 
-              onChange={e => { setSearch(e.target.value); setPage(1); }}
-              className="pr-10 bg-background/50 border-border/30 h-10 text-xs text-foreground placeholder:text-muted-foreground/65 focus-visible:ring-indigo-500/50 rounded-xl" 
+              placeholder="بحث بالاسم، الشركة، رقم العقد، نوع الإعلان، الفريق..." 
+              value={searchInput} 
+              onChange={e => setSearchInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  handleImmediateSearch(searchInput);
+                }
+              }}
+              className="pr-10 pl-9 bg-background/50 border-border/30 h-10 text-xs text-foreground placeholder:text-muted-foreground/65 focus-visible:ring-indigo-500/50 rounded-xl" 
             />
+            {isSearching ? (
+              <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />
+              </div>
+            ) : searchInput ? (
+              <button
+                type="button"
+                onClick={() => handleImmediateSearch('')}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground p-1 rounded-md cursor-pointer transition-colors"
+                title="مسح البحث"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
           </div>
           
           <Select value={filterStatus} onValueChange={v => { setFilterStatus(v); setPage(1); }}>
@@ -3670,9 +3752,22 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
               </motion.div>
             ))
           ) : paginatedGroups.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-28 gap-3 text-muted-foreground bg-card/20 rounded-3xl border border-border/20">
+            <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground bg-card/20 rounded-3xl border border-border/20 text-center px-4">
               <Package className="h-14 w-14 opacity-20" />
-              <span className="text-sm font-bold opacity-70">لا توجد مهام تركيب شاملة مطابقة لمعايير البحث</span>
+              <span className="text-sm font-bold opacity-70">
+                {search ? `لا توجد نتائج مطابقة للبحث عن «${search}»` : 'لا توجد مهام تركيب شاملة مطابقة لمعايير التصفية'}
+              </span>
+              {search && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleImmediateSearch('')}
+                  className="mt-2 h-8 text-xs gap-1.5 border-amber-500/30 text-amber-400 hover:bg-amber-500/10 cursor-pointer rounded-xl"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  إلغاء البحث وعرض كل المهام
+                </Button>
+              )}
             </div>
           ) : (
             paginatedGroups.map((group) => (

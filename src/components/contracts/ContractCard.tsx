@@ -34,9 +34,9 @@ import { EnhancedDistributePaymentDialog } from '@/components/billing/EnhancedDi
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { resolveContractMarketingVisibility } from '@/services/billboardAvailabilityService';
+import { fetchContractDesignUrls, contractDesignCache } from '@/lib/contractDesignUtils';
 
-const dominantColorCache = new Map<string, string | null>();
-const contractDesignCache = new Map<number, string[]>();
+const designPaletteCache = new Map<string, string[]>();
 
 interface ContractCardProps {
   contract: Contract;
@@ -71,7 +71,8 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
   const [designImages, setDesignImages] = useState<string[]>([]);
   const [currentDesignIndex, setCurrentDesignIndex] = useState(0);
   const designImage = designImages.length > 0 ? designImages[currentDesignIndex] : null;
-  const [dominantHsl, setDominantHsl] = useState<string | null>(null);
+  const [designPalette, setDesignPalette] = useState<string[]>([]);
+  const dominantHsl = designPalette[0] ?? null;
   const [actualPaid, setActualPaid] = useState<number | null>(null);
   const [contractPayments, setContractPayments] = useState<Array<{ id: string; amount: number; distributed_payment_id: string | null; paid_at: string; rowNumber: number }>>([]);
   const [isRenewing, setIsRenewing] = useState(false);
@@ -796,12 +797,18 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
   const paymentPercentage = finalTotalCost > 0 ? (totalPaid / finalTotalCost) * 100 : 0;
   const remaining = finalTotalCost - totalPaid;
   
-  // استخراج اللون السائد من الصورة (كنمط HSL لتوافق أفضل مع الثيم)
-  const extractDominantColor = (imageUrl: string) => {
-    if (dominantColorCache.has(imageUrl)) {
-      setDominantHsl(dominantColorCache.get(imageUrl) ?? null);
-      return;
-    }
+  // Keep the palette tied to the visible design, including rapid image changes.
+  useEffect(() => {
+    if (!designImage) { setDesignPalette([]); return; }
+    const imageUrl = designImage;
+    const cached = designPaletteCache.get(imageUrl);
+    if (cached) { setDesignPalette(cached); return; }
+    setDesignPalette([]);
+    let cancelled = false;
+    const applyPalette = (palette: string[]) => {
+      designPaletteCache.set(imageUrl, palette);
+      if (!cancelled) setDesignPalette(palette);
+    };
 
     const rgbToHsl = (r: number, g: number, b: number) => {
       r /= 255;
@@ -851,50 +858,43 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
         canvas.height = 32;
         ctx.drawImage(img, 0, 0, 32, 32);
 
-        const imageData = ctx.getImageData(0, 0, 50, 50).data;
-        let r = 0,
-          g = 0,
-          b = 0,
-          count = 0;
-
-        for (let i = 0; i < imageData.length; i += 4) {
-          const brightness = (imageData[i] + imageData[i + 1] + imageData[i + 2]) / 3;
-          // تجاهل الأسود/الأبيض الشديد
-          if (brightness > 30 && brightness < 225) {
-            r += imageData[i];
-            g += imageData[i + 1];
-            b += imageData[i + 2];
-            count++;
+        const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+        const buckets = new Map<string, { r: number; g: number; b: number; count: number }>();
+        for (let i = 0; i < pixels.length; i += 4) {
+          if (pixels[i + 3] < 128) continue;
+          const [r, g, b] = [pixels[i], pixels[i + 1], pixels[i + 2]];
+          const brightness = (r + g + b) / 3;
+          if (brightness < 20 || brightness > 240) continue;
+          const key = `${r >> 5},${g >> 5},${b >> 5}`;
+          const bucket = buckets.get(key) ?? { r: 0, g: 0, b: 0, count: 0 };
+          bucket.r += r; bucket.g += g; bucket.b += b; bucket.count++;
+          buckets.set(key, bucket);
+        }
+        const candidates = [...buckets.values()].sort((a, b) => b.count - a.count)
+          .map(c => ({ r: c.r / c.count, g: c.g / c.count, b: c.b / c.count }));
+        const selected: typeof candidates = [];
+        for (const candidate of candidates) {
+          if (selected.every(c => Math.hypot(c.r - candidate.r, c.g - candidate.g, c.b - candidate.b) > 65)) {
+            selected.push(candidate);
           }
+          if (selected.length === 3) break;
         }
-
-        if (count > 0) {
-          r = Math.round(r / count);
-          g = Math.round(g / count);
-          b = Math.round(b / count);
-
-          const hsl = rgbToHsl(r, g, b);
-          // ضبط السطوع لضمان تباين جيد - خفض السطوع للخلفية
-          const adjustedL = Math.min(hsl.l, 25); // حد أقصى 25% سطوع للخلفية
-          const color = `${hsl.h} ${Math.min(hsl.s, 60)}% ${adjustedL}%`;
-          dominantColorCache.set(imageUrl, color);
-          setDominantHsl(color);
-        } else {
-          dominantColorCache.set(imageUrl, null);
-          setDominantHsl(null);
-        }
-      } catch (e) {
-        dominantColorCache.set(imageUrl, null);
-        setDominantHsl(null);
+        const palette = selected.map(c => {
+          const hsl = rgbToHsl(c.r, c.g, c.b);
+          return `${hsl.h} ${Math.min(hsl.s, 75)}% ${Math.max(30, Math.min(hsl.l, 60))}%`;
+        });
+        // Designs with fewer colours retain their own palette across all stops.
+        while (palette.length > 0 && palette.length < 3) palette.push(palette[0]);
+        applyPalette(palette);
+      } catch {
+        if (!cancelled) setDesignPalette([]);
       }
     };
-    img.onerror = () => {
-      dominantColorCache.set(imageUrl, null);
-      setDominantHsl(null);
-    };
+    img.onerror = () => { if (!cancelled) setDesignPalette([]); };
     img.decoding = 'async';
     img.src = imageUrl;
-  };
+    return () => { cancelled = true; img.onload = null; img.onerror = null; };
+  }, [designImage]);
   
   // جلب صور التصميم من بيانات العقد أو من مهام التركيب المرتبطة به
   useEffect(() => {
@@ -903,231 +903,20 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
     let isMounted = true;
 
     const fetchDesignImage = async () => {
-      const inlineImages: string[] = [];
-      const addInlineImage = (url: unknown) => {
-        if (typeof url === 'string') {
-          const trimmed = url.trim();
-          if (trimmed && (trimmed.startsWith('http') || trimmed.startsWith('/') || trimmed.startsWith('data:')) && !inlineImages.includes(trimmed)) {
-            inlineImages.push(trimmed);
-          }
-        }
-      };
-
-      // 1. استخراج التصاميم المضمنة مباشرة في العقد (design_data)
-      const rawInlineDesigns = (contract as any).design_data;
-      if (rawInlineDesigns) {
-        try {
-          let parsed = typeof rawInlineDesigns === 'string'
-            ? JSON.parse(rawInlineDesigns)
-            : rawInlineDesigns;
-          // التعامل مع JSON مشفر مرتين (double-stringified)
-          if (typeof parsed === 'string') {
-            try {
-              parsed = JSON.parse(parsed);
-            } catch {}
-          }
-          if (Array.isArray(parsed)) {
-            parsed.forEach((design: any) => {
-              addInlineImage(design?.designFaceA || design?.faceA || design?.design_face_a || design?.design_face_a_url || design?.designFaceAUrl);
-              addInlineImage(design?.designFaceB || design?.faceB || design?.design_face_b || design?.design_face_b_url || design?.designFaceBUrl);
-            });
-          } else if (parsed && typeof parsed === 'object') {
-            addInlineImage(parsed?.designFaceA || parsed?.faceA || parsed?.design_face_a || parsed?.design_face_a_url || parsed?.designFaceAUrl);
-            addInlineImage(parsed?.designFaceB || parsed?.faceB || parsed?.design_face_b || parsed?.design_face_b_url || parsed?.designFaceBUrl);
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      }
-
-      if (inlineImages.length > 0) {
-        if (!isMounted) return;
-        setDesignImages(inlineImages);
-        setCurrentDesignIndex(0);
-        extractDominantColor(inlineImages[0]);
-        return;
-      }
-
       const rawContractNumber =
         (contract as any).Contract_Number ?? (contract as any)['Contract Number'] ?? contract.id;
 
       const contractNumber = Number(rawContractNumber);
       if (!Number.isFinite(contractNumber)) return;
 
-      // فحص الذاكرة المؤقتة (Cache)
-      if (contractDesignCache.has(contractNumber)) {
-        const cached = contractDesignCache.get(contractNumber) || [];
-        if (!isMounted) return;
-        if (cached.length > 0) {
-          setDesignImages(cached);
-          setCurrentDesignIndex(0);
-          extractDominantColor(cached[0]);
-        } else {
-          setDesignImages([]);
-          setDominantHsl(null);
-        }
-        return;
-      }
-
-      const currentContractImages: string[] = [];
-      const addDesign = (url: unknown) => {
-        if (typeof url === 'string') {
-          const trimmed = url.trim();
-          if (trimmed && (trimmed.startsWith('http') || trimmed.startsWith('/') || trimmed.startsWith('data:')) && !currentContractImages.includes(trimmed)) {
-            currentContractImages.push(trimmed);
-          }
-        }
-      };
-
       try {
-        // 2. مهام التركيب المباشرة لهذا العقد (الأولوية القصوى)
-        const { data: directTasks } = await supabase
-          .from('installation_tasks')
-          .select('id, reinstallation_number, task_type')
-          .eq('contract_id', contractNumber)
-          .order('reinstallation_number', { ascending: false, nullsFirst: false });
-
-        if (directTasks && directTasks.length > 0) {
-          for (const task of directTasks) {
-            // أ) جلب التصاميم من جدول task_designs التابع للمهمة
-            const { data: taskDesigns } = await supabase
-              .from('task_designs')
-              .select('design_face_a_url, design_face_b_url, cutout_image_url')
-              .eq('task_id', task.id);
-
-            (taskDesigns || []).forEach(td => {
-              addDesign(td.design_face_a_url);
-              addDesign(td.design_face_b_url);
-              addDesign(td.cutout_image_url);
-            });
-
-            // ب) جلب التصاميم من عناصر المهمة installation_task_items
-            const { data: taskItems } = await supabase
-              .from('installation_task_items')
-              .select('design_face_a, design_face_b')
-              .eq('task_id', task.id)
-              .or('design_face_a.not.is.null,design_face_b.not.is.null');
-
-            (taskItems || []).forEach(item => {
-              addDesign(item.design_face_a);
-              addDesign(item.design_face_b);
-            });
-
-            if (currentContractImages.length > 0) break;
-          }
-        }
-
-        // 3. المهام المدمجة (combined tasks)
-        if (currentContractImages.length === 0) {
-          const { data: combinedTasks } = await supabase
-            .from('installation_tasks')
-            .select('id')
-            .contains('contract_ids', [contractNumber]);
-
-          if (combinedTasks && combinedTasks.length > 0) {
-            const taskIds = combinedTasks.map(t => t.id);
-            const { data: combinedItems } = await supabase
-              .from('installation_task_items')
-              .select(`
-                design_face_a, design_face_b,
-                billboard:billboards!installation_task_items_billboard_id_fkey(Contract_Number)
-              `)
-              .in('task_id', taskIds)
-              .or('design_face_a.not.is.null,design_face_b.not.is.null');
-
-            (combinedItems || []).forEach(item => {
-              const bb = item.billboard as any;
-              if (bb?.Contract_Number === contractNumber) {
-                addDesign(item.design_face_a);
-                addDesign(item.design_face_b);
-              }
-            });
-
-            if (currentContractImages.length === 0) {
-              const { data: combinedDesigns } = await supabase
-                .from('task_designs')
-                .select('design_face_a_url, design_face_b_url')
-                .in('task_id', taskIds);
-
-              (combinedDesigns || []).forEach(td => {
-                addDesign(td.design_face_a_url);
-                addDesign(td.design_face_b_url);
-              });
-            }
-          }
-        }
-
-        // 4. المهام المجمعة (composite_tasks)
-        if (currentContractImages.length === 0) {
-          const { data: compositeTasks } = await supabase
-            .from('composite_tasks')
-            .select('installation_task_id')
-            .eq('contract_id', contractNumber)
-            .not('installation_task_id', 'is', null);
-
-          if (compositeTasks && compositeTasks.length > 0) {
-            const itIds = compositeTasks.map(c => c.installation_task_id).filter((id): id is string => Boolean(id));
-            if (itIds.length > 0) {
-              const { data: compDesigns } = await supabase
-                .from('task_designs')
-                .select('design_face_a_url, design_face_b_url')
-                .in('task_id', itIds);
-
-              (compDesigns || []).forEach(td => {
-                addDesign(td.design_face_a_url);
-                addDesign(td.design_face_b_url);
-              });
-
-              if (currentContractImages.length === 0) {
-                const { data: compItems } = await supabase
-                  .from('installation_task_items')
-                  .select('design_face_a, design_face_b')
-                  .in('task_id', itIds)
-                  .or('design_face_a.not.is.null,design_face_b.not.is.null');
-
-                (compItems || []).forEach(item => {
-                  addDesign(item.design_face_a);
-                  addDesign(item.design_face_b);
-                });
-              }
-            }
-          }
-        }
-
-        // 5. حالة واحدة فقط: إذا كان هذا العقد لم يُضف له أي تصميم في مهمة التركيب ولا في بيانات العقد
-        // نأخذ فقط آخر تصميم تم تركيبه على إحدى لوحات هذا العقد من العقود السابقة
-        if (currentContractImages.length === 0) {
-          const bbIds = (contract as any).billboard_ids
-            ? String((contract as any).billboard_ids).split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n) && n > 0)
-            : [];
-
-          if (bbIds.length > 0) {
-            const { data: latestPreviousItem } = await supabase
-              .from('installation_task_items')
-              .select('design_face_a, design_face_b')
-              .in('billboard_id', bbIds)
-              .or('design_face_a.not.is.null,design_face_b.not.is.null')
-              .order('created_at', { ascending: false })
-              .limit(1);
-
-            if (latestPreviousItem && latestPreviousItem.length > 0) {
-              addDesign(latestPreviousItem[0].design_face_a);
-              addDesign(latestPreviousItem[0].design_face_b);
-            }
-          }
-        }
-
-        // 6. حفظ في الذاكرة المؤقتة وتحديث الحالة
-        contractDesignCache.set(contractNumber, currentContractImages);
-
+        const urls = await fetchContractDesignUrls(contractNumber, contract);
         if (!isMounted) return;
-        if (currentContractImages.length > 0) {
-          setDesignImages(currentContractImages);
+        if (urls.length > 0) {
+          setDesignImages(urls);
           setCurrentDesignIndex(0);
-          extractDominantColor(currentContractImages[0]);
         } else {
           setDesignImages([]);
-          setDominantHsl(null);
         }
       } catch (err) {
         console.error('Error fetching design image for contract:', contractNumber, err);
@@ -1236,11 +1025,10 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
   const progress = getProgress();
   const contractNumber = String((contract as any).Contract_Number ?? (contract as any)['Contract Number'] ?? contract.id);
 
-  // Preserve the design-derived colour as a refined accent instead of flooding
-  // the entire surface. This keeps light/dark contrast stable and paints faster.
+  // Blend three image colours over the theme surface to preserve text contrast.
   const cardStyle = dominantHsl
     ? {
-        background: `linear-gradient(155deg, hsl(${dominantHsl} / 0.16) 0%, hsl(var(--card)) 38%, hsl(var(--card)) 100%)`,
+        background: `linear-gradient(145deg, hsl(${designPalette[0]} / 0.22) 0%, hsl(${designPalette[1]} / 0.15) 50%, hsl(${designPalette[2]} / 0.22) 100%), hsl(var(--card))`,
         borderColor: `hsl(${dominantHsl} / 0.48)`,
         boxShadow: `0 14px 34px -24px hsl(${dominantHsl} / 0.65)`,
         contentVisibility: 'auto' as const,
@@ -1273,7 +1061,7 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
         className="absolute inset-x-0 top-0 h-1 z-40 pointer-events-none"
         style={{
           background: dominantHsl
-            ? `linear-gradient(90deg, transparent, hsl(${dominantHsl}), transparent)`
+            ? `linear-gradient(90deg, hsl(${designPalette[0]}), hsl(${designPalette[1]}), hsl(${designPalette[2]}))`
             : 'linear-gradient(90deg, transparent, hsl(var(--primary)), transparent)',
         }}
       />
@@ -1304,7 +1092,7 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
       
       {/* منطقة الصورة - بتنسيق فاخر بداخل بطاقة بحدود ناعمة */}
       <div className="p-3 pb-0 flex-shrink-0">
-        <div className="relative h-40 w-full rounded-xl overflow-hidden bg-muted/20 border border-border/50 group/design">
+        <div className="relative h-56 sm:h-64 w-full rounded-xl overflow-hidden bg-muted/20 border border-border/50 group/design">
           {designImage ? (
             <div 
               className="relative h-full w-full cursor-pointer"
@@ -1333,7 +1121,7 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
                       e.stopPropagation();
                       const newIdx = (currentDesignIndex + 1) % designImages.length;
                       setCurrentDesignIndex(newIdx);
-                      extractDominantColor(designImages[newIdx]);
+
                     }}
                   >
                     <ChevronRight className="h-3.5 w-3.5" />
@@ -1344,7 +1132,7 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
                       e.stopPropagation();
                       const newIdx = (currentDesignIndex - 1 + designImages.length) % designImages.length;
                       setCurrentDesignIndex(newIdx);
-                      extractDominantColor(designImages[newIdx]);
+
                     }}
                   >
                     <ChevronLeft className="h-3.5 w-3.5" />
@@ -1361,13 +1149,13 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
                         onClick={(e) => {
                           e.stopPropagation();
                           setCurrentDesignIndex(i);
-                          extractDominantColor(designImages[i]);
+
                         }}
                       />
                     ))}
                   </div>
                   {/* عداد التصاميم */}
-                  <div className="absolute top-2.5 left-2.5 bg-black/60 backdrop-blur-sm text-white text-[9px] font-bold px-2 py-0.5 rounded-full z-10">
+                  <div className="absolute bottom-3 right-3 bg-black/80 text-white text-xs font-bold tabular-nums px-2.5 py-1 rounded-lg z-10">
                     {currentDesignIndex + 1}/{designImages.length}
                   </div>
                 </>
@@ -1379,19 +1167,6 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
               <span className="text-[10px] text-muted-foreground/50">بدون تصميم متوفر</span>
             </div>
           )}
-
-          {/* تراكب الشارات العلوية المباشرة */}
-          {/* شارة رقم العقد في اليمين */}
-          <div className="absolute top-2.5 right-2.5 flex items-center gap-1 z-10">
-            <span className="font-manrope font-extrabold text-[10px] bg-black/70 backdrop-blur-sm text-white px-2 py-0.5 rounded-lg border border-white/10 shadow-sm">
-              #{contractNumber}
-            </span>
-            {yearlyCode && (
-              <span className="font-manrope font-extrabold text-[10px] bg-primary text-primary-foreground px-2 py-0.5 rounded-lg shadow-sm">
-                {yearlyCode}
-              </span>
-            )}
-          </div>
 
           {/* شارة حالة العقد في اليسار */}
           <div className="absolute top-2.5 left-2.5 z-10 flex flex-col gap-1 items-end">
@@ -1435,7 +1210,7 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
                   e.stopPropagation();
                   const newIdx = (currentDesignIndex + 1) % designImages.length;
                   setCurrentDesignIndex(newIdx);
-                  extractDominantColor(designImages[newIdx]);
+
                 }}
               >
                 <ChevronRight className="h-6 w-6" />
@@ -1446,7 +1221,7 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
                   e.stopPropagation();
                   const newIdx = (currentDesignIndex - 1 + designImages.length) % designImages.length;
                   setCurrentDesignIndex(newIdx);
-                  extractDominantColor(designImages[newIdx]);
+
                 }}
               >
                 <ChevronLeft className="h-6 w-6" />
@@ -1475,6 +1250,23 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
       
       {/* محتوى الكارد */}
       <CardContent className="p-4 flex-grow flex flex-col justify-between space-y-3">
+        <div className="grid grid-cols-2 gap-3 rounded-xl border border-primary/25 bg-background/85 p-3 shadow-sm">
+          <div className="min-w-0">
+            <span className="block text-xs font-semibold text-muted-foreground">رقم العقد</span>
+            <span dir="ltr" className="mt-1 block break-words text-right font-manrope text-2xl font-extrabold leading-tight tabular-nums text-foreground">
+              #{contractNumber}
+            </span>
+          </div>
+          {yearlyCode && (
+            <div className="min-w-0 border-r border-primary/25 pr-3">
+              <span className="block text-xs font-semibold text-muted-foreground">الترقيم السنوي</span>
+              <span dir="ltr" className="mt-1 block break-words text-right font-manrope text-xl font-extrabold leading-tight tabular-nums text-primary">
+                {yearlyCode}
+              </span>
+            </div>
+          )}
+        </div>
+
         {/* صف معلومات العميل والشركة */}
         <div className="space-y-1">
           <div className="flex items-center justify-between gap-2">

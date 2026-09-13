@@ -57,8 +57,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { PageHero } from '@/components/shared/PageHero';
-import { StatBadge } from '@/components/shared/StatBadge';
 
 export default function Contracts() {
   const { confirm: systemConfirm } = useSystemDialog();
@@ -114,7 +112,7 @@ export default function Contracts() {
   const [showTrash, setShowTrash] = useState(false);
   const [showUnpaid, setShowUnpaid] = usePersistedState<boolean>('contracts.showUnpaid', false);
   const [viewMode, setViewMode] = usePersistedState<'cards' | 'table'>('contracts.viewMode', 'cards');
-  const [statsOpen, setStatsOpen] = useState(true);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [showYearlyCode, setShowYearlyCode] = useState(true);
   const [separateExpired, setSeparateExpired] = useState(true);
@@ -1286,7 +1284,7 @@ export default function Contracts() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }, (_, index) => (
             <div key={index} className="overflow-hidden rounded-2xl border border-border/60 bg-card/70">
-              <div className="h-40 bg-muted/60 motion-safe:animate-pulse" />
+              <div className="h-56 sm:h-64 bg-muted/60 motion-safe:animate-pulse" />
               <div className="space-y-3 p-4">
                 <div className="h-5 w-2/3 rounded bg-muted motion-safe:animate-pulse" />
                 <div className="h-10 rounded-xl bg-muted/70 motion-safe:animate-pulse" />
@@ -1301,22 +1299,19 @@ export default function Contracts() {
 
   return (
     <div className="min-h-full space-y-4 bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.08),transparent_32rem)] p-3 sm:space-y-6 sm:p-4 md:p-6" dir="rtl">
-      <PageHero
-        icon={<FileText className="h-5 w-5 sm:h-6 sm:w-6" />}
-        title="إدارة العقود"
-        description="إنشاء وإدارة عقود الإيجار مع اللوحات الإعلانية"
-        actions={
-          <>
-            <ToggleGroup type="single" value={viewMode} onValueChange={(v) => v && setViewMode(v as 'cards' | 'table')} className="rounded-full bg-muted/40 p-0.5">
-              <ToggleGroupItem value="cards" aria-label="عرض الكروت" className="gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs data-[state=on]:bg-background data-[state=on]:shadow-sm">
-                <LayoutGrid className="h-3.5 w-3.5" />
-                <span>كروت</span>
-              </ToggleGroupItem>
-              <ToggleGroupItem value="table" aria-label="عرض الجدول" className="gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs data-[state=on]:bg-background data-[state=on]:shadow-sm">
-                <List className="h-3.5 w-3.5" />
-                <span>جدول</span>
-              </ToggleGroupItem>
-            </ToggleGroup>
+      <section className="overflow-hidden rounded-3xl border border-primary/20 bg-card shadow-sm">
+        <div className="flex flex-col gap-6 bg-gradient-to-l from-primary/10 via-card to-card p-5 sm:p-7 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+              <FileText className="h-6 w-6" />
+            </div>
+            <div>
+              <p className="mb-1 text-xs font-semibold text-muted-foreground">العقود واللوحات الإعلانية</p>
+              <h1 className="text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">إدارة العقود</h1>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">تابع عقودك وتصاميمك، واصل إلى الطباعة والتحصيل من مكان واحد.</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 [&_button]:cursor-pointer [&_button]:rounded-xl [&_button]:transition-colors [&_button]:duration-200">
             <Button variant="outline" size="sm" onClick={() => setAlertsDialogOpen(true)} className="gap-1.5 rounded-full h-8 sm:h-9 px-2.5 sm:px-3 text-xs">
               <Send className="h-3.5 w-3.5" />
               <span>تنبيهات</span>
@@ -1347,54 +1342,68 @@ export default function Contracts() {
                 </Button>
               </div>
             )}
-          </>
-        }
-        stats={
-          <>
-            <StatBadge label="إجمالي" value={contracts.length} variant="primary" />
-            <StatBadge label="نشطة" value={contracts.filter((c: any) => c.End_Date ? new Date(c.End_Date) >= new Date() : true).length} variant="success" />
-            <StatBadge label="متأخرة" value={delayedContractIds.size} variant="danger" />
-          </>
-        }
-      />
-
-      {/* إحصائيات محسّنة */}
-      <Collapsible open={statsOpen} onOpenChange={setStatsOpen}>
-        <CollapsibleTrigger asChild>
-          <Button variant="ghost" className="w-full flex items-center justify-between p-3 hover:bg-muted/50 rounded-lg border border-border/50">
-            <div className="flex items-center gap-2">
-              <SlidersHorizontal className="h-4 w-4 text-primary" />
-              <span className="font-medium">الإحصائيات السريعة</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-3 divide-x divide-x-reverse divide-border/60 border-t border-border/60 bg-background/40">
+          {[
+            { label: 'عقود مسجلة', value: validContracts.length, icon: FileText, color: 'text-primary' },
+            { label: 'غير مسددة', value: unpaidContracts.length, icon: DollarSign, color: 'text-amber-600 dark:text-amber-400' },
+            { label: 'متأخرة التركيب', value: delayedContractIds.size, icon: Clock, color: 'text-rose-600 dark:text-rose-400' },
+          ].map(({ label, value, icon: Icon, color }) => (
+            <div key={label} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:gap-3 sm:px-6">
+              <Icon className={`h-5 w-5 shrink-0 ${color}`} />
+              <div><div className="font-manrope text-2xl font-extrabold tabular-nums text-foreground">{value.toLocaleString()}</div><div className="mt-1 text-xs text-muted-foreground">{label}</div></div>
             </div>
-            <Badge variant="secondary">{statsOpen ? 'إخفاء' : 'إظهار'}</Badge>
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="mt-4">
-          <ContractStats contracts={filteredContracts} />
-        </CollapsibleContent>
-      </Collapsible>
-
-      {/* كاشف اللوحات المتضاربة (التأجير المزدوج) */}
-      <DoubleBillboardDetector />
+          ))}
+        </div>
+      </section>
 
       {/* البحث والفلاتر المحسّنة */}
-      <Card className="rounded-2xl border border-border/60 bg-card/80 shadow-[0_18px_50px_-38px_hsl(var(--primary)/0.55)] backdrop-blur-xl">
-        <CardContent className="p-3 sm:p-4">
+      <Card className="overflow-hidden rounded-3xl border border-border/60 bg-card shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 bg-muted/20 p-3 sm:px-5">
+          <div role="group" aria-label="نطاق العقود" className="flex flex-wrap gap-1 rounded-xl bg-background p-1">
+            {[
+              { key: 'all', label: 'كل العقود', count: validContracts.length },
+              { key: 'unpaid', label: 'غير المسددة', count: unpaidContracts.length },
+              { key: 'trash', label: 'المهملات', count: trashContracts.length },
+            ].map(({ key, label, count }) => {
+              const selected = key === (showTrash ? 'trash' : showUnpaid ? 'unpaid' : 'all');
+              return <button key={key} type="button" aria-pressed={selected}
+                onClick={() => { setShowTrash(key === 'trash'); setShowUnpaid(key === 'unpaid'); }}
+                className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${selected ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
+                {label}<span className="rounded-md bg-current/10 px-1.5 font-manrope tabular-nums">{count}</span>
+              </button>;
+            })}
+          </div>
+            <ToggleGroup type="single" value={viewMode} onValueChange={(v) => v && setViewMode(v as 'cards' | 'table')} className="rounded-full bg-muted/40 p-0.5">
+              <ToggleGroupItem value="cards" aria-label="عرض الكروت" className="gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs data-[state=on]:bg-background data-[state=on]:shadow-sm">
+                <LayoutGrid className="h-3.5 w-3.5" />
+                <span>كروت</span>
+              </ToggleGroupItem>
+              <ToggleGroupItem value="table" aria-label="عرض الجدول" className="gap-1.5 px-2.5 sm:px-3 py-1 rounded-full text-xs data-[state=on]:bg-background data-[state=on]:shadow-sm">
+                <List className="h-3.5 w-3.5" />
+                <span>جدول</span>
+              </ToggleGroupItem>
+            </ToggleGroup>
+
+        </div>
+        <CardContent className="p-4 sm:p-5">
           <div className="flex flex-col gap-3">
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1 min-w-0">
                 <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
+                  aria-label="البحث في العقود"
                   placeholder="ابحث برقم العقد، اسم العميل، أو نوع الإعلان..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-10 rounded-xl pr-10 bg-background/80 border-border/60 focus-visible:ring-primary/40"
+                  className="h-12 rounded-xl pr-10 bg-background border-border/60 text-sm focus-visible:ring-primary/40"
                 />
               </div>
             
-              <div className="flex gap-2 flex-wrap">
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="h-10 w-40 rounded-xl bg-background/80">
+                <SelectTrigger className="h-12 w-full sm:w-40 rounded-xl bg-background">
                   <SelectValue placeholder="حالة العقد" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1433,7 +1442,7 @@ export default function Contracts() {
               </Select>
 
               <Select value={customerFilter} onValueChange={setCustomerFilter}>
-                <SelectTrigger className="h-10 w-44 rounded-xl bg-background/80">
+                <SelectTrigger className="h-12 w-full sm:w-44 rounded-xl bg-background">
                   <SelectValue placeholder="العميل" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1452,7 +1461,7 @@ export default function Contracts() {
                 size="sm"
                 onClick={() => setAdvancedFiltersOpen((open) => !open)}
                 aria-expanded={advancedFiltersOpen}
-                className="h-10 gap-2 rounded-xl px-3 cursor-pointer transition-all duration-200"
+                className="h-12 gap-2 rounded-xl px-3 cursor-pointer transition-all duration-200"
               >
                 <SlidersHorizontal className="h-4 w-4 text-primary" />
                 <span>فلاتر متقدمة</span>
@@ -1504,35 +1513,8 @@ export default function Contracts() {
                 </Button>
               ))}
               
-              <div className="border-r border-border h-6 mx-2" />
-              
-              <Button
-                variant={showUnpaid ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => {
-                  setShowUnpaid(!showUnpaid);
-                  if (!showUnpaid) setShowTrash(false);
-                }}
-                className="h-7 px-3 gap-1"
-              >
-                <AlertCircle className="h-3.5 w-3.5" />
-                غير مسددة ({unpaidContracts.length})
-              </Button>
-              
-              <Button
-                variant={showTrash ? 'destructive' : 'outline'}
-                size="sm"
-                onClick={() => {
-                  setShowTrash(!showTrash);
-                  if (!showTrash) setShowUnpaid(false);
-                }}
-                className="h-7 px-3 gap-1"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                المهملات ({trashContracts.length})
-              </Button>
             </div>
-            
+
             {/* فلاتر الأشهر */}
             <div className="flex items-center gap-2 mt-3 flex-wrap overflow-x-auto">
               <span className="text-sm text-muted-foreground">شهر البداية:</span>
@@ -1609,10 +1591,10 @@ export default function Contracts() {
             )}
           
           {/* عداد النتائج وزر تحديد النطاق */}
-          <div className="flex items-center justify-between gap-2 mt-3 text-sm text-muted-foreground">
+          <div className="flex flex-wrap items-center justify-between gap-3 mt-2 border-t border-border/60 pt-4 text-sm text-muted-foreground">
             <div className="flex items-center gap-2">
               <FileText className="h-4 w-4" />
-              <span>عرض {filteredContracts.length} من {contracts.length} عقد</span>
+              <span><strong className="font-manrope text-lg text-foreground">{filteredContracts.length}</strong> عقد ضمن النتائج</span>
               {separateExpired && (
                 <span className="text-muted-foreground">
                   ({allFilteredActiveContracts.length} نشط، {allFilteredExpiredContracts.length} منتهي)
@@ -1629,6 +1611,25 @@ export default function Contracts() {
           </div>
         </CardContent>
       </Card>
+
+      {/* إحصائيات محسّنة */}
+      <Collapsible open={statsOpen} onOpenChange={setStatsOpen}>
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" className="w-full flex cursor-pointer items-center justify-between p-4 hover:bg-muted/50 rounded-2xl border border-border/60 bg-card transition-colors duration-200">
+            <div className="flex items-center gap-2">
+              <SlidersHorizontal className="h-4 w-4 text-primary" />
+              <span className="font-medium">ملخص نتائج البحث</span>
+            </div>
+            <Badge variant="secondary">{statsOpen ? 'إخفاء' : 'إظهار'}</Badge>
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-4">
+          <ContractStats contracts={filteredContracts} />
+        </CollapsibleContent>
+      </Collapsible>
+
+      {/* كاشف اللوحات المتضاربة (التأجير المزدوج) */}
+      <DoubleBillboardDetector />
 
       {/* شريط الاختيار المتعدد */}
       {selectedContractIds.size > 0 && (
@@ -1761,7 +1762,7 @@ export default function Contracts() {
                   <CheckCircle className="h-5 w-5 text-primary" />
                   العقود النشطة ({allFilteredActiveContracts.length})
                 </h3>
-                <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2 2xl:grid-cols-3">
                   {activeContracts.map((contract) => (
                     <ContractCard
                       key={contract.id}
@@ -1885,7 +1886,7 @@ export default function Contracts() {
                     <AlertCircle className="h-5 w-5" />
                     العقود المنتهية ({allFilteredExpiredContracts.length})
                   </h3>
-                  <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2 2xl:grid-cols-3">
                     {expiredContracts.map((contract) => (
                       <ContractCard
                         key={contract.id}
@@ -2002,7 +2003,7 @@ export default function Contracts() {
               )}
             </>
           ) : (
-            <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2 2xl:grid-cols-3">
 
               {/* Pagination أعلى */}
               {totalPages > 1 && (
@@ -2550,7 +2551,7 @@ export default function Contracts() {
                               setRenewSource(contract); setRenewStart(start.toISOString().slice(0,10)); setRenewEnd(end.toISOString().slice(0,10)); setRenewOpen(true);
                             }}
                             className="h-8 px-2 gap-1"
-                            title="تجديد العقد ب��فس اللوحات"
+                            title="تجديد العقد بنفس اللوحات"
                           >
                             <RefreshCcw className="h-4 w-4" />
                             تجديد
