@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { calculateInstallationArea, resolveInstallationFacesCount } from '@/lib/installationFaces';
 
 describe('installation face calculations', () => {
+  it('honours ZL-ZL0503 front-only selection despite a stale both-faces reinstallation flag', () => {
+    const item = { faces_to_install: 1, reinstalled_faces: 'both' as const };
+    const billboard = { Faces_Count: 2 };
+
+    expect(resolveInstallationFacesCount(item, billboard, 'reinstallation')).toBe(1);
+    expect(calculateInstallationArea(8, 3, item, billboard, 'reinstallation')).toBe(24);
+  });
+
+  it('retains both reinstalled faces when no narrower selection is saved', () => {
+    const item = { reinstalled_faces: 'both' as const };
+    expect(resolveInstallationFacesCount(item, { Faces_Count: 2 }, 'reinstallation')).toBe(2);
+    expect(resolveInstallationFacesCount(item, undefined, 'reinstallation')).toBe(2);
+  });
   it('never prints or charges a second face for a one-face billboard', () => {
     const item = { faces_to_install: 2 };
     const billboard = { Faces_Count: 1 };

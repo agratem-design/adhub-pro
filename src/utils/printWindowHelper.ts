@@ -865,7 +865,7 @@ export function injectPrintActionBar(
           print-color-adjust: exact !important;
         }
 
-        /* Prevent orphan totals and summary sections from appearing alone */
+        /* Prevent orphan totals and summary sections from breaking internally across pages */
         .total-section, 
         .cost-section, 
         .summary-section, 
@@ -879,21 +879,6 @@ export function injectPrintActionBar(
         tfoot tr {
           break-inside: avoid !important;
           page-break-inside: avoid !important;
-          break-before: avoid !important;
-          page-break-before: avoid !important;
-        }
-
-        tbody tr:last-child {
-          break-after: avoid !important;
-          page-break-after: avoid !important;
-        }
-        tbody tr:nth-last-child(2) {
-          break-after: avoid !important;
-          page-break-after: avoid !important;
-        }
-        tbody tr:nth-last-child(3) {
-          break-after: avoid !important;
-          page-break-after: avoid !important;
         }
       }
     </style>

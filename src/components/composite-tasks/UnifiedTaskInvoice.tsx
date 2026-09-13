@@ -1458,14 +1458,10 @@ export function UnifiedTaskInvoice({
                   ? ['b']
                   : (hasBackFace ? ['a', 'b'] : ['a']);
                 const operationFacesCount = Math.max(1, operationFaces.length);
-                const singleIterationStandardCost = areaPerFace * operationFacesCount * (taskPricePerMeter || 10);
-
                 const itemHistoryCount = photoHistoryCountByItemMap[item.id] || 0;
-                let iterationsCount = Math.max(1, itemReinstallCount || 1, itemHistoryCount);
-                // إذا كان السعر المسجل مضاعفاً لتكلفة العملية الواحدة ولم تكن reinstall_count محددة
-                if (iterationsCount === 1 && singleIterationStandardCost > 0 && actualItemInstallCost >= (singleIterationStandardCost * 1.7)) {
-                  iterationsCount = Math.max(1, Math.round(actualItemInstallCost / singleIterationStandardCost));
-                }
+                // عدد مرات إعادة التركيب يؤخذ بدقة من المسجل في قاعدة البيانات
+                const iterationsCount = Math.max(1, itemReinstallCount || 1, itemHistoryCount);
+
 
                 // احتساب تكلفة الوجه الواحد لكل دورة تركيب
                 const installCostPerFacePerIteration = actualItemInstallCost > 0
@@ -2249,78 +2245,35 @@ export function UnifiedTaskInvoice({
   table { page-break-inside: auto !important; width: 100% !important; max-width: 100% !important; border-collapse: collapse !important; margin-bottom: 8px !important; box-sizing: border-box !important; }
   tr { page-break-inside: avoid !important; break-inside: avoid !important; }
   thead { display: table-header-group; }
-  tfoot { display: table-row-group !important; page-break-inside: avoid !important; break-inside: avoid !important; page-break-before: avoid !important; break-before: avoid !important; }
+  tfoot { display: table-row-group !important; page-break-inside: avoid !important; break-inside: avoid !important; }
   tfoot tr { display: table-row !important; }
   img { page-break-inside: avoid !important; break-inside: avoid !important; }
   td img { position: relative; z-index: 1; max-width: 100% !important; height: auto !important; object-fit: contain !important; }
   td:has(img) { background-color: #fff !important; }
 
-  /* Prevent total/summary from breaking alone */
-  .total-section, .cost-section, .summary-section, .cost-summary, [data-no-break] {
+  /* Keep each billboard tbody together without chaining them to adjacent elements */
+  tbody[data-no-break] {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
-    page-break-before: avoid !important;
-    break-before: avoid !important;
   }
-  tbody tr:last-child {
-    page-break-after: avoid !important;
-    break-after: avoid !important;
-  }
-  tbody tr:nth-last-child(2) {
-    page-break-after: avoid !important;
-    break-after: avoid !important;
-  }
-  tbody tr:nth-last-child(3) {
-    page-break-after: avoid !important;
-    break-after: avoid !important;
-  }
-
-  .u-footer { margin-top: auto; page-break-inside: avoid !important; break-inside: avoid !important; }
-  @media print {
-  table { page-break-inside: auto !important; width: 100% !important; max-width: 100% !important; border-collapse: collapse !important; margin-bottom: 8px !important; box-sizing: border-box !important; }
-  tr { page-break-inside: avoid !important; break-inside: avoid !important; }
-  thead { display: table-header-group; }
-  tfoot { display: table-row-group !important; page-break-inside: avoid !important; break-inside: avoid !important; page-break-before: avoid !important; break-before: avoid !important; }
-  tfoot tr { display: table-row !important; }
-  img { page-break-inside: avoid !important; break-inside: avoid !important; }
-  td img { position: relative; z-index: 1; max-width: 100% !important; height: auto !important; object-fit: contain !important; }
-  td:has(img) { background-color: #fff !important; }
-
-  /* Prevent total/summary from breaking alone */
-  .total-section, .cost-section, .summary-section, .cost-summary, [data-no-break] {
+  .total-section, .cost-section, .summary-section, .cost-summary {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
-    page-break-before: avoid !important;
-    break-before: avoid !important;
-  }
-  tbody tr:last-child {
-    page-break-after: avoid !important;
-    break-after: avoid !important;
-  }
-  tbody tr:nth-last-child(2) {
-    page-break-after: avoid !important;
-    break-after: avoid !important;
-  }
-  tbody tr:nth-last-child(3) {
-    page-break-after: avoid !important;
-    break-after: avoid !important;
   }
 
   .u-footer { margin-top: auto; page-break-inside: avoid !important; break-inside: avoid !important; }
   @media print {
     @page { size: A4 portrait; margin: 8mm 10mm; }
-    * { box-sizing: border-box !important; }
+    * { box-sizing: border-box !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     .print-container, .page, [data-print-page] { width: 100% !important; max-width: 100% !important; min-height: auto; padding: 0 !important; margin: 0 !important; display: block; box-sizing: border-box !important; }
     .page { width: 100% !important; height: auto !important; min-height: auto !important; max-height: none !important; }
     .page:last-child { page-break-after: avoid !important; break-after: avoid !important; }
     .u-header { width: 100% !important; max-width: 100% !important; padding-top: 2px; }
     .u-logo { width: auto; object-fit: contain; overflow: visible; }
     .u-footer { width: 100% !important; margin-top: 14px; page-break-inside: avoid !important; break-inside: avoid !important; }
-    .total-section, .cost-section, .summary-section, .cost-summary, [data-no-break] {
-      page-break-before: avoid !important;
-      break-before: avoid !important;
+    .total-section, .cost-section, .summary-section, .cost-summary {
+      break-inside: avoid !important;
     }
-    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   }
 </style>
 </head>

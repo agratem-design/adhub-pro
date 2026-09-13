@@ -1281,7 +1281,7 @@ export default function Contracts() {
       <div className="min-h-full space-y-6 p-3 sm:p-4 md:p-6" dir="rtl">
         <div className="h-32 rounded-2xl border border-border/60 bg-card/70 motion-safe:animate-pulse" />
         <div className="h-24 rounded-2xl border border-border/60 bg-card/70 motion-safe:animate-pulse" />
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 2xl:grid-cols-3">
           {Array.from({ length: 6 }, (_, index) => (
             <div key={index} className="overflow-hidden rounded-2xl border border-border/60 bg-card/70">
               <div className="h-56 sm:h-64 bg-muted/60 motion-safe:animate-pulse" />
@@ -1371,7 +1371,7 @@ export default function Contracts() {
               return <button key={key} type="button" aria-pressed={selected}
                 onClick={() => { setShowTrash(key === 'trash'); setShowUnpaid(key === 'unpaid'); }}
                 className={`flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${selected ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
-                {label}<span className="rounded-md bg-current/10 px-1.5 font-manrope tabular-nums">{count}</span>
+                {label}<span className="rounded-md bg-background/15 px-1.5 font-manrope tabular-nums">{count}</span>
               </button>;
             })}
           </div>
@@ -1389,7 +1389,7 @@ export default function Contracts() {
         </div>
         <CardContent className="p-4 sm:p-5">
           <div className="flex flex-col gap-3">
-            <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex flex-col xl:flex-row gap-3">
               <div className="relative flex-1 min-w-0">
                 <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -1397,7 +1397,7 @@ export default function Contracts() {
                   placeholder="ابحث برقم العقد، اسم العميل، أو نوع الإعلان..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="h-12 rounded-xl pr-10 bg-background border-border/60 text-sm focus-visible:ring-primary/40"
+                  className="h-12 sm:h-12 rounded-xl pr-10 sm:pr-10 bg-background border-border/60 text-sm focus-visible:ring-primary/40"
                 />
               </div>
             
@@ -1722,7 +1722,7 @@ export default function Contracts() {
             <>
               {/* Pagination أعلى - الوضع المفصول */}
               {totalPages > 1 && (
-                <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm" dir="rtl">
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm" dir="rtl">
                   <div className="flex items-center gap-1.5">
                     <Button variant="ghost" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage(1)} className="h-8 px-2 text-xs">
                       <ChevronRight className="h-3.5 w-3.5 ml-0.5" />الأولى
@@ -2007,7 +2007,7 @@ export default function Contracts() {
 
               {/* Pagination أعلى */}
               {totalPages > 1 && (
-                <div className="col-span-full flex items-center justify-between gap-3 p-3 rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm" dir="rtl">
+                <div className="col-span-full flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm" dir="rtl">
                   <div className="flex items-center gap-1.5">
                     <Button variant="ghost" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage(1)} className="h-8 px-2 text-xs">
                       <ChevronRight className="h-3.5 w-3.5 ml-0.5" />الأولى
@@ -2183,7 +2183,7 @@ export default function Contracts() {
 
       {/* جدول العقود */}
       {viewMode === 'table' && (
-      <Card className="border-0 shadow-sm">
+      <Card className="overflow-hidden rounded-3xl border border-border/60 bg-card shadow-sm">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-lg">
             <Calendar className="h-5 w-5 text-primary" />

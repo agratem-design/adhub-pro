@@ -45,7 +45,8 @@ export const resolveInstallationFacesCount = (
   if (taskType === 'reinstallation') {
     if (reinstalledFaces === 'face_a' || reinstalledFaces === 'face_b') resolvedFaces = 1;
     if (reinstalledFaces === 'both') {
-      resolvedFaces = physicalFaces !== null ? physicalFaces : Math.max(2, resolvedFaces);
+      // A legacy "both" flag must not widen an explicit one-face selection.
+      resolvedFaces = requestedFaces ?? physicalFaces ?? 2;
     }
   }
 

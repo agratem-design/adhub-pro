@@ -89,7 +89,14 @@ export function MissingContractNumbersDialog({
     }
   };
 
-  const handleSelectGap = (gapNumber: number, gapYear: number) => {
+  const handleSelectGap = async (gapNumber: number, gapYear: number) => {
+    // التحقق الأمني المباشر للتأكد من عدم وجود العقد بقاعدة البيانات
+    const check = await isContractNumberAvailable(gapNumber);
+    if (!check.available) {
+      toast.error(`عذراً، الرقم #${gapNumber} مستخدم بالفعل للعقد (${check.contract?.['Customer Name'] || 'عميل'}) ولا يمكن استخدامه!`);
+      loadGaps(selectedYear);
+      return;
+    }
     onSelectMissingNumber(gapNumber, gapYear);
     onOpenChange(false);
     toast.success(`تم اختيار الرقم المتروك #${gapNumber} للعقد الجديد`);
