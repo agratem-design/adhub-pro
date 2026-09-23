@@ -293,6 +293,16 @@ const App = () => (
                         }
                       />
 
+                      {/* Direct /design-studio route support */}
+                      <Route
+                        path="/design-studio"
+                        element={
+                          <ProtectedRoute requiredPermission="tasks">
+                            <MainLayout><DesignStudio /></MainLayout>
+                          </ProtectedRoute>
+                        }
+                      />
+
                       {/* Admin routes from config array */}
                       {adminRoutes.map(({ path, Component, permission }) => (
                         <Route

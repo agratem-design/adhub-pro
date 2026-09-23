@@ -1,0 +1,16 @@
+.design-studio button, .design-studio [role="tab"], .design-studio [role="switch"] { cursor: pointer; transition: background-color 180ms, border-color 180ms, color 180ms; }
+.design-studio button:disabled { cursor: not-allowed; }
+.studio-inspector input:not([type="checkbox"]):not([type="color"]), .studio-inspector [role="combobox"] { min-height: 36px; font-size: 13px; }
+.studio-inspector label { font-size: 12px; line-height: 1.6; }
+.studio-inspector [role="tab"] { min-height: 40px; }
+.studio-inspector [role="tabpanel"] { margin-top: 12px; }
+.studio-inspector .shadow-lg { box-shadow: none; }
+.studio-viewport { height: clamp(340px, 62vh, 840px); background-color: hsl(var(--muted) / .5); background-image: radial-gradient(hsl(var(--foreground) / .14) 1px, transparent 1px); background-size: 20px 20px; }
+@media (max-width: 1023px) {
+  .studio-preview { grid-row: 1; }
+  .studio-inspector { max-height: none; }
+  .studio-viewport { height: 42vh; min-height: 300px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .design-studio *, .design-studio *::before, .design-studio *::after { animation: none !important; transition: none !important; }
+}

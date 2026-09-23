@@ -268,7 +268,8 @@ export function UnifiedPrintAllDialog({
 
   const [includeDesigns, setIncludeDesigns] = useState(true);
   const [showDesignName, setShowDesignName] = useState(false);
-  const [showTeamName, setShowTeamName] = useState(true);
+  const [showTeamInContent, setShowTeamInContent] = useState(false);
+  const [showTeamInHeader, setShowTeamInHeader] = useState(false);
   const [hideCustomerName, setHideCustomerName] = useState(true);
   const [hideInstallDate, setHideInstallDate] = useState(true);
   const [printType, setPrintType] = useState<'client' | 'installation'>(
@@ -732,9 +733,9 @@ export function UnifiedPrintAllDialog({
     let rawCompany = (companyName || '').trim();
     const allTeamNames = Object.values(teams || {}).map(t => t?.team_name).filter(Boolean);
 
-    // حساب اسم الفريق المختار
+    // حساب اسم الفريق المختار (يظهر في ترويسة نافذة الطباعة فقط عند تفعيل الخيار)
     let selectedTeamStr = '';
-    if (showTeamName) {
+    if (showTeamInHeader) {
       if (selectedTeamIds.size > 0) {
         selectedTeamStr = Array.from(selectedTeamIds).map(id => teams[id]?.team_name).filter(Boolean).join(' - ');
       } else {
@@ -996,7 +997,7 @@ export function UnifiedPrintAllDialog({
             ${isCutoutEnabled ? 'مجسم - ' : ''}${formatFacesCountArabic(facesCount)}
           </div>
 
-          ${printType === 'installation' && showTeamName && displayTeamNames ? `
+          ${printType === 'installation' && showTeamInContent && displayTeamNames ? `
             <div class="absolute-field print-type" style="top: ${s.team_name_top}; right: ${s.team_name_right}; font-size: ${s.team_name_font_size}; color: ${s.team_name_color || '#000'}; font-weight: ${s.team_name_font_weight}; text-align: ${s.team_name_alignment}; ${s.team_name_offset_x && s.team_name_offset_x !== '0mm' ? `margin-right: ${s.team_name_offset_x};` : ''}">
                ${contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'}: ${displayTeamNames}
             </div>
@@ -1497,7 +1498,7 @@ export function UnifiedPrintAllDialog({
       const customerCompanyText = !hideCustomerName ? [customerName, companyName].filter(Boolean).join(' - ') : '';
       pages.push(`
         <div class="info-bar">
-          <span>${getContextLabel()} رقم: ${contextNumber}${customerCompanyText ? ' | ' + customerCompanyText : ''}${adType ? ' | ' + adType : ''}${printType === 'installation' && showTeamName && selectedTeamNames ? ' | الفريق: ' + selectedTeamNames : ''} | صفحة ${pageIndex + 1} من ${Math.ceil(sortedItems.length / rowsPerPage)}</span>
+          <span>${getContextLabel()} رقم: ${contextNumber}${customerCompanyText ? ' | ' + customerCompanyText : ''}${adType ? ' | ' + adType : ''}${printType === 'installation' && showTeamInContent && selectedTeamNames ? ' | الفريق: ' + selectedTeamNames : ''} | صفحة ${pageIndex + 1} من ${Math.ceil(sortedItems.length / rowsPerPage)}</span>
         </div>
         <table>
           <thead><tr>${headerCells.join('')}</tr></thead>
@@ -2108,6 +2109,37 @@ export function UnifiedPrintAllDialog({
                   <Badge className="text-sm font-bold">{filteredItems.length} لوحة</Badge>
                 </div>
               </div>
+
+              {/* خيارات عرض اسم الفريق في المستند - بارزة في قسم الفرق */}
+              <div className="pt-3 border-t border-amber-500/20 space-y-2.5 bg-amber-500/5 -mx-4 -mb-4 p-4 rounded-b-xl">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400">
+                  <Users className="h-4 w-4" />
+                  <span>خيارات عرض اسم {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'} في الطباعة:</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="flex items-center gap-2 p-2.5 rounded-lg border border-amber-500/30 bg-background/80 hover:bg-muted/50 transition-colors">
+                    <Checkbox
+                      id="showTeamInContent_teamSec"
+                      checked={showTeamInContent}
+                      onCheckedChange={(c) => setShowTeamInContent(!!c)}
+                    />
+                    <Label htmlFor="showTeamInContent_teamSec" className="cursor-pointer flex-1 text-xs font-medium">
+                      إظهار اسم {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'} داخل الطباعة
+                    </Label>
+                  </div>
+
+                  <div className="flex items-center gap-2 p-2.5 rounded-lg border border-amber-500/30 bg-background/80 hover:bg-muted/50 transition-colors">
+                    <Checkbox
+                      id="showTeamInHeader_teamSec"
+                      checked={showTeamInHeader}
+                      onCheckedChange={(c) => setShowTeamInHeader(!!c)}
+                    />
+                    <Label htmlFor="showTeamInHeader_teamSec" className="cursor-pointer flex-1 text-xs font-medium">
+                      إظهار اسم {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'} في ترويسة نافذة الطباعة
+                    </Label>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -2262,15 +2294,34 @@ export function UnifiedPrintAllDialog({
               </Label>
             </div>
 
-            <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-              <Checkbox
-                id="showTeamName"
-                checked={showTeamName}
-                onCheckedChange={(c) => setShowTeamName(!!c)}
-              />
-              <Label htmlFor="showTeamName" className="cursor-pointer flex-1">
-                إظهار اسم الفريق المختار
-              </Label>
+            <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 space-y-2.5">
+              <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                <Users className="h-4 w-4" />
+                <span>خيارات اسم {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'} في الطباعة:</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="flex items-center gap-2 p-2.5 rounded-lg border border-amber-500/20 bg-background/80 hover:bg-muted/50 transition-colors">
+                  <Checkbox
+                    id="showTeamInContent"
+                    checked={showTeamInContent}
+                    onCheckedChange={(c) => setShowTeamInContent(!!c)}
+                  />
+                  <Label htmlFor="showTeamInContent" className="cursor-pointer flex-1 text-xs font-medium">
+                    إظهار اسم {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'} داخل الطباعة
+                  </Label>
+                </div>
+
+                <div className="flex items-center gap-2 p-2.5 rounded-lg border border-amber-500/20 bg-background/80 hover:bg-muted/50 transition-colors">
+                  <Checkbox
+                    id="showTeamInHeader"
+                    checked={showTeamInHeader}
+                    onCheckedChange={(c) => setShowTeamInHeader(!!c)}
+                  />
+                  <Label htmlFor="showTeamInHeader" className="cursor-pointer flex-1 text-xs font-medium">
+                    إظهار اسم {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'} في ترويسة نافذة الطباعة
+                  </Label>
+                </div>
+              </div>
             </div>
 
             <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors bg-amber-500/10 border border-amber-500/20">

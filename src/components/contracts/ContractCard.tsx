@@ -14,7 +14,7 @@ import {
   Send, FileSpreadsheet, MoreHorizontal, Phone,
   TrendingUp, TrendingDown, Minus, ImageIcon, RefreshCw,
   Maximize2, X, MapPin, Landmark, ChevronDown, ChevronLeft, ChevronRight,
-  AlertTriangle, Ruler, Navigation, FileArchive, Pencil, Check
+  AlertTriangle, Ruler, Navigation, FileArchive, Pencil, Check, Lock
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -1818,13 +1818,25 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
 
                 <DropdownMenuSeparator />
 
-                <DropdownMenuItem
-                  className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                  onClick={() => onDelete(String(contract.id))}
-                >
-                  <Trash2 className="h-4 w-4 ml-2" />
-                  حذف العقد
-                </DropdownMenuItem>
+                {(totalPaid > 0 || (contractPayments && contractPayments.length > 0)) ? (
+                  <DropdownMenuItem
+                    className="text-amber-600 dark:text-amber-400 focus:text-amber-600 focus:bg-amber-50 dark:focus:bg-amber-950/30 cursor-pointer font-medium"
+                    onClick={() => {
+                      toast.warning(`لا يمكن حذف العقد #${contract.Contract_Number ?? contract.id} نظراً لوجود دفعات مسددة مرتبطة به بقيمة ${totalPaid.toLocaleString('ar-LY')} د.ل. يجب تسوية أو إلغاء الدفعات أولاً.`);
+                    }}
+                  >
+                    <Lock className="h-4 w-4 ml-2 text-amber-500" />
+                    <span>حذف العقد (محمي - يوجد سداد)</span>
+                  </DropdownMenuItem>
+                ) : (
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                    onClick={() => onDelete(String(contract.id))}
+                  >
+                    <Trash2 className="h-4 w-4 ml-2" />
+                    حذف العقد
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

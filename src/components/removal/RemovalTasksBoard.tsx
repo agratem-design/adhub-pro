@@ -100,6 +100,17 @@ function getDisplayStatus(items: any[]): keyof typeof STATUS_CONFIG {
   return 'pending';
 }
 
+function normalizeArabic(str: string | null | undefined): string {
+  if (!str) return '';
+  return str
+    .trim()
+    .toLowerCase()
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/\s+/g, ' ');
+}
+
 /* ── Skeleton card ── */
 const SkeletonCard = () => (
   <div className="rounded-2xl overflow-hidden border border-border/50 bg-card">
@@ -246,17 +257,37 @@ export const RemovalTasksBoard: React.FC<Props> = ({
     if (filterStatus !== 'all') r = r.filter(t => t.displayStatus === filterStatus);
     if (filterTeam !== 'all') r = r.filter(t => t.team_id === filterTeam);
     if (search) {
-      const s = search.toLowerCase();
-      r = r.filter(t =>
-        t.customerName.toLowerCase().includes(s) ||
-        String(t.contract_id).includes(s) ||
-        t.adType.toLowerCase().includes(s) ||
-        t.team?.team_name?.toLowerCase().includes(s) ||
-        t.id.toLowerCase().includes(s)
-      );
+      const s = normalizeArabic(search);
+      r = r.filter(t => {
+        const cust = normalizeArabic(t.customerName);
+        const cId = String(t.contract_id || '');
+        const ad = normalizeArabic(t.adType);
+        const teamName = normalizeArabic(t.team?.team_name);
+        const taskId = String(t.id || '').toLowerCase();
+        
+        // Also check if any billboard in the task matches
+        const matchesBillboard = (t.items || []).some((item: any) => {
+          const bb = billboardById[item.billboard_id];
+          return (
+            String(item.billboard_id).includes(s) ||
+            normalizeArabic(bb?.Billboard_Name).includes(s) ||
+            normalizeArabic(bb?.Municipality).includes(s) ||
+            normalizeArabic(bb?.District).includes(s)
+          );
+        });
+
+        return (
+          cust.includes(s) ||
+          cId.includes(s) ||
+          ad.includes(s) ||
+          teamName.includes(s) ||
+          taskId.includes(s) ||
+          matchesBillboard
+        );
+      });
     }
     return r;
-  }, [enriched, filterStatus, filterTeam, search, activeTab]);
+  }, [enriched, filterStatus, filterTeam, search, activeTab, billboardById]);
 
   // Count for tabs
   const activeCount = useMemo(() => enriched.filter(t => t.displayStatus !== 'completed').length, [enriched]);

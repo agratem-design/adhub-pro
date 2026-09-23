@@ -39,7 +39,17 @@ export interface CanvasElement {
     municipality?: { fontSize?: number; fontWeight?: string; fontColor?: string };
     region?: { fontSize?: number; fontWeight?: string; fontColor?: string };
   };
+
+  // Text background / Pill options (خلفية كبسولة أو شارة مخصصة للنص)
+  textBackground?: boolean;
+  textBgColor?: string;
+  textBgPaddingX?: number;
+  textBgPaddingY?: number;
+  textBgRadius?: number;
+  textBgBorder?: string;
+  textBgBlur?: number;
 }
+
 
 export interface ImageStyle {
   x: number;
@@ -66,6 +76,14 @@ export interface GlassPanelStyle {
   borderColor: string;
   backgroundColor: string;
   shadow: boolean;
+  bgMode?: 'color' | 'image';
+  bgImageUrl?: string;
+  bgObjectFit?: 'fill' | 'cover' | 'contain';
+  bgFlipY?: boolean;
+  bgScale?: number;
+  bgOffsetY?: number;
+  showDividers?: boolean;
+  dividerColor?: string;
 }
 
 export interface CompanyInfo {
@@ -74,6 +92,30 @@ export interface CompanyInfo {
   phone: string;
   website: string;
   logoUrl: string;
+}
+
+export interface LocationStripStyle {
+  visible: boolean;
+  height: number;
+  backgroundColor: string;
+  textColor: string;
+  fontSize: number;
+  opacity?: number;
+  blur?: number;
+  borderWidth?: number;
+  borderColor?: string;
+  borderRadius?: number;
+  bgMode?: 'color' | 'image';
+  bgImageUrl?: string;
+  bgObjectFit?: 'cover' | 'contain' | 'fill';
+  showPinIcon?: boolean;
+  textColorTheme?: string;
+  x?: number;
+  offsetY?: number;
+  width?: number;
+  bgFlipY?: boolean;
+  bgScale?: number;
+  bgOffsetY?: number;
 }
 
 export interface SavedTemplate {
@@ -86,18 +128,7 @@ export interface SavedTemplate {
   bg_image_url?: string;
   blur_amount: number;
   glass_panel_style: GlassPanelStyle & {
-    locationStrip?: {
-      visible: boolean;
-      height: number;
-      backgroundColor: string;
-      textColor: string;
-      fontSize: number;
-      opacity?: number;
-      blur?: number;
-      borderWidth?: number;
-      borderColor?: string;
-      borderRadius?: number;
-    };
+    locationStrip?: LocationStripStyle;
     companyInfo?: CompanyInfo;
     layoutMode?: 'normal' | 'cover';
     coverTitle1?: string;
@@ -132,7 +163,15 @@ export interface InstallationTask {
   contract_id: string | number;
   task_type: string;
   created_at: string;
-  installation_teams: { team_name: string } | null;
+  team_id?: string | null;
+  team_name?: string;
+  reinstallation_number?: number | null;
+  status?: string;
+  taskDesignImage?: string;
+  totalItems?: number;
+  photoItems?: number;
+  installation_teams?: { team_name: string } | null;
+  Contract?: any;
 }
 
 export interface TaskItem {
@@ -156,14 +195,57 @@ export interface ItemDetails {
   billboard_code: string;
   size: string;
   installation_date: string;
+  
+  // صور التركيب الميدانية (Installation Photos)
   installed_image: string;
   installed_face_a: string;
   installed_face_b: string;
+  
+  // تصاميم الإعلان الجرافيكية (Design Artworks)
+  design_face_a?: string;
+  design_face_b?: string;
+  design_cutout?: string;
+  design_main?: string;
+
   company_name: string;
   company_subtitle: string;
   campaign_label: string;
   size_label: string;
   phone: string;
   website: string;
-  [key: string]: string;
+  [key: string]: any;
+}
+
+export type ImageSourceType =
+  | 'installed_face_a'
+  | 'installed_face_b'
+  | 'installed'
+  | 'design_face_a'
+  | 'design_face_b'
+  | 'design_cutout'
+  | 'face_a'
+  | 'face_b';
+
+export interface CompositeStudioTask {
+  id: string;
+  task_number: number;
+  contract_id: number;
+  contract_ids?: number[];
+  customer_id?: string | null;
+  customer_name?: string | null;
+  task_type: 'new_installation' | 'reinstallation' | string;
+  installation_task_id: string;
+  print_task_id?: string | null;
+  cutout_task_id?: string | null;
+  status: string;
+  notes?: string | null;
+  created_at: string;
+  adType?: string;
+  teamName?: string;
+  printerName?: string;
+  designImage?: string;
+  installedImage?: string;
+  totalBillboards?: number;
+  completedBillboards?: number;
+  photoStatus?: 'all' | 'partial' | 'none' | 'unknown';
 }

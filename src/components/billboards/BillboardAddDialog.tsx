@@ -3,9 +3,29 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MultiSelect } from '@/components/ui/multi-select';
-import { Upload, Loader2, ClipboardList, MapPin, Ruler, ImageIcon, Handshake, Sparkles, CheckCircle2, Building, Plus } from 'lucide-react';
+import { 
+  Upload, 
+  Loader2, 
+  ClipboardList, 
+  MapPin, 
+  Ruler, 
+  ImageIcon, 
+  Handshake, 
+  Sparkles, 
+  CheckCircle2, 
+  Building, 
+  Plus,
+  Hash,
+  RotateCcw,
+  AlertCircle,
+  Search,
+  ChevronDown
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { uploadToImgbb } from '@/services/imgbbService';
@@ -169,6 +189,150 @@ export const BillboardAddDialog: React.FC<BillboardAddDialogProps> = ({
     setShowDistrictSuggestions(false);
   };
 
+  // ✅ NEW: Empty numbers (gaps) from previous and sequence management
+  const [allBillboards, setAllBillboards] = useState<{ ID: number; Billboard_Name: string }[]>([]);
+  const [loadingBillboardsList, setLoadingBillboardsList] = useState(false);
+  const [isGapPopoverOpen, setIsGapPopoverOpen] = useState(false);
+  const [gapSearchQuery, setGapSearchQuery] = useState('');
+
+  // Fetch all existing billboard IDs to identify empty/missing numbers from previously
+  useEffect(() => {
+    if (!addOpen) return;
+    let isCancelled = false;
+
+    const fetchAllBillboards = async () => {
+      setLoadingBillboardsList(true);
+      try {
+        const { data, error } = await supabase
+          .from('billboards')
+          .select('ID, Billboard_Name')
+          .not('ID', 'is', null)
+          .order('ID', { ascending: true });
+
+        if (!error && data && !isCancelled) {
+          setAllBillboards(
+            data.map((b: any) => ({
+              ID: Number(b.ID),
+              Billboard_Name: b.Billboard_Name || ''
+            })).filter((b: any) => !isNaN(b.ID) && b.ID > 0)
+          );
+          setLoadingBillboardsList(false);
+          return;
+        }
+      } catch (err) {
+        console.warn('Failed to load billboards for gap calculation:', err);
+      }
+
+      if (!isCancelled) {
+        const mapped = (billboards || []).map((b: any) => ({
+          ID: Number(b.ID),
+          Billboard_Name: b.Billboard_Name || b.billboard_name || ''
+        })).filter((b: any) => !isNaN(b.ID) && b.ID > 0);
+        setAllBillboards(mapped);
+        setLoadingBillboardsList(false);
+      }
+    };
+
+    fetchAllBillboards();
+    return () => {
+      isCancelled = true;
+    };
+  }, [addOpen, billboards]);
+
+  // Map of occupied IDs -> Billboard_Name
+  const occupiedMap = useMemo(() => {
+    const map = new Map<number, string>();
+    allBillboards.forEach(b => {
+      map.set(b.ID, b.Billboard_Name);
+    });
+    return map;
+  }, [allBillboards]);
+
+  // Calculate highest ID, empty numbers (gaps from 1 to max), and next sequential ID
+  const { maxExistingId, emptyNumbers, nextSequentialId } = useMemo(() => {
+    if (allBillboards.length === 0) {
+      return { maxExistingId: 0, emptyNumbers: [] as number[], nextSequentialId: 1 };
+    }
+    let max = 0;
+    allBillboards.forEach(b => {
+      if (b.ID > max) max = b.ID;
+    });
+
+    const gaps: number[] = [];
+    for (let i = 1; i < max; i++) {
+      if (!occupiedMap.has(i)) {
+        gaps.push(i);
+      }
+    }
+
+    return {
+      maxExistingId: max,
+      emptyNumbers: gaps,
+      nextSequentialId: max + 1
+    };
+  }, [allBillboards, occupiedMap]);
+
+  // Filtered empty numbers by search query
+  const filteredEmptyNumbers = useMemo(() => {
+    if (!gapSearchQuery.trim()) return emptyNumbers;
+    const q = gapSearchQuery.trim();
+    return emptyNumbers.filter(num => String(num).includes(q));
+  }, [emptyNumbers, gapSearchQuery]);
+
+  // Current ID status checks
+  const currentIdNum = Number(addForm.ID);
+  const isIdEmptyOrInvalid = !addForm.ID || isNaN(currentIdNum) || currentIdNum <= 0;
+  const isCurrentIdOccupied = !isIdEmptyOrInvalid && occupiedMap.has(currentIdNum);
+  const occupiedBillboardName = isCurrentIdOccupied ? occupiedMap.get(currentIdNum) : null;
+  const isCurrentIdGap = !isIdEmptyOrInvalid && emptyNumbers.includes(currentIdNum);
+  const isCurrentIdSequential = !isIdEmptyOrInvalid && currentIdNum === nextSequentialId;
+
+  // Resolve municipality code
+  const getMunicipalityCode = (munName?: string) => {
+    const mName = munName || addForm.Municipality;
+    if (!mName) return 'XX';
+    const found = municipalities.find((m: any) => m.name === mName || m.name_ar === mName);
+    return found?.code || 'XX';
+  };
+
+  // Update billboard ID and sync billboard name & image name
+  const updateBillboardId = (newId: number | string) => {
+    const numId = typeof newId === 'string' ? (newId === '' ? '' : parseInt(newId, 10)) : newId;
+
+    setAddForm((prev: any) => {
+      if (numId === '' || isNaN(numId as number)) {
+        return { ...prev, ID: '' };
+      }
+
+      const munCode = getMunicipalityCode(prev.Municipality);
+      const paddedId = String(numId).padStart(4, '0');
+      const newBillboardName = `${munCode}${paddedId}`;
+      const keepImage = prev.hasCustomImage || (prev.Image_URL && !prev.Image_URL.startsWith('/image/'));
+
+      return {
+        ...prev,
+        ID: numId,
+        Billboard_Name: newBillboardName,
+        image_name: keepImage ? prev.image_name : generateImageName(newBillboardName),
+        Image_URL: keepImage ? prev.Image_URL : `/image/${generateImageName(newBillboardName)}`
+      };
+    });
+  };
+
+  // Select a specific empty gap number
+  const handleSelectGapId = (gapId: number) => {
+    updateBillboardId(gapId);
+    setIsGapPopoverOpen(false);
+    toast.success(`تم اختيار الرقم الشاغر السابق: #${gapId}`);
+  };
+
+  // Select the next sequential number
+  const handleSelectSequentialId = () => {
+    updateBillboardId(nextSequentialId);
+    setIsGapPopoverOpen(false);
+    toast.success(`تم اختيار الرقم التسلسلي الجديد: #${nextSequentialId}`);
+  };
+
   const [imgbbUploading, setImgbbUploading] = useState(false);
 
   // Upload image to imgbb with professional naming
@@ -260,6 +424,33 @@ export const BillboardAddDialog: React.FC<BillboardAddDialogProps> = ({
     if (!addForm.Municipality || !addForm.Level || !addForm.Size) {
       toast.error('يرجى تحديد البلدية والمستوى والمقاس');
       return;
+    }
+
+    const targetIdNum = Number(addForm.ID);
+    if (!addForm.ID || isNaN(targetIdNum) || targetIdNum <= 0) {
+      toast.error('يرجى تحديد رقم لوحة صحيح');
+      return;
+    }
+
+    if (occupiedMap.has(targetIdNum)) {
+      toast.error(`رقم اللوحة (${targetIdNum}) مستخدم بالفعل للوحة "${occupiedMap.get(targetIdNum)}". يرجى اختيار رقم فارغ أو رقم تسلسلي جديد.`);
+      return;
+    }
+
+    // Direct check in DB to prevent duplicate key error
+    try {
+      const { data: collision } = await supabase
+        .from('billboards')
+        .select('ID, Billboard_Name')
+        .eq('ID', targetIdNum)
+        .maybeSingle();
+
+      if (collision) {
+        toast.error(`رقم اللوحة (${targetIdNum}) مسجل مسبقاً للوحة "${collision.Billboard_Name}". يرجى اختيار رقم آخر.`);
+        return;
+      }
+    } catch (colErr) {
+      console.warn('Collision check warning:', colErr);
     }
 
     setAdding(true);
@@ -477,23 +668,205 @@ export const BillboardAddDialog: React.FC<BillboardAddDialogProps> = ({
           {/* القسم 1: المعلومات الأساسية */}
           <fieldset className="rounded-xl border border-border p-4 space-y-4">
             <legend className="text-sm font-semibold text-primary px-2 flex items-center gap-1.5"><ClipboardList className="h-4 w-4" /> المعلومات الأساسية</legend>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <div>
-                <Label className="text-xs text-muted-foreground">رقم اللوحة (تلقائي)</Label>
-                <Input 
-                  type="number" 
-                  value={addForm.ID || ''} 
-                  disabled 
-                  className="bg-muted/50 cursor-not-allowed text-sm text-muted-foreground h-9"
-                  placeholder="تلقائي" 
-                />
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 items-start">
+              {/* رقم اللوحة مع ميزة اختيار الأرقام الفارغة من السابق */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold text-foreground flex items-center gap-1">
+                    <Hash className="h-3.5 w-3.5 text-primary" />
+                    رقم اللوحة *
+                  </Label>
+                  {/* Status Badge */}
+                  {isCurrentIdOccupied ? (
+                    <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 gap-0.5 font-tajawal">
+                      <AlertCircle className="h-2.5 w-2.5" />
+                      مستخدم
+                    </Badge>
+                  ) : isCurrentIdGap ? (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 gap-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 font-tajawal">
+                      <Sparkles className="h-2.5 w-2.5 text-amber-500" />
+                      شاغر سابق
+                    </Badge>
+                  ) : isCurrentIdSequential ? (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 gap-0.5 bg-primary/10 text-primary border-primary/20 font-tajawal">
+                      تسلسلي جديد
+                    </Badge>
+                  ) : !isIdEmptyOrInvalid ? (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 gap-0.5 bg-emerald-500/10 text-emerald-600 border-emerald-500/30 font-tajawal">
+                      <CheckCircle2 className="h-2.5 w-2.5 text-emerald-500" />
+                      متاح
+                    </Badge>
+                  ) : null}
+                </div>
+
+                <div className="flex gap-1 items-center">
+                  <Input 
+                    type="number" 
+                    value={addForm.ID ?? ''} 
+                    onChange={(e) => updateBillboardId(e.target.value)}
+                    className={cn(
+                      "text-sm h-9 flex-1 font-mono transition-colors",
+                      isCurrentIdOccupied && "border-destructive focus-visible:ring-destructive text-destructive font-bold bg-destructive/5",
+                      isCurrentIdGap && "border-amber-500/50 text-amber-700 dark:text-amber-300 font-bold bg-amber-500/5"
+                    )}
+                    placeholder={nextSequentialId ? String(nextSequentialId) : "رقم اللوحة"} 
+                  />
+
+                  {/* Popover for selecting empty numbers */}
+                  <Popover open={isGapPopoverOpen} onOpenChange={setIsGapPopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        className={cn(
+                          "h-9 w-9 shrink-0 cursor-pointer transition-all duration-200",
+                          emptyNumbers.length > 0
+                            ? "border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20"
+                            : "text-muted-foreground hover:text-foreground"
+                        )}
+                        title={emptyNumbers.length > 0 ? `الأرقام الفارغة (${emptyNumbers.length} متوفر)` : "الأرقام الفارغة من السابق"}
+                      >
+                        <Sparkles className="h-4 w-4 text-amber-500" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-80 sm:w-96 p-3 bg-card border-border shadow-xl z-50">
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between pb-2 border-b border-border">
+                          <div className="flex items-center gap-2">
+                            <div className="p-1.5 rounded-lg bg-amber-500/15 text-amber-600">
+                              <Sparkles className="h-4 w-4" />
+                            </div>
+                            <div>
+                              <h4 className="text-sm font-bold text-foreground">الأرقام الفارغة السابقة</h4>
+                              <p className="text-[11px] text-muted-foreground">
+                                {emptyNumbers.length > 0 
+                                  ? `${emptyNumbers.length} رقم شاغر متاح لإعادة الاستخدام`
+                                  : 'لا توجد أرقام فارغة سابقة في النظام'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Quick action buttons */}
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {emptyNumbers.length > 0 && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => handleSelectGapId(emptyNumbers[0])}
+                              className="h-8 text-xs font-semibold gap-1.5 bg-amber-500/15 text-amber-700 dark:text-amber-300 hover:bg-amber-500/25 border border-amber-500/30 cursor-pointer"
+                            >
+                              <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                              <span>أول فارغ (#{emptyNumbers[0]})</span>
+                            </Button>
+                          )}
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={handleSelectSequentialId}
+                            className={cn(
+                              "h-8 text-xs font-semibold gap-1.5 cursor-pointer text-muted-foreground hover:text-foreground",
+                              emptyNumbers.length === 0 && "col-span-2"
+                            )}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            <span>التسلسلي (#{nextSequentialId})</span>
+                          </Button>
+                        </div>
+
+                        {/* Search if more than 8 gaps */}
+                        {emptyNumbers.length > 8 && (
+                          <div className="relative">
+                            <Search className="absolute right-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                            <Input
+                              value={gapSearchQuery}
+                              onChange={(e) => setGapSearchQuery(e.target.value)}
+                              placeholder="بحث عن رقم محدد..."
+                              className="h-8 pr-8 text-xs font-mono"
+                            />
+                          </div>
+                        )}
+
+                        {/* Numbers Grid */}
+                        {emptyNumbers.length > 0 ? (
+                          <div className="space-y-1.5">
+                            <div className="text-[11px] font-medium text-muted-foreground flex items-center justify-between">
+                              <span>قائمة الأرقام الشاغرة:</span>
+                              {gapSearchQuery && (
+                                <span>{filteredEmptyNumbers.length} نتيجة</span>
+                              )}
+                            </div>
+                            <div className="max-h-40 overflow-y-auto pr-1">
+                              <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5">
+                                {filteredEmptyNumbers.map((num) => {
+                                  const isSelected = Number(addForm.ID) === num;
+                                  return (
+                                    <button
+                                      key={num}
+                                      type="button"
+                                      onClick={() => handleSelectGapId(num)}
+                                      className={cn(
+                                        "h-8 rounded-md text-xs font-mono font-bold flex items-center justify-center transition-all duration-200 cursor-pointer border",
+                                        isSelected
+                                          ? "bg-amber-500 text-white border-amber-600 shadow-sm"
+                                          : "bg-muted/40 hover:bg-amber-500/20 hover:border-amber-500/40 text-foreground border-border"
+                                      )}
+                                    >
+                                      #{num}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="py-4 text-center text-xs text-muted-foreground">
+                            جميع الأرقام السابقة من 1 إلى {maxExistingId} مستخدمة.
+                          </div>
+                        )}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+
+                {/* Sub-label quick suggestion or warning */}
+                {isCurrentIdOccupied ? (
+                  <p className="text-[11px] text-destructive flex items-center gap-1 font-medium leading-tight mt-1">
+                    <AlertCircle className="h-3 w-3 shrink-0" />
+                    <span>مستخدم بالفعل: {occupiedBillboardName}</span>
+                  </p>
+                ) : emptyNumbers.length > 0 ? (
+                  !isCurrentIdGap ? (
+                    <button
+                      type="button"
+                      onClick={() => handleSelectGapId(emptyNumbers[0])}
+                      className="text-[11px] text-amber-600 dark:text-amber-400 hover:underline cursor-pointer flex items-center gap-1 font-medium mt-1 transition-colors"
+                    >
+                      <Sparkles className="h-3 w-3 shrink-0 text-amber-500" />
+                      <span>اختر أول فارغ: #{emptyNumbers[0]} (متوفر {emptyNumbers.length})</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleSelectSequentialId}
+                      className="text-[11px] text-primary hover:underline cursor-pointer flex items-center gap-1 font-medium mt-1 transition-colors"
+                    >
+                      <RotateCcw className="h-3 w-3 shrink-0" />
+                      <span>التبديل للتسلسلي الجديد: #{nextSequentialId}</span>
+                    </button>
+                  )
+                ) : null}
               </div>
-              <div>
+
+              <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">اسم اللوحة (تلقائي)</Label>
                 <Input 
                   value={addForm.Billboard_Name || ''} 
-                  disabled 
-                  className="bg-muted/50 cursor-not-allowed text-sm font-mono text-muted-foreground h-9"
+                  onChange={(e) => setAddForm((p: any) => ({ ...p, Billboard_Name: e.target.value }))}
+                  className="bg-muted/50 text-sm font-mono text-foreground h-9"
                   placeholder="تلقائي" 
                 />
               </div>

@@ -26,6 +26,7 @@ import {
 import { Installment, generatePaymentsClauseText } from '@/utils/paymentGrouping';
 import { numberToArabicWords } from '@/lib/printUtils';
 import { preparePrintWindow, writePrintWindow, openPrintDirectly } from '@/utils/printWindowHelper';
+import { getBillboardDimensions } from '@/lib/billboardDimensions';
 
 interface ContractPDFDialogProps {
   open: boolean;
@@ -1525,15 +1526,11 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
       // ✅ STEP 2: Calculate PRINT COST based on faces and billboard size
       let printCostForBillboard = 0;
       if (printCostEnabled && printPricePerMeter > 0) {
-        // Extract dimensions from size (e.g., "12×4" -> 12 * 4 = 48 square meters)
-        const sizeMatch = size.match(/(\d+)×(\d+)/);
-        if (sizeMatch) {
-          const width = Number(sizeMatch[1]);
-          const height = Number(sizeMatch[2]);
-          const areaPerFace = width * height;
-          // ✅ CRITICAL: Print cost = area per face × number of faces × price per meter
+        const dims = getBillboardDimensions(billboard);
+        if (dims.area > 0) {
+          const areaPerFace = dims.area;
           printCostForBillboard = areaPerFace * faces * printPricePerMeter;
-          console.log(`✅ Billboard ${id}: ${width}×${height} = ${areaPerFace}m² × ${faces} faces × ${printPricePerMeter}/m² = ${printCostForBillboard} print cost`);
+          console.log(`✅ Billboard ${id}: ${dims.width}×${dims.height} = ${areaPerFace}m² × ${faces} faces × ${printPricePerMeter}/m² = ${printCostForBillboard} print cost`);
         }
       }
 

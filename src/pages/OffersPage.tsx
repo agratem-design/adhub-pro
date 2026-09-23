@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import type { Billboard } from '@/types';
+import { getBillboardDimensions } from '@/lib/billboardDimensions';
 import { useContractPricing } from '@/hooks/useContractPricing';
 import { BillboardImage } from '@/components/BillboardImage';
 import SelectableGoogleHomeMap from '@/components/Map/SelectableGoogleHomeMap';
@@ -418,10 +419,10 @@ export default function OffersPage() {
     
     selectedBillboards.forEach((b: any) => {
       const size = String(b.Size || '');
-      const match = size.match(/(\d+(?:\.\d+)?)\s*[xX×]\s*(\d+(?:\.\d+)?)/);
-      if (match) {
-        const width = parseFloat(match[1]);
-        const height = parseFloat(match[2]);
+      const dims = getBillboardDimensions(b);
+      if (dims.area > 0) {
+        const width = dims.width;
+        const height = dims.height;
         const faces = Number(b.Faces_Count) || 2;
         const area = width * height * faces;
         const cost = Math.round(area * printPricePerMeter);

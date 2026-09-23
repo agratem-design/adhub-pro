@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/sonner';
-import { Plus, Eye, Edit, Trash2, Calendar, User, DollarSign, Search, Filter, Building, AlertCircle, Clock, CheckCircle, Printer, RefreshCcw, Hammer, Wrench, Percent, PaintBucket, FileText, Send, FileSpreadsheet, LayoutGrid, List, SlidersHorizontal, Hash, SplitSquareVertical, Download, X, Loader2, CheckSquare, Square, Ruler, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Shield, ShieldCheck } from 'lucide-react';
+import { Plus, Eye, Edit, Trash2, Calendar, User, DollarSign, Search, Filter, Building, AlertCircle, Clock, CheckCircle, Printer, RefreshCcw, Hammer, Wrench, Percent, PaintBucket, FileText, Send, FileSpreadsheet, LayoutGrid, List, SlidersHorizontal, Hash, SplitSquareVertical, Download, X, Loader2, CheckSquare, Square, Ruler, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, Shield, ShieldCheck, Lock } from 'lucide-react';
 import { SendContractDialog } from '@/components/contracts/SendContractDialog';
 import { AddPaymentDialog } from '@/components/contracts/AddPaymentDialog';
 import { BillboardBulkPrintDialog } from '@/components/billboards/BillboardBulkPrintDialog';
@@ -306,14 +306,22 @@ export default function Contracts() {
   };
 
   const handleDeleteContract = async (contractId: string) => {
-    if (await systemConfirm({ title: 'تأكيد حذف العقد', message: 'هل أنت متأكد من حذف هذا العقد؟', variant: 'destructive', confirmText: 'حذف' })) {
+    const targetContract = contracts.find(c => String(c.id) === String(contractId) || String(c.Contract_Number) === String(contractId));
+    const paidAmount = Number(targetContract?.actual_paid ?? (targetContract as any)?.['Total Paid'] ?? 0);
+
+    if (paidAmount > 0) {
+      toast.warning(`لا يمكن حذف العقد #${contractId} نظراً لوجود دفعة مسددة مرتبطة به بقيمة ${paidAmount.toLocaleString()} د.ل. يرجى تسوية أو إلغاء الدفعات أولاً.`);
+      return;
+    }
+
+    if (await systemConfirm({ title: 'تأكيد حذف العقد', message: 'هل أنت متأكد من حذف هذا العقد؟ سيتم تحرير كافة اللوحات المحجوزة فيه.', variant: 'destructive', confirmText: 'حذف' })) {
       try {
         await deleteContract(contractId);
         toast.success('تم حذف العقد بنجاح');
         loadData();
-      } catch (error) {
+      } catch (error: any) {
         console.error('خطأ في حذف العقد:', error);
-        toast.error('فشل في حذف العقد');
+        toast.error(error?.message || 'فشل في حذف العقد');
       }
     }
   };
@@ -2357,16 +2365,31 @@ export default function Contracts() {
                               >
                                 <Edit className="h-4 w-4" />
                               </Button>
-                              {canCreateOrDelete && (
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => handleDeleteContract(String(contract.id))}
-                                className="h-8 w-8 p-0"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                              )}
+                              {canCreateOrDelete && (() => {
+                                const rowPaid = Number(contract.actual_paid ?? (contract as any)['Total Paid'] ?? 0);
+                                const hasRowPaid = rowPaid > 0;
+                                return hasRowPaid ? (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => toast.warning(`لا يمكن حذف العقد #${contract.Contract_Number ?? contract.id} نظراً لوجود دفعة مسددة مرتبطة به بقيمة ${rowPaid.toLocaleString()} د.ل. يجب تسوية أو إلغاء الدفعات أولاً.`)}
+                                    className="h-8 w-8 p-0 text-amber-500 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                                    title={`محمي من الحذف: يوجد سداد بقيمة ${rowPaid.toLocaleString()} د.ل`}
+                                  >
+                                    <Lock className="h-4 w-4" />
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={() => handleDeleteContract(String(contract.id))}
+                                    className="h-8 w-8 p-0"
+                                    title="حذف العقد"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                );
+                              })()}
                             </>
                           )}
                           <Button

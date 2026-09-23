@@ -1,0 +1,22 @@
+# Cover 3 visual references
+
+Generated with the built-in ImageGen tool. These are design references, not production campaign photographs.
+
+## First reference — rejected by user
+
+File: cover-3-glass-reference.png
+
+Prompt:
+
+Use case: ads-marketing. Create one exceptional polished Arabic advertising portfolio COVER, flat front-facing finished artwork, portrait 3:4 ratio, not a photograph of printed paper and no interface. Reference image is a BAD BEFORE design: keep its underlying glass-shard and central glass-lens idea, but redesign to editorial luxury quality. Dark charcoal near black background, restrained champagne gold #d6ac40, natural blue sky in a premium architectural storefront advertising photograph. Composition: top 18% clean dark breathing room with centered Arabic brand “الفارس الذهبي”, very small subtitle “للدعاية والإعلان”. Middle and lower area (y 24%-85%) a SINGLE coherent panoramic photo of elegant gray commercial facade and illuminated storefront signage, seen through a few large angular glass panes with thin 2-4px gaps. Keep facade readable and continuous: no jumble, no eight tiny photo cards, no skewed lettering. Main panes are balanced left and right, with three smaller edge fragments framing the outside only. Central circular smoked GLASS LENS at x50% y49%, diameter about 48% of page width. Realistic translucent glass with pale silver bevel on upper left, very subtle gold rim lower right, softly frosted optical center, no opaque black disk, no glowing neon orbit, no sparkles. Photo gently visible underneath lens but text perfectly readable. In lens exact centered Arabic typography: small gold “حملة إعلانية لـ”, large elegant bold white on two lines “بيت” and “الجمال”, below small white “إعلانك بارز مع الفارس”. No yellow pill. Typography modern Tajawal-like, balanced not overly heavy. Bottom 10% clean dark margin with tiny thin gold divider centered. Carefully art-directed, quiet, photorealistic glass material, precise layout reproducible in CSS/SVG. No additional text, no watermark, no decorative frame. Render beautiful final cover only.
+
+## Second reference — implemented as Template 9
+
+File: cover-3-editorial-reference-v2.png
+
+Prompt:
+
+Design an exceptionally refined contemporary Arabic creative-agency portfolio cover, portrait 3:4, finished flat artwork only. Art direction: premium architectural monograph, Swiss editorial restraint adapted to beautiful Arabic typography, luxury print design. NOT a gaming poster, not a sci-fi cover, not a collage template. Background warm ivory #eeeae2. Black typography, tiny restrained muted brass accents. Large generous margins. Upper third is calm editorial typography: small agency name “الفارس الذهبي” aligned upper right with tiny “للدعاية والإعلان” beneath. Then striking spacious dark Arabic title “بيت الجمال”, underneath small “حملة إعلانية”. Lower two thirds: one exquisite large architectural photograph of a sophisticated beauty retail facade at blue hour, travertine and dark metal, warm interior, subtle shop signage, real professional architectural photography. Photo is nearly rectangular and stays fully legible, offset with asymmetrical ivory margins. Preserve a hint of the glass-shard original concept using ONLY three large clear sculptural glass planes partially over the image edges, subtle beveled reflections, near invisible glass, clean diagonal seams. One very subtle transparent circular optical lens sits off-center lower right over the architecture, contains NO text, diameter only 20% cover width, almost invisible except finely lit edge. NO central dark circle. NO fragmented photo jumble. Bottom margin small understated text “إعلانك بارز مع الفارس” aligned right, hairline brass rule left. Typography is exact Arabic, crisp modern Arabic editorial sans, elegant strong title not bubbly bold. Distinct hierarchy, purposeful whitespace, impeccable proportions. Photorealistic optics, matte paper feel, restrained, confident, world-class art direction. No frame, no mockup, no hands, no UI, no gold pill, no glow, no floating tiny cards, no decorative stars. The overall cover must look curated by an experienced human designer for a high-end architectural advertising studio.
+
+
+Implementation: src/components/design-studio/LightEditorialCover.tsx. Uses live editable text and the selected campaign photograph; the reference bitmap is not embedded in exported covers.

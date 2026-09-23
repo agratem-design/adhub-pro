@@ -772,14 +772,14 @@ export function SendAlertsDialog({ open, onOpenChange, contracts }: SendAlertsDi
                   اضغط على زر واتساب بجانب كل عقد لفتح محادثة مباشرة مع رسالة جاهزة. يمكنك تعديل الرسالة قبل الإرسال.
                 </p>
 
-                {filteredContracts.filter(c => getContractPhone(c)).length === 0 ? (
+                {filteredContracts.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground">
                     {contractViewTab === 'expiring' ? 'لا توجد عقود قاربت على الانتهاء' : 'لا توجد عقود منتهية'}
                   </div>
                 ) : (
                   <ScrollArea className="h-[420px]">
                     <div className="space-y-3 pl-1">
-                      {filteredContracts.filter(c => getContractPhone(c)).map(contract => {
+                      {filteredContracts.map(contract => {
                         const status = getContractStatusInfo(contract);
                         return (
                           <ManualContractRow

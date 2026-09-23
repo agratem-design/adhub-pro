@@ -13,6 +13,7 @@ import { checkLinkedTasks, removeBillboardFromAllTasks, addBillboardToExistingTa
 import { calculateInstallationCostFromIds } from '@/services/installationService';
 import { getPriceFor, getDailyPriceFor, CustomerType } from '@/data/pricing';
 import { ContractPDFDialog } from '@/components/Contract';
+import { getBillboardDimensions } from '@/lib/billboardDimensions';
 import type { Billboard } from '@/types';
 import { Button } from '@/components/ui/button';
 import { RefreshCw, DollarSign, Settings, Wrench, FileText, List, Map as MapIcon, Trash2, Calculator, PauseCircle, AlertTriangle } from 'lucide-react';
@@ -634,7 +635,7 @@ export default function ContractEdit() {
 
   // ✅ NEW: Size names mapping (size_id -> name)
   const [sizeNames, setSizeNames] = useState(() => new Map<number, string>());
-  const [sizeDimensions, setSizeDimensions] = useState(() => new Map<number, { width: number; height: number }>());
+  const [sizeDimensions, setSizeDimensions] = useState(() => new Map<string | number, { width: number; height: number }>());
 
   // Load pricing data and size names
   useEffect(() => {
@@ -657,7 +658,18 @@ export default function ContractEdit() {
         if (!sizesRes.error && Array.isArray(sizesRes.data)) {
           const sizeMap = new Map(sizesRes.data.map((s: any) => [s.id, s.name]));
           setSizeNames(sizeMap);
-          const dimMap = new Map(sizesRes.data.map((s: any) => [s.id, { width: Number(s.width) || 0, height: Number(s.height) || 0 }]));
+          const dimMap = new Map<string | number, { width: number; height: number }>();
+          sizesRes.data.forEach((s: any) => {
+            const w = Number(s.width) || 0;
+            const h = Number(s.height) || 0;
+            if (w > 0 && h > 0) {
+              dimMap.set(s.id, { width: w, height: h });
+              dimMap.set(Number(s.id), { width: w, height: h });
+              dimMap.set(String(s.id), { width: w, height: h });
+              dimMap.set(s.name, { width: w, height: h });
+              dimMap.set(String(s.name).toLowerCase(), { width: w, height: h });
+            }
+          });
           setSizeDimensions(dimMap);
         } else {
           console.error('❌ Failed to load size names:', sizesRes.error);
@@ -1319,30 +1331,10 @@ export default function ContractEdit() {
   // ✅ UPDATED: Calculate print cost only if enabled and consider faces count
   const calculatePrintCost = (billboard: Billboard): number => {
     if (!printCostEnabled || !printPricePerMeter || printPricePerMeter <= 0) return 0;
-    
-    const size = (billboard.size || (billboard as any).Size || '') as string;
+    const dims = getBillboardDimensions(billboard, sizeDimensions);
+    if (dims.area <= 0) return 0;
     const faces = Number((billboard as any).faces || (billboard as any).Faces || (billboard as any).faces_count || (billboard as any).Faces_Count || 1);
-    const sizeId = Number((billboard as any).size_id);
-    
-    // ✅ Use actual dimensions from sizes table
-    let width = 0, height = 0;
-    if (sizeId && sizeDimensions.has(sizeId)) {
-      const dims = sizeDimensions.get(sizeId)!;
-      width = dims.width;
-      height = dims.height;
-    } else {
-      const sizeMatch = size.match(/(\d+(?:[.,]\d+)?)\s*[xX×\-]\s*(\d+(?:[.,]\d+)?)/);
-      if (!sizeMatch) return 0;
-      width = parseFloat(sizeMatch[1].replace(',', '.'));
-      height = parseFloat(sizeMatch[2].replace(',', '.'));
-    }
-    
-    if (width <= 0 || height <= 0) return 0;
-    // تقريب الأبعاد لأقرب عدد صحيح (الإجراء الهندسي الصحيح)
-
-    const area = width * height;
-    
-    return area * faces * printPricePerMeter;
+    return dims.area * faces * printPricePerMeter;
   };
 
   // ✅ NEW: Calculate price using factors system
@@ -1589,29 +1581,10 @@ export default function ContractEdit() {
     const groupedDetails = selectedBillboards.reduce((groups: any, billboard) => {
       const size = (billboard.size || (billboard as any).Size || '') as string;
       const faces = Number((billboard as any).faces || (billboard as any).Faces || (billboard as any).faces_count || (billboard as any).Faces_Count || 1);
-      const sizeId = Number((billboard as any).size_id);
-      
-      // ✅ Use actual dimensions from sizes table instead of parsing size name
-      let width = 0, height = 0;
-      if (sizeId && sizeDimensions.has(sizeId)) {
-        const dims = sizeDimensions.get(sizeId)!;
-        width = dims.width;
-        height = dims.height;
-      } else {
-        // Fallback: parse from size name
-        const sizeMatch = size.match(/(\d+(?:[.,]\d+)?)\s*[xX×\-]\s*(\d+(?:[.,]\d+)?)/);
-        if (!sizeMatch) return groups;
-        width = parseFloat(sizeMatch[1].replace(',', '.'));
-        height = parseFloat(sizeMatch[2].replace(',', '.'));
-      }
-      
-      // تقريب الأبعاد لأقرب عدد صحيح (الإجراء الهندسي الصحيح)
-      width = Math.round(width);
-      height = Math.round(height);
-      
-      if (width <= 0 || height <= 0) return groups;
-      const area = width * height;
-      
+      const dims = getBillboardDimensions(billboard, sizeDimensions);
+      if (dims.area <= 0) return groups;
+
+      const area = dims.area; // single face area
       const key = `${size}_${faces}faces`;
       
       if (!groups[key]) {
@@ -1715,24 +1688,10 @@ export default function ContractEdit() {
   // Helper: compute print cost for a single billboard (matches selected-billboards logic)
   const computePrintForBillboard = React.useCallback((billboard: any): number => {
     if (!billboard) return 0;
-    const sizeId = Number(billboard.size_id);
-    const size = (billboard.Size || billboard.size || '') as string;
-    let width = 0, height = 0;
-    if (sizeId && sizeDimensions.has(sizeId)) {
-      const dims = sizeDimensions.get(sizeId)!;
-      width = dims.width;
-      height = dims.height;
-    } else {
-      const m = size.match(/(\d+(?:[.,]\d+)?)\s*[xX×\-]\s*(\d+(?:[.,]\d+)?)/);
-      if (m) {
-        width = parseFloat(m[1].replace(',', '.'));
-        height = parseFloat(m[2].replace(',', '.'));
-      }
-    }
-
-    const area = width * height;
-    const faces = Number(billboard.Faces_Count || billboard.faces_count || 1);
-    return applyExchangeRate(area * faces * printPricePerMeter);
+    const dims = getBillboardDimensions(billboard, sizeDimensions);
+    if (dims.area <= 0) return 0;
+    const faces = Number(billboard.Faces_Count || billboard.faces_count || billboard.faces || 1);
+    return applyExchangeRate(dims.area * faces * printPricePerMeter);
   }, [sizeDimensions, printPricePerMeter, exchangeRate]);
 
   // Paused installation details (separate from selected to avoid double-counting in summaries)

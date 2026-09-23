@@ -54,6 +54,17 @@ interface ContractGroup {
   billboards: any[];
 }
 
+function normalizeArabic(str: string | null | undefined): string {
+  if (!str) return '';
+  return str
+    .trim()
+    .toLowerCase()
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/ة/g, 'ه')
+    .replace(/\s+/g, ' ');
+}
+
 export function ManualRemovalTaskDialog({ 
   open, 
   onOpenChange, 
@@ -90,31 +101,61 @@ export function ManualRemovalTaskDialog({
     queryKey: ['expired-billboards-for-manual-removal', open],
     enabled: open,
     queryFn: async () => {
-      // جلب جميع اللوحات المرتبطة بعقود
-      const { data: billboards, error } = await supabase
-        .from('billboards')
-        .select('*')
-        .not('Contract_Number', 'is', null)
-        .order('Rent_End_Date', { ascending: false, nullsFirst: false });
-      
-      if (error) throw error;
-      
-      // جلب جميع العقود للتأكد من حالة الإتاحة المركزية (نفس منطق تصدير المتاح)
+      // جلب جميع العقود للتأكد من حالة الإتاحة المركزية وربط بيانات الزبون ونوع الإعلان
       const { data: allContracts } = await supabase
         .from('Contract')
         .select('*')
         .order('Contract_Number', { ascending: false });
+
+      // خريطة العقود بالرقم وخريطة اللوحات المرتبطة عبر billboard_ids
+      const contractMap = new Map<number, any>();
+      const billboardToContractMap = new Map<number, any>();
+
+      (allContracts || []).forEach((c: any) => {
+        const cNum = Number(c.Contract_Number);
+        if (cNum) {
+          contractMap.set(cNum, c);
+          if (c.billboard_ids) {
+            const ids = String(c.billboard_ids)
+              .split(',')
+              .map((id: string) => parseInt(id.trim()))
+              .filter(Boolean);
+            ids.forEach((id: number) => {
+              if (!billboardToContractMap.has(id)) {
+                billboardToContractMap.set(id, c);
+              }
+            });
+          }
+        }
+      });
+
+      // جلب اللوحات
+      const { data: billboards, error } = await supabase
+        .from('billboards')
+        .select('*')
+        .order('Rent_End_Date', { ascending: false, nullsFirst: false });
       
-      // فلترة اللوحات الموجودة بالفعل في مهام إزالة مع تطبيق منطق تصدير المتاح الموحد
-      return (billboards || []).filter(b => 
-        !existingTaskBillboardIds.has(b.ID)
-      ).map(b => {
+      if (error) throw error;
+      
+      // فلترة اللوحات المرتبطة بعقود (سواء في حقل اللوحة أو في مصفوفة العقد) واستبعاد ما له مهام إزالة معلقة
+      return (billboards || []).filter(b => {
+        const hasContract = (b.Contract_Number != null && b.Contract_Number !== '') || billboardToContractMap.has(b.ID);
+        return hasContract && !existingTaskBillboardIds.has(b.ID);
+      }).map(b => {
+        const contract = (b.Contract_Number ? contractMap.get(Number(b.Contract_Number)) : null) || billboardToContractMap.get(b.ID);
+        const resolvedContractNum = b.Contract_Number || contract?.Contract_Number || null;
+        const resolvedCustomer = contract?.['Customer Name'] || b.Customer_Name || '';
+        const resolvedAd = contract?.['Ad Type'] || b.Ad_Type || '';
+
         const isAvailable = checkIsAvailableForAvailableExports(b, allContracts || []);
         const res = resolveBillboardAvailability(b, allContracts || []);
         const isVisibleInAvailable = res.classification === 'EXPLICIT_CONTRACT_SHOW' || res.classification === 'EXPLICIT_BILLBOARD_SHOW' || res.isMarketingVisible;
         
         return {
           ...b,
+          Contract_Number: resolvedContractNum,
+          resolvedCustomerName: resolvedCustomer,
+          resolvedAdType: resolvedAd,
           isAvailable,
           isVisibleInAvailable,
           isRentedInActiveContract: res.operationalStatus === 'RENTED' && !isAvailable
@@ -161,16 +202,28 @@ export function ManualRemovalTaskDialog({
     }
 
     if (searchTerm.trim()) {
-      const search = searchTerm.toLowerCase();
-      result = result.filter(b => 
-        String(b.ID).includes(search) ||
-        String(b.Contract_Number).includes(search) ||
-        b.Billboard_Name?.toLowerCase().includes(search) ||
-        b.Municipality?.toLowerCase().includes(search) ||
-        b.District?.toLowerCase().includes(search) ||
-        b.Customer_Name?.toLowerCase().includes(search) ||
-        b.Nearest_Landmark?.toLowerCase().includes(search)
-      );
+      const search = normalizeArabic(searchTerm);
+      result = result.filter(b => {
+        const idStr = String(b.ID || '');
+        const cNumStr = String(b.Contract_Number || '');
+        const bName = normalizeArabic(b.Billboard_Name);
+        const muni = normalizeArabic(b.Municipality);
+        const dist = normalizeArabic(b.District);
+        const cust = normalizeArabic(b.resolvedCustomerName || b.Customer_Name);
+        const adType = normalizeArabic(b.resolvedAdType || b.Ad_Type);
+        const landmark = normalizeArabic(b.Nearest_Landmark);
+
+        return (
+          idStr.includes(search) ||
+          cNumStr.includes(search) ||
+          bName.includes(search) ||
+          muni.includes(search) ||
+          dist.includes(search) ||
+          cust.includes(search) ||
+          adType.includes(search) ||
+          landmark.includes(search)
+        );
+      });
     }
     
     if (filterCity !== 'all') {
@@ -201,8 +254,8 @@ export function ManualRemovalTaskDialog({
       if (!groups.has(key)) {
         groups.set(key, {
           contractNumber: contractNum,
-          customerName: billboard.Customer_Name || 'غير محدد',
-          adType: billboard.Ad_Type || 'غير محدد',
+          customerName: billboard.resolvedCustomerName || billboard.Customer_Name || 'غير محدد',
+          adType: billboard.resolvedAdType || billboard.Ad_Type || 'غير محدد',
           designUrl: billboard.design_face_a || billboard.design_face_b || null,
           isVisibleInAvailable: billboard.isVisibleInAvailable,
           billboards: []
@@ -510,7 +563,7 @@ export function ManualRemovalTaskDialog({
                   <div className="relative flex-1">
                     <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      placeholder="بحث بالرقم، العقد، الاسم، الموقع، النقطة الدالة..."
+                      placeholder="بحث برقم العقد، نوع الإعلان (مثل صابون Oxi)، الزبون، اللوحة، الموقع..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="pr-10 h-10"

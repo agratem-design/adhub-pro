@@ -134,3 +134,126 @@ export function alphaToHex(a: number): string {
   const v = Math.max(0, Math.min(1, a));
   return Math.round(v * 255).toString(16).padStart(2, '0');
 }
+
+// ─── Smart Role-Based Color Pickers ────────────────────────────────────────
+
+/**
+ * Mix a hex color toward white or black by `t` (0 = original, 1 = full target).
+ */
+function blendHex(hex: string, target: '#ffffff' | '#000000', t: number): string {
+  const m = hex.replace('#', '');
+  const tr = target === '#ffffff' ? 255 : 0;
+  const r = Math.round(parseInt(m.substring(0, 2), 16) * (1 - t) + tr * t);
+  const g = Math.round(parseInt(m.substring(2, 4), 16) * (1 - t) + tr * t);
+  const b = Math.round(parseInt(m.substring(4, 6), 16) * (1 - t) + tr * t);
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+/**
+ * Pick the best color for the MAIN TITLE (campaign name).
+ * Prefers light/bright colors for readability on dark templates.
+ * Falls back to near-white if palette is all dark.
+ */
+export function pickTitleColor(palette: string[]): string {
+  if (!palette.length) return '#ffffff';
+  // Sort by luminance descending — brightest first
+  const sorted = [...palette].sort((a, b) => hexLuminance(b) - hexLuminance(a));
+  // Prefer colors with luminance > 0.6 (light enough to read)
+  const bright = sorted.find(c => hexLuminance(c) > 0.6);
+  if (bright) return bright;
+  // If none bright enough, lighten the brightest one
+  return blendHex(sorted[0], '#ffffff', 0.5);
+}
+
+/**
+ * Pick the best color for the KICKER (small top label / "حملة إعلانية لـ").
+ * Prefers vivid, mid-luminance colors — should feel energetic but not garish.
+ */
+export function pickKickerColor(palette: string[], accent: string): string {
+  if (!palette.length) return accent;
+  const candidates = [...palette].sort((a, b) => {
+    const aScore = hexSaturation(a) * 1.5 + (hexLuminance(a) > 0.35 && hexLuminance(a) < 0.78 ? 1 : 0);
+    const bScore = hexSaturation(b) * 1.5 + (hexLuminance(b) > 0.35 && hexLuminance(b) < 0.78 ? 1 : 0);
+    return bScore - aScore;
+  });
+  // Prefer a color that's different from title (avoid clashing)
+  const vivid = candidates.find(c => hexSaturation(c) > 0.3 && hexLuminance(c) > 0.3);
+  return vivid || accent;
+}
+
+/**
+ * Pick the best color for the TAGLINE pill / badge background.
+ * Should be the warmest, most saturated color — calls-to-action feel.
+ */
+export function pickTaglineColor(palette: string[], accent: string): string {
+  if (!palette.length) return accent;
+  const sorted = [...palette].sort((a, b) => {
+    const aLum = hexLuminance(a);
+    const bLum = hexLuminance(b);
+    // Favor warm hues and high saturation in a safe mid-luminance range
+    const aScore = hexSaturation(a) * 2.5 + (aLum > 0.25 && aLum < 0.72 ? 0.8 : 0);
+    const bScore = hexSaturation(b) * 2.5 + (bLum > 0.25 && bLum < 0.72 ? 0.8 : 0);
+    return bScore - aScore;
+  });
+  return sorted[0] || accent;
+}
+
+/**
+ * Pick the best color for the BRAND NAME label at the top.
+ * Should be readable and authoritative — prefer mid-bright with good saturation.
+ */
+export function pickBrandNameColor(palette: string[], accent: string): string {
+  if (!palette.length) return accent;
+  // Similar to accent logic but biased toward golden / warm tones
+  const sorted = [...palette].sort((a, b) => {
+    const aLum = hexLuminance(a);
+    const bLum = hexLuminance(b);
+    const aScore = hexSaturation(a) * 1.8 + (aLum > 0.4 && aLum < 0.85 ? 1.2 : 0);
+    const bScore = hexSaturation(b) * 1.8 + (bLum > 0.4 && bLum < 0.85 ? 1.2 : 0);
+    return bScore - aScore;
+  });
+  return sorted[0] || accent;
+}
+
+/**
+ * Build a complete role-mapped color assignment from a palette.
+ * Returns all the element-level color decisions in one call.
+ */
+export function buildCoverColorRoles(palette: string[]): {
+  accent: string;
+  secondary: string;
+  glow: string;
+  kicker: string;
+  campaignName: string;
+  tagline: string;
+  badge: string;
+  footerRight: string;
+  brandName: string;
+} {
+  if (!palette.length) {
+    const fallback = '#d6ac40';
+    return { accent: fallback, secondary: '#ffffff', glow: '#000000', kicker: fallback, campaignName: '#ffffff', tagline: fallback, badge: fallback, footerRight: fallback, brandName: fallback };
+  }
+
+  const accent = pickAccentColor(palette) || palette[0];
+  const glow = pickGlowColor(palette) || '#000000';
+  const title = pickTitleColor(palette);
+  const kicker = pickKickerColor(palette, accent);
+  const tagline = pickTaglineColor(palette, accent);
+  const brand = pickBrandNameColor(palette, accent);
+  // Footer right: slightly lighter than accent if possible
+  const secondary = pickSecondaryColor(palette, accent) || '#ffffff';
+  const footerRight = pickKickerColor(palette, secondary);
+
+  return {
+    accent,
+    secondary,
+    glow,
+    kicker,
+    campaignName: title,
+    tagline,
+    badge: secondary,
+    footerRight,
+    brandName: brand,
+  };
+}

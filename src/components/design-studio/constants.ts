@@ -17,7 +17,7 @@ import {
   Gift,
   Award,
 } from 'lucide-react';
-import { CanvasElement } from './types';
+import { CanvasElement, LocationStripStyle } from './types';
 
 // ====================== ICONS MAPPER ======================
 export const iconMap: Record<string, React.ComponentType<any>> = {
@@ -100,9 +100,17 @@ export const DEFAULT_GLASS_PANEL = {
   borderColor: '#ffffff20',
   backgroundColor: '#1a1a2e',
   shadow: false,
+  bgMode: 'color' as 'color' | 'image',
+  bgImageUrl: '',
+  bgObjectFit: 'fill' as 'fill' | 'cover' | 'contain',
+  bgFlipY: false,
+  bgScale: 1,
+  bgOffsetY: 0,
+  showDividers: false,
+  dividerColor: 'rgba(0, 0, 0, 0.15)',
 };
 
-export const DEFAULT_LOCATION_STRIP = {
+export const DEFAULT_LOCATION_STRIP: LocationStripStyle = {
   visible: true,
   height: 120,
   backgroundColor: '#c9a84c',
@@ -113,6 +121,17 @@ export const DEFAULT_LOCATION_STRIP = {
   borderWidth: 0,
   borderColor: '#ffffff20',
   borderRadius: 0,
+  bgMode: 'color',
+  bgImageUrl: '',
+  bgObjectFit: 'fill',
+  showPinIcon: true,
+  textColorTheme: 'default',
+  x: 0,
+  offsetY: 0,
+  width: 0,
+  bgFlipY: false,
+  bgScale: 1,
+  bgOffsetY: 0,
 };
 
 export const DEFAULT_TEXT_ELEMENTS: CanvasElement[] = [

@@ -1,6 +1,7 @@
 import type { Billboard, Contract } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 import { calculateInstallationCostFromIds, formatInstallationDataForContract } from './installationService';
+import { getBillboardDimensions } from '@/lib/billboardDimensions';
 
 interface ContractData {
   customer_name: string;
@@ -168,24 +169,10 @@ export async function createContract(contractData: ContractData) {
         // ✅ NEW: حساب تكلفة الطباعة إذا كانت مفعلة
         if (print_cost_enabled && print_price_per_meter && print_price_per_meter > 0) {
           printCost = billboardsInfo.reduce((sum: number, b: any) => {
-            const size = b.size || b.Size || '';
+            const dims = getBillboardDimensions(b);
+            if (dims.area <= 0) return sum;
             const faces = Number(b.faces || b.Faces || b.faces_count || b.Faces_Count || 1);
-
-            // Parse billboard area from size (e.g., "4x3" -> 12 square meters)
-            // ✅ Also check size_id dimensions from the billboard data
-            let width = 0, height = 0;
-            if (b.actual_width && b.actual_height) {
-              width = Number(b.actual_width);
-              height = Number(b.actual_height);
-            } else {
-              const sizeMatch = size.match(/(\d+(?:[.,]\d+)?)\s*[xX×\-]\s*(\d+(?:[.,]\d+)?)/);
-              if (!sizeMatch) return sum;
-              width = parseFloat(sizeMatch[1].replace(',', '.'));
-              height = parseFloat(sizeMatch[2].replace(',', '.'));
-            }
-            const area = width * height;
-
-            return sum + (area * faces * print_price_per_meter);
+            return sum + (dims.area * faces * print_price_per_meter);
           }, 0);
         }
 
@@ -978,22 +965,10 @@ export async function updateContract(contractId: string, updates: any) {
 
         if (billboardsInfo) {
           printCost = billboardsInfo.reduce((sum: number, b: any) => {
-            const size = b.size || b.Size || '';
+            const dims = getBillboardDimensions(b);
+            if (dims.area <= 0) return sum;
             const faces = Number(b.faces || b.Faces || b.faces_count || b.Faces_Count || 1);
-
-            let width = 0, height = 0;
-            if (b.actual_width && b.actual_height) {
-              width = Number(b.actual_width);
-              height = Number(b.actual_height);
-            } else {
-              const sizeMatch = size.match(/(\d+(?:[.,]\d+)?)\s*[xX×\-]\s*(\d+(?:[.,]\d+)?)/);
-              if (!sizeMatch) return sum;
-              width = parseFloat(sizeMatch[1].replace(',', '.'));
-              height = parseFloat(sizeMatch[2].replace(',', '.'));
-            }
-            const area = width * height;
-
-            return sum + (area * faces * printPricePerMeter);
+            return sum + (dims.area * faces * printPricePerMeter);
           }, 0);
         }
       }
@@ -1383,36 +1358,88 @@ export async function deleteContract(contractNumber: string) {
     throw new Error('رقم العقد غير صالح');
   }
 
+  // فحص أمني استباقي: منع حذف العقد إذا وُجدت أي دفعات مسددة
+  const { data: existingPayments, error: payErr } = await supabase
+    .from('customer_payments')
+    .select('id, amount')
+    .eq('contract_number', numericContractNumber)
+    .gt('amount', 0);
+
+  if (!payErr && existingPayments && existingPayments.length > 0) {
+    const totalPaid = existingPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    throw new Error(`لا يمكن حذف العقد #${numericContractNumber} نظراً لوجود دفعات مسددة مرتبطة به بقيمة ${totalPaid.toLocaleString()} د.ل. يرجى تسوية أو إلغاء الدفعات أولاً.`);
+  }
+
   try {
     // 1. Primary path: PostgreSQL Atomic Deletion RPC (Single transaction)
     const { data: rpcRes, error: rpcErr } = await supabase.rpc('delete_contract_atomic', {
       p_contract_number: numericContractNumber,
+      p_expected_version: null,
     });
 
     if (rpcErr) {
+      if (rpcErr.message?.includes('CONTRACT_HAS_PAYMENTS') || rpcErr.message?.includes('دفعات مسددة')) {
+        throw new Error(rpcErr.message);
+      }
+
       console.warn('RPC delete_contract_atomic failed, falling back to sequential delete:', rpcErr);
 
-      // 1. حذف المدفوعات المرتبطة بالعقد
+      // 1. حذف حسابات فرق التركيب المرتبطة بالعقد
+      await supabase
+        .from('installation_team_accounts')
+        .delete()
+        .eq('contract_id', numericContractNumber);
+
+      // 2. حذف المدفوعات ومصروفات وحصص الشراكة المرتبطة بالعقد
       await supabase
         .from('customer_payments')
         .delete()
         .eq('contract_number', numericContractNumber);
 
-      // 2. حذف إيجارات الشركات الصديقة المرتبطة بالعقد
+      await supabase
+        .from('contract_expenses')
+        .delete()
+        .eq('contract_number', numericContractNumber);
+
+      await supabase
+        .from('partnership_contract_shares')
+        .delete()
+        .eq('contract_id', numericContractNumber);
+
+      // 3. حذف إيجارات الشركات الصديقة والتمديدات وتاريخ اللوحات المرتبطة بالعقد
       await supabase
         .from('friend_billboard_rentals')
         .delete()
         .eq('contract_number', numericContractNumber);
 
-      // 3. حذف سجلات تاريخ اللوحات المرتبطة بالعقد
+      await supabase
+        .from('billboard_extensions')
+        .delete()
+        .eq('contract_number', numericContractNumber);
+
       await supabase
         .from('billboard_history')
         .delete()
         .eq('contract_number', numericContractNumber);
 
-      // 4. حذف المهام المركبة المرتبطة بالعقد
+      // 4. حذف المهام المرتبطة بالعقد (إزالة، مركبة، تركيب، طباعة)
+      await supabase
+        .from('removal_tasks')
+        .delete()
+        .eq('contract_id', numericContractNumber);
+
       await supabase
         .from('composite_tasks')
+        .delete()
+        .eq('contract_id', numericContractNumber);
+
+      await supabase
+        .from('installation_tasks')
+        .delete()
+        .eq('contract_id', numericContractNumber);
+
+      await supabase
+        .from('print_tasks')
         .delete()
         .eq('contract_id', numericContractNumber);
 

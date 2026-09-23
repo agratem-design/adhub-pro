@@ -98,7 +98,10 @@ export function SystemDialogProvider({ children }: { children: React.ReactNode }
     <SystemDialogContext.Provider value={{ confirm, alert: alertFn }}>
       {children}
       <AlertDialog open={open} onOpenChange={(v) => { if (!v) handleCancel(); }}>
-        <AlertDialogContent className="max-w-md" dir="rtl">
+        <AlertDialogContent
+          className="max-w-md"
+          dir="rtl"
+        >
           <AlertDialogHeader>
             <AlertDialogTitle className="text-right">{options.title}</AlertDialogTitle>
             <AlertDialogDescription className="text-right whitespace-pre-line">

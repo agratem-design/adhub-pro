@@ -95,7 +95,7 @@ export const useBillboardForm = (municipalities: any[]) => {
     setSelectedFile(null);
   };
 
-  // ✅ FIXED: Auto-generate billboard name when municipality changes
+  // ✅ FIXED: Auto-generate billboard name when municipality changes, preserving chosen ID
   useEffect(() => {
     const updateBillboardData = async () => {
       if (addForm.Municipality) {
@@ -103,12 +103,15 @@ export const useBillboardForm = (municipalities: any[]) => {
         
         setAddForm(prev => {
           const keepImage = prev.hasCustomImage || (prev.Image_URL && !prev.Image_URL.startsWith('/image/'));
+          const currentId = prev.ID || nextId;
+          const paddedId = String(currentId).padStart(4, '0');
+          const finalBillboardName = `${municipalityCode}${paddedId}`;
           return {
             ...prev,
-            ID: nextId,
-            Billboard_Name: billboardName,
-            image_name: keepImage ? prev.image_name : generateImageName(billboardName),
-            Image_URL: keepImage ? prev.Image_URL : `/image/${generateImageName(billboardName)}`
+            ID: currentId,
+            Billboard_Name: finalBillboardName,
+            image_name: keepImage ? prev.image_name : generateImageName(finalBillboardName),
+            Image_URL: keepImage ? prev.Image_URL : `/image/${generateImageName(finalBillboardName)}`
           };
         });
       }

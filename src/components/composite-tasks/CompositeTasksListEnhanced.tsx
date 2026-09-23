@@ -974,7 +974,15 @@ const TaskCardRow = ({
                   المزيد
                 </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-48 text-right font-tajawal rounded-xl border-border/40 shadow-xl" dir="rtl">
+              <DropdownMenuContent align="start" className="w-52 text-right font-tajawal rounded-xl border-border/40 shadow-xl" dir="rtl">
+                <DropdownMenuItem 
+                  onClick={() => window.open(`/design-studio?composite_task_id=${task.id}`, '_blank')} 
+                  className="gap-2 cursor-pointer text-xs font-bold text-amber-400 focus:text-amber-300 focus:bg-amber-500/10"
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                  <span>فتح في استوديو التصميم</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 {task.installation_task_id && (
                   <DropdownMenuItem onClick={() => onOpenInstallationTask(task)} className="gap-2 cursor-pointer text-xs font-bold">
                     <Wrench className="h-3.5 w-3.5 text-amber-400" />
@@ -1040,6 +1048,15 @@ const TaskCardRow = ({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => window.open(`/design-studio?composite_task_id=${task.id}`, '_blank')}
+              className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/15 px-3.5 text-xs font-black text-amber-300 transition-all duration-200 hover:bg-amber-500/25 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+              title="فتح المهمة في استوديو التصميم لجلب صور التركيب والتصاميم"
+            >
+              <Sparkles className="h-4 w-4 text-amber-400" />
+              <span>استوديو التصميم</span>
+            </button>
             {workflowActions.map(({ key, label, icon: Icon, onClick, primary }) => (
               <button
                 key={key}
@@ -1451,6 +1468,25 @@ const ContractGroupCard = ({
                   <TooltipContent side="top" className="text-xs">تعديل موحد للعملية الأحدث</TooltipContent>
                 </Tooltip>
               )}
+
+              {/* Design Studio Link for Contract */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.open(`/design-studio?contract_id=${group.contractId}`, '_blank');
+                    }}
+                    className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-amber-500/35 bg-amber-500/15 px-3 text-xs font-black text-amber-300 transition-all duration-200 hover:bg-amber-500/25 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                    aria-label="فتح في استوديو التصميم"
+                  >
+                    <Sparkles className="h-4 w-4 text-amber-400" />
+                    <span className="hidden xl:inline">استوديو التصميم</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-xs">فتح صور وتصاميم هذا العقد في استوديو التصميم</TooltipContent>
+              </Tooltip>
 
               {/* ZIP Download */}
               <Tooltip>

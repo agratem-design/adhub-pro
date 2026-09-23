@@ -21,6 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import type { Billboard } from '@/types';
 import { ArrowLeft, Save, Map as MapIcon, Wrench, FileText, List, DollarSign, Printer, Trash2, RefreshCw, Calculator, AlertTriangle } from 'lucide-react';
+import { getBillboardDimensions } from '@/lib/billboardDimensions';
 
 // Import modular components (shared with contract edit)
 import { SelectedBillboardsCard } from '@/components/contracts/edit/SelectedBillboardsCard';
@@ -133,6 +134,31 @@ export default function OfferEdit() {
   const [printCostEnabled, setPrintCostEnabled] = useState<boolean>(false);
   const [printPricePerMeter, setPrintPricePerMeter] = useState<number>(0);
   const [customPrintCosts, setCustomPrintCosts] = useState<Map<string, number>>(new Map());
+
+  const { data: dbSizesData = [] } = useQuery({
+    queryKey: ['offer-edit-sizes-sorting'],
+    queryFn: async () => {
+      const { data } = await supabase.from('sizes').select('id, name, width, height, sort_order').order('sort_order', { ascending: true });
+      return data || [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const sizeDimensionsMap = useMemo(() => {
+    const map = new Map<string | number, { width: number; height: number }>();
+    dbSizesData.forEach((s: any) => {
+      const w = Number(s.width) || 0;
+      const h = Number(s.height) || 0;
+      if (w > 0 && h > 0) {
+        map.set(s.id, { width: w, height: h });
+        map.set(Number(s.id), { width: w, height: h });
+        map.set(String(s.id), { width: w, height: h });
+        map.set(s.name, { width: w, height: h });
+        map.set(String(s.name).toLowerCase(), { width: w, height: h });
+      }
+    });
+    return map;
+  }, [dbSizesData]);
 
   // Include in price toggles
   const [includeInstallationInPrice, setIncludeInstallationInPrice] = useState<boolean>(true);
@@ -587,25 +613,36 @@ export default function OfferEdit() {
     const detailsMap = new Map();
     sel.forEach((b) => {
       const size = ((b as any).Size || (b as any).size || '') as string;
-      const faces = Number((b as any).Faces_Count || 1);
-      const sizeMatch = size.match(/(\d+(?:[.,]\d+)?)\s*[xX×\-]\s*(\d+(?:[.,]\d+)?)/);
-      if (!sizeMatch) return;
-      const width = parseFloat(sizeMatch[1]);
-      const height = parseFloat(sizeMatch[2]);
-      const areaPerBoard = width * height * faces;
+      const faces = Number((b as any).Faces_Count || (b as any).faces_count || (b as any).faces || 1);
+      const dims = getBillboardDimensions(b, sizeDimensionsMap);
+      if (dims.area <= 0) return;
+      const areaPerFace = dims.area;
+      const areaPerBoard = dims.area * faces;
       const customUnitCost = customPrintCosts.get(size);
       const unitCost = customUnitCost || (areaPerBoard * printPricePerMeter);
-      if (detailsMap.has(size)) {
-        const existing = detailsMap.get(size)!;
+      const key = `${size}_${faces}faces`;
+      if (detailsMap.has(key)) {
+        const existing = detailsMap.get(key)!;
+        existing.count += 1;
         existing.quantity += 1;
         existing.totalArea += areaPerBoard;
         existing.totalCost += unitCost;
       } else {
-        detailsMap.set(size, { size, quantity: 1, areaPerBoard, totalArea: areaPerBoard, unitCost, totalCost: unitCost });
+        detailsMap.set(key, {
+          size,
+          faces,
+          area: areaPerFace,
+          areaPerBoard,
+          count: 1,
+          quantity: 1,
+          totalArea: areaPerBoard,
+          unitCost,
+          totalCost: unitCost,
+        });
       }
     });
     return Array.from(detailsMap.values()).sort((a, b) => b.totalCost - a.totalCost);
-  }, [billboards, selected, printCostEnabled, printPricePerMeter, customPrintCosts]);
+  }, [billboards, selected, printCostEnabled, printPricePerMeter, customPrintCosts, sizeDimensionsMap]);
 
   const totalPrintCost = useMemo(() => printCostDetails.reduce((sum, d) => sum + d.totalCost, 0), [printCostDetails]);
 
@@ -615,17 +652,15 @@ export default function OfferEdit() {
     const sel = billboards.filter((b) => selected.includes(String((b as any).ID)));
     return sel.map((b) => {
       const size = ((b as any).Size || (b as any).size || '') as string;
-      const faces = Number((b as any).Faces_Count || 1);
-      const sizeMatch = size.match(/(\d+(?:[.,]\d+)?)\s*[xX×\-]\s*(\d+(?:[.,]\d+)?)/);
-      if (!sizeMatch) return { billboardId: String((b as any).ID), printCost: 0 };
-      const width = parseFloat(sizeMatch[1]);
-      const height = parseFloat(sizeMatch[2]);
-      const areaPerBoard = width * height * faces;
+      const faces = Number((b as any).Faces_Count || (b as any).faces_count || (b as any).faces || 1);
+      const dims = getBillboardDimensions(b, sizeDimensionsMap);
+      if (dims.area <= 0) return { billboardId: String((b as any).ID), printCost: 0 };
+      const areaPerBoard = dims.area * faces;
       const customUnitCost = customPrintCosts.get(size);
       const printCost = customUnitCost || (areaPerBoard * printPricePerMeter);
       return { billboardId: String((b as any).ID), printCost };
     });
-  }, [billboards, selected, printCostEnabled, printPricePerMeter, customPrintCosts]);
+  }, [billboards, selected, printCostEnabled, printPricePerMeter, customPrintCosts, sizeDimensionsMap]);
 
   // ✅ NEW: Calculate unified billboard prices (same as ContractEdit)
   const unifiedPricingByBillboard = useMemo(() => {
@@ -816,13 +851,6 @@ export default function OfferEdit() {
     } as Billboard;
   };
 
-  const { data: dbSizesData = [] } = useQuery({
-    queryKey: ['offer-edit-sizes-sorting'],
-    queryFn: async () => {
-      const { data } = await supabase.from('sizes').select('name, sort_order').order('sort_order', { ascending: true });
-      return data || [];
-    }
-  });
 
   const { data: dbMunisData = [] } = useQuery({
     queryKey: ['offer-edit-munis-sorting'],

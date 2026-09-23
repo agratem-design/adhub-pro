@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { createContract } from '@/services/contractService';
+import { getBillboardDimensions } from '@/lib/billboardDimensions';
 import type { Billboard } from '@/types';
 import { getPriceFor, getDailyPriceFor, CustomerType } from '@/data/pricing';
 import { isBillboardAvailable, checkBillboardConflicts, type BillboardConflict } from '@/utils/contractUtils';
@@ -300,18 +301,10 @@ export default function ContractCreate() {
   // ✅ UPDATED: Calculate print cost only if enabled
   const calculatePrintCost = (billboard: Billboard): number => {
     if (!printCostEnabled || !printPricePerMeter || printPricePerMeter <= 0) return 0;
-    
-    const size = (billboard.Size || '') as string;
+    const dims = getBillboardDimensions(billboard);
+    if (dims.area <= 0) return 0;
     const faces = Number(billboard.Faces_Count || 1);
-    
-    const sizeMatch = size.match(/(\d+(?:[.,]\d+)?)\s*[xX×\-]\s*(\d+(?:[.,]\d+)?)/);
-    if (!sizeMatch) return 0;
-    
-    const width = parseFloat(sizeMatch[1].replace(',', '.'));
-    const height = parseFloat(sizeMatch[2].replace(',', '.'));
-    const area = width * height;
-    
-    const costInLYD = area * faces * printPricePerMeter;
+    const costInLYD = dims.area * faces * printPricePerMeter;
     return convertPrice(costInLYD);
   };
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,10 +9,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { toast } from 'sonner';
 import html2canvas from 'html2canvas';
 import { toBlob as htmlToImageBlob } from 'html-to-image';
-import { extractImagePalette, pickAccentColor, pickGlowColor, pickSecondaryColor, alphaToHex } from '@/utils/extractImagePalette';
+import { extractImagePalette, pickAccentColor, pickGlowColor, pickSecondaryColor, alphaToHex, buildCoverColorRoles } from '@/utils/extractImagePalette';
+import { ShardSphereCover } from '@/components/design-studio/ShardSphereCover';
+import { LightEditorialCover } from '@/components/design-studio/LightEditorialCover';
+import { LocationStripControls } from '@/components/design-studio/LocationStripControls';
+import { TextBackgroundControls } from '@/components/design-studio/TextBackgroundControls';
 import {
   Image as ImageIcon,
   ZoomIn,
@@ -26,6 +31,8 @@ import {
   Sliders,
   Sparkles,
   Layout,
+  LayoutTemplate,
+  CreditCard,
   AlignLeft,
   AlignCenter,
   AlignRight,
@@ -51,6 +58,9 @@ import {
   Plus,
   Trash,
   ArrowRight,
+  Calendar,
+  Users,
+  CheckCircle2,
   AlignStartVertical,
   AlignEndVertical,
   AlignCenterVertical,
@@ -94,9 +104,14 @@ import {
 
 export default function DesignStudio() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const urlCompositeTaskId = searchParams.get('composite_task_id');
+  const urlContractId = searchParams.get('contract_id');
+  const urlTaskId = searchParams.get('task_id') || searchParams.get('installation_task_id');
 
   // ═══════ UI & State ═══════
   const [tasks, setTasks] = useState<InstallationTask[]>([]);
+  const [modalSelectedContractId, setModalSelectedContractId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string>('');
   const [groupedContracts, setGroupedContracts] = useState<GroupedContract[]>([]);
   const [selectedContractId, setSelectedContractId] = useState<string>('');
@@ -860,17 +875,35 @@ export default function DesignStudio() {
     }
   }, []);
 
+
+  const getTaskTypeInfo = (tt?: string) => {
+    const v = (tt || '').toLowerCase();
+    if (v.includes('re') || (tt || '').includes('إعادة')) {
+      return { label: 'إعادة تركيب', color: 'bg-amber-500/15 text-amber-400 border-amber-500/30' };
+    }
+    if (v.includes('remov') || (tt || '').includes('فك')) {
+      return { label: 'فك', color: 'bg-rose-500/15 text-rose-400 border-rose-500/30' };
+    }
+    if (v.includes('maint') || (tt || '').includes('صيانة')) {
+      return { label: 'صيانة', color: 'bg-blue-500/15 text-blue-400 border-blue-500/30' };
+    }
+    return { label: 'تركيب رئيسي', color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' };
+  };
+
   const loadTasks = async () => {
     try {
       setLoadingTasks(true);
+
+      // 1. Fetch installation tasks with Contract info
       const { data, error } = await supabase
         .from('installation_tasks')
         .select(`
           id,
           contract_id,
           task_type,
+          team_id,
           created_at,
-          installation_teams!installation_tasks_team_id_fkey(team_name),
+          status,
           Contract!installation_tasks_contract_id_fkey(
             Contract_Number,
             "Customer Name",
@@ -881,12 +914,21 @@ export default function DesignStudio() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      const result = (data || []) as any[];
-      setTasks(result as unknown as InstallationTask[]);
-      tasksRef.current = result as unknown as InstallationTask[];
+      const rawTasks = (data || []) as any[];
 
-      // Fetch task_designs for all tasks to enable design images fallback
-      const allTaskIds = result.map(t => t.id).filter(Boolean);
+      // 2. Fetch installation teams separately to avoid broken foreign key relationship (PGRST200)
+      const teamsMap = new Map<string, string>();
+      try {
+        const { data: teamsData } = await supabase.from('installation_teams').select('id, team_name');
+        (teamsData || []).forEach((tm: any) => {
+          if (tm.id && tm.team_name) teamsMap.set(String(tm.id), tm.team_name);
+        });
+      } catch (err) {
+        console.warn('Failed to load installation_teams:', err);
+      }
+
+      // 3. Fetch task_designs for all tasks to enable design images fallback
+      const allTaskIds = rawTasks.map(t => t.id).filter(Boolean);
       const designsMap = new Map<string, { a?: string; b?: string; cutout?: string }>();
       if (allTaskIds.length > 0) {
         try {
@@ -909,34 +951,66 @@ export default function DesignStudio() {
       }
       taskDesignsRef.current = designsMap;
 
-      // Group tasks by contract_id
+      // 4. Fetch task items photo availability stats
+      const byTask = new Map<string, { total: number; withPhoto: number }>();
+      if (allTaskIds.length > 0) {
+        try {
+          const { data: items } = await supabase
+            .from('installation_task_items')
+            .select('task_id, installed_image_url, installed_image_face_a_url, installed_image_face_b_url')
+            .in('task_id', allTaskIds);
+          (items || []).forEach((it: any) => {
+            const tid = String(it.task_id);
+            const has = !!(it.installed_image_url || it.installed_image_face_a_url || it.installed_image_face_b_url);
+            const cur = byTask.get(tid) || { total: 0, withPhoto: 0 };
+            cur.total += 1;
+            if (has) cur.withPhoto += 1;
+            byTask.set(tid, cur);
+          });
+        } catch (e) {
+          console.warn('Failed to compute photo availability per task:', e);
+        }
+      }
+
+      // 5. Enrich tasks with team_name, taskDesignImage, and stats
+      const enrichedTasks: InstallationTask[] = rawTasks.map(t => {
+        const teamName = t.team_id ? teamsMap.get(String(t.team_id)) : undefined;
+        const td = designsMap.get(t.id);
+        let taskDesignImage = td ? (td.a || td.b || td.cutout || '') : '';
+        if (!taskDesignImage && t.Contract?.design_data) {
+          try {
+            const dd = typeof t.Contract.design_data === 'string'
+              ? JSON.parse(t.Contract.design_data) : t.Contract.design_data;
+            const arr = typeof dd === 'string' ? JSON.parse(dd) : dd;
+            if (Array.isArray(arr) && arr.length > 0) {
+              taskDesignImage = arr[0].designFaceA || arr[0].design_face_a_url || arr[0].designFaceB || arr[0].design_face_b_url || '';
+            }
+          } catch (e) {}
+        }
+        const stats = byTask.get(String(t.id)) || { total: 0, withPhoto: 0 };
+        return {
+          ...t,
+          team_name: teamName,
+          installation_teams: teamName ? { team_name: teamName } : null,
+          taskDesignImage,
+          totalItems: stats.total,
+          photoItems: stats.withPhoto,
+        };
+      });
+
+      setTasks(enrichedTasks);
+      tasksRef.current = enrichedTasks;
+
+      // 6. Group tasks by contract_id
       const groups: Record<string, GroupedContract> = {};
-      result.forEach(t => {
+      enrichedTasks.forEach(t => {
         const cId = String(t.contract_id);
-        const teamName = t.installation_teams?.team_name;
+        const teamName = t.team_name;
         
         const contractInfo = t.Contract;
         const customerName = contractInfo?.['Customer Name'] || contractInfo?.customer_name || '';
         const adType = contractInfo?.['Ad Type'] || contractInfo?.ad_type || '';
-        
-        let designImage = '';
-        if (contractInfo?.design_data) {
-          try {
-            const dd = typeof contractInfo.design_data === 'string'
-              ? JSON.parse(contractInfo.design_data) : contractInfo.design_data;
-            const arr = typeof dd === 'string' ? JSON.parse(dd) : dd;
-            if (Array.isArray(arr) && arr.length > 0) {
-              designImage = arr[0].designFaceA || arr[0].design_face_a_url || arr[0].designFaceB || arr[0].design_face_b_url || '';
-            }
-          } catch (e) {
-            console.error('Failed to parse design_data for contract', cId, e);
-          }
-        }
-        // Fallback to task_designs for this task
-        if (!designImage) {
-          const td = designsMap.get(t.id);
-          if (td) designImage = td.a || td.b || td.cutout || '';
-        }
+        const designImage = t.taskDesignImage || '';
 
         if (!groups[cId]) {
           groups[cId] = {
@@ -965,43 +1039,23 @@ export default function DesignStudio() {
         }
       });
       const groupedList = Object.values(groups).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      setGroupedContracts(groupedList);
 
-      // Aggregate installed-photos availability per contract
-      try {
-        if (allTaskIds.length > 0) {
-          const { data: items } = await supabase
-            .from('installation_task_items')
-            .select('task_id, installed_image_url, installed_image_face_a_url, installed_image_face_b_url')
-            .in('task_id', allTaskIds);
-          const byTask = new Map<string, { total: number; withPhoto: number }>();
-          (items || []).forEach((it: any) => {
-            const tid = String(it.task_id);
-            const has = !!(it.installed_image_url || it.installed_image_face_a_url || it.installed_image_face_b_url);
-            const cur = byTask.get(tid) || { total: 0, withPhoto: 0 };
-            cur.total += 1;
-            if (has) cur.withPhoto += 1;
-            byTask.set(tid, cur);
-          });
-          const enriched = groupedList.map(g => {
-            let total = 0, withPhoto = 0;
-            g.taskIds.forEach(tid => {
-              const c = byTask.get(String(tid));
-              if (c) { total += c.total; withPhoto += c.withPhoto; }
-            });
-            let status: 'all' | 'partial' | 'none' | 'unknown' = 'unknown';
-            if (total > 0) {
-              if (withPhoto === 0) status = 'none';
-              else if (withPhoto >= total) status = 'all';
-              else status = 'partial';
-            }
-            return { ...g, totalItems: total, photoItems: withPhoto, photoStatus: status };
-          });
-          setGroupedContracts(enriched);
+      // Aggregate contract stats
+      const enrichedGrouped = groupedList.map(g => {
+        let total = 0, withPhoto = 0;
+        g.taskIds.forEach(tid => {
+          const c = byTask.get(String(tid));
+          if (c) { total += c.total; withPhoto += c.withPhoto; }
+        });
+        let status: 'all' | 'partial' | 'none' | 'unknown' = 'unknown';
+        if (total > 0) {
+          if (withPhoto === 0) status = 'none';
+          else if (withPhoto >= total) status = 'all';
+          else status = 'partial';
         }
-      } catch (e) {
-        console.warn('Failed to compute photo availability:', e);
-      }
+        return { ...g, totalItems: total, photoItems: withPhoto, photoStatus: status };
+      });
+      setGroupedContracts(enrichedGrouped);
     } catch (e) {
       console.error(e);
       toast.error('فشل في تحميل مهام التركيب');
@@ -1187,6 +1241,52 @@ export default function DesignStudio() {
       loadTaskItems(contract.taskIds);
     }
   }, [selectedContractId, groupedContracts, loadTaskItems]);
+
+
+  // Auto-handle URL query parameters (?composite_task_id=... or ?contract_id=...)
+  const urlParamsHandledRef = useRef(false);
+  useEffect(() => {
+    if (urlParamsHandledRef.current) return;
+
+    if (urlCompositeTaskId) {
+      urlParamsHandledRef.current = true;
+      (async () => {
+        try {
+          const { data: compTask, error: compErr } = await supabase
+            .from('composite_tasks')
+            .select('id, contract_id, installation_task_id, customer_name, task_type')
+            .eq('id', urlCompositeTaskId)
+            .maybeSingle();
+
+          if (compErr) throw compErr;
+          if (compTask) {
+            if (compTask.contract_id) {
+              setSelectedContractId(String(compTask.contract_id));
+            }
+            if (compTask.installation_task_id) {
+              setSelectedTaskId(compTask.installation_task_id);
+              loadTaskItems([compTask.installation_task_id]);
+            }
+            toast.success(`تم فتح المهمة المجمعة للعقد #${compTask.contract_id || ''}`);
+          }
+        } catch (err) {
+          console.error('Failed to load composite task from URL:', err);
+          toast.error('تعذر جلب تفاصيل المهمة المجمعة');
+        }
+      })();
+      return;
+    }
+
+    if (urlContractId) {
+      urlParamsHandledRef.current = true;
+      setSelectedContractId(String(urlContractId));
+      if (urlTaskId) {
+        setSelectedTaskId(urlTaskId);
+        loadTaskItems([urlTaskId]);
+      }
+      toast.success(`تم تحديد العقد #${urlContractId}`);
+    }
+  }, [urlCompositeTaskId, urlContractId, urlTaskId, loadTaskItems]);
 
   // Load details when selected item changes (from dropdown switch)
   useEffect(() => {
@@ -1444,11 +1544,12 @@ export default function DesignStudio() {
       const r = selectedItemDetails?.region || 'المنطقة';
       const mp = el.parts.municipality || {};
       const rp = el.parts.region || {};
+      const fallbackColor = el.fontColor || locationStrip.textColor || '#ffffff';
       return (
         <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '4px', whiteSpace: 'nowrap' }}>
-          <span style={{ fontSize: `${mp.fontSize ?? el.fontSize}px`, fontWeight: (mp.fontWeight ?? el.fontWeight) as any, color: mp.fontColor ?? undefined }}>{m}</span>
-          <span style={{ fontSize: `${Math.max(mp.fontSize ?? el.fontSize, rp.fontSize ?? el.fontSize)}px`, fontWeight: 700, opacity: 0.8 }}>{sep}</span>
-          <span style={{ fontSize: `${rp.fontSize ?? el.fontSize}px`, fontWeight: (rp.fontWeight ?? el.fontWeight) as any, color: rp.fontColor ?? undefined }}>{r}</span>
+          <span style={{ fontSize: `${mp.fontSize ?? el.fontSize}px`, fontWeight: (mp.fontWeight ?? el.fontWeight) as any, color: mp.fontColor || fallbackColor }}>{m}</span>
+          <span style={{ fontSize: `${Math.max(mp.fontSize ?? el.fontSize, rp.fontSize ?? el.fontSize)}px`, fontWeight: 700, opacity: 0.8, color: fallbackColor }}>{sep}</span>
+          <span style={{ fontSize: `${rp.fontSize ?? el.fontSize}px`, fontWeight: (rp.fontWeight ?? el.fontWeight) as any, color: rp.fontColor || fallbackColor }}>{r}</span>
         </span>
       );
     }
@@ -1663,8 +1764,8 @@ export default function DesignStudio() {
         if (!activeElement) return;
 
         // Parent offsets to convert local coordinates to canvas coordinates
-        const parentX = activeElement.parentStrip === 'panel' ? glassPanel.x : 0;
-        const parentY = activeElement.parentStrip === 'panel' ? glassPanel.y : (activeElement.parentStrip === 'location' ? (canvasHeight - locationStrip.height) : 0);
+        const parentX = activeElement.parentStrip === 'panel' ? glassPanel.x : (locationStrip.x || 0);
+        const parentY = activeElement.parentStrip === 'panel' ? glassPanel.y : (canvasHeight - locationStrip.height - (locationStrip.offsetY || 0));
 
         // --- Snapping & Magnetic Snapping Logic ---
         let snapX = newX;
@@ -1933,19 +2034,11 @@ export default function DesignStudio() {
         }
       }
 
-      const ratio = newH / initialHeight;
-
-      // Proportionally scale child elements
+      // Keep child elements anchored to their exact visual canvas positions without scaling font sizes or moving them
+      const yComp = Math.round(initialY - newY);
       setTextElements(initialTextElements.map(el => {
         if (el.parentStrip === 'panel') {
-          const updated = { ...el, y: Math.round(el.y * ratio) };
-          if (el.type === 'image' && el.height && el.width) {
-            updated.height = Math.round(el.height * ratio);
-            updated.width = Math.round(el.width * ratio);
-          } else if (el.fontSize) {
-            updated.fontSize = Math.max(8, Math.round(el.fontSize * ratio));
-          }
-          return updated;
+          return { ...el, y: el.y + yComp };
         }
         return el;
       }));
@@ -2334,6 +2427,14 @@ export default function DesignStudio() {
         borderColor: gps.borderColor ?? DEFAULT_GLASS_PANEL.borderColor,
         backgroundColor: gps.backgroundColor ?? DEFAULT_GLASS_PANEL.backgroundColor,
         shadow: gps.shadow ?? DEFAULT_GLASS_PANEL.shadow,
+        bgMode: (gps as any).bgMode ?? DEFAULT_GLASS_PANEL.bgMode,
+        bgImageUrl: (gps as any).bgImageUrl ?? DEFAULT_GLASS_PANEL.bgImageUrl,
+        bgObjectFit: (gps as any).bgObjectFit ?? DEFAULT_GLASS_PANEL.bgObjectFit,
+        bgFlipY: (gps as any).bgFlipY ?? DEFAULT_GLASS_PANEL.bgFlipY,
+        bgScale: (gps as any).bgScale ?? DEFAULT_GLASS_PANEL.bgScale,
+        bgOffsetY: (gps as any).bgOffsetY ?? DEFAULT_GLASS_PANEL.bgOffsetY,
+        showDividers: (gps as any).showDividers ?? DEFAULT_GLASS_PANEL.showDividers,
+        dividerColor: (gps as any).dividerColor ?? DEFAULT_GLASS_PANEL.dividerColor,
       } as any);
       if (gps.locationStrip) setLocationStrip(gps.locationStrip as any);
       if (gps.companyInfo) setCompanyInfo(gps.companyInfo);
@@ -2842,10 +2943,51 @@ export default function DesignStudio() {
       }
     }
 
-    // ── Helper to draw a strip (panel or location): blurred replica + tinted bg
-    const drawStripBg = (sx: number, sy: number, sw: number, sh: number, blurPx: number, bgColor: string, opacity: number, br: number) => {
+    const drawStripBg = async (
+      sx: number,
+      sy: number,
+      sw: number,
+      sh: number,
+      blurPx: number,
+      bgColor: string,
+      opacity: number,
+      br: number,
+      bgMode?: 'color' | 'solid' | 'gradient' | 'image',
+      bgImageUrl?: string,
+      bgObjectFit?: string,
+      bgFlipY?: boolean,
+      bgScale?: number,
+      bgOffsetY?: number
+    ) => {
       ctx.save();
       if (br > 0) { roundRectPath(ctx, sx, sy, sw, sh, br); ctx.clip(); }
+
+      if (bgMode === 'image' && bgImageUrl) {
+        const stripImg = await loadImg(bgImageUrl);
+        if (stripImg) {
+          ctx.save();
+          if (bgFlipY) {
+            ctx.translate(0, sy * 2 + sh);
+            ctx.scale(1, -1);
+          }
+          if (bgScale && bgScale !== 1) {
+            const cx = sx + sw / 2;
+            const cy = sy + sh / 2;
+            ctx.translate(cx, cy);
+            ctx.scale(bgScale, bgScale);
+            ctx.translate(-cx, -cy);
+          }
+          if (bgOffsetY) {
+            ctx.translate(0, bgOffsetY);
+          }
+          ctx.globalAlpha = opacity ?? 1;
+          drawObjectFit(ctx, stripImg, sx, sy, sw, sh, bgObjectFit || 'fill');
+          ctx.restore();
+          ctx.restore();
+          return;
+        }
+      }
+
       if (blurPx > 0 && mainImg) {
         const tmp = document.createElement('canvas');
         tmp.width = Math.max(1, sw); tmp.height = Math.max(1, sh);
@@ -2937,14 +3079,14 @@ export default function DesignStudio() {
         const mp = el.parts.municipality || {};
         const rp = el.parts.region || {};
         const fontFam0 = el.fontFamily || "'Cairo', sans-serif";
-        const color0 = textColorOverride || el.fontColor || '#fff';
+        const color0 = el.fontColor || textColorOverride || '#fff';
         // Preview uses direction:rtl which visually places municipality on the RIGHT
         // and region on the LEFT. To match this in the canvas (which draws left-to-right),
         // we draw region first, then separator, then municipality.
         const segments = [
-          { text: r, fontSize: rp.fontSize ?? el.fontSize ?? 24, fontWeight: rp.fontWeight ?? el.fontWeight ?? '400', color: rp.fontColor ?? color0 },
+          { text: r, fontSize: rp.fontSize ?? el.fontSize ?? 24, fontWeight: rp.fontWeight ?? el.fontWeight ?? '400', color: rp.fontColor || color0 },
           { text: sep, fontSize: Math.max(mp.fontSize ?? el.fontSize ?? 24, rp.fontSize ?? el.fontSize ?? 24), fontWeight: '700', color: color0 },
-          { text: m, fontSize: mp.fontSize ?? el.fontSize ?? 24, fontWeight: mp.fontWeight ?? el.fontWeight ?? '400', color: mp.fontColor ?? color0 },
+          { text: m, fontSize: mp.fontSize ?? el.fontSize ?? 24, fontWeight: mp.fontWeight ?? el.fontWeight ?? '400', color: mp.fontColor || color0 },
         ];
         ctx.save();
         ctx.textBaseline = 'alphabetic';
@@ -2961,6 +3103,29 @@ export default function DesignStudio() {
         else groupRight = baseX + totalW;
         const maxFs = Math.max(segments[0].fontSize, segments[1].fontSize, segments[2].fontSize);
         const baselineY = baseY + 4 + maxFs * 0.85;
+
+        // Draw pill / text background if enabled
+        if (el.textBackground) {
+          const padX = el.textBgPaddingX ?? 12;
+          const padY = el.textBgPaddingY ?? 4;
+          const rad = el.textBgRadius ?? 8;
+          const bgX = groupRight - totalW - padX;
+          const bgY = baseY + 4 - padY;
+          const bgW = totalW + padX * 2;
+          const bgH = maxFs * 1.35 + padY * 2;
+
+          ctx.save();
+          ctx.fillStyle = el.textBgColor || 'rgba(12, 14, 20, 0.88)';
+          roundRectPath(ctx, bgX, bgY, bgW, bgH, rad);
+          ctx.fill();
+          if (el.textBgBorder && el.textBgBorder !== 'none') {
+            ctx.strokeStyle = '#d6ac40';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+
         // Draw left-to-right starting from groupRight - totalW
         let cursor = groupRight - totalW;
         segments.forEach((s, i) => {
@@ -2975,7 +3140,7 @@ export default function DesignStudio() {
       }
 
       const text = String(getElementText(el) ?? '');
-      const color = textColorOverride || el.fontColor || '#fff';
+      const color = el.fontColor || textColorOverride || '#fff';
       const fontFam = el.fontFamily || "'Cairo', sans-serif";
       ctx.save();
       ctx.fillStyle = color;
@@ -3004,6 +3169,29 @@ export default function DesignStudio() {
       const groupLeft = groupRight - totalW;
       const iconLeft = groupRight - inlineIconBox; // icon on the right side of the group
       const textRight = inlineIconBox ? (iconLeft - gap) : groupRight;
+
+      // Draw pill / text background if enabled
+      if (el.textBackground) {
+        const padX = el.textBgPaddingX ?? 12;
+        const padY = el.textBgPaddingY ?? 4;
+        const rad = el.textBgRadius ?? 8;
+        const bgX = groupLeft - padX;
+        const bgY = baseY + 4 - padY;
+        const bgW = totalW + padX * 2;
+        const bgH = (el.fontSize || 18) * 1.4 + padY * 2;
+
+        ctx.save();
+        ctx.fillStyle = el.textBgColor || 'rgba(12, 14, 20, 0.88)';
+        roundRectPath(ctx, bgX, bgY, bgW, bgH, rad);
+        ctx.fill();
+        if (el.textBgBorder && el.textBgBorder !== 'none') {
+          ctx.strokeStyle = '#d6ac40';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
       ctx.textAlign = 'right';
       ctx.fillText(text, textRight, baseY + 4);
 
@@ -3036,12 +3224,22 @@ export default function DesignStudio() {
 
     // 4. Glass panel (info bar)
     if (glassPanel.visible) {
-      drawStripBg(glassPanel.x, glassPanel.y, glassPanel.width, glassPanel.height, glassPanel.blur ?? 15, glassPanel.backgroundColor, glassPanel.opacity ?? 0.92, glassPanel.borderRadius || 0);
-      // dividers
-      ctx.fillStyle = 'rgba(255,255,255,0.08)';
-      [0.28, 0.60, 0.78].forEach(f => {
-        ctx.fillRect(glassPanel.x + glassPanel.width * f, glassPanel.y + glassPanel.height * 0.12, 1, glassPanel.height * 0.76);
-      });
+      await drawStripBg(
+        glassPanel.x,
+        glassPanel.y,
+        glassPanel.width,
+        glassPanel.height,
+        glassPanel.blur ?? 15,
+        glassPanel.backgroundColor,
+        glassPanel.opacity ?? 0.92,
+        glassPanel.borderRadius || 0,
+        glassPanel.bgMode,
+        glassPanel.bgImageUrl,
+        glassPanel.bgObjectFit,
+        glassPanel.bgFlipY,
+        glassPanel.bgScale,
+        glassPanel.bgOffsetY
+      );
       for (const el of infoPanelTexts) {
         if (!el.visible) continue;
         await drawElement(el, glassPanel.x, glassPanel.y);
@@ -3051,23 +3249,42 @@ export default function DesignStudio() {
     // 5. Location strip
     if (locationStrip.visible) {
       const sh = locationStrip.height;
-      const sx = 0, sy = H - sh, sw = W;
-      drawStripBg(sx, sy, sw, sh, locationStrip.blur ?? 10, locationStrip.backgroundColor, locationStrip.opacity ?? 0.9, locationStrip.borderRadius ?? 0);
+      const sw = locationStrip.width || W;
+      const sx = locationStrip.x || 0;
+      const sy = H - sh - (locationStrip.offsetY || 0);
+      await drawStripBg(
+        sx,
+        sy,
+        sw,
+        sh,
+        locationStrip.blur ?? 10,
+        locationStrip.backgroundColor,
+        locationStrip.opacity ?? 0.9,
+        locationStrip.borderRadius ?? 0,
+        locationStrip.bgMode,
+        locationStrip.bgImageUrl,
+        locationStrip.bgObjectFit,
+        locationStrip.bgFlipY,
+        locationStrip.bgScale,
+        locationStrip.bgOffsetY
+      );
 
       // Pin icon on the right side (matches preview)
-      ctx.save();
-      ctx.translate(sw - 50 - 20, sy + sh / 2 - 20);
-      ctx.fillStyle = locationStrip.textColor;
-      const path = new Path2D('M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z');
-      ctx.save();
-      ctx.scale(40 / 24, 40 / 24);
-      ctx.fill(path);
-      ctx.fillStyle = locationStrip.backgroundColor;
-      ctx.beginPath();
-      ctx.arc(12, 10, 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      ctx.restore();
+      if (locationStrip.showPinIcon !== false) {
+        ctx.save();
+        ctx.translate(sx + sw - 50 - 20, sy + sh / 2 - 20);
+        ctx.fillStyle = locationStrip.textColor;
+        const path = new Path2D('M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z');
+        ctx.save();
+        ctx.scale(40 / 24, 40 / 24);
+        ctx.fill(path);
+        ctx.fillStyle = locationStrip.bgMode === 'image' ? '#000000' : locationStrip.backgroundColor;
+        ctx.beginPath();
+        ctx.arc(12, 10, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        ctx.restore();
+      }
 
       for (const el of locationTexts) {
         if (!el.visible) continue;
@@ -3114,8 +3331,14 @@ export default function DesignStudio() {
   //        TEXT GROUPS: info bar vs location
   // ══════════════════════════════════════════
 
-  const infoPanelTexts = textElements.filter(el => el.parentStrip !== 'location' && !['municipality', 'region', 'landmark', 'municipality_region'].includes(el.id));
-  const locationTexts = textElements.filter(el => el.parentStrip === 'location' || ['municipality', 'region', 'landmark', 'municipality_region'].includes(el.id));
+  const infoPanelTexts = textElements.filter(el =>
+    el.parentStrip === 'panel' ||
+    (!el.parentStrip && !['municipality', 'region', 'landmark', 'municipality_region'].includes(el.id))
+  );
+  const locationTexts = textElements.filter(el =>
+    el.parentStrip === 'location' ||
+    (!el.parentStrip && ['municipality', 'region', 'landmark', 'municipality_region'].includes(el.id))
+  );
 
   const canvasImageUrl = getCanvasImageUrl();
 
@@ -3143,6 +3366,13 @@ export default function DesignStudio() {
   const elColors = coverElementColors;
 
   const pickPhotos = (limit: number) => {
+    // If the active task has a design in taskDesignsRef or tasks, prioritize it
+    const activeTaskObj = tasks.find(t => t.id === selectedTaskId);
+    const activeTaskDesign = (selectedTaskId && taskDesignsRef.current.get(selectedTaskId)?.a)
+      || activeTaskObj?.taskDesignImage;
+
+    const taskHeroPhoto = activeTaskDesign ? [{ id: 'task-hero-design', url: activeTaskDesign }] : [];
+
     const items = taskItems.flatMap((it: any) => {
       const designUrls = [
         it.design_image_url,
@@ -3174,7 +3404,7 @@ export default function DesignStudio() {
       { id: 'd5', url: 'https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?w=900&auto=format&fit=crop' },
       { id: 'd6', url: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=900&auto=format&fit=crop' },
     ];
-    const pool = items.length > 0 ? items : fallback;
+    const pool = (taskHeroPhoto.length > 0 ? [...taskHeroPhoto, ...items] : (items.length > 0 ? items : fallback));
     const seen = new Set<string>();
     const unique: { id: string; url: string }[] = [];
     for (const p of pool) {
@@ -3530,253 +3760,510 @@ export default function DesignStudio() {
     <div className="flex flex-col gap-4 w-full p-1 min-h-[calc(100vh-140px)] font-sans" dir="rtl">
       <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&family=Tajawal:wght@300;400;500;700;900&family=Almarai:wght@300;400;700;800&family=Amiri:ital,wght@0,400;0,700;1,400;1,700&family=Montserrat:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
-      {/* ──── Top Header Bar with Back Button ──── */}
-      <div className="flex items-center justify-between bg-card/90 backdrop-blur-sm p-3 rounded-xl border border-border/40 shadow-sm">
+      {/* ──── Top Header Bar with Mode Switcher & Primary Actions ──── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-card/95 backdrop-blur-md p-3 rounded-2xl border border-border/50 shadow-md">
         <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" onClick={() => navigate(-1)} className="gap-1.5 h-9 text-xs font-bold text-foreground">
+          <Button variant="outline" size="sm" onClick={() => navigate(-1)} className="gap-1.5 h-9 text-xs font-bold text-foreground rounded-xl">
             <ArrowRight className="h-4 w-4" />
             العودة للخلف
           </Button>
-          <div className="h-5 w-px bg-border" />
-          <h1 className="text-base font-bold text-foreground">استوديو التصميم (Design Studio)</h1>
+          <div className="h-5 w-px bg-border/60" />
+          <div>
+            <h1 className="text-sm lg:text-base font-bold text-foreground flex items-center gap-2">
+              <span>استوديو التصميم</span>
+              {selectedContractId && (
+                <span className="text-[11px] font-medium text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full">
+                  عقد #{selectedContractId}
+                </span>
+              )}
+            </h1>
+          </div>
+        </div>
+
+        {/* ── Mode Switcher (صفحة الغلاف / بطاقة اللوحة) ── */}
+        <div className="flex items-center bg-muted/70 p-1 rounded-xl border border-border/40 shadow-inner">
+          <Button
+            type="button"
+            variant={layoutMode === 'cover' ? 'default' : 'ghost'}
+            size="sm"
+            className={`h-8 px-3.5 text-xs font-bold gap-1.5 rounded-lg transition-all ${
+              layoutMode === 'cover'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+            onClick={() => setLayoutMode('cover')}
+          >
+            <LayoutTemplate className="h-4 w-4" />
+            <span>صفحة الغلاف</span>
+          </Button>
+          <Button
+            type="button"
+            variant={layoutMode === 'normal' ? 'default' : 'ghost'}
+            size="sm"
+            className={`h-8 px-3.5 text-xs font-bold gap-1.5 rounded-lg transition-all ${
+              layoutMode === 'normal'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+            onClick={() => setLayoutMode('normal')}
+          >
+            <CreditCard className="h-4 w-4" />
+            <span>بطاقة اللوحة</span>
+          </Button>
+        </div>
+
+        {/* ── Primary Actions (Upload, Lock, Export) ── */}
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setLockMode(!lockMode)}
+            className={`h-9 px-3 gap-1.5 text-xs font-bold rounded-xl transition-all ${
+              lockMode ? 'bg-amber-500/15 border-amber-500/40 text-amber-500' : ''
+            }`}
+            title={lockMode ? 'إلغاء قفل العناصر للتحريك' : 'قفل العناصر لمنع التحريك بالخطأ'}
+          >
+            {lockMode ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
+            <span className="hidden sm:inline">{lockMode ? 'مقفلة' : 'قفل'}</span>
+          </Button>
+
+          <Label
+            className="flex items-center justify-center gap-1.5 h-9 px-3 border border-border/60 hover:bg-accent/40 rounded-xl cursor-pointer text-xs font-bold transition-all"
+            title="رفع صورة مخصصة من جهازك"
+          >
+            <Upload className="h-3.5 w-3.5 text-primary" />
+            <span className="hidden sm:inline">رفع صورة</span>
+            <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+          </Label>
+
+          <Button
+            type="button"
+            onClick={handleExportCard}
+            size="sm"
+            className="h-9 gap-1.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md text-xs transition-all"
+            title="تصدير وتحميل التصميم الحالي بجودة عالية"
+          >
+            <Download className="h-4 w-4" />
+            <span>تحميل الصورة</span>
+          </Button>
         </div>
       </div>
 
-      {/* ═══════════════ CONTRACT SELECTION MODAL ═══════════════ */}
-      {showContractModal && (
-        <div
-          className="fixed inset-0 z-[999] flex items-center justify-center p-4"
-          style={{ backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowContractModal(false); }}
-        >
+      {/* ═══════════════ CONTRACT & TASK SELECTION MODAL (2-STEP) ═══════════════ */}
+      {showContractModal && (() => {
+        const selectedModalContract = modalSelectedContractId
+          ? groupedContracts.find(c => String(c.contract_id) === modalSelectedContractId)
+          : null;
+        const modalContractTasks = modalSelectedContractId
+          ? tasks.filter(t => String(t.contract_id) === modalSelectedContractId)
+          : [];
+
+        return (
           <div
-            className="bg-card border border-border/50 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col"
-            dir="rtl"
+            className="fixed inset-0 z-[999] flex items-center justify-center p-4"
+            style={{ backgroundColor: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)' }}
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setShowContractModal(false);
+                setModalSelectedContractId(null);
+              }
+            }}
           >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-5 border-b border-border/40">
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center">
-                  <FolderOpen className="h-5 w-5 text-primary" />
+            <div
+              className="bg-card border border-border/50 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden"
+              dir="rtl"
+            >
+              {/* ── Modal Top Header ── */}
+              <div className="flex items-center justify-between p-4 px-6 border-b border-border/40 bg-card/90">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                    <FolderOpen className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-foreground">
+                      {modalSelectedContractId ? (
+                        <span className="flex items-center gap-2">
+                          <span>مهام التركيب للعقد #{modalSelectedContractId}</span>
+                          {selectedModalContract?.customerName && (
+                            <span className="text-sm font-normal text-muted-foreground">— {selectedModalContract.customerName}</span>
+                          )}
+                        </span>
+                      ) : (
+                        'اختيار العقد ومهمة التركيب'
+                      )}
+                    </h2>
+                    <p className="text-[11px] text-muted-foreground">
+                      {modalSelectedContractId
+                        ? `يتوفر ${modalContractTasks.length} مهام تركيب — اختر المهمة لجلب تصميمها ولوحاتها`
+                        : `${groupedContracts.length} عقد متاح — اختر عقداً لاستعراض مهام تركيبه وتصاميمها`}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-base font-bold">اختيار مهمة التركيب</h2>
-                  <p className="text-[11px] text-muted-foreground">{groupedContracts.length} عقد متاح — اختر عقداً لعرض تصميمه</p>
-                </div>
-              </div>
-              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl" onClick={() => setShowContractModal(false)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
 
-            {/* Search Bar */}
-            <div className="p-4 border-b border-border/30">
-              <div className="relative">
-                <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="بحث بالعقد، الزبون، نوع الإعلان، أو الفريق..."
-                  value={taskSearch}
-                  onChange={(e) => setTaskSearch(e.target.value)}
-                  className="pr-10 h-10 text-sm bg-muted/40"
-                  autoFocus
-                />
-              </div>
-              {taskSearch && (
-                <p className="text-[11px] text-muted-foreground mt-2">
-                  {filteredContracts.length} نتيجة من أصل {groupedContracts.length}
-                </p>
-              )}
-              {/* Photo availability filter */}
-              <div className="flex items-center gap-1.5 mt-3 flex-wrap">
-                <span className="text-[11px] text-muted-foreground ml-1">صور التركيب:</span>
-                {([
-                  { key: 'all', label: 'الكل' },
-                  { key: 'with_all', label: 'متوفرة كاملة' },
-                  { key: 'partial', label: 'متوفرة جزئياً' },
-                  { key: 'none', label: 'غير متوفرة' },
-                ] as const).map(opt => (
-                  <button
-                    key={opt.key}
-                    onClick={() => setPhotoFilter(opt.key)}
-                    className={`text-[10px] font-bold px-2.5 py-1 rounded-full border transition-all ${
-                      photoFilter === opt.key
-                        ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                        : 'bg-muted/40 text-muted-foreground border-border/40 hover:border-primary/40'
-                    }`}
+                <div className="flex items-center gap-2">
+                  {modalSelectedContractId && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setModalSelectedContractId(null)}
+                      className="h-8 gap-1.5 text-xs rounded-xl font-bold border-border/60 hover:border-primary/40"
+                    >
+                      <ArrowRight className="h-3.5 w-3.5" />
+                      <span>العودة للعقود</span>
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-xl"
+                    onClick={() => {
+                      setShowContractModal(false);
+                      setModalSelectedContractId(null);
+                    }}
                   >
-                    {opt.label}
-                  </button>
-                ))}
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
               </div>
-            </div>
 
-            {/* Contracts Grid */}
-            <div className="flex-1 overflow-y-auto p-4">
-              {loadingTasks ? (
-                <div className="flex items-center justify-center h-40 text-muted-foreground gap-3">
-                  <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                  <span className="text-sm">جاري تحميل المهام...</span>
-                </div>
-              ) : filteredContracts.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-40 text-muted-foreground gap-2">
-                  <Search className="h-10 w-10 opacity-30" />
-                  <span className="text-sm">لا توجد نتائج مطابقة</span>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {filteredContracts.map((c) => {
-                    const tc = c as any;
-                    const isSelected = String(c.contract_id) === selectedContractId;
-                    return (
-                      <button
-                        key={c.contract_id}
-                        onClick={() => {
-                          setSelectedContractId(String(c.contract_id));
-                          setShowContractModal(false);
-                          setTaskSearch('');
-                        }}
-                        className={`group relative flex flex-col rounded-xl border text-right overflow-hidden transition-all duration-200 hover:shadow-lg hover:scale-[1.02] ${
-                          isSelected
-                            ? 'border-primary ring-2 ring-primary/40 bg-primary/5 shadow-md'
-                            : 'border-border/40 bg-card hover:border-primary/40'
-                        }`}
-                      >
-                        {/* Design Thumbnail */}
-                        <div className="w-full h-36 bg-muted/50 relative overflow-hidden">
-                          {tc.designImage ? (
-                            <img
-                              src={tc.designImage}
-                              crossOrigin="anonymous"
-                              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground/40 gap-2">
-                              <ImageIcon className="h-10 w-10" />
-                              <span className="text-[10px]">لا يوجد تصميم</span>
-                            </div>
-                          )}
-                          {/* Ad type badge */}
-                          {tc.adType && (
-                            <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white text-[9px] font-bold px-2 py-0.5 rounded-full truncate max-w-[90%]">
-                              {tc.adType}
-                            </div>
-                          )}
-                          {/* Photo availability badge */}
-                          {tc.photoStatus && tc.photoStatus !== 'unknown' && (
+              {/* ── STEP 1: CONTRACTS LIST (when no contract is drilled into) ── */}
+              {!modalSelectedContractId && (
+                <>
+                  {/* Search Bar & Filter */}
+                  <div className="p-4 px-6 border-b border-border/30 bg-muted/20 space-y-3">
+                    <div className="relative">
+                      <Search className="absolute right-3.5 top-3 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="بحث برقم العقد، اسم الزبون، نوع الإعلان، أو الفريق..."
+                        value={taskSearch}
+                        onChange={(e) => setTaskSearch(e.target.value)}
+                        className="pr-10 h-10 text-xs bg-background/80 rounded-xl"
+                        autoFocus
+                      />
+                    </div>
+                    {/* Photo availability filter */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-muted-foreground ml-1">تصفية صور التركيب:</span>
+                        {([
+                          { key: 'all', label: 'الكل' },
+                          { key: 'with_all', label: 'متوفرة كاملة' },
+                          { key: 'partial', label: 'متوفرة جزئياً' },
+                          { key: 'none', label: 'غير متوفرة' },
+                        ] as const).map(opt => (
+                          <button
+                            key={opt.key}
+                            type="button"
+                            onClick={() => setPhotoFilter(opt.key)}
+                            className={`text-[10px] font-bold px-2.5 py-1 rounded-full border transition-all cursor-pointer ${
+                              photoFilter === opt.key
+                                ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                                : 'bg-muted/40 text-muted-foreground border-border/40 hover:border-primary/40'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      <span className="text-[11px] text-muted-foreground">
+                        {filteredContracts.length} عقد معروض
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Contracts Grid */}
+                  <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
+                    {loadingTasks ? (
+                      <div className="flex items-center justify-center h-48 text-muted-foreground gap-3">
+                        <div className="h-6 w-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                        <span className="text-xs font-bold">جاري تحميل العقود والمهام...</span>
+                      </div>
+                    ) : filteredContracts.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-48 text-muted-foreground gap-2">
+                        <Search className="h-10 w-10 opacity-30" />
+                        <span className="text-xs">لا توجد عقود مطابقة لبحثك</span>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                        {filteredContracts.map((c) => {
+                          const tc = c as any;
+                          const isSelected = String(c.contract_id) === selectedContractId;
+                          const taskCount = tc.taskIds?.length || 1;
+
+                          return (
                             <div
-                              className={`absolute bottom-2 right-2 text-[9px] font-bold px-2 py-0.5 rounded-full backdrop-blur-sm border ${
-                                tc.photoStatus === 'all'
-                                  ? 'bg-green-500/85 text-white border-green-300/50'
-                                  : tc.photoStatus === 'partial'
-                                  ? 'bg-amber-500/85 text-white border-amber-300/50'
-                                  : 'bg-red-500/85 text-white border-red-300/50'
+                              key={c.contract_id}
+                              onClick={() => setModalSelectedContractId(String(c.contract_id))}
+                              className={`group relative flex flex-col rounded-2xl border text-right overflow-hidden transition-all duration-200 hover:shadow-xl hover:border-primary/60 cursor-pointer bg-card ${
+                                isSelected
+                                  ? 'border-primary ring-2 ring-primary/40 shadow-md bg-primary/[0.02]'
+                                  : 'border-border/40 hover:-translate-y-0.5'
                               }`}
-                              title="حالة صور التركيب"
                             >
- {tc.photoItems || 0}/{tc.totalItems || 0}
- {tc.photoStatus === 'all' ? ' ' : tc.photoStatus === 'none' ? ' ' : ''}
-                            </div>
-                          )}
-                          {/* Selected check */}
-                          {isSelected && (
-                            <div className="absolute top-2 left-2 bg-primary rounded-full p-0.5">
-                              <Check className="h-3.5 w-3.5 text-primary-foreground" />
-                            </div>
-                          )}
-                        </div>
+                              {/* Design Thumbnail */}
+                              <div className="w-full h-36 bg-muted/60 relative overflow-hidden">
+                                {tc.designImage ? (
+                                  <img
+                                    src={tc.designImage}
+                                    crossOrigin="anonymous"
+                                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground/40 gap-2">
+                                    <ImageIcon className="h-8 w-8" />
+                                    <span className="text-[10px]">لا يوجد تصميم</span>
+                                  </div>
+                                )}
 
-                        {/* Info */}
-                        <div className="p-2.5 space-y-1">
-                          <div className="flex items-start justify-between gap-1">
-                            <span className="text-[10px] text-muted-foreground font-mono">#{c.contract_id}</span>
-                            <span className="text-[10px] text-muted-foreground">{tc.taskIds?.length || 1} مهمة</span>
-                          </div>
-                          <div className="text-xs font-bold text-foreground leading-tight truncate">
-                            {tc.customerName || 'زبون عام'}
-                          </div>
-                          {tc.teams?.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {tc.teams.slice(0, 2).map((t: string) => (
-                                <span key={t} className="text-[9px] bg-muted/80 text-muted-foreground px-1.5 py-0.5 rounded-full truncate max-w-[80px]">
-                                  {t}
-                                </span>
-                              ))}
-                              {tc.teams.length > 2 && (
-                                <span className="text-[9px] text-muted-foreground">+{tc.teams.length - 2}</span>
-                              )}
+                                {/* Overlay gradient */}
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 pointer-events-none" />
+
+                                {/* Contract number & tasks count badge */}
+                                <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
+                                  <span className="text-[10px] font-mono font-black bg-black/75 backdrop-blur-md text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-lg shadow-sm">
+                                    عقد #{c.contract_id}
+                                  </span>
+                                  <span className="text-[10px] font-bold bg-primary text-primary-foreground px-2 py-0.5 rounded-lg shadow-sm flex items-center gap-1">
+                                    <Layers className="h-3 w-3" />
+                                    {taskCount} {taskCount === 1 ? 'مهمة' : 'مهام'}
+                                  </span>
+                                </div>
+
+                                {/* Ad type pill */}
+                                {tc.adType && (
+                                  <div className="absolute bottom-2.5 right-2.5 max-w-[85%] truncate text-[10px] font-bold text-white/90 bg-black/60 backdrop-blur-md border border-white/10 px-2.5 py-0.5 rounded-lg">
+                                    {tc.adType}
+                                  </div>
+                                )}
+
+                                {/* Active check badge */}
+                                {isSelected && (
+                                  <div className="absolute top-2.5 left-2.5 bg-primary text-primary-foreground rounded-full p-1 shadow-md">
+                                    <Check className="h-3 w-3" />
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Info Content */}
+                              <div className="p-3 space-y-2 flex-1 flex flex-col justify-between">
+                                <div>
+                                  <div className="text-xs font-bold text-foreground truncate group-hover:text-primary transition-colors">
+                                    {tc.customerName || 'زبون عام'}
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                                    {tc.teams?.length > 0 ? `الفرق: ${tc.teams.join(' • ')}` : 'فريق التركيب غير محدد'}
+                                  </div>
+                                </div>
+
+                                <div className="pt-2 border-t border-border/30 flex items-center justify-between text-[10px]">
+                                  <span className="text-muted-foreground">
+                                    {tc.photoItems || 0} / {tc.totalItems || 0} لوحات مصورة
+                                  </span>
+                                  <span className="font-bold text-primary flex items-center gap-1 group-hover:underline">
+                                    استعراض المهام
+                                    <ChevronLeft className="h-3 w-3" />
+                                  </span>
+                                </div>
+                              </div>
                             </div>
-                          )}
-                        </div>
-                      </button>
-                    );
-                  })}
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* ── STEP 2: TASKS LIST FOR THE SELECTED CONTRACT ── */}
+              {modalSelectedContractId && (
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  {/* Sub-header instruction banner */}
+                  <div className="p-3 px-6 bg-primary/5 border-b border-primary/20 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-primary shrink-0" />
+                      <span className="text-xs font-bold text-foreground">
+                        اختر مهمة التركيب المطلوبة لجلب تصميمها المحدد ولوحاتها إلى الاستوديو:
+                      </span>
+                    </div>
+                    {modalContractTasks.length > 1 && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setSelectedContractId(modalSelectedContractId);
+                          if (modalContractTasks.length > 0) setSelectedTaskId(modalContractTasks[0].id);
+                          loadTaskItems(modalContractTasks.map(x => x.id));
+                          setShowContractModal(false);
+                          setModalSelectedContractId(null);
+                          setTaskSearch('');
+                          toast.success(`تم جلب كافة مهام العقد #${modalSelectedContractId} (${modalContractTasks.length} مهام)`);
+                        }}
+                        className="h-7 text-[11px] font-bold text-primary hover:bg-primary/10 rounded-lg"
+                      >
+                        جلب كافة لوحات العقد (جميع المهام معاً)
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Tasks Cards Grid */}
+                  <div className="flex-1 overflow-y-auto p-5 custom-scrollbar">
+                    {modalContractTasks.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-48 text-muted-foreground gap-2">
+                        <FolderOpen className="h-10 w-10 opacity-30" />
+                        <span className="text-xs">لا توجد مهام تركيب مسجلة لهذا العقد</span>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {modalContractTasks.map((task, idx) => {
+                          const isTaskActive = selectedTaskId === task.id && selectedContractId === modalSelectedContractId;
+                          const typeInfo = getTaskTypeInfo(task.task_type);
+
+                          return (
+                            <div
+                              key={task.id}
+                              onClick={() => {
+                                setSelectedContractId(modalSelectedContractId);
+                                setSelectedTaskId(task.id);
+                                loadTaskItems([task.id]);
+                                setShowContractModal(false);
+                                setModalSelectedContractId(null);
+                                setTaskSearch('');
+                                toast.success(`تم جلب ${typeInfo.label} للعقد #${modalSelectedContractId}`);
+                              }}
+                              className={`group relative flex flex-col rounded-2xl border text-right overflow-hidden transition-all duration-200 hover:shadow-xl cursor-pointer bg-card ${
+                                isTaskActive
+                                  ? 'border-primary ring-2 ring-primary/40 bg-primary/[0.03] shadow-lg'
+                                  : 'border-border/50 hover:border-primary/60 hover:-translate-y-0.5'
+                              }`}
+                            >
+                              {/* Task Design Preview */}
+                              <div className="w-full h-44 bg-muted/60 relative overflow-hidden">
+                                {task.taskDesignImage ? (
+                                  <img
+                                    src={task.taskDesignImage}
+                                    crossOrigin="anonymous"
+                                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground/40 gap-2 bg-gradient-to-b from-muted/30 to-muted">
+                                    <ImageIcon className="h-10 w-10 text-primary/40" />
+                                    <span className="text-[11px] font-bold">لا يوجد تصميم مرفق بالمهمة</span>
+                                  </div>
+                                )}
+
+                                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-black/30 pointer-events-none" />
+
+                                {/* Task Type Badge */}
+                                <div className="absolute top-2.5 right-2.5">
+                                  <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-lg border backdrop-blur-md shadow-sm ${typeInfo.color}`}>
+                                    {typeInfo.label}
+                                  </span>
+                                </div>
+
+                                {/* Task Index / ID Badge */}
+                                <div className="absolute top-2.5 left-2.5">
+                                  <span className="text-[10px] font-mono bg-black/70 text-white/80 border border-white/10 px-2 py-0.5 rounded-lg">
+                                    مهمة #{idx + 1}
+                                  </span>
+                                </div>
+
+                                {/* Active badge */}
+                                {isTaskActive && (
+                                  <div className="absolute bottom-2.5 left-2.5 bg-emerald-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-md shadow-md flex items-center gap-1">
+                                    <Check className="h-3 w-3" />
+                                    المهمة النشطة حالياً
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Task Details */}
+                              <div className="p-3.5 space-y-2.5 flex-1 flex flex-col justify-between">
+                                <div className="space-y-1">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="font-bold text-foreground">
+                                      فريق: {task.team_name || task.installation_teams?.team_name || 'بدون فريق'}
+                                    </span>
+                                    <span className="text-[10px] text-muted-foreground">
+                                      {task.created_at ? new Date(task.created_at).toLocaleDateString('ar-LY') : ''}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground">
+                                    اللوحات: {task.totalItems ?? '—'} لوحة {task.photoItems !== undefined && `(مصورة: ${task.photoItems}/${task.totalItems})`}
+                                  </div>
+                                </div>
+
+                                {/* Select Button */}
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className={`w-full h-8 text-xs font-bold rounded-xl gap-1.5 transition-all ${
+                                    isTaskActive
+                                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                                      : 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                                  }`}
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                  {isTaskActive ? 'تم جلب هذه المهمة' : 'جلب هذه المهمة للتصميم'}
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
-            </div>
 
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-border/30 flex items-center justify-between">
-              <span className="text-[11px] text-muted-foreground">
- {selectedContractId ? ` تم اختيار عقد #${selectedContractId}` : 'لم يتم اختيار عقد بعد'}
-              </span>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => { setShowContractModal(false); setTaskSearch(''); }}>
-                  إلغاء
-                </Button>
-                {selectedContractId && (
-                  <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => { setShowContractModal(false); setTaskSearch(''); }}>
-                    <Check className="h-3.5 w-3.5" />
-                    تأكيد الاختيار
+              {/* ── Modal Footer ── */}
+              <div className="p-3.5 px-6 border-t border-border/30 bg-card/90 flex items-center justify-between">
+                <span className="text-[11px] text-muted-foreground">
+                  {selectedContractId ? `العقد الحالي: #${selectedContractId}` : 'لم يتم اختيار عقد بعد'}
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs rounded-xl"
+                    onClick={() => {
+                      setShowContractModal(false);
+                      setModalSelectedContractId(null);
+                      setTaskSearch('');
+                    }}
+                  >
+                    إغلاق
                   </Button>
-                )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <div className="flex flex-col lg:flex-row gap-5">
 
       {/* ═══════════════ LEFT PANEL (RESTYLED WITH TABS) ═══════════════ */}
       <div className="w-full lg:w-[370px] shrink-0 flex flex-col gap-3 max-h-[calc(100vh-160px)] overflow-y-auto custom-scrollbar">
-        {/* ── Sticky template save toolbar (always visible) ── */}
-        <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-md border border-border/40 rounded-2xl p-2 shadow-md flex items-center gap-2">
-          <Button
-            onClick={handleUpdateTemplate}
-            disabled={savingTemplate || !selectedTemplateId}
-            className="flex-1 h-9 gap-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white rounded-xl shadow-md transition-all disabled:opacity-50"
-            title={selectedTemplateId ? 'حفظ التعديلات في القالب الحالي' : 'حمّل قالباً أولاً'}
-          >
-            <Save className="h-4 w-4" />
-            حفظ تحديثات القالب
-          </Button>
-          <div className="flex gap-1 flex-1">
-            <Input
-              placeholder="اسم قالب جديد..."
-              value={newTemplateName}
-              onChange={(e) => setNewTemplateName(e.target.value)}
-              className="h-9 text-[11px] rounded-xl flex-1"
-            />
-            <Button
-              onClick={handleSaveTemplate}
-              disabled={savingTemplate || !newTemplateName.trim()}
-              size="sm"
-              className="h-9 px-2 gap-1 text-[11px] rounded-xl font-bold bg-primary hover:bg-primary/95"
-              title="حفظ كقالب جديد"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              جديد
-            </Button>
-          </div>
-        </div>
-
         <Tabs defaultValue="data" className="w-full flex flex-col gap-3">
           {/* Elegant tabs navigation */}
-          <TabsList className="grid grid-cols-4 bg-muted/60 p-1.5 rounded-2xl border border-border/25 shadow-sm">
-            <TabsTrigger value="data" className="text-xs font-bold py-2 rounded-xl transition-all data-[state=active]:bg-card data-[state=active]:shadow-sm">البيانات</TabsTrigger>
-            <TabsTrigger value="design" className="text-xs font-bold py-2 rounded-xl transition-all data-[state=active]:bg-card data-[state=active]:shadow-sm">التنسيق</TabsTrigger>
-            <TabsTrigger value="layers" className="text-xs font-bold py-2 rounded-xl transition-all data-[state=active]:bg-card data-[state=active]:shadow-sm">العناصر</TabsTrigger>
-            <TabsTrigger value="templates" className="text-xs font-bold py-2 rounded-xl transition-all data-[state=active]:bg-card data-[state=active]:shadow-sm">القوالب</TabsTrigger>
+          <TabsList className="grid grid-cols-4 bg-muted/60 p-1.5 rounded-2xl border border-border/25 shadow-sm sticky top-0 z-20 backdrop-blur-md">
+            <TabsTrigger value="data" className="text-xs font-bold py-2 rounded-xl transition-all data-[state=active]:bg-card data-[state=active]:shadow-sm flex items-center justify-center gap-1.5">
+              <FolderOpen className="h-3.5 w-3.5" />
+              البيانات
+            </TabsTrigger>
+            <TabsTrigger value="layers" className="text-xs font-bold py-2 rounded-xl transition-all data-[state=active]:bg-card data-[state=active]:shadow-sm flex items-center justify-center gap-1.5">
+              {layoutMode === 'cover' ? <LayoutTemplate className="h-3.5 w-3.5 text-primary" /> : <Layers className="h-3.5 w-3.5 text-primary" />}
+              {layoutMode === 'cover' ? 'الغلاف' : 'العناصر'}
+            </TabsTrigger>
+            <TabsTrigger value="design" className="text-xs font-bold py-2 rounded-xl transition-all data-[state=active]:bg-card data-[state=active]:shadow-sm flex items-center justify-center gap-1.5">
+              <Sliders className="h-3.5 w-3.5" />
+              التنسيق
+            </TabsTrigger>
+            <TabsTrigger value="templates" className="text-xs font-bold py-2 rounded-xl transition-all data-[state=active]:bg-card data-[state=active]:shadow-sm flex items-center justify-center gap-1.5">
+              <Save className="h-3.5 w-3.5" />
+              القوالب
+            </TabsTrigger>
           </TabsList>
 
           {/* ════════ TAB 1: DATA & TASKS ════════ */}
@@ -3825,33 +4312,87 @@ export default function DesignStudio() {
                   </Button>
                 </div>
 
-                {/* Task selector (only when contract has multiple tasks, e.g. re-installation) */}
+                {/* Task switcher (rich interactive cards when contract is selected) */}
                 {selectedContractId && (() => {
                   const contract = groupedContracts.find(c => String(c.contract_id) === selectedContractId);
-                  if (!contract || contract.taskIds.length < 2) return null;
-                  const contractTasks = tasks.filter(t => contract.taskIds.includes(t.id));
-                  const taskTypeLabel = (tt?: string) => {
-                    const v = (tt || '').toLowerCase();
-                    if (v.includes('re') || (tt || '').includes('إعادة')) return 'إعادة تركيب';
-                    if (v.includes('remov') || (tt || '').includes('فك')) return 'فك';
-                    if (v.includes('maint') || (tt || '').includes('صيانة')) return 'صيانة';
-                    return 'تركيب';
-                  };
+                  const contractTasks = tasks.filter(t => String(t.contract_id) === selectedContractId);
+                  if (!contract || contractTasks.length === 0) return null;
+
                   return (
-                    <div className="space-y-1.5">
-                      <Label className="text-[11px] text-muted-foreground">المهمة ({contractTasks.length})</Label>
-                      <Select value={selectedTaskId} onValueChange={selectTaskAndSyncItem}>
-                        <SelectTrigger className="h-9 text-xs rounded-xl">
-                          <SelectValue placeholder="اختر المهمة..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {contractTasks.map(t => (
-                            <SelectItem key={t.id} value={t.id} className="text-xs">
-                              {taskTypeLabel(t.task_type)} — {t.installation_teams?.team_name || 'بدون فريق'} — {t.created_at ? new Date(t.created_at).toLocaleDateString('ar-LY') : ''}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    <div className="space-y-2 p-2.5 rounded-xl border border-border/40 bg-muted/20">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-[11px] font-bold text-foreground flex items-center gap-1.5">
+                          <Layers className="h-3.5 w-3.5 text-primary" />
+                          <span>مهام التركيب للعقد ({contractTasks.length})</span>
+                        </Label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalSelectedContractId(selectedContractId);
+                            setShowContractModal(true);
+                          }}
+                          className="text-[10px] font-bold text-primary hover:underline cursor-pointer flex items-center gap-1"
+                        >
+                          <span>عرض الكل بالتصاميم</span>
+                          <ChevronLeft className="h-3 w-3" />
+                        </button>
+                      </div>
+
+                      {/* Interactive Task Chips / List */}
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar">
+                        {contractTasks.map((t, idx) => {
+                          const isActive = selectedTaskId === t.id;
+                          const typeInfo = getTaskTypeInfo(t.task_type);
+
+                          return (
+                            <button
+                              key={t.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedTaskId(t.id);
+                                loadTaskItems([t.id]);
+                                toast.success(`تم التبديل إلى ${typeInfo.label}`);
+                              }}
+                              className={`w-full flex items-center gap-2 p-2 rounded-lg border text-right transition-all cursor-pointer ${
+                                isActive
+                                  ? 'border-primary bg-primary/10 text-foreground font-bold shadow-sm'
+                                  : 'border-border/30 bg-background/60 hover:bg-muted/50 text-muted-foreground'
+                              }`}
+                            >
+                              {/* Task design thumbnail or icon */}
+                              {t.taskDesignImage ? (
+                                <img
+                                  src={t.taskDesignImage}
+                                  crossOrigin="anonymous"
+                                  className="h-8 w-8 rounded-md object-cover border border-border/40 shrink-0"
+                                />
+                              ) : (
+                                <div className="h-8 w-8 rounded-md bg-muted flex items-center justify-center shrink-0 border border-border/40">
+                                  <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                                </div>
+                              )}
+
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded ${typeInfo.color}`}>
+                                    {typeInfo.label}
+                                  </span>
+                                  <span className="text-[10px] font-mono text-muted-foreground truncate">
+                                    #{idx + 1}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-muted-foreground truncate mt-0.5">
+                                  {t.team_name || t.installation_teams?.team_name || 'بدون فريق'} • {t.totalItems ?? '—'} لوحة
+                                </div>
+                              </div>
+
+                              {isActive && (
+                                <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   );
                 })()}
@@ -4155,51 +4696,21 @@ export default function DesignStudio() {
             <Card className="border-border/40 shadow-lg bg-card/90 backdrop-blur-sm rounded-2xl">
               <CardHeader className="pb-2 pt-3">
                 <CardTitle className="text-sm font-bold flex items-center gap-2">
-                  <MapPin className="h-4 w-4 text-red-400" />
-                  شريط الموقع السفلي
+                  <MapPin className="h-4 w-4 text-primary" />
+                  شريط الموقع السفلي (خلفيات PNG وأنماط الكتابات)
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 pb-4">
-                <div className="flex items-center justify-between">
-                  <Label className="text-[11px]">إظهار شريط الموقع</Label>
-                  <Switch checked={locationStrip.visible} onCheckedChange={(c) => setLocationStrip(p => ({ ...p, visible: c }))} />
-                </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between"><Label className="text-[11px]">الارتفاع</Label><span className="font-mono text-[10px]">{locationStrip.height}px</span></div>
-                  <Slider min={40} max={250} step={1} value={[locationStrip.height]} onValueChange={([v]) => setLocationStrip(p => ({ ...p, height: v }))} />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-[10px]">لون الخلفية</Label>
-                    <div className="flex gap-1">
-                      <Input type="color" value={locationStrip.backgroundColor} onChange={(e) => setLocationStrip(p => ({ ...p, backgroundColor: e.target.value }))} className="w-8 h-8 p-0 border cursor-pointer rounded-md shrink-0" />
-                      <Input value={locationStrip.backgroundColor} onChange={(e) => setLocationStrip(p => ({ ...p, backgroundColor: e.target.value }))} className="h-8 text-[10px] font-mono rounded-lg w-full" />
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px]">لون النص</Label>
-                    <div className="flex gap-1">
-                      <Input type="color" value={locationStrip.textColor} onChange={(e) => setLocationStrip(p => ({ ...p, textColor: e.target.value }))} className="w-8 h-8 p-0 border cursor-pointer rounded-md shrink-0" />
-                      <Input value={locationStrip.textColor} onChange={(e) => setLocationStrip(p => ({ ...p, textColor: e.target.value }))} className="h-8 text-[10px] font-mono rounded-lg w-full" />
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between"><Label className="text-[11px]">الشفافية</Label><span className="font-mono text-[10px]">{Math.round((locationStrip.opacity ?? 0.9) * 100)}%</span></div>
-                  <Slider min={0} max={1} step={0.05} value={[locationStrip.opacity ?? 0.9]} onValueChange={([v]) => setLocationStrip(p => ({ ...p, opacity: v }))} />
-                </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between"><Label className="text-[11px]">تمويه زجاجي (Blur)</Label><span className="font-mono text-[10px]">{locationStrip.blur ?? 10}px</span></div>
-                  <Slider min={0} max={50} step={1} value={[locationStrip.blur ?? 10]} onValueChange={([v]) => setLocationStrip(p => ({ ...p, blur: v }))} />
-                </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between"><Label className="text-[11px]">انحناء الحواف</Label><span className="font-mono text-[10px]">{locationStrip.borderRadius ?? 0}px</span></div>
-                  <Slider min={0} max={100} step={1} value={[locationStrip.borderRadius ?? 0]} onValueChange={([v]) => setLocationStrip(p => ({ ...p, borderRadius: v }))} />
-                </div>
-                <div className="space-y-1">
-                  <div className="flex justify-between"><Label className="text-[11px]">سمك الحدود</Label><span className="font-mono text-[10px]">{locationStrip.borderWidth ?? 0}px</span></div>
-                  <Slider min={0} max={20} step={1} value={[locationStrip.borderWidth ?? 0]} onValueChange={([v]) => setLocationStrip(p => ({ ...p, borderWidth: v }))} />
-                </div>
+                <LocationStripControls
+                  locationStrip={locationStrip}
+                  setLocationStrip={setLocationStrip}
+                  textElements={textElements}
+                  setTextElements={setTextElements}
+                  glassPanel={glassPanel}
+                  setGlassPanel={setGlassPanel}
+                  canvasWidth={canvasWidth}
+                  canvasHeight={canvasHeight}
+                />
               </CardContent>
             </Card>
           </TabsContent>
@@ -4267,12 +4778,12 @@ export default function DesignStudio() {
                         {([
                           { id: 'template1', label: '1 — مموج عميق' },
                           { id: 'template2', label: '2 — كريستال' },
-                          { id: 'template3', label: '3 — زجاج مموّج' },
+                          { id: 'template3', label: '3 — النجمة الذهبية (أسود)' },
                           { id: 'template4', label: '4 — بطاقات' },
                           { id: 'template5', label: '5 — البوابة الذهبية' },
                           { id: 'template6', label: '6 — أسطوانات ثلاثية الأبعاد' },
                           { id: 'template7', label: '7 — موزاييك سينمائي' },
-                          { id: 'template8', label: '8 — الزجاج المكسور' },
+                          { id: 'template8', label: '8 — الغلاف التحريري (أبيض)' },
                         ] as const).map((t) => (
                           <Button
                             key={t.id}
@@ -5177,21 +5688,7 @@ export default function DesignStudio() {
                             <div className="space-y-1">
                               <div className="flex justify-between"><Label className="text-[10px]">ارتفاع الشريط (منزلق)</Label><span className="font-mono text-[9px]">{glassPanel.height}px</span></div>
                               <Slider min={80} max={600} step={2} value={[glassPanel.height]} onValueChange={([v]) => {
-                                const ratio = v / glassPanel.height;
                                 setGlassPanel(p => ({ ...p, height: v }));
-                                setTextElements(prev => prev.map(ei => {
-                                  if (ei.parentStrip === 'panel') {
-                                    const up = { ...ei, y: Math.round(ei.y * ratio) };
-                                    if (ei.type === 'image' && ei.width && ei.height) {
-                                      up.width = Math.round(ei.width * ratio);
-                                      up.height = Math.round(ei.height * ratio);
-                                    } else if (ei.fontSize) {
-                                      up.fontSize = Math.round(ei.fontSize * ratio);
-                                    }
-                                    return up;
-                                  }
-                                  return ei;
-                                }));
                               }} />
                             </div>
                             <div className="grid grid-cols-2 gap-2">
@@ -5243,46 +5740,16 @@ export default function DesignStudio() {
                       if (selectedLayerId === 'location') {
                         return (
                           <div className="space-y-3 border-t pt-3">
-                            <div className="flex items-center justify-between">
-                              <Label className="text-[11px]">إظهار شريط الموقع</Label>
-                              <Switch checked={locationStrip.visible} onCheckedChange={(c) => setLocationStrip(p => ({ ...p, visible: c }))} />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex justify-between"><Label className="text-[11px]">الارتفاع</Label><span className="font-mono text-[10px]">{locationStrip.height}px</span></div>
-                              <Slider min={40} max={250} step={1} value={[locationStrip.height]} onValueChange={([v]) => setLocationStrip(p => ({ ...p, height: v }))} />
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <div className="space-y-1">
-                                <Label className="text-[10px]">لون الخلفية</Label>
-                                <div className="flex gap-1">
-                                  <Input type="color" value={locationStrip.backgroundColor} onChange={(e) => setLocationStrip(p => ({ ...p, backgroundColor: e.target.value }))} className="w-8 h-8 p-0 border cursor-pointer rounded-md shrink-0" />
-                                  <Input value={locationStrip.backgroundColor} onChange={(e) => setLocationStrip(p => ({ ...p, backgroundColor: e.target.value }))} className="h-8 text-[10px] font-mono rounded-lg w-full" />
-                                </div>
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-[10px]">لون النص</Label>
-                                <div className="flex gap-1">
-                                  <Input type="color" value={locationStrip.textColor} onChange={(e) => setLocationStrip(p => ({ ...p, textColor: e.target.value }))} className="w-8 h-8 p-0 border cursor-pointer rounded-md shrink-0" />
-                                  <Input value={locationStrip.textColor} onChange={(e) => setLocationStrip(p => ({ ...p, textColor: e.target.value }))} className="h-8 text-[10px] font-mono rounded-lg w-full" />
-                                </div>
-                              </div>
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex justify-between"><Label className="text-[11px]">الشفافية</Label><span className="font-mono text-[10px]">{Math.round((locationStrip.opacity ?? 0.9) * 100)}%</span></div>
-                              <Slider min={0} max={1} step={0.05} value={[locationStrip.opacity ?? 0.9]} onValueChange={([v]) => setLocationStrip(p => ({ ...p, opacity: v }))} />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex justify-between"><Label className="text-[11px]">تمويه زجاجي (Blur)</Label><span className="font-mono text-[10px]">{locationStrip.blur ?? 10}px</span></div>
-                              <Slider min={0} max={50} step={1} value={[locationStrip.blur ?? 10]} onValueChange={([v]) => setLocationStrip(p => ({ ...p, blur: v }))} />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex justify-between"><Label className="text-[11px]">انحناء الحواف</Label><span className="font-mono text-[10px]">{locationStrip.borderRadius ?? 0}px</span></div>
-                              <Slider min={0} max={100} step={1} value={[locationStrip.borderRadius ?? 0]} onValueChange={([v]) => setLocationStrip(p => ({ ...p, borderRadius: v }))} />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex justify-between"><Label className="text-[11px]">سمك الحدود</Label><span className="font-mono text-[10px]">{locationStrip.borderWidth ?? 0}px</span></div>
-                              <Slider min={0} max={20} step={1} value={[locationStrip.borderWidth ?? 0]} onValueChange={([v]) => setLocationStrip(p => ({ ...p, borderWidth: v }))} />
-                            </div>
+                            <LocationStripControls
+                              locationStrip={locationStrip}
+                              setLocationStrip={setLocationStrip}
+                              textElements={textElements}
+                              setTextElements={setTextElements}
+                              glassPanel={glassPanel}
+                              setGlassPanel={setGlassPanel}
+                              canvasWidth={canvasWidth}
+                              canvasHeight={canvasHeight}
+                            />
                           </div>
                         );
                       }
@@ -5592,6 +6059,18 @@ export default function DesignStudio() {
                                   <Switch checked={el.iconBackground || false} onCheckedChange={(c) => setTextElements(prev => prev.map(ei => ei.id === el.id ? { ...ei, iconBackground: c } : ei))} />
                                 </div>
                               </div>
+
+                              {/* Text Background / Pill Controls */}
+                              <TextBackgroundControls
+                                element={el}
+                                setTextElements={setTextElements}
+                                currentStripContext={
+                                  el.parentStrip === 'location' ||
+                                  ['municipality', 'region', 'landmark', 'municipality_region'].includes(el.id)
+                                    ? 'location'
+                                    : 'panel'
+                                }
+                              />
                             </>
                           )}
 
@@ -5766,15 +6245,14 @@ export default function DesignStudio() {
         {/* ═══════════════ RIGHT: CANVAS (Sticky so it follows scrolling down the side panel) ═══════════════ */}
         <div className="flex-1 flex flex-col gap-3 lg:sticky lg:top-4 self-start">
 
-          {/* ── Toolbar ── */}
-          <Card className="border-border/40 shadow-lg bg-card/90 backdrop-blur-sm">
-            <CardContent className="py-2.5 px-4 flex flex-wrap items-center justify-between gap-3">
-
-              {/* Size */}
-              <div className="flex flex-wrap items-center gap-2 text-xs">
+          {/* ── Sleek Unified Canvas Toolbar ── */}
+          <Card className="border-border/40 shadow-md bg-card/95 backdrop-blur-md rounded-2xl">
+            <CardContent className="py-2 px-3 flex flex-wrap items-center justify-between gap-2.5">
+              {/* Dimensions Presets */}
+              <div className="flex items-center gap-1.5 text-xs">
                 <Select onValueChange={handlePresetSize}>
-                  <SelectTrigger className="h-8 w-28 text-[11px] bg-muted/40">
-                    <SelectValue placeholder="قوالب المقاس..." />
+                  <SelectTrigger className="h-8 w-28 text-[11px] bg-muted/50 rounded-xl">
+                    <SelectValue placeholder="المقاس..." />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="portrait">عمودي (1500×2000)</SelectItem>
@@ -5785,15 +6263,26 @@ export default function DesignStudio() {
                   </SelectContent>
                 </Select>
                 <div className="flex items-center gap-1">
-                  <Input type="number" value={canvasWidth} onChange={(e) => updateCanvasWidth(parseInt(e.target.value) || 1500)} className="h-8 w-14 text-center text-[11px]" />
-                  <span className="text-muted-foreground">×</span>
-                  <Input type="number" value={canvasHeight} onChange={(e) => updateCanvasHeight(parseInt(e.target.value) || 2000)} className="h-8 w-14 text-center text-[11px]" />
+                  <Input
+                    type="number"
+                    value={canvasWidth}
+                    onChange={(e) => updateCanvasWidth(parseInt(e.target.value) || 1500)}
+                    className="h-8 w-14 text-center text-[11px] rounded-lg"
+                  />
+                  <span className="text-muted-foreground text-[10px]">×</span>
+                  <Input
+                    type="number"
+                    value={canvasHeight}
+                    onChange={(e) => updateCanvasHeight(parseInt(e.target.value) || 2000)}
+                    className="h-8 w-14 text-center text-[11px] rounded-lg"
+                  />
                 </div>
               </div>
 
-              {/* If cover mode, show Template options */}
-              {layoutMode === 'cover' && (
-                <div className="flex items-center gap-1.5 bg-muted/40 border border-border/50 rounded-2xl p-1 shrink-0 flex-wrap">
+              {/* Mode-Specific Controls */}
+              {layoutMode === 'cover' ? (
+                /* Cover Mode: Quick Template Switcher & Mix */
+                <div className="flex items-center gap-1 bg-muted/60 border border-border/40 rounded-xl p-1 shrink-0 flex-wrap">
                   {([
                     { id: 'template1', label: '1' },
                     { id: 'template2', label: '2' },
@@ -5809,51 +6298,34 @@ export default function DesignStudio() {
                       type="button"
                       variant={coverTemplate === t.id ? 'default' : 'ghost'}
                       size="sm"
-                      className="h-7 w-7 p-0 text-xs font-bold rounded-lg"
+                      className={`h-7 w-7 p-0 text-xs font-bold rounded-lg transition-all ${
+                        coverTemplate === t.id
+                          ? 'bg-primary text-primary-foreground shadow-sm'
+                          : 'hover:bg-primary/10'
+                      }`}
                       onClick={() => handleSelectTemplate(t.id as any)}
                       title={`قالب ${t.label}`}
                     >
                       {t.label}
                     </Button>
                   ))}
-                  <div className="w-px h-5 bg-border/60 mx-0.5" />
+                  <div className="w-px h-4 bg-border/60 mx-1" />
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="h-7 px-2.5 text-[11px] rounded-full gap-1 whitespace-nowrap"
+                    className="h-7 px-2.5 text-[11px] font-bold rounded-lg gap-1 whitespace-nowrap"
                     onClick={() => setCoverShuffleSeed(Date.now())}
                     title="خلط التصميم عشوائياً"
                   >
                     <Shuffle className="h-3 w-3" />
-                    خلط
+                    <span>خلط</span>
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2.5 text-[11px] rounded-full gap-1 whitespace-nowrap"
-                    onClick={() => {
-                      const current = coverT4.zoom ?? 1.5;
-                      let next = 1.5;
-                      if (current === 1.5) next = 2.0;
-                      else if (current === 2.0) next = 2.5;
-                      else if (current === 2.5) next = 3.0;
-                      else if (current === 3.0) next = 1.0;
-                      else next = 1.5;
-                      setCoverT4(p => ({ ...p, zoom: next }));
-                    }}
-                    title="التحكم بمستوى تكبير الكروت (الزوم)"
-                  >
-                    <ZoomIn className="h-3 w-3" />
-                    زوم: {(coverT4.zoom ?? 1.5).toFixed(1)}x
-                  </Button>
-                  <div className="w-px h-5 bg-border/60 mx-0.5" />
                   <Button
                     type="button"
                     variant={coverUseInstalledImages && !coverMixImages ? 'default' : 'outline'}
                     size="sm"
-                    className="h-7 px-2.5 text-[11px] rounded-full gap-1 whitespace-nowrap"
+                    className="h-7 px-2 text-[10px] font-bold rounded-lg whitespace-nowrap"
                     onClick={() => {
                       setCoverUseInstalledImages(prev => !prev);
                       setCoverMixImages(false);
@@ -5862,124 +6334,36 @@ export default function DesignStudio() {
                   >
                     صور التركيب
                   </Button>
-                  <Button
-                    type="button"
-                    variant={coverMixImages ? 'default' : 'outline'}
-                    size="sm"
-                    className="h-7 px-2.5 text-[11px] rounded-full gap-1 whitespace-nowrap"
-                    onClick={() => {
-                      setCoverMixImages(prev => !prev);
-                    }}
-                    title="خلط صور التصميم وصور التركيب معاً"
-                  >
-                    خلط الصور
-                  </Button>
-                  <div className="w-px h-5 bg-border/60 mx-0.5" />
-                  <Button
-                    type="button"
-                    variant={coverSwapSides ? 'default' : 'outline'}
-                    size="sm"
-                    className="h-7 px-2.5 text-[11px] rounded-full gap-1 whitespace-nowrap"
-                    onClick={() => setCoverSwapSides(v => !v)}
- title="عكس الاتجاه (يمين يسار)"
-                  >
-                    عكس
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={coverTextCentered ? 'default' : 'outline'}
-                    size="sm"
-                    className="h-7 px-2.5 text-[11px] rounded-full gap-1 whitespace-nowrap"
-                    onClick={() => setCoverTextCentered(v => !v)}
-                    title="توسيط النص"
-                  >
-                    توسيط
-                  </Button>
                 </div>
-              )}
-
-              {/* Controls */}
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setLockMode(!lockMode)}
-                  className={`h-8 px-2.5 gap-1.5 text-xs ${lockMode ? 'bg-amber-500/20 border-amber-500/50 text-amber-600' : ''}`}
-                >
-                  {lockMode ? <Lock className="h-3.5 w-3.5" /> : <Unlock className="h-3.5 w-3.5" />}
-                  {lockMode ? 'إلغاء قفل العناصر' : 'قفل العناصر'}
-                </Button>
-
-                <div className="flex items-center border rounded-md p-0.5 bg-muted/40">
-                  <Button variant="ghost" size="icon" onClick={() => setZoom(z => Math.min(2, z + 0.05))} className="h-7 w-7" title="تكبير">
-                    <ZoomIn className="h-3.5 w-3.5" />
-                  </Button>
-                  <span className="text-[10px] font-mono w-8 text-center">{Math.round(zoom * 100)}%</span>
-                  <Button variant="ghost" size="icon" onClick={() => setZoom(z => Math.max(0.1, z - 0.05))} className="h-7 w-7" title="تصغير">
-                    <ZoomOut className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-                
-                <Button variant="outline" size="sm" onClick={() => setZoom(0.38)} className="h-8 px-2 text-xs">ملاءمة</Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* ── Central Quick Dashboard Controls ── */}
-          {showQuickControls ? (
-            <div className="w-full mx-auto">
-              <Card className="border-border/40 shadow-xl bg-card/90 backdrop-blur-md px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 rounded-2xl relative">
-                {/* Collapse button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setShowQuickControls(false)}
-                  className="absolute -top-3 -left-3 h-6 w-6 rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/95 shadow-md flex items-center justify-center border border-border/20"
-                  title="إخفاء اللوحة"
-                >
-                  <X className="h-3 w-3" />
-                </Button>
-                {/* Group 1: Zoom In / Out */}
+              ) : (
+                /* Card Mode: Billboard Navigator & Face Switcher */
                 <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground font-bold">الزووم:</span>
-                  <div className="flex items-center border rounded-xl p-0.5 bg-muted/40 border-border/50">
-                    <Button variant="ghost" size="icon" onClick={() => setZoom(z => Math.max(0.1, z - 0.05))} className="h-7 w-7 rounded-lg" title="تصغير">
-                      <ZoomOut className="h-3.5 w-3.5" />
-                    </Button>
-                    <span className="text-xs font-bold font-mono px-2 min-w-[40px] text-center">{Math.round(zoom * 100)}%</span>
-                    <Button variant="ghost" size="icon" onClick={() => setZoom(z => Math.min(2, z + 0.05))} className="h-7 w-7 rounded-lg" title="تكبير">
-                      <ZoomIn className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setZoom(0.38)} className="h-7 px-1.5 text-[10px] rounded-lg font-bold" title="إعادة تعيين الزوم">
-                      38%
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="h-5 w-px bg-border/60" />
-
-                {/* Group 2: Photo / Item Navigation */}
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground font-bold">اللوحة:</span>
-                  <div className="flex items-center gap-1 bg-muted/40 border border-border/50 rounded-xl p-0.5">
-                    <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg" disabled={!canGoPrev} onClick={goToPrevItem} title="السابق">
+                  <div className="flex items-center gap-1 bg-muted/60 border border-border/40 rounded-xl p-0.5">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 rounded-lg"
+                      disabled={!canGoPrev}
+                      onClick={goToPrevItem}
+                      title="السابق"
+                    >
                       <ChevronRight className="h-3.5 w-3.5" />
                     </Button>
-                    <span className="text-xs font-bold px-2 select-none text-foreground">
+                    <span className="text-xs font-bold px-2 text-foreground font-mono">
                       {currentItemIndex + 1} / {taskItems.length || 1}
                     </span>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg" disabled={!canGoNext} onClick={goToNextItem} title="التالي">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 rounded-lg"
+                      disabled={!canGoNext}
+                      onClick={goToNextItem}
+                      title="التالي"
+                    >
                       <ChevronLeft className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                </div>
-
-                <div className="h-5 w-px bg-border/60" />
-
-                {/* Group 3: Face Switcher */}
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-muted-foreground font-bold">الوجه:</span>
-                  <div className="flex bg-muted/40 border border-border/50 rounded-xl p-0.5 gap-0.5">
+                  <div className="flex bg-muted/60 border border-border/40 rounded-xl p-0.5 gap-0.5">
                     <Button
                       variant={imageSource === 'face_a' ? 'default' : 'ghost'}
                       size="sm"
@@ -6000,41 +6384,45 @@ export default function DesignStudio() {
                     </Button>
                   </div>
                 </div>
+              )}
 
-                <div className="h-5 w-px bg-border/60" />
-
-                {/* Group 4: Download & Upload */}
-                <div className="flex items-center gap-1.5">
-                  <Label
-                    className="flex items-center justify-center gap-1 h-8 px-2.5 border border-border/60 hover:bg-accent/40 rounded-xl cursor-pointer text-[10px] font-bold transition-all"
-                  >
-                    <Upload className="h-3 w-3" />
-                    <span>رفع صورة</span>
-                    <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-                  </Label>
-
+              {/* Canvas Zoom Controls */}
+              <div className="flex items-center gap-1">
+                <div className="flex items-center border border-border/40 rounded-xl p-0.5 bg-muted/50">
                   <Button
-                    onClick={handleExportCard}
-                    size="sm"
-                    className="h-8 gap-1 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-lg text-[10px]"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setZoom((z) => Math.max(0.1, z - 0.05))}
+                    className="h-7 w-7 rounded-lg"
+                    title="تصغير"
                   >
-                    <Download className="h-3 w-3" />
-                    تحميل الصورة
+                    <ZoomOut className="h-3.5 w-3.5" />
+                  </Button>
+                  <span className="text-xs font-mono font-bold w-10 text-center">
+                    {Math.round(zoom * 100)}%
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setZoom((z) => Math.min(2, z + 0.05))}
+                    className="h-7 w-7 rounded-lg"
+                    title="تكبير"
+                  >
+                    <ZoomIn className="h-3.5 w-3.5" />
                   </Button>
                 </div>
-              </Card>
-            </div>
-          ) : (
-            <div className="flex justify-center w-full py-1">
-              <Button
-                onClick={() => setShowQuickControls(true)}
-                className="shadow-xl bg-card/95 hover:bg-accent border border-border/50 text-foreground gap-1.5 px-4 py-2.5 rounded-full font-bold text-[11px] backdrop-blur-md transition-all hover:scale-105"
-              >
-                <Sliders className="h-3.5 w-3.5 text-primary" />
-                <span>إظهار لوحة التحكم السريعة</span>
-              </Button>
-            </div>
-          )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setZoom(0.38)}
+                  className="h-8 px-2.5 text-xs font-bold rounded-xl"
+                  title="ملاءمة لحجم الشاشة"
+                >
+                  ملاءمة
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* ── Canvas Viewport ── */}
           <div className="flex-1 overflow-auto bg-muted/20 border border-border/40 rounded-2xl flex items-center justify-center p-6 min-h-[500px] relative">
@@ -7653,620 +8041,41 @@ export default function DesignStudio() {
                       );
                     }
 
-                    // ============= TEMPLATE 3 — PREMIUM 3D FLOATING MOSAIC =============
+                    // ============= TEMPLATE 3 — SHARD SPHERE (النجمة الذهبية - الأسود الفاخر) =============
                     if (coverTemplate === 'template3') {
-                      const accent = coverAccentColor;
-                      const glow = coverGlowColor;
-                      const gI = coverGlowIntensity;
-                      const swap = coverSwapSides;
-                      const textAlign: 'left' | 'right' | 'center' = 'center';
-
-                      const photos = pickPhotos(8); // 8 shards
-                      const crops = getTemplateCrops(photos, 8);
-
-                      const w = canvasWidth;
-                      const h = canvasHeight;
-                      const scaleFactor = w / 1200;
-
-                      const spotlightColor = (!glow || glow === '#000000' || glow === 'black' || glow === '#000') ? accent : glow;
-                      const activeIntensity = coverT5ColorMode ? (coverT4.fgBlur ?? 0.6) : 0;
-                      const effectIntensity = 1.0;
-
-                      // Define the 3D cards metadata with dynamic positions and polygon points for glass shards
-                      // Adjusted to leave the top center completely empty for the brand logo header
-                      const cards = [
-                        // 1. Top-Left Shard
-                        { 
-                          x: 0.03, y: 0.02, width: 0.36, height: 0.40, 
-                          rotX: -12, rotY: -15, rotZ: -8, tz: -20,
-                          p1: { x: 0, y: 0 }, p2: { x: 100, y: 15 }, p3: { x: 75, y: 100 }, p4: { x: 0, y: 100 },
-                          sparkleIndex: 2,
-                          drawEdges: [false, true, true, false] // pt2->pt3 and pt3->pt4
-                        },
-                        // 2. Top-Right Shard
-                        { 
-                          x: 0.62, y: 0.02, width: 0.36, height: 0.40, 
-                          rotX: -10, rotY: 15, rotZ: 8, tz: -15,
-                          p1: { x: 0, y: 15 }, p2: { x: 100, y: 0 }, p3: { x: 100, y: 100 }, p4: { x: 25, y: 100 },
-                          sparkleIndex: 3,
-                          drawEdges: [false, false, true, true] // pt3->pt4 and pt4->pt1
-                        },
-                        // 3. Right Shard (center right)
-                        { 
-                          x: 0.68, y: 0.32, width: 0.30, height: 0.36, 
-                          rotX: 5, rotY: 18, rotZ: 4, tz: 60,
-                          p1: { x: 25, y: 0 }, p2: { x: 100, y: 10 }, p3: { x: 100, y: 90 }, p4: { x: 0, y: 100 },
-                          sparkleIndex: 3,
-                          drawEdges: [true, false, false, true] // pt1->pt2 and pt4->pt1
-                        },
-                        // 4. Bottom-Right Shard
-                        { 
-                          x: 0.62, y: 0.58, width: 0.36, height: 0.40, 
-                          rotX: 12, rotY: 15, rotZ: -6, tz: -50,
-                          p1: { x: 0, y: 0 }, p2: { x: 100, y: 0 }, p3: { x: 100, y: 100 }, p4: { x: 25, y: 75 },
-                          sparkleIndex: 0,
-                          drawEdges: [true, false, false, false] // pt1->pt2
-                        },
-                        // 5. Bottom-Center-Right Shard
-                        { 
-                          x: 0.46, y: 0.66, width: 0.28, height: 0.32, 
-                          rotX: 15, rotY: 8, rotZ: -2, tz: -40,
-                          p1: { x: 30, y: 0 }, p2: { x: 100, y: 15 }, p3: { x: 90, y: 100 }, p4: { x: 0, y: 100 },
-                          sparkleIndex: 0,
-                          drawEdges: [false, false, false, true] // pt4->pt1
-                        },
-                        // 6. Bottom-Center-Left Shard
-                        { 
-                          x: 0.26, y: 0.66, width: 0.28, height: 0.32, 
-                          rotX: 15, rotY: -8, rotZ: 2, tz: -30,
-                          p1: { x: 0, y: 15 }, p2: { x: 70, y: 0 }, p3: { x: 100, y: 100 }, p4: { x: 10, y: 100 },
-                          sparkleIndex: 1,
-                          drawEdges: [false, true, false, false] // pt2->pt3
-                        },
-                        // 7. Bottom-Left Shard
-                        { 
-                          x: 0.02, y: 0.58, width: 0.36, height: 0.40, 
-                          rotX: 10, rotY: -18, rotZ: 6, tz: 80,
-                          p1: { x: 0, y: 0 }, p2: { x: 100, y: 0 }, p3: { x: 75, y: 75 }, p4: { x: 0, y: 100 },
-                          sparkleIndex: 1,
-                          drawEdges: [true, true, false, false] // pt1->pt2 and pt2->pt3
-                        },
-                        // 8. Left Shard (center left)
-                        { 
-                          x: 0.02, y: 0.32, width: 0.30, height: 0.36, 
-                          rotX: -5, rotY: -15, rotZ: -4, tz: 40,
-                          p1: { x: 0, y: 10 }, p2: { x: 75, y: 0 }, p3: { x: 100, y: 100 }, p4: { x: 0, y: 90 },
-                          sparkleIndex: 1,
-                          drawEdges: [false, true, true, false] // pt2->pt3 and pt3->pt4
-                        }
-                      ];
-
-                      // Seeded random wobbly offsets for the shards to make the shattering look irregular and organic
-                      const wobblyCards = cards.map((c, idx) => {
-                        const seed = (coverShuffleSeed || 1) + idx * 79;
-                        const cardRng = mulberry32(seed);
-                        const cardRand = (min: number, max: number) => min + cardRng() * (max - min);
-
-                        // Randomized rotation, positions, sizes, and depth translation based on shuffle seed!
-                        const rotXMod = cardRand(-12, 12) * effectIntensity;
-                        const rotYMod = cardRand(-12, 12) * effectIntensity;
-                        const rotZMod = cardRand(-6, 6) * effectIntensity;
-                        const tzMod = (c.tz + cardRand(-25, 25)) * effectIntensity;
-
-                        const widthMod = c.width * cardRand(0.9, 1.1);
-                        const heightMod = c.height * cardRand(0.9, 1.1);
-                        const xMod = c.x + cardRand(-0.02, 0.02);
-                        const yMod = c.y + cardRand(-0.02, 0.02);
-                        
-                        const wp1 = c.p1;
-                        const wp2 = c.p2;
-                        const wp3 = c.p3;
-                        const wp4 = c.p4;
-
-                        const flipX = false;
-                        const flipY = false;
-
-                        const brightnessOffset = cardRand(-0.04, 0.04);
-                        const contrastOffset = cardRand(-0.02, 0.05);
-
-                        return {
-                          ...c,
-                          x: xMod,
-                          y: yMod,
-                          width: widthMod,
-                          height: heightMod,
-                          rotX: rotXMod,
-                          rotY: rotYMod,
-                          rotZ: rotZMod,
-                          tz: tzMod,
-                          p1: wp1,
-                          p2: wp2,
-                          p3: wp3,
-                          p4: wp4,
-                          flipX,
-                          flipY,
-                          brightness: 0.98 + brightnessOffset,
-                          contrast: 1.02 + contrastOffset,
-                          seed
-                        };
-                      });
-
-                      // Circle size (increased to 48% for a larger sphere presence)
-                      const circleSize = Math.round(Math.min(w, h) * 0.48);
-
-                      const campaignTitle = (adTypeOverride && adTypeOverride.trim()) || ((groupedContracts.find((x:any) => String(x.contract_id) === selectedContractId) as any)?.adType) || coverCampaignName || coverTitle2;
-                      const kickerText = coverKicker;
-                      const taglineText = coverTagline;
-
-                      const panelLogoEl = textElements.find(el => el.id === 'company_logo');
-                      const logoSrc = companyInfo.logoUrl || panelLogoEl?.url || '';
-
-                      // Dynamic background source from main design image
-                      const bgRng = mulberry32(coverShuffleSeed + 999);
-                      const bgPhotoIdx = photos.length > 0 ? Math.floor(bgRng() * photos.length) : 0;
-                      const bgPhoto = photos[bgPhotoIdx]?.url || canvasImageUrl || 'https://images.unsplash.com/photo-1519501025264-65ba15a82390?w=1600&auto=format&fit=crop';
-
-                      const crackColor = coverT5ColorMode ? accent : '#f4c25a';
-                      const bgBrightness = 0.25 - activeIntensity * 0.03;
-                      const bgSaturate = 1.0 - activeIntensity * 0.9;
-                      const bgGrayscale = activeIntensity * 0.9;
+                      const accent = coverAccentColor || '#d6ac40';
+                      const photos = pickPhotos(1);
+                      const crops = getTemplateCrops(photos, 1);
+                      const campaignTitle = ((adTypeOverride && adTypeOverride.trim()) || ((groupedContracts.find((x: any) => String(x.contract_id) === selectedContractId) as any)?.adType) || coverCampaignName || coverTitle2) || 'اسم الحملة';
 
                       return (
-                        <div className="w-full h-full relative flex flex-col select-none text-white overflow-hidden" 
-                          style={{ 
-                            ['--cover-accent' as any]: accent, 
-                            background: '#030305',
-                            padding: '64px' 
-                          }}
-                        >
-                          {/* 0. Blurred design image background replica (independently blurred at Z-0) */}
-                          <div 
-                            className="absolute inset-0 z-0 pointer-events-none scale-105"
-                            style={{
-                              backgroundImage: `url('${bgPhoto}')`,
-                              backgroundSize: 'cover',
-                              backgroundPosition: 'center',
-                              filter: `blur(16px) brightness(${bgBrightness}) saturate(${bgSaturate}) grayscale(${bgGrayscale})`,
-                              opacity: 0.98
-                            }}
-                          />
-                          {/* Dynamic accent color overlay on background */}
-                          {coverT5ColorMode && (
-                            <div 
-                              className="absolute inset-0 z-0 pointer-events-none"
-                              style={{
-                                background: getRGBAColor(accent, activeIntensity * 0.35),
-                                mixBlendMode: 'color',
-                              }}
-                            />
-                          )}
-                          {/* Floating accent-colored background lights */}
-                          <div className="absolute inset-0 z-0 pointer-events-none" style={{ mixBlendMode: 'screen', opacity: 0.5 }}>
-                            <div className="absolute rounded-full" style={{ left: '10%', top: '15%', width: '400px', height: '400px', background: `radial-gradient(circle, ${getRGBAColor(accent, 0.22)} 0%, transparent 70%)`, filter: 'blur(50px)' }} />
-                            <div className="absolute rounded-full" style={{ right: '10%', bottom: '15%', width: '500px', height: '500px', background: `radial-gradient(circle, ${getRGBAColor(accent, 0.22)} 0%, transparent 70%)`, filter: 'blur(60px)' }} />
-                          </div>
-                          {/* Dark vignette overlay for contrast and depth */}
-                          <div 
-                            className="absolute inset-0 z-0 pointer-events-none"
-                            style={{
-                              background: 'radial-gradient(circle, transparent 35%, rgba(3, 3, 5, 0.8) 100%), linear-gradient(180deg, rgba(3, 3, 5, 0.3) 0%, rgba(12, 13, 18, 0.6) 100%)'
-                            }}
-                          />
-
-                          {/* 1. Brand Logo Header Section (Unified with other templates) */}
-                          <Header accent={accent} brandRight={swap} align={textAlign} imagesSide={undefined} />
-
-                          {/* 2. Spotlight background behind text/glass (Z-index: 15) */}
-                          <div className="absolute pointer-events-none z-[15]" 
-                            style={{ 
-                              left: '50%',
-                              top: '50%',
-                              width: `${circleSize * 1.5}px`,
-                              height: `${circleSize * 1.5}px`,
-                              transform: 'translate(-50%, -50%)',
-                              background: `radial-gradient(circle, ${spotlightColor}${alphaToHex(0.35 * gI.opacity)} 0%, ${spotlightColor}${alphaToHex(0.10 * gI.opacity)} 50%, transparent 80%)`, 
-                              filter: `blur(${gI.blur * 1.5}px)`,
-                              opacity: 0.95
-                            }} 
-                          />
-
-                          {/* 3. 3D Floating Glass Shards (Z-index: 10) */}
-                          {coverShow.collage && (
-                            <div className="absolute inset-0 z-10 pointer-events-none" style={{ perspective: '1200px', transformStyle: 'preserve-3d' }}>
-                              {wobblyCards.map((c, idx) => {
-                                const photo = photos[idx % photos.length] || photos[0];
-                                if (!photo) return null;
-                                const crop = crops[idx % crops.length] || { x: 50, y: 50 };
-
-                                const cardWidth = Math.round(w * c.width);
-                                const cardHeight = Math.round(h * c.height);
-                                
-                                // Mirror horizontal coordinates if swap is active
-                                const left = swap ? Math.round(w * (1 - c.x - c.width)) : Math.round(w * c.x);
-                                const p1x = swap ? 100 - c.p1.x : c.p1.x;
-                                const p2x = swap ? 100 - c.p2.x : c.p2.x;
-                                const p3x = swap ? 100 - c.p3.x : c.p3.x;
-                                const p4x = swap ? 100 - c.p4.x : c.p4.x;
-                                
-                                const p1y = c.p1.y;
-                                const p2y = c.p2.y;
-                                const p3y = c.p3.y;
-                                const p4y = c.p4.y;
-
-                                // Maintain clockwise drawing order for polygon
-                                const pt1 = swap ? { x: p2x, y: p2y } : { x: p1x, y: p1y };
-                                const pt2 = swap ? { x: p1x, y: p1y } : { x: p2x, y: p2y };
-                                const pt3 = swap ? { x: p4x, y: p4y } : { x: p3x, y: p3y };
-                                const pt4 = swap ? { x: p3x, y: p3y } : { x: p4x, y: p4y };
-
-                                const clipPathVal = `polygon(${pt1.x}% ${pt1.y}%, ${pt2.x}% ${pt2.y}%, ${pt3.x}% ${pt3.y}%, ${pt4.x}% ${pt4.y}%)`;
-                                const pointsStr = `${pt1.x * cardWidth / 100},${pt1.y * cardHeight / 100} ${pt2.x * cardWidth / 100},${pt2.y * cardHeight / 100} ${pt3.x * cardWidth / 100},${pt3.y * cardHeight / 100} ${pt4.x * cardWidth / 100},${pt4.y * cardHeight / 100}`;
-                                const top = Math.round(h * c.y);
-
-                                // Sparkle coordinates on the inner corner
-                                const sparklePt = [pt1, pt2, pt3, pt4][c.sparkleIndex ?? 0];
-                                const sparkleX = Math.round(sparklePt.x * cardWidth / 100);
-                                const sparkleY = Math.round(sparklePt.y * cardHeight / 100);
-
-                                // Card-specific random shift for refraction effect
-                                const cardRng = mulberry32(c.seed);
-                                const cardRand = (min: number, max: number) => min + cardRng() * (max - min);
-                                const refractX = Math.round(cardRand(-180, 180)); // Much larger visible shift
-                                const refractY = Math.round(cardRand(-180, 180)); // Much larger visible shift
-                                const refractScale = cardRand(1.18, 1.48); // Much larger visible scale
-
-                                // Dynamic 3D transformations scaling with effectIntensity
-                                const rotXVal = (swap ? -c.rotX : c.rotX) * effectIntensity;
-                                const rotYVal = (swap ? -c.rotY : c.rotY) * effectIntensity;
-                                const rotZVal = (swap ? -c.rotZ : c.rotZ) * effectIntensity;
-                                const tzVal = c.tz * effectIntensity;
-
-                                const refractScaleVal = refractScale;
-                                const refractXVal = refractX;
-                                const refractYVal = refractY;
-
-                                return (
-                                  <div
-                                    key={`t3-card-${idx}`}
-                                    className="absolute transition-all duration-300 pointer-events-none"
-                                    style={{
-                                      left: `${left}px`,
-                                      top: `${top}px`,
-                                      width: `${cardWidth}px`,
-                                      height: `${cardHeight}px`,
-                                      transform: `perspective(1200px) rotateX(${rotXVal}deg) rotateY(${rotYVal}deg) rotateZ(${rotZVal}deg) translateZ(${tzVal}px)`,
-                                      transformStyle: 'preserve-3d',
-                                      filter: `drop-shadow(0 ${10 * effectIntensity}px ${20 * effectIntensity}px rgba(0, 0, 0, ${0.55 * effectIntensity}))`,
-                                    }}
-                                  >
-                                    {/* 2D Glass Extrusion Layers (Stacking layers with 2D offsets to simulate thick glass edges) */}
-                                    {/* 2D Glass Extrusion Layers (Stacking 10 layers with 2D offsets to simulate realistic thick glass edges) */}
-                                    {Array.from({ length: 10 }).map((_, lIdx) => {
-                                      const step = lIdx + 1;
-                                      const offset = step * 1.5 * effectIntensity;
-                                      const scale = 1.0 - step * 0.0015;
-                                      const bgOpacity = (0.04 - step * 0.003) * effectIntensity;
-                                      const borderOpacity = (0.28 - step * 0.02) * effectIntensity;
-                                      
-                                      return (
-                                        <div
-                                          key={`t3-glass-layer-${idx}-${lIdx}`}
-                                          className="absolute inset-0 pointer-events-none"
-                                          style={{
-                                            clipPath: clipPathVal,
-                                            transform: `translate(${-offset}px, ${offset}px) scale(${scale})`,
-                                            background: `linear-gradient(135deg, rgba(255, 255, 255, ${Math.max(0.08, bgOpacity * 2.0)}) 0%, rgba(255, 255, 255, 0.01) 50%, rgba(0, 0, 0, 0.2) 100%)`,
-                                            border: `1.2px solid rgba(255, 255, 255, ${Math.max(0.08, borderOpacity * 1.2)})`,
-                                          }}
-                                        />
-                                      );
-                                    })}
-
-                                    {/* The clipped card image wrapper */}
-                                    <div
-                                      className="w-full h-full absolute inset-0 overflow-hidden"
-                                      style={{
-                                        clipPath: clipPathVal,
-                                        background: '#0e1017',
-                                        boxShadow: `0 ${20 * effectIntensity}px ${45 * effectIntensity}px rgba(0,0,0,${0.55 * effectIntensity})`,
-                                      }}
-                                    >
-                                      <img
-                                        src={coverMixImages ? photo.url : bgPhoto}
-                                        crossOrigin="anonymous"
-                                        alt="Design"
-                                        className="absolute object-cover"
-                                        style={coverMixImages ? {
-                                          left: 0,
-                                          top: 0,
-                                          width: '100%',
-                                          height: '100%',
-                                          objectFit: 'cover',
-                                          objectPosition: `${crop.x}% ${crop.y}%`,
-                                          filter: `contrast(${c.contrast * (1 + activeIntensity * 0.08)}) brightness(${c.brightness * (1 - activeIntensity * 0.03)}) saturate(${1.0 - activeIntensity * 0.5}) grayscale(${activeIntensity * 0.5})`,
-                                          transform: `scale(${refractScaleVal * 1.15}) translate(${refractXVal / 2}px, ${refractYVal / 2}px)`,
-                                        } : {
-                                          left: `${-left}px`,
-                                          top: `${-top}px`,
-                                          width: `${w}px`,
-                                          height: `${h}px`,
-                                          maxWidth: 'none',
-                                          filter: `contrast(${c.contrast * (1 + activeIntensity * 0.08)}) brightness(${c.brightness * (1 - activeIntensity * 0.03)}) saturate(${1.0 - activeIntensity * 0.5}) grayscale(${activeIntensity * 0.5})`,
-                                          transform: `scale(${refractScaleVal}) translate(${refractXVal}px, ${refractYVal}px)`,
-                                          transformOrigin: `${left + cardWidth / 2}px ${top + cardHeight / 2}px`,
-                                        }}
-                                      />
-                                      {/* Dynamic accent color overlay */}
-                                      {coverT5ColorMode && (
-                                        <div className="absolute inset-0 pointer-events-none z-[4]"
-                                          style={{
-                                            background: getRGBAColor(accent, activeIntensity * 0.6),
-                                            mixBlendMode: 'color',
-                                          }}
-                                        />
-                                      )}
-                                      {/* Accent color grading multiply overlay */}
-                                      <div className="absolute inset-0 pointer-events-none"
-                                        style={{
-                                          background: `linear-gradient(135deg, ${getRGBAColor(accent, activeIntensity * 0.15)} 0%, rgba(0,0,0,0.4) 100%)`,
-                                          mixBlendMode: 'multiply',
-                                          opacity: activeIntensity * 0.8
-                                        }}
-                                      />
-                                      {/* Glass sheen overlay (1. Diagonal general gloss) */}
-                                      <div className="absolute inset-0 pointer-events-none"
-                                        style={{
-                                          background: 'linear-gradient(135deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.03) 40%, rgba(0,0,0,0.45) 100%)',
-                                          mixBlendMode: 'overlay',
-                                        }}
-                                      />
-                                      {/* Glass sheen overlay (2. Diagonal sharp specular glare streak floating slightly above) */}
-                                      <div className="absolute inset-0 pointer-events-none z-[8]"
-                                        style={{
-                                          background: 'linear-gradient(105deg, transparent 30%, rgba(255,255,255,0.12) 35%, rgba(255,255,255,0.4) 37%, rgba(255,255,255,0.12) 39%, transparent 45%)',
-                                          mixBlendMode: 'screen', // Changed from color-dodge to prevent burning
-                                          opacity: 0.18, // Reduced to prevent distortion
-                                          transform: 'translateZ(2px)',
-                                        }}
-                                      />
-                                      {/* Photorealistic glass reflection texture overlay */}
-                                      <img
-                                        src="/glass-reflection-texture.png"
-                                        alt=""
-                                        className="absolute inset-0 w-full h-full object-cover pointer-events-none z-[8]"
-                                        style={{
-                                          mixBlendMode: 'screen',
-                                          opacity: 0.35,
-                                        }}
-                                      />
-                                      {/* Glass Bevel 3D edge highlight (Dark bevel shadow + white glint line) */}
-                                      <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible z-[9]">
-                                        {/* Outer dark bevel shadow */}
-                                        <polygon 
-                                          points={pointsStr} 
-                                          fill="none" 
-                                          stroke="#000000" 
-                                          strokeWidth="3.8" 
-                                          strokeLinejoin="round"
-                                          opacity="0.45"
-                                        />
-                                        {/* Inner white bevel glint line */}
-                                        <polygon 
-                                          points={pointsStr} 
-                                          fill="none" 
-                                          stroke="#ffffff" 
-                                          strokeWidth="1.6" 
-                                          strokeLinejoin="round"
-                                          opacity="0.65"
-                                        />
-                                      </svg>
-                                    </div>
-
-                                    {/* Glowing gold glass shard borders — Toned down to act as base structural glow underneath the overlay */}
-                                    <svg 
-                                      className="absolute inset-0 w-full h-full pointer-events-none overflow-visible" 
-                                      style={{ 
-                                        zIndex: 10,
-                                        filter: 'drop-shadow(0 0 2px rgba(244,194,90,0.4))'
-                                      }}
-                                    >
-                                      {[
-                                        { from: pt1, to: pt2, draw: c.drawEdges?.[0] },
-                                        { from: pt2, to: pt3, draw: c.drawEdges?.[1] },
-                                        { from: pt3, to: pt4, draw: c.drawEdges?.[2] },
-                                        { from: pt4, to: pt1, draw: c.drawEdges?.[3] }
-                                      ].map((edge, eIdx) => {
-                                        if (!edge.draw) return null;
-                                        
-                                        const x1 = edge.from.x * cardWidth / 100;
-                                        const y1 = edge.from.y * cardHeight / 100;
-                                        const x2 = edge.to.x * cardWidth / 100;
-                                        const y2 = edge.to.y * cardHeight / 100;
-
-                                        return (
-                                          <g key={`edge-${idx}-${eIdx}`}>
-                                            {/* Level 3: Soft outer glow */}
-                                            <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={crackColor} strokeWidth="8" strokeLinecap="round" opacity={effectIntensity * 0.05} />
-                                            {/* Level 2: Medium glow */}
-                                            <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={crackColor} strokeWidth="4" strokeLinecap="round" opacity={effectIntensity * 0.12} />
-                                            {/* Level 1: Core gold line */}
-                                            <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={crackColor} strokeWidth="1.8" strokeLinecap="round" opacity={effectIntensity * 0.25} />
-                                            {/* Highlight: White-gold inner specular reflection line */}
-                                            <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#ffffff" strokeWidth="0.8" strokeLinecap="round" opacity={effectIntensity * 0.3} />
-                                          </g>
-                                        );
-                                      })}
-                                    </svg>
-                                  </div>
-                                );
-                              })}
-
-                              {/* 3D Gold Shatter Cracks Texture Overlay */}
-                              <img
-                                src="/cover-template3-gold-cracks.png"
-                                alt=""
-                                className="absolute inset-0 w-full h-full object-cover pointer-events-none"
-                                style={{
-                                  mixBlendMode: 'screen',
-                                  opacity: effectIntensity * 0.42,
-                                  zIndex: 15,
-                                }}
-                              />
-
-                              {/* Light Leak Layer 2: Scattered rainbow prisms for realistic glass sheen */}
-                              <img
-                                src={LIGHT_LEAK_OVERLAYS[4]}
-                                alt=""
-                                className="absolute inset-0 w-full h-full object-cover pointer-events-none z-[16]"
-                                style={{
-                                  mixBlendMode: 'screen',
-                                  opacity: 0.4,
-                                }}
-                              />
-                            </div>
-                          )}
-
-                          {/* Light Leak Layer 1: Warm amber/blue diagonal streak */}
-                          <img
-                            src={LIGHT_LEAK_OVERLAYS[1]}
-                            alt=""
-                            className="absolute inset-0 w-full h-full object-cover pointer-events-none z-[12]"
-                            style={{
-                              mixBlendMode: 'screen',
-                              opacity: 0.35,
-                            }}
-                          />
-
-                          {/* Glowing radial halo behind the center badge */}
-                          <div 
-                            className="absolute pointer-events-none rounded-full"
-                            style={{
-                              left: '50%',
-                              top: '50%',
-                              width: `${circleSize * 1.55}px`,
-                              height: `${circleSize * 1.55}px`,
-                              transform: 'translate(-50%, -50%)',
-                              background: `radial-gradient(circle, ${getRGBAColor(accent, 0.35)} 0%, ${getRGBAColor(accent, 0.08)} 50%, transparent 75%)`,
-                              filter: 'blur(16px)',
-                              zIndex: 15
-                            }}
-                          />
-
-                          {/* Soft 3D Sphere shadow backing */}
-                          <div 
-                            className="absolute pointer-events-none rounded-full"
-                            style={{
-                              left: '50%',
-                              top: '50%',
-                              width: `${circleSize * 0.95}px`,
-                              height: `${circleSize * 0.95}px`,
-                              transform: 'translate(-50%, -50%)',
-                              background: 'rgba(0, 0, 0, 0.45)',
-                              filter: 'blur(20px)',
-                              zIndex: 16
-                            }}
-                          />
-
-                          {/* 3D Glass Sphere Texture Overlay (Rendered as sibling for perfect mixBlendMode blending, unclipped) */}
-                          <img
-                            src="/cover-template3-glass-sphere.png"
-                            alt=""
-                            className="absolute pointer-events-none"
-                            style={{
-                              left: '50%',
-                              top: '50%',
-                              width: `${circleSize}px`,
-                              height: `${circleSize}px`,
-                              transform: `translate(-50%, -50%) scale(${coverT4.zoom ?? 1.55})`,
-                              transformOrigin: 'center center',
-                              mixBlendMode: 'screen',
-                              opacity: 0.98,
-                              zIndex: 18
-                            }}
-                          />
-
-                          {/* 4. Centered Glassmorphism Focus Circle (Z-index: 20) */}
-                          <div 
-                            className="absolute pointer-events-none z-20 flex flex-col justify-center items-center p-6"
-                            style={{
-                              left: '50%',
-                              top: '50%',
-                              width: `${circleSize}px`,
-                              height: `${circleSize}px`,
-                              transform: 'translate(-50%, -50%)',
-                              borderRadius: '50%',
-                              background: 'radial-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.01) 100%)',
-                              border: `1.2px solid ${getRGBAColor(accent, 0.35)}`,
-                              backdropFilter: 'blur(3px)',
-                              WebkitBackdropFilter: 'blur(3px)',
-                              boxShadow: `inset 0 0 15px rgba(255,255,255,0.1), 0 8px 25px rgba(0,0,0,0.4)`,
-                            }}
-                          >
-                            {/* Inner spotlight behind text */}
-                            <div className="absolute inset-0 z-0 pointer-events-none"
-                              style={{
-                                background: `radial-gradient(circle at 50% 50%, ${getRGBAColor(accent, 0.15)} 0%, transparent 70%)`,
-                              }}
-                            />
-
-                            {/* Centered Campaign Content */}
-                            {coverShow.kicker && kickerText && (
-                              <div 
-                                dir="rtl" 
-                                className="font-bold text-center tracking-wide mb-1 select-none z-10" 
-                                style={{ 
-                                  color: accent,
-                                  fontSize: `${Math.round(coverFontSizes.kicker * 0.9)}px`, 
-                                  textShadow: '0 2px 4px rgba(0,0,0,0.6)',
-                                }}
-                              >
-                                {kickerText}
-                              </div>
-                            )}
-                            
-                            <div 
-                              dir="rtl" 
-                              className="font-black text-center text-white select-none max-w-[90%] break-words z-10" 
-                              style={{ 
-                                fontFamily: "'Tajawal', sans-serif", 
-                                fontSize: `${coverFontSizes.campaignName}px`, 
-                                lineHeight: 1.15,
-                                textShadow: '0 0 20px rgba(255,255,255,0.45), 0 4px 12px rgba(0,0,0,0.9)'
-                              }}
-                            >
-                              {campaignTitle}
-                            </div>
-
-                            {/* Small horizontal gold line divider */}
-                            <div className="w-14 h-[2px] mx-auto my-3.5 rounded-full z-10"
-                              style={{
-                                background: `linear-gradient(90deg, transparent, ${accent}, transparent)`,
-                                boxShadow: `0 0 8px ${getRGBAColor(accent, 0.8)}`
-                              }}
-                            />
-
-                            {coverShow.tagline && taglineText && (
-                              <div 
-                                dir="rtl"
-                                className="inline-flex items-center justify-center font-extrabold text-center select-none z-10" 
-                                style={{ 
-                                  color: '#030305', 
-                                  background: 'linear-gradient(180deg, #ffd700 0%, #d4af37 50%, #aa7c11 100%)', 
-                                  borderRadius: '9999px', 
-                                  padding: '10px 30px', 
-                                  fontSize: `${coverFontSizes.tagline}px`,
-                                  boxShadow: '0 8px 20px rgba(212, 175, 55, 0.35), inset 0 1px 0 rgba(255,255,255,0.5)',
-                                  textShadow: '0 1px 0 rgba(255,255,255,0.2)'
-                                }}
-                              >
-                                {taglineText}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Footer information displayed conditionally */}
-                          <Footer accent={accent} />
-                        </div>
+                        <ShardSphereCover
+                          width={canvasWidth}
+                          height={canvasHeight}
+                          photos={photos}
+                          crops={crops}
+                          title={campaignTitle}
+                          kicker={coverKicker || 'حملة إعلانية لـ'}
+                          tagline={coverTagline || 'إعلانك بارز مع الفارس'}
+                          accent={accent}
+                          titleSize={coverFontSizes.campaignName}
+                          kickerSize={coverFontSizes.kicker}
+                          taglineSize={coverFontSizes.tagline}
+                          zoom={coverT4.zoom ?? 1.0}
+                          intensity={coverT4.fgBlur ?? 1.0}
+                          mixImages={coverMixImages}
+                          showCollage={true}
+                          colorStrength={1.0}
+                          glow={coverGlowColor || accent}
+                          glowOpacity={coverGlowIntensity}
+                          glowBlur={coverGlowBlur}
+                          glowSpread={coverGlowSpread}
+                          showKicker={coverShow.kicker}
+                          showTagline={coverShow.tagline}
+                          swap={coverSwapSides}
+                          header={<Header accent={accent} align="center" />}
+                          footer={<Footer accent={accent} />}
+                        />
                       );
                     }
 
@@ -9155,647 +8964,35 @@ export default function DesignStudio() {
                       );
                     }
 
-                    // ============= TEMPLATE 8 — BROKEN GLASS (الزجاج المكسور) =============
+                    // ============= TEMPLATE 8 — LIGHT EDITORIAL (الغلاف التحريري - الأبيض الفاخر) =============
                     if (coverTemplate === 'template8') {
-                      const accent = coverAccentColor;
-                      const glow = coverGlowColor;
-                      const gI = coverGlowIntensity;
-                      const swap = coverSwapSides;
-                      const textAlign: 'left' | 'right' | 'center' = 'center';
-                      const activeIntensity = coverT5ColorMode ? (coverT4.fgBlur ?? 0.8) : 0;
-                      const effectIntensity = 1.0;
-                      const glassIntensity = coverT4.bgBlur ?? 1.0;
-                      
-                      // Depth intensity derived from coverT4.zoom (default to 1.25)
-                      const depthIntensity = coverT4.zoom ?? 1.25;
-                      // Gap size ratio derived from coverT4.cardHeight (default to 0.5)
-                      const gapRatio = coverT4.cardHeight ?? 0.5;
-                      
-                      const photos = pickPhotos(24); // 24 collage photos for more diversity
-                      const crops = getTemplateCrops(photos, 24);
-
-                      const w = canvasWidth;
-                      const h = canvasHeight;
-                      const scaleFactor = w / 1200;
-                      const circleSize = Math.round(Math.min(w, h) * 0.48);
-
-                      const spotlightColor = (!glow || glow === '#000000' || glow === 'black' || glow === '#000') ? accent : glow;
-
-                      // Dynamically generate 48 radial glass shards partitioning the canvas (16 rays x 3 concentric rings) to cover all 360° directions and corners
-                      const generateShatterShards = () => {
-                        const numRays = 16;
-                        const numRings = 3;
-                        const radii = [0, 18, 48, 115]; // Outer radius 115 ensures full corners coverage (sqrt(50^2 + 50^2) = 70.7)
-                        const center = { x: 50, y: 50 };
-                        const generated: Array<{ p: Array<{x: number; y: number}>; cx: number; cy: number; rotX: number; rotY: number; rotZ: number; tz: number }> = [];
-
-                        const shardRng = mulberry32(coverShuffleSeed + 999);
-
-                        for (let ring = 0; ring < numRings; ring++) {
-                          const rInner = radii[ring];
-                          const rOuter = radii[ring + 1];
-
-                          for (let ray = 0; ray < numRays; ray++) {
-                            const angle1 = (ray * 360) / numRays;
-                            const angle2 = ((ray + 1) * 360) / numRays;
-
-                            const rad1_1 = (angle1 * Math.PI) / 180;
-                            const rad2_1 = (angle2 * Math.PI) / 180;
-
-                            const points: Array<{x: number; y: number}> = [];
-                            
-                            if (ring === 0) {
-                              points.push({ x: center.x, y: center.y });
-                              points.push({
-                                x: center.x + rOuter * Math.cos(rad1_1),
-                                y: center.y + rOuter * Math.sin(rad1_1)
-                              });
-                              points.push({
-                                x: center.x + rOuter * Math.cos(rad2_1),
-                                y: center.y + rOuter * Math.sin(rad2_1)
-                              });
-                            } else {
-                              points.push({
-                                x: center.x + rInner * Math.cos(rad1_1),
-                                y: center.y + rInner * Math.sin(rad1_1)
-                              });
-                              points.push({
-                                x: center.x + rInner * Math.cos(rad2_1),
-                                y: center.y + rInner * Math.sin(rad2_1)
-                              });
-                              points.push({
-                                x: center.x + rOuter * Math.cos(rad2_1),
-                                y: center.y + rOuter * Math.sin(rad2_1)
-                              });
-                              points.push({
-                                x: center.x + rOuter * Math.cos(rad1_1),
-                                y: center.y + rOuter * Math.sin(rad1_1)
-                              });
-                            }
-
-                            let sumX = 0;
-                            let sumY = 0;
-                            points.forEach(pt => {
-                              sumX += pt.x;
-                              sumY += pt.y;
-                            });
-                            const cx = Math.max(2, Math.min(98, sumX / points.length));
-                            const cy = Math.max(2, Math.min(98, sumY / points.length));
-
-                            const tiltScale = (ring + 1) / numRings;
-                            const rotX = (shardRng() * 12 - 6) * tiltScale;
-                            const rotY = (shardRng() * 12 - 6) * tiltScale;
-                            const rotZ = (shardRng() * 8 - 4) * tiltScale;
-                            const tz = (shardRng() * 24 - 12) * tiltScale;
-
-                            generated.push({
-                              p: points,
-                              cx,
-                              cy,
-                              rotX,
-                              rotY,
-                              rotZ,
-                              tz
-                            });
-                          }
-                        }
-                        return generated;
-                      };
-
-                      const shards = generateShatterShards();
-
-                      const campaignTitle = (adTypeOverride && adTypeOverride.trim()) || ((groupedContracts.find((x:any) => String(x.contract_id) === selectedContractId) as any)?.adType) || coverCampaignName || coverTitle2;
-                      const kickerText = coverKicker;
-                      const taglineText = coverTagline;
-                      const panelLogoEl = textElements.find(el => el.id === 'company_logo');
-                      const logoSrc = companyInfo.logoUrl || panelLogoEl?.url || '';
-
-                      const bgRng = mulberry32(coverShuffleSeed + 999);
-                      const bgPhotoIdx = photos.length > 0 ? Math.floor(bgRng() * photos.length) : 0;
-                      const bgPhoto = photos[bgPhotoIdx]?.url || canvasImageUrl || 'https://images.unsplash.com/photo-1519501025264-65ba15a82390?w=1600&auto=format&fit=crop';
-
-                      // Frosted glass card dimensions
-                      const cardW = Math.round(w * 0.65);
-                      const cardH = Math.round(h * 0.35);
+                      const accent = coverAccentColor || '#d6ac40';
+                      const photos = pickPhotos(1);
+                      const crops = getTemplateCrops(photos, 1);
+                      const photoUrl = photos[0]?.url || '';
+                      const crop = crops[0] || { x: 50, y: 50 };
+                      const campaignTitle = ((adTypeOverride && adTypeOverride.trim()) || ((groupedContracts.find((x: any) => String(x.contract_id) === selectedContractId) as any)?.adType) || coverCampaignName || coverTitle2) || 'اسم الحملة';
 
                       return (
-                        <div className="w-full h-full relative flex flex-col select-none text-white overflow-hidden" 
-                          style={{ 
-                            ['--cover-accent' as any]: accent, 
-                            ['--t8-bg-photo' as any]: `url('${bgPhoto}')`,
-                            ['--t8-glass-texture' as any]: `url('${coverCustomGlassTextureProcessed || coverCustomGlassTexture}')`,
-                            ['--t8-glass-sphere' as any]: `url('/cover-template3-glass-sphere.png')`,
-                            ['--t8-light-leak-0' as any]: `url('${LIGHT_LEAK_OVERLAYS[0]}')`,
-                            ['--t8-light-leak-1' as any]: `url('${LIGHT_LEAK_OVERLAYS[1]}')`,
-                            ['--t8-light-leak-2' as any]: `url('${LIGHT_LEAK_OVERLAYS[2]}')`,
-                            ['--t8-light-leak-4' as any]: `url('${LIGHT_LEAK_OVERLAYS[4]}')`,
-                            background: '#010103',
-                            padding: '64px' 
-                          }}
-                        >
-                          {/* 0. Blurred design background image replica */}
-                          <div 
-                            className="absolute inset-0 z-0 pointer-events-none scale-105"
-                            style={{
-                              backgroundImage: 'var(--t8-bg-photo)',
-                              backgroundSize: 'cover',
-                              backgroundPosition: 'center',
-                              filter: coverT5ColorMode
-                                ? `blur(28px) brightness(0.1) saturate(0.05) grayscale(0.95)`
-                                : 'blur(24px) brightness(0.12) saturate(0.8)',
-                              opacity: 0.95
-                            }}
-                          />
-
-                          {/* Dynamic accent color overlay on background */}
-                          {coverT5ColorMode && (
-                            <div 
-                              className="absolute inset-0 z-0 pointer-events-none"
-                              style={{
-                                background: getRGBAColor(accent, activeIntensity * 0.35),
-                                mixBlendMode: 'color',
-                              }}
-                            />
-                          )}
-
-                          {/* Cinematic dual light leaks (Cyan and Accent/Amber) */}
-                          <div className="absolute inset-0 z-0 pointer-events-none" style={{ mixBlendMode: 'screen', opacity: 0.7 }}>
-                            {/* Cyan light leak left side */}
-                            <div className="absolute rounded-full" 
-                              style={{ 
-                                left: '-15%', 
-                                top: '10%', 
-                                width: '700px', 
-                                height: '700px', 
-                                background: 'radial-gradient(circle, rgba(6, 182, 212, 0.18) 0%, transparent 70%)', 
-                                filter: 'blur(80px)' 
-                              }} 
-                            />
-                            {/* Amber / Accent light leak right side */}
-                            <div className="absolute rounded-full" 
-                              style={{ 
-                                right: '-15%', 
-                                bottom: '10%', 
-                                width: '700px', 
-                                height: '700px', 
-                                background: `radial-gradient(circle, ${getRGBAColor(spotlightColor, 0.2)} 0%, transparent 70%)`, 
-                                filter: 'blur(80px)' 
-                              }} 
-                            />
-                          </div>
-
-                          {/* Vignette */}
-                          <div 
-                            className="absolute inset-0 z-0 pointer-events-none"
-                            style={{
-                              background: 'radial-gradient(circle, transparent 25%, rgba(0, 0, 0, 0.95) 100%), linear-gradient(180deg, rgba(0, 0, 0, 0.4) 0%, rgba(1, 2, 4, 0.85) 100%)'
-                            }}
-                          />
-
-                          {/* 1. Header (Logo & Brand Info) */}
-                          <Header accent={accent} brandRight={swap} align={textAlign} imagesSide={undefined} showBlurCard={true} />
-
-                          {/* SVG Shatter Mask Definition using userSpaceOnUse to fit exactly to the canvas dimensions */}
-                           {/* 2. Shattered Glass Shards (Z-index: 10) (CSS mask-image with base64 data URL to support canvas export) */}
-                           {coverShow.collage && (
-                             <div 
-                               className="absolute inset-0 z-10 pointer-events-none" 
-                               style={{ 
-                                 perspective: '1200px', 
-                                 transformStyle: 'preserve-3d',
-                                 WebkitMaskImage: coverCustomGlassMaskProcessed ? `url(${coverCustomGlassMaskProcessed})` : 'none',
-                                 WebkitMaskSize: 'cover',
-                                 WebkitMaskPosition: 'center',
-                                 maskImage: coverCustomGlassMaskProcessed ? `url(${coverCustomGlassMaskProcessed})` : 'none',
-                                 maskSize: 'cover',
-                                 maskPosition: 'center',
-                               }}
-                             >
-                              {/* Flat base design layer inside the mask to fill any 3D gaps */}
-                              <div 
-                                className="absolute inset-0 pointer-events-none" 
-                                style={{ 
-                                  zIndex: 1,
-                                  backgroundImage: 'var(--t8-bg-photo)',
-                                  backgroundSize: 'cover',
-                                  backgroundPosition: 'center',
-                                  width: '100%',
-                                  height: '100%',
-                                  opacity: 0.92, // High opacity to ensure a full and rich fill
-                                  filter: coverT5ColorMode 
-                                    ? `contrast(1.05) brightness(0.85)` 
-                                    : 'none',
-                                }}
-                              />
-
-                              {shards.map((c, idx) => {
-                                const photo = photos[idx % photos.length] || photos[0];
-                                if (!photo) return null;
-                                const crop = crops[idx % crops.length] || { x: 50, y: 50 };
-
-                                // Apply gap size mathematically by scaling vertices towards local center
-                                const gapSizeRatio = gapRatio * 0.022; // max ~2.2% gap spacing
-                                const shrunkPoints = c.p.map(pt => {
-                                  const px = c.cx + (pt.x - c.cx) * (1 - gapSizeRatio);
-                                  const py = c.cy + (pt.y - c.cy) * (1 - gapSizeRatio);
-                                  return { x: px, y: py };
-                                });
-
-                                const clipPathVal = `polygon(${shrunkPoints.map(pt => pt.x + '% ' + pt.y + '%').join(', ')})`;
-                                const pointsStr = shrunkPoints.map(pt => Math.round(pt.x * w / 100) + ',' + Math.round(pt.y * h / 100)).join(' ');
-
-                                // Seeded random for glass refraction translation and rotation
-                                const shardRng = mulberry32(coverShuffleSeed + idx * 83);
-                                const zoomFactor = coverT8StaticOnly ? 1.0 : 1.22 + shardRng() * 0.28; // between 1.22x and 1.5x zoom
-                                
-                                // Random horizontal and vertical flips for shattered puzzle mirroring
-                                const flipH = coverT8StaticOnly ? 1 : (shardRng() > 0.5 ? -1 : 1);
-                                const flipV = coverT8StaticOnly ? 1 : (shardRng() > 0.5 ? -1 : 1);
-                                
-                                // Larger, more dramatic random rotations and translations for shattered puzzle effect
-                                const rotateAngle = coverT8StaticOnly ? 0 : (shardRng() * 90 - 45) * effectIntensity;
-                                const translateX = coverT8StaticOnly ? 0 : (shardRng() * 80 - 40) * effectIntensity;
-                                const translateY = coverT8StaticOnly ? 0 : (shardRng() * 80 - 40) * effectIntensity;
-
-                                // Random 3D tilt offsets based on shuffle seed for realistic shattered depth changes
-                                const rx = coverT8StaticOnly ? 0 : (c.rotX + (shardRng() * 16 - 8)) * depthIntensity;
-                                const ry = coverT8StaticOnly ? 0 : (c.rotY + (shardRng() * 16 - 8)) * depthIntensity;
-                                const rz = coverT8StaticOnly ? 0 : (c.rotZ + (shardRng() * 40 - 20)) * depthIntensity;
-                                const tz = coverT8StaticOnly ? 0 : (c.tz + (shardRng() * 20 - 10)) * depthIntensity;
-
-                                return (
-                                  <div
-                                    key={`t8-shard-${idx}`}
-                                    className="absolute inset-0 transition-all duration-300 pointer-events-none"
-                                    style={{
-                                      transform: `perspective(1200px) rotateX(${rx}deg) rotateY(${ry}deg) rotateZ(${rz}deg) translateZ(${tz}px)`,
-                                      transformStyle: 'preserve-3d',
-                                      filter: coverT8StaticOnly 
-                                        ? 'none' 
-                                        : `drop-shadow(0 ${8 * effectIntensity}px ${18 * effectIntensity}px rgba(0, 0, 0, ${0.5 * effectIntensity}))`,
-                                      zIndex: 10,
-                                    }}
-                                  >
-                                    {/* Clipped image wrapper */}
-                                    <div
-                                      className="w-full h-full absolute inset-0 overflow-hidden"
-                                      style={{
-                                        clipPath: clipPathVal,
-                                        background: '#020306',
-                                      }}
-                                    >
-                                      {/* Image inside shard */}
-                                      {coverMixImages ? (
-                                        <img
-                                          src={photo.url}
-                                          crossOrigin="anonymous"
-                                          alt="Design Shard"
-                                          className="absolute object-cover"
-                                          style={{
-                                            left: `${c.cx}%`,
-                                            top: `${c.cy}%`,
-                                            width: '75%',
-                                            height: '75%',
-                                            objectFit: 'cover',
-                                            objectPosition: `${crop.x}% ${crop.y}%`,
-                                            transform: `translate(-50%, -50%) scale(${zoomFactor * (coverT4.zoom ?? 1.25) * flipH}, ${zoomFactor * (coverT4.zoom ?? 1.25) * flipV}) rotate(${rotateAngle}deg) translate(${translateX}px, ${translateY}px)`,
-                                            filter: `contrast(${1.03 + (shardRng() * 0.06)}) brightness(${0.96 - activeIntensity * 0.05 + (shardRng() * 0.04 - 0.02)}) saturate(${0.95 - activeIntensity * 0.75}) grayscale(${activeIntensity * 0.8})`,
-                                          }}
-                                        />
-                                      ) : (
-                                        <div
-                                          className="absolute"
-                                          style={coverT8StaticOnly ? {
-                                            left: 0,
-                                            top: 0,
-                                            width: '100%',
-                                            height: '100%',
-                                            backgroundImage: 'var(--t8-bg-photo)',
-                                            backgroundSize: 'cover',
-                                            backgroundPosition: 'center',
-                                            filter: `contrast(${1.03 + (shardRng() * 0.06)}) brightness(${0.96 - activeIntensity * 0.05 + (shardRng() * 0.04 - 0.02)}) saturate(${0.95 - activeIntensity * 0.75}) grayscale(${activeIntensity * 0.8})`,
-                                          } : {
-                                            left: `${c.cx}%`,
-                                            top: `${c.cy}%`,
-                                            width: '75%',
-                                            height: '75%',
-                                            backgroundImage: 'var(--t8-bg-photo)',
-                                            backgroundSize: 'cover',
-                                            backgroundPosition: `${Math.max(5, Math.min(95, c.cx + (shardRng() * 24 - 12)))}% ${Math.max(5, Math.min(95, c.cy + (shardRng() * 24 - 12)))}%`,
-                                            transform: `translate(-50%, -50%) scale(${zoomFactor * (coverT4.zoom ?? 1.25) * flipH}, ${zoomFactor * (coverT4.zoom ?? 1.25) * flipV}) rotate(${rotateAngle}deg) translate(${translateX}px, ${translateY}px)`,
-                                            filter: `contrast(${1.03 + (shardRng() * 0.06)}) brightness(${0.96 - activeIntensity * 0.05 + (shardRng() * 0.04 - 0.02)}) saturate(${0.95 - activeIntensity * 0.75}) grayscale(${activeIntensity * 0.8})`,
-                                          }}
-                                        />
-                                      )}
-
-                                      {/* Color grading overlay */}
-                                      <div className="absolute inset-0 pointer-events-none z-[4]"
-                                        style={{
-                                          background: coverT5ColorMode
-                                            ? getRGBAColor(accent, activeIntensity)
-                                            : `linear-gradient(135deg, ${getRGBAColor(accent, 0.12)} 0%, rgba(0,0,0,0.45) 100%)`,
-                                          mixBlendMode: coverT5ColorMode ? 'color' : 'multiply',
-                                          opacity: coverT5ColorMode ? activeIntensity : 0.7
-                                        }}
-                                      />
-
-                                      {/* Specular light overlay 1: Liquid glass/rainbow sheen */}
-                                      <div
-                                        className="absolute inset-0 w-full h-full pointer-events-none z-[7]"
-                                        style={{
-                                          backgroundImage: 'var(--t8-light-leak-2)',
-                                          backgroundSize: 'cover',
-                                          mixBlendMode: 'screen',
-                                          opacity: 0.28,
-                                          transform: `scale(${1.15 + shardRng() * 0.2}) rotate(${shardRng() * 60 - 30}deg)`,
-                                        }}
-                                      />
-
-                                      {/* Specular light overlay 2: Scattered prisms */}
-                                      <div
-                                        className="absolute inset-0 w-full h-full pointer-events-none z-[7]"
-                                        style={{
-                                          backgroundImage: 'var(--t8-light-leak-4)',
-                                          backgroundSize: 'cover',
-                                          mixBlendMode: 'screen',
-                                          opacity: 0.32,
-                                          transform: `scale(${1.2 + shardRng() * 0.15}) rotate(${shardRng() * 90 - 45}deg)`,
-                                        }}
-                                      />
-
-                                      {/* Photorealistic glass reflection texture overlay */}
-                                      <div
-                                        className="absolute inset-0 w-full h-full pointer-events-none z-[8]"
-                                        style={{
-                                          backgroundImage: 'var(--t8-glass-texture)',
-                                          backgroundSize: 'cover',
-                                          backgroundPosition: 'center',
-                                          mixBlendMode: 'screen',
-                                          opacity: 0.35 * Math.min(1.0, glassIntensity),
-                                          transform: `scale(${1.1 + shardRng() * 0.1}) rotate(${shardRng() * 20 - 10}deg)`,
-                                        }}
-                                      />
-
-                                      {/* Edge Bevel SVG Outline Highlight inside the shard clip */}
-                                      <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible z-[9]">
-                                        {/* Outer bevel shadow */}
-                                        <polygon 
-                                          points={pointsStr} 
-                                          fill="none" 
-                                          stroke="#000000" 
-                                          strokeWidth="3.2" 
-                                          strokeLinejoin="round"
-                                          opacity="0.55"
-                                        />
-                                        {/* Inner white light reflection glint */}
-                                        <polygon 
-                                          points={pointsStr} 
-                                          fill="none" 
-                                          stroke="#ffffff" 
-                                          strokeWidth="1.2" 
-                                          strokeLinejoin="round"
-                                          opacity="0.65"
-                                        />
-                                      </svg>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-
-                              {/* Global cracks overlay SVG for realistic outlines in 3D gaps */}
-                              <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible z-[12]" style={{ opacity: Math.min(1.0, glassIntensity) * 0.85 }}>
-                                {shards.map((c, idx) => {
-                                  const gapSizeRatio = gapRatio * 0.022;
-                                  const shrunkPoints = c.p.map(pt => {
-                                    const px = c.cx + (pt.x - c.cx) * (1 - gapSizeRatio);
-                                    const py = c.cy + (pt.y - c.cy) * (1 - gapSizeRatio);
-                                    return { x: px * w / 100, y: py * h / 100 };
-                                  });
-
-                                  const pointsStr = shrunkPoints.map(pt => Math.round(pt.x) + ',' + Math.round(pt.y)).join(' ');
-
-                                  return (
-                                    <g key={`global-edge-${idx}`}>
-                                      {/* Outer dark crack shadow */}
-                                      <polygon points={pointsStr} fill="none" stroke="#010103" strokeWidth={4 + gapRatio * 4} strokeLinecap="round" strokeLinejoin="round" opacity="0.9" />
-                                      {/* Outer glow gold line */}
-                                      <polygon points={pointsStr} fill="none" stroke={accent} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" opacity="0.3" />
-                                    </g>
-                                  );
-                                })}
-                              </svg>
-
-                              {/* Ambient rainbow prisms overlay across all shards */}
-                              <div
-                                className="absolute inset-0 w-full h-full pointer-events-none z-[13]"
-                                style={{
-                                  backgroundImage: 'var(--t8-light-leak-4)',
-                                  backgroundSize: 'cover',
-                                  mixBlendMode: 'screen',
-                                  opacity: 0.35,
-                                }}
-                              />
-
-                              {/* Global realistic glass shards render overlay */}
-                              <div
-                                className="absolute inset-0 w-full h-full pointer-events-none z-[14]"
-                                style={{
-                                  backgroundImage: 'var(--t8-glass-texture)',
-                                  backgroundSize: 'cover',
-                                  backgroundPosition: 'center',
-                                  mixBlendMode: 'screen',
-                                  opacity: Math.min(1.0, glassIntensity) * 0.95,
-                                  filter: `brightness(${1.0 + Math.min(1.0, glassIntensity) * 0.2}) contrast(${1.0 + Math.min(1.0, glassIntensity) * 0.15})`,
-                                }}
-                              />
-
-                              {/* Secondary duplicate glass overlay for extra density (rotated to fill gaps) */}
-                              {glassIntensity > 0.8 && (
-                                <div
-                                  className="absolute inset-0 w-full h-full pointer-events-none z-[14]"
-                                  style={{
-                                    backgroundImage: 'var(--t8-glass-texture)',
-                                    backgroundSize: 'cover',
-                                    backgroundPosition: 'center',
-                                    mixBlendMode: 'screen',
-                                    opacity: (glassIntensity - 0.8) * 0.95,
-                                    transform: 'scale(1.05) rotate(180deg)',
-                                    filter: 'brightness(1.1) contrast(1.1)',
-                                  }}
-                                />
-                              )}
-                            </div>
-                          )}
-
-                          {/* Light Leak Layer 1: Warm amber/blue diagonal streak */}
-                          <div
-                            className="absolute inset-0 w-full h-full pointer-events-none z-[12]"
-                            style={{
-                              backgroundImage: 'var(--t8-light-leak-1)',
-                              backgroundSize: 'cover',
-                              mixBlendMode: 'screen',
-                              opacity: 0.3 * coverLightLeaksIntensity,
-                            }}
-                          />
-
-                          {/* 3. Text Backdrop Spotlight (glowing backdrop for centered info panel) */}
-                          <div className="absolute pointer-events-none z-[15]" 
-                            style={{ 
-                              left: '50%',
-                              top: '50%',
-                              width: `${circleSize * 1.55}px`,
-                              height: `${circleSize * 1.55}px`,
-                              transform: 'translate(-50%, -50%)',
-                              background: `radial-gradient(circle, ${spotlightColor}${alphaToHex(0.32 * gI.opacity)} 0%, ${spotlightColor}${alphaToHex(0.08 * gI.opacity)} 50%, transparent 75%)`, 
-                              filter: `blur(${gI.blur * 1.3}px)`,
-                              opacity: 0.95
-                            }} 
-                          />
-
-                          {/* Soft 3D Sphere shadow backing */}
-                          <div 
-                            className="absolute pointer-events-none rounded-full"
-                            style={{
-                              left: '50%',
-                              top: '50%',
-                              width: `${circleSize * 0.95}px`,
-                              height: `${circleSize * 0.95}px`,
-                              transform: 'translate(-50%, -50%)',
-                              background: 'rgba(0, 0, 0, 0.45)',
-                              filter: 'blur(20px)',
-                              zIndex: 16
-                            }}
-                          />
-
-                          {/* 3D Glass Sphere Texture Overlay */}
-                          <div
-                            className="absolute pointer-events-none"
-                            style={{
-                              left: '50%',
-                              top: '50%',
-                              width: `${circleSize}px`,
-                              height: `${circleSize}px`,
-                              transform: `translate(-50%, -50%) scale(${coverT4.zoom ?? 1.25})`,
-                              transformOrigin: 'center center',
-                              backgroundImage: 'var(--t8-glass-sphere)',
-                              backgroundSize: 'cover',
-                              mixBlendMode: 'screen',
-                              opacity: 0.98,
-                              zIndex: 18
-                            }}
-                          />
-
-                          {/* 4. Centered Glassmorphism Focus Circle (Z-index: 20) */}
-                          <div 
-                            className="absolute pointer-events-none z-20 flex flex-col justify-center items-center p-6 transition-all duration-300"
-                            style={{
-                              left: '50%',
-                              top: '50%',
-                              width: `${circleSize}px`,
-                              height: `${circleSize}px`,
-                              transform: 'translate(-50%, -50%)',
-                              borderRadius: '50%',
-                              background: 'radial-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.01) 100%)',
-                              border: `1.2px solid ${getRGBAColor(accent, 0.35)}`,
-                              backdropFilter: 'blur(3px)',
-                              WebkitBackdropFilter: 'blur(3px)',
-                              boxShadow: `inset 0 0 15px rgba(255,255,255,0.1), 0 8px 25px rgba(0,0,0,0.4)`,
-                            }}
-                          >
-                            {/* Inner spotlight behind text */}
-                            <div className="absolute inset-0 z-0 pointer-events-none"
-                              style={{
-                                background: `radial-gradient(circle at 50% 50%, ${getRGBAColor(accent, 0.15)} 0%, transparent 70%)`,
-                              }}
-                            />
-
-                            {/* Brand Logo inside the Frosted Panel at the Top */}
-                            {coverShow.companyLogo && logoSrc && (
-                              <div className="z-10 flex justify-center items-center" style={{ marginBottom: `${Math.round(16 * scaleFactor)}px` }}>
-                                <img
-                                  src={logoSrc}
-                                  className="object-contain"
-                                  style={{
-                                    height: `${coverFontSizes.companyBrandLogo * 0.7 * scaleFactor}px`,
-                                    maxWidth: `${coverFontSizes.companyBrandLogo * 2.5 * scaleFactor}px`
-                                  }}
-                                />
-                              </div>
-                            )}
-
-                            {/* Campaign Text Content */}
-                            {coverShow.kicker && kickerText && (
-                              <div 
-                                dir="rtl" 
-                                className="font-bold text-center tracking-wide select-none z-10" 
-                                style={{ 
-                                  color: accent,
-                                  fontSize: `${Math.round(coverFontSizes.kicker * 0.9 * scaleFactor)}px`, 
-                                  textShadow: '0 2px 4px rgba(0,0,0,0.6)',
-                                  marginBottom: `${Math.round(4 * scaleFactor)}px`
-                                }}
-                              >
-                                {kickerText}
-                              </div>
-                            )}
-                            
-                            <div 
-                              dir="rtl" 
-                              className="font-black text-center text-white select-none max-w-[90%] break-words z-10" 
-                              style={{ 
-                                fontFamily: "'Tajawal', sans-serif", 
-                                fontSize: `${coverFontSizes.campaignName * 0.9 * scaleFactor}px`, 
-                                lineHeight: 1.15,
-                                textShadow: '0 0 20px rgba(255,255,255,0.45), 0 4px 12px rgba(0,0,0,0.9)'
-                              }}
-                            >
-                              {campaignTitle}
-                            </div>
-
-                            {/* Small horizontal gold line divider */}
-                            <div className="mx-auto rounded-full z-10"
-                              style={{
-                                width: `${Math.round(56 * scaleFactor)}px`,
-                                height: `${Math.max(1, Math.round(2 * scaleFactor))}px`,
-                                margin: `${Math.round(14 * scaleFactor)}px auto`,
-                                background: `linear-gradient(90deg, transparent, ${accent}, transparent)`,
-                                boxShadow: `0 0 8px ${getRGBAColor(accent, 0.7)}`
-                              }}
-                            />
-
-                            {coverShow.tagline && taglineText && (
-                              <div 
-                                dir="rtl"
-                                className="inline-flex items-center justify-center font-black text-center select-none z-10" 
-                                style={{ 
-                                  color: '#010103', 
-                                  background: `linear-gradient(135deg, #ffd700 0%, ${accent} 50%, #b8860b 100%)`, 
-                                  borderRadius: '9999px', 
-                                  padding: `${Math.round(8 * scaleFactor)}px ${Math.round(28 * scaleFactor)}px`, 
-                                  fontSize: `${coverFontSizes.tagline * 0.85 * scaleFactor}px`,
-                                  boxShadow: `0 10px 20px ${getRGBAColor(accent, 0.3)}, inset 0 1px 0 rgba(255, 255, 255, 0.4)`,
-                                  fontFamily: "'Tajawal', sans-serif"
-                                }}
-                              >
-                                {taglineText}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Light Leak Effect Overlay — professional cinematic light effect */}
-                          <div
-                            className="absolute inset-0 w-full h-full pointer-events-none z-[22]"
-                            style={{
-                              backgroundImage: 'var(--t8-light-leak-0)',
-                              backgroundSize: 'cover',
-                              mixBlendMode: 'screen',
-                              opacity: 0.38,
-                            }}
-                          />
-
-                          {/* Footer information displayed conditionally */}
-                          <Footer accent={accent} />
-                        </div>
+                        <LightEditorialCover
+                          width={canvasWidth}
+                          height={canvasHeight}
+                          photo={photoUrl}
+                          crop={crop}
+                          title={campaignTitle}
+                          kicker={coverKicker || 'حملة إعلانية'}
+                          tagline={coverTagline || 'إعلانك بارز مع الفارس'}
+                          accent={accent}
+                          titleSize={coverFontSizes.campaignName}
+                          kickerSize={coverFontSizes.kicker}
+                          taglineSize={coverFontSizes.tagline}
+                          showKicker={coverShow.kicker}
+                          showTagline={coverShow.tagline}
+                          showPhoto={true}
+                          intensity={coverT4.fgBlur ?? 1.0}
+                          header={<Header accent={accent} align="right" />}
+                          footer={<Footer accent={accent} />}
+                        />
                       );
                     }
 
@@ -10068,7 +9265,7 @@ export default function DesignStudio() {
                       />
                     ))}
 
-                    {/* ── Info Bar ── */}
+                    {/* ── Info Bar (Glass Panel at Top / Middle) ── */}
                     {glassPanel.visible && (
                       <div
                         onMouseDown={(e) => handleMouseDown(e, 'panel')}
@@ -10090,49 +9287,84 @@ export default function DesignStudio() {
                         }}
                         className={`transition-shadow duration-150 ${!isExporting && !lockMode && selectedLayerId === 'panel' ? 'ring-4 ring-sky-400/60 ring-offset-2 ring-offset-transparent' : ''}`}
                       >
-                        {/* Blurred background replica to simulate backdrop-filter (works in Chrome + html2canvas export) */}
-                        {(glassPanel.blur ?? 15) > 0 && canvasImageUrl && (
+                        {/* ── PNG / Custom Image Background Layer for Upper Strip ── */}
+                        {glassPanel.bgMode === 'image' && glassPanel.bgImageUrl ? (
                           <div style={{
                             position: 'absolute',
                             inset: 0,
                             overflow: 'hidden',
-                            borderRadius: 'inherit',
+                            borderRadius: `${glassPanel.borderRadius ?? 0}px`,
                             pointerEvents: 'none',
-                            zIndex: 0,
+                            zIndex: 1,
                           }}>
                             <img
-                              src={canvasImageUrl}
+                              src={fixSvgDataUrl(glassPanel.bgImageUrl)}
                               crossOrigin="anonymous"
-                              alt=""
-                              draggable={false}
+                              alt="Upper Strip Background"
                               style={{
                                 position: 'absolute',
-                                left: `${imageStyle.x - glassPanel.x}px`,
-                                top: `${imageStyle.y - glassPanel.y}px`,
-                                width: `${imageStyle.width}px`,
-                                height: `${imageStyle.height}px`,
-                                objectFit: (imageStyle.objectFit as any) || 'cover',
+                                top: 0,
+                                left: 0,
+                                width: '100%',
+                                height: '100%',
+                                objectFit: (glassPanel.bgObjectFit as any) || 'fill',
                                 objectPosition: 'center',
-                                filter: `blur(${glassPanel.blur ?? 15}px)`,
-                                transform: 'scale(1.05)',
+                                opacity: glassPanel.opacity ?? 1,
+                                transform: [
+                                  glassPanel.bgFlipY ? 'scaleY(-1)' : '',
+                                  (glassPanel.bgScale && glassPanel.bgScale !== 1) ? `scale(${glassPanel.bgScale})` : '',
+                                  (glassPanel.bgOffsetY && glassPanel.bgOffsetY !== 0) ? `translateY(${glassPanel.bgOffsetY}px)` : '',
+                                ].filter(Boolean).join(' ') || 'none',
+                                transformOrigin: 'center center',
+                                display: 'block',
                                 pointerEvents: 'none',
                                 userSelect: 'none',
-                                display: 'block',
                               }}
                             />
                           </div>
+                        ) : (
+                          <>
+                            {/* Blurred background replica to simulate backdrop-filter (works in Chrome + html2canvas export) */}
+                            {(glassPanel.blur ?? 15) > 0 && canvasImageUrl && (
+                              <div style={{
+                                position: 'absolute',
+                                inset: 0,
+                                overflow: 'hidden',
+                                borderRadius: 'inherit',
+                                pointerEvents: 'none',
+                                zIndex: 0,
+                              }}>
+                                <img
+                                  src={canvasImageUrl}
+                                  crossOrigin="anonymous"
+                                  alt=""
+                                  draggable={false}
+                                  style={{
+                                    position: 'absolute',
+                                    left: `${imageStyle.x - glassPanel.x}px`,
+                                    top: `${imageStyle.y - glassPanel.y}px`,
+                                    width: `${imageStyle.width}px`,
+                                    height: `${imageStyle.height}px`,
+                                    objectFit: (imageStyle.objectFit as any) || 'cover',
+                                    objectPosition: 'center',
+                                    filter: `blur(${glassPanel.blur ?? 15}px)`,
+                                    transform: 'scale(1.05)',
+                                    pointerEvents: 'none',
+                                    userSelect: 'none',
+                                    display: 'block',
+                                  }}
+                                />
+                              </div>
+                            )}
+
+                            <div style={{ position: 'absolute', inset: 0, backgroundColor: getRGBAColor(glassPanel.backgroundColor, glassPanel.opacity ?? 0.92), borderRadius: 'inherit', pointerEvents: 'none', zIndex: 1 }} />
+                          </>
                         )}
-
-                        <div style={{ position: 'absolute', inset: 0, backgroundColor: getRGBAColor(glassPanel.backgroundColor, glassPanel.opacity ?? 0.92), borderRadius: 'inherit', pointerEvents: 'none', zIndex: 1 }} />
-
-                        {/* Divider lines (logo-campaign at 28%, campaign-size at 60%, size-contact at 78%) */}
-                        <div style={{ position: 'absolute', left: '28%', top: '12%', height: '76%', width: '1px', backgroundColor: '#ffffff15', zIndex: 3 }} />
-                        <div style={{ position: 'absolute', left: '60%', top: '12%', height: '76%', width: '1px', backgroundColor: '#ffffff15', zIndex: 3 }} />
-                        <div style={{ position: 'absolute', left: '78%', top: '12%', height: '76%', width: '1px', backgroundColor: '#ffffff15', zIndex: 3 }} />
 
                         {/* Canvas elements inside info bar */}
                         {infoPanelTexts.map((el) => {
                           if (!el.visible) return null;
+                          const hasBg = Boolean(el.textBackground);
                           return (
                             <div
                               key={el.id}
@@ -10163,7 +9395,7 @@ export default function DesignStudio() {
                             >
                               {el.type === 'image' ? (
                                 <img
-                                    src={fixSvgDataUrl(el.id === 'company_logo' && companyInfo.logoUrl ? companyInfo.logoUrl : (el.url || ''))}
+                                  src={fixSvgDataUrl(el.id === 'company_logo' && companyInfo.logoUrl ? companyInfo.logoUrl : (el.url || ''))}
                                   style={{
                                     width: '100%',
                                     height: '100%',
@@ -10189,19 +9421,26 @@ export default function DesignStudio() {
                                   {renderLucideIcon(el.iconName || 'phone', el.iconColor || '#ffffff', el.iconSize || 24)}
                                 </div>
                               ) : (
-                                // Text element
+                                // Text element with optional pill/background
                                 <div style={{
-                                  display: 'flex',
+                                  display: 'inline-flex',
                                   alignItems: 'center',
                                   gap: '10px',
                                   fontSize: `${el.fontSize}px`,
-                                  color: el.fontColor,
+                                  color: el.fontColor || '#ffffff',
                                   fontWeight: el.fontWeight,
                                   textAlign: el.alignment,
                                   whiteSpace: 'nowrap',
                                   direction: 'rtl',
                                   lineHeight: 1.4,
                                   fontFamily: el.fontFamily || 'inherit',
+                                  backgroundColor: hasBg ? (el.textBgColor || 'rgba(12, 14, 20, 0.88)') : 'transparent',
+                                  padding: hasBg ? `${el.textBgPaddingY ?? 4}px ${el.textBgPaddingX ?? 12}px` : undefined,
+                                  borderRadius: hasBg ? `${el.textBgRadius ?? 8}px` : undefined,
+                                  border: hasBg ? (el.textBgBorder || '1px solid rgba(214, 172, 64, 0.5)') : 'none',
+                                  boxShadow: hasBg ? '0 4px 12px rgba(0, 0, 0, 0.35)' : undefined,
+                                  backdropFilter: hasBg && el.textBgBlur ? `blur(${el.textBgBlur}px)` : undefined,
+                                  WebkitBackdropFilter: hasBg && el.textBgBlur ? `blur(${el.textBgBlur}px)` : undefined,
                                 }}>
                                   {el.icon && el.icon !== 'none' && (
                                     <div style={{
@@ -10226,14 +9465,15 @@ export default function DesignStudio() {
                       </div>
                     )}
 
-                    {/* ── Location strip ── */}
+                    {/* ── Location strip (Bottom Strip) ── */}
                     {locationStrip.visible && (
                       <div
                         data-location-strip="true"
                         style={{
                           position: 'absolute',
-                          left: 0, bottom: 0,
-                          width: '100%',
+                          left: `${locationStrip.x ?? 0}px`,
+                          bottom: `${locationStrip.offsetY ?? 0}px`,
+                          width: locationStrip.width ? `${locationStrip.width}px` : '100%',
                           height: `${locationStrip.height}px`,
                           backgroundColor: 'transparent',
                           backdropFilter: 'none',
@@ -10259,50 +9499,85 @@ export default function DesignStudio() {
                             : ''
                         }`}
                       >
-                        {/* Blurred background replica to simulate backdrop-filter (works in Chrome + html2canvas export) */}
-                        {(locationStrip.blur ?? 10) > 0 && canvasImageUrl && (
+                        {/* ── PNG / Custom Image Background Layer ── */}
+                        {locationStrip.bgMode === 'image' && locationStrip.bgImageUrl ? (
                           <div style={{
                             position: 'absolute',
                             inset: 0,
                             overflow: 'hidden',
-                            borderRadius: 'inherit',
+                            borderRadius: `${locationStrip.borderRadius ?? 0}px`,
                             pointerEvents: 'none',
-                            zIndex: 0,
+                            zIndex: 1,
                           }}>
                             <img
-                              src={canvasImageUrl}
+                              src={fixSvgDataUrl(locationStrip.bgImageUrl)}
                               crossOrigin="anonymous"
-                              alt=""
-                              draggable={false}
+                              alt="Location Strip Background"
                               style={{
                                 position: 'absolute',
-                                left: `${imageStyle.x}px`,
-                                top: `${imageStyle.y - (canvasHeight - (locationStrip.height ?? 120))}px`,
-                                width: `${imageStyle.width}px`,
-                                height: `${imageStyle.height}px`,
-                                objectFit: (imageStyle.objectFit as any) || 'cover',
-                                objectPosition: 'center',
-                                filter: `blur(${locationStrip.blur ?? 10}px)`,
-                                transform: 'scale(1.05)',
+                                inset: 0,
+                                width: '100%',
+                                height: '100%',
+                                objectFit: (locationStrip.bgObjectFit as any) || 'fill',
+                                opacity: locationStrip.opacity ?? 1,
+                                transform: locationStrip.bgFlipY ? 'scaleY(-1)' : 'none',
+                                display: 'block',
                                 pointerEvents: 'none',
                                 userSelect: 'none',
-                                display: 'block',
                               }}
                             />
                           </div>
+                        ) : (
+                          <>
+                            {/* Blurred background replica to simulate backdrop-filter (works in Chrome + html2canvas export) */}
+                            {(locationStrip.blur ?? 10) > 0 && canvasImageUrl && (
+                              <div style={{
+                                position: 'absolute',
+                                inset: 0,
+                                overflow: 'hidden',
+                                borderRadius: 'inherit',
+                                pointerEvents: 'none',
+                                zIndex: 0,
+                              }}>
+                                <img
+                                  src={canvasImageUrl}
+                                  crossOrigin="anonymous"
+                                  alt=""
+                                  draggable={false}
+                                  style={{
+                                    position: 'absolute',
+                                    left: `${imageStyle.x}px`,
+                                    top: `${imageStyle.y - (canvasHeight - (locationStrip.height ?? 120))}px`,
+                                    width: `${imageStyle.width}px`,
+                                    height: `${imageStyle.height}px`,
+                                    objectFit: (imageStyle.objectFit as any) || 'cover',
+                                    objectPosition: 'center',
+                                    filter: `blur(${locationStrip.blur ?? 10}px)`,
+                                    transform: 'scale(1.05)',
+                                    pointerEvents: 'none',
+                                    userSelect: 'none',
+                                    display: 'block',
+                                  }}
+                                />
+                              </div>
+                            )}
+
+                            <div style={{ position: 'absolute', inset: 0, backgroundColor: getRGBAColor(locationStrip.backgroundColor, locationStrip.opacity ?? 0.9), borderRadius: 'inherit', pointerEvents: 'none', zIndex: 1 }} />
+                          </>
                         )}
 
-                        <div style={{ position: 'absolute', inset: 0, backgroundColor: getRGBAColor(locationStrip.backgroundColor, locationStrip.opacity ?? 0.9), borderRadius: 'inherit', pointerEvents: 'none', zIndex: 1 }} />
-
-                        {/* Pin icon */}
-                        <div style={{ position: 'absolute', right: 50, top: '50%', transform: 'translateY(-50%)', zIndex: 3 }}>
-                          <svg width="40" height="40" viewBox="0 0 24 24" fill={locationStrip.textColor} stroke="none">
-                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" fill={locationStrip.backgroundColor} />
-                          </svg>
-                        </div>
+                        {/* Pin icon (can be toggled) */}
+                        {locationStrip.showPinIcon !== false && (
+                          <div style={{ position: 'absolute', right: 50, top: '50%', transform: 'translateY(-50%)', zIndex: 3, pointerEvents: 'none' }}>
+                            <svg width="40" height="40" viewBox="0 0 24 24" fill={locationStrip.textColor} stroke="none">
+                              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" fill={locationStrip.bgMode === 'image' ? '#000000' : locationStrip.backgroundColor} />
+                            </svg>
+                          </div>
+                        )}
 
                         {locationTexts.map((el) => {
                           if (!el.visible) return null;
+                          const hasBg = Boolean(el.textBackground);
                           return (
                             <div
                               key={el.id}
@@ -10322,7 +9597,9 @@ export default function DesignStudio() {
                                 zIndex: 20,
                                 boxSizing: el.type === 'image' ? 'content-box' : 'border-box',
                               }}
-                              className={`transition-shadow p-1 rounded ${!isExporting && !lockMode && selectedLayerId === el.id ? 'ring-2 ring-primary bg-black/10' : ''}`}
+                              className={`transition-shadow p-1 rounded ${
+                                !isExporting && !lockMode && selectedLayerId === el.id ? 'ring-2 ring-primary bg-black/10' : ''
+                              }`}
                             >
                               {el.type === 'image' ? (
                                 <img
@@ -10353,19 +9630,26 @@ export default function DesignStudio() {
                                   {renderLucideIcon(el.iconName || 'phone', el.iconColor || '#ffffff', el.iconSize || 24)}
                                 </div>
                               ) : (
-                                // Text element
+                                // Text element with optional background / pill
                                 <div style={{
-                                  display: 'flex',
+                                  display: 'inline-flex',
                                   alignItems: 'center',
                                   gap: '10px',
                                   fontSize: `${el.fontSize}px`,
-                                  color: locationStrip.textColor,
+                                  color: el.fontColor || locationStrip.textColor || '#ffffff',
                                   fontFamily: el.fontFamily || 'inherit',
                                   fontWeight: el.fontWeight,
                                   textAlign: el.alignment,
                                   whiteSpace: 'nowrap',
                                   direction: 'rtl',
                                   lineHeight: 1.4,
+                                  backgroundColor: hasBg ? (el.textBgColor || 'rgba(12, 14, 20, 0.88)') : 'transparent',
+                                  padding: hasBg ? `${el.textBgPaddingY ?? 4}px ${el.textBgPaddingX ?? 12}px` : undefined,
+                                  borderRadius: hasBg ? `${el.textBgRadius ?? 8}px` : undefined,
+                                  border: hasBg ? (el.textBgBorder || '1px solid rgba(214, 172, 64, 0.5)') : 'none',
+                                  boxShadow: hasBg ? '0 4px 12px rgba(0, 0, 0, 0.35)' : undefined,
+                                  backdropFilter: hasBg && el.textBgBlur ? `blur(${el.textBgBlur}px)` : undefined,
+                                  WebkitBackdropFilter: hasBg && el.textBgBlur ? `blur(${el.textBgBlur}px)` : undefined,
                                 }}>
                                   {el.icon && el.icon !== 'none' && (
                                     <div style={{
@@ -10378,7 +9662,7 @@ export default function DesignStudio() {
                                       backgroundColor: el.iconBackground ? (el.iconBgColor || '#ffffff') : 'transparent',
                                       flexShrink: 0,
                                     }}>
-                                      {renderLucideIcon(el.icon, el.iconColor || locationStrip.textColor || '#ffffff', el.iconSize || el.fontSize || 18)}
+                                      {renderLucideIcon(el.icon, el.iconColor || el.fontColor || locationStrip.textColor || '#ffffff', el.iconSize || el.fontSize || 18)}
                                     </div>
                                   )}
                                   <span>{renderTextContent(el)}</span>

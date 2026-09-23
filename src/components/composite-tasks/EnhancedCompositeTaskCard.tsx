@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { CompositeTaskWithDetails } from '@/types/composite-task';
-import { Wrench, Printer, Scissors, FileText, Edit, Eye, TrendingUp, FileOutput, Loader2, Trash2, Users, AlertTriangle, RefreshCw, Pencil, Check, X as XIcon, Megaphone } from 'lucide-react';
+import { Wrench, Printer, Scissors, FileText, Edit, Eye, TrendingUp, FileOutput, Loader2, Trash2, Users, AlertTriangle, RefreshCw, Pencil, Check, X as XIcon, Megaphone, Sparkles } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
@@ -892,7 +892,19 @@ export const EnhancedCompositeTaskCard: React.FC<EnhancedCompositeTaskCardProps>
           </div>
 
           {/* أزرار الإدارة */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                window.open(`/design-studio?composite_task_id=${task.id}`, '_blank');
+              }}
+              className="border-amber-500/40 hover:bg-amber-500/10 hover:border-amber-500 text-amber-400 font-bold transition-all cursor-pointer"
+            >
+              <Sparkles className="h-4 w-4 mr-2 text-amber-400" />
+              استوديو التصميم
+            </Button>
+
             {onEditCosts && (
               <Button
                 variant="outline"
