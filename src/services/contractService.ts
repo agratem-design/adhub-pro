@@ -572,7 +572,7 @@ export async function getContracts(linkedCustomerId?: string | null) {
   try {
     let query = supabase
       .from('contract_summary' as any)
-      .select(CONTRACT_SUMMARY_LIST_COLUMNS)
+      .select('*')
       .order('Contract_Number', { ascending: false });
 
     // فلترة حسب العميل المربوط
@@ -589,7 +589,7 @@ export async function getContracts(linkedCustomerId?: string | null) {
       // Fallback to Contract table
       let fallbackQuery = supabase
         .from('Contract')
-        .select(CONTRACT_LIST_COLUMNS)
+        .select('*')
         .order('Contract_Number', { ascending: false });
 
       if (linkedCustomerId) {

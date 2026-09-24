@@ -513,12 +513,12 @@ export function UnifiedPrintAllDialog({
     (async () => {
       const { data } = await supabase
         .from('maintenance_statuses')
-        .select('name, color, display_name');
+        .select('name, color, label');
       if (data) {
         const map: Record<string, { label: string; color: string }> = {};
         data.forEach((st: any) => {
           map[st.name] = {
-            label: st.display_name || st.name,
+            label: st.label || st.name,
             color: st.color || '#b91c1c'
           };
         });

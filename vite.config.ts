@@ -72,6 +72,9 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     dedupe: ["react", "react-dom"],
     alias: [
+      // Keep the renderer and every lazy route on one React instance during HMR.
+      { find: /^react$/, replacement: path.resolve(__dirname, './node_modules/react') },
+      { find: /^react-dom$/, replacement: path.resolve(__dirname, './node_modules/react-dom') },
       { find: '@', replacement: path.resolve(__dirname, './src') },
       { find: /^pako$/, replacement: path.resolve(__dirname, './src/libs/pako-shim.ts') },
     ],

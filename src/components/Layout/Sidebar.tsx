@@ -26,6 +26,7 @@ interface SidebarSection {
 
 const coreItems: SidebarItem[] = [
   { id: 'dashboard', label: 'الرئيسية', icon: Home, path: '/admin' },
+  { id: 'billboards', label: 'جميع اللوحات', icon: MapPin, path: '/admin/billboards' },
   { id: 'contracts', label: 'العقود', icon: FileText, path: '/admin/contracts' },
   { id: 'events_contracts', label: 'عقود المناسبات', icon: CalendarPlus, path: '/admin/events-contracts' },
   { id: 'offers', label: 'العروض', icon: FileSpreadsheet, path: '/admin/offers' },
@@ -188,7 +189,7 @@ const group = (id: string, title: string, icon: LucideIcon, ids: string[]): Side
 });
 const sidebarSections: SidebarSection[] = [
   group('sales', 'العملاء والأسعار', Users, ['customers', 'pricing', 'pricing_factors', 'export_pricing', 'customer_merge']),
-  group('billboards', 'اللوحات والمواقع', MapPin, ['billboards', 'billboard_photos', 'extended_billboards', 'delayed_billboards', 'billboard_maintenance', 'smart_distribution', 'billboard_cleanup']),
+  group('billboards', 'إدارة اللوحات والمواقع', MapPin, ['billboard_photos', 'extended_billboards', 'delayed_billboards', 'billboard_maintenance', 'smart_distribution', 'billboard_cleanup']),
   group('operations', 'التنفيذ والتصميم', FolderKanban, ['tasks', 'comprehensive_installation_tasks', 'removal_tasks', 'design_studio', 'image_gallery', 'field_photos', 'rephotography', 'drive_uploader']),
   group('finance', 'المالية والحسابات', DollarSign, ['payments', 'overdue_payments', 'account_overdue_payments', 'revenue', 'expenses', 'printed_invoices_page', 'printer_accounts', 'installation_team_accounts', 'custody', 'salaries', 'contract_closure_simulator']),
   group('partnerships', 'الشركات والشراكات', Building2, ['company_management', 'shared_companies', 'shared_billboards', 'friend_billboards', 'friend_accounts', 'logo_management']),

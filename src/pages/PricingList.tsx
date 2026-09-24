@@ -87,7 +87,7 @@ interface PricingData {
   full_year: number;
   one_day: number;
   size_id?: number | null;
-  duration_prices?: Record<string, number> | null;
+  duration_prices?: import('@/integrations/supabase/types').Json;
 }
 
 interface SizeData {

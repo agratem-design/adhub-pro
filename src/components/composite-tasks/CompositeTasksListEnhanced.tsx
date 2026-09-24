@@ -2980,18 +2980,19 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       const data = await batchInQuery(
         taskIds,
         35,
-        (chunk) =>
-          supabase
-            .from('customer_payments')
-            .select('id, amount, payment_date, entry_type, notes, composite_task_id, distributed_payment_id')
+          (chunk) =>
+            supabase
+              .from('customer_payments')
+            .select('id, amount, paid_at, entry_type, notes, composite_task_id, distributed_payment_id')
             .in('composite_task_id', chunk)
             .eq('entry_type', 'payment')
-            .order('payment_date', { ascending: true })
+            .order('paid_at', { ascending: true })
       );
 
       const map: Record<string, any[]> = {};
       (data || []).forEach((p: any) => {
         if (!map[p.composite_task_id]) map[p.composite_task_id] = [];
+        p.payment_date = p.paid_at;
         map[p.composite_task_id].push(p);
       });
       return map;
