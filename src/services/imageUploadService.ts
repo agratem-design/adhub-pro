@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { createRequestId } from '@/lib/requestId';
 
 export type ImageUploadProvider = 'supabase_storage' | 'imgbb' | 'freeimage' | 'postimg' | 'cloudinary' | 'google_drive';
 
@@ -90,7 +91,7 @@ export function sanitizeStorageKey(name: string): string {
  */
 const uploadToSupabaseStorage = async (file: File, name?: string): Promise<string> => {
   const ext = file.name?.split('.').pop() || 'png';
-  const rawName = name || crypto.randomUUID();
+  const rawName = name || createRequestId();
   const fileName = `${sanitizeStorageKey(rawName)}-${Date.now()}.${ext}`;
   const filePath = `images/${fileName}`;
 

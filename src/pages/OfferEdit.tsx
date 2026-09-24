@@ -1,3 +1,5 @@
+import { usePricingDurations } from '@/hooks/usePricingDurations';
+import { durationPrice, durationName, durationEnd } from '@/utils/pricingDuration';
 // @ts-nocheck
 import { isBillboardAvailable } from '@/utils/contractUtils';
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
@@ -91,6 +93,7 @@ export default function OfferEdit() {
   // Dates & pricing
   const [startDate, setStartDate] = useState('');
   const [pricingMode, setPricingMode] = useState<'months' | 'days'>('months');
+  const { data: durations } = usePricingDurations();
   const [durationMonths, setDurationMonths] = useState<number>(3);
   const [durationDays, setDurationDays] = useState<number>(0);
   const [use30DayMonth, setUse30DayMonth] = useState<boolean>(true);
@@ -248,10 +251,13 @@ export default function OfferEdit() {
 
         const s = offer.start_date || '';
         const e = offer.end_date || '';
+        setUse30DayMonth((offer as any).use_30_day_month ?? true);
         setStartDate(s);
         setEndDate(e);
 
-        if (s && e) {
+        if (offer.duration_months > 0) {
+          setPricingMode('months'); setDurationMonths(Number(offer.duration_months));
+        } else if (s && e) {
           const sd = new Date(s);
           const ed = new Date(e);
           if (!isNaN(sd.getTime()) && !isNaN(ed.getTime())) {
@@ -404,16 +410,12 @@ export default function OfferEdit() {
     const d = new Date(startDate);
     const end = new Date(d);
     if (pricingMode === 'months') {
-      if (use30DayMonth) {
-        end.setDate(end.getDate() + Math.max(0, Number(durationMonths || 0)) * 30);
-      } else {
-        end.setMonth(end.getMonth() + Math.max(0, Number(durationMonths || 0)));
-      }
+      end.setTime(durationEnd(startDate, durationMonths, use30DayMonth, durations).getTime());
     } else {
       end.setDate(end.getDate() + Math.max(0, Number(durationDays || 0)));
     }
     setEndDate(end.toISOString().split('T')[0]);
-  }, [startDate, durationMonths, durationDays, pricingMode, use30DayMonth]);
+  }, [startDate, durationMonths, durationDays, pricingMode, use30DayMonth, durations]);
 
   // ✅ NEW: Get stored price from offer's billboard_prices data
   const getStoredPriceFromOffer = (billboardId: string): number | null => {
@@ -459,7 +461,7 @@ export default function OfferEdit() {
     }
     
     return pricing.calculateBillboardPrice(billboard, pricingMode, durationMonths, durationDays, pricingCategory);
-  }, [useStoredPrices, currentOffer, pricingMode, durationMonths, durationDays, pricingCategory]);
+  }, [useStoredPrices, currentOffer, pricingMode, durationMonths, durationDays, pricingCategory, pricing.pricingData, durations]);
 
   // ✅ NEW: Alert states for modifying pricing parameters when useStoredPrices is true
   const handlePricingCategoryChange = (newVal: string) => {
@@ -1360,7 +1362,9 @@ export default function OfferEdit() {
         customer_id: customerId,
         start_date: startDate,
         end_date: endDate,
-        duration_months: durationMonths,
+        duration_months: pricingMode === 'months' ? durationMonths : 0,
+        duration_label: pricingMode === 'months' ? durationName(durationMonths, durations) : `${durationDays} يوم`,
+        use_30_day_month: use30DayMonth,
         total: finalTotal,
         discount: discountAmount,
         discount_type: discountType === 'percent' ? 'percentage' : 'fixed',
@@ -1456,6 +1460,7 @@ export default function OfferEdit() {
                     'Contract Date': startDate,
                     end_date: endDate,
                     'End Date': endDate,
+                    Duration: pricingMode === 'months' ? durationName(durationMonths, durations) : `${durationDays} يوم`,
                     Total: finalTotal,
                     'Total Rent': finalTotal,
                     Discount: discountAmount,
@@ -2109,7 +2114,7 @@ export default function OfferEdit() {
             <div className="flex justify-between">
               <span className="text-muted-foreground">المدة المحفوظة:</span>
               <span className="font-semibold text-foreground">
-                {currentOffer?.duration_months ? `${currentOffer.duration_months} شهر` : (currentOffer?.duration_days ? `${currentOffer.duration_days} يوم` : 'غير محددة')}
+                {currentOffer?.duration_months ? durationName(Number(currentOffer.duration_months), durations) : (currentOffer?.duration_days ? `${currentOffer.duration_days} يوم` : 'غير محددة')}
               </span>
             </div>
             {savedBaseRent !== null && (

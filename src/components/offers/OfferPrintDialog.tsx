@@ -20,6 +20,7 @@ interface OfferPrintDialogProps {
     currency?: string;
     notes?: string;
     duration_months?: number;
+    duration_label?: string;
   };
   trigger?: React.ReactNode;
 }
@@ -57,7 +58,7 @@ export function OfferPrintDialog({ offer, trigger }: OfferPrintDialogProps) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       const durationDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-      duration = `${durationDays}`;
+      duration = offer.duration_label ? `${offer.duration_label.replace(/[<>&"']/g, '')} (${durationDays})` : `${durationDays}`;
     }
 
     const formattedPrice = `${totalCost.toLocaleString('ar-LY')}`;

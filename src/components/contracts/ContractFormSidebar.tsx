@@ -1,3 +1,5 @@
+import { usePricingDurations } from '@/hooks/usePricingDurations';
+import { durationName } from '@/utils/pricingDuration';
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -121,6 +123,8 @@ export const ContractFormSidebar: React.FC<ContractFormSidebarProps> = ({
   onHasDifferentFirstPaymentChange,
   onFirstAtSigningChange,
 }) => {
+  const { data: durations } = usePricingDurations();
+  const monthOptions = Array.from(new Set([...durations.filter(d => d.is_active && d.months > 0).map(d => Number(d.months)), ...(!durations.length ? [1, 2, 3, 6, 12] : []), formData.durationMonths]));
   return (
     <div className="w-full lg:w-[360px] space-y-4">
       {/* Customer Info */}
@@ -232,9 +236,9 @@ export const ContractFormSidebar: React.FC<ContractFormSidebarProps> = ({
                   <SelectValue placeholder="اختر عدد الأشهر" />
                 </SelectTrigger>
                 <SelectContent>
-                  {[1, 2, 3, 6, 12].map((m) => (
+                  {monthOptions.map((m) => (
                     <SelectItem key={m} value={String(m)}>
-                      {m} {m === 1 ? 'شهر' : 'أشهر'}
+                      {durationName(m, durations)}
                     </SelectItem>
                   ))}
                 </SelectContent>

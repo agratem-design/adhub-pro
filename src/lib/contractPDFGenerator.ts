@@ -282,7 +282,7 @@ export async function generateContractHTML(data: ContractPDFData): Promise<strin
         ${duration ? `
         <div class="info-row">
           <span class="info-label">المدة:</span>
-          <span class="info-value">${duration} يوم</span>
+          <span class="info-value">${duration.includes('يوم') || duration.includes('شهر') || duration.includes('سنة') ? duration : `${duration} يوم`}</span>
         </div>
         ` : ''}
         <div class="info-row">

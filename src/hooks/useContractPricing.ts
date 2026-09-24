@@ -1,3 +1,5 @@
+import { usePricingDurations } from '@/hooks/usePricingDurations';
+import { durationPrice } from '@/utils/pricingDuration';
 // Hook مشترك لحساب الأسعار من قاعدة البيانات (موحد لإنشاء/تعديل العقد)
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
@@ -5,6 +7,7 @@ import { getPriceFor, getDailyPriceFor, CustomerType } from '@/data/pricing';
 import { toast } from '@/components/ui/sonner';
 
 export function useContractPricing() {
+  const { data: durations } = usePricingDurations();
   const [pricingData, setPricingData] = useState<any[]>([]);
   const [sizeNames, setSizeNames] = useState(() => new Map<number, string>());
   const [loading, setLoading] = useState(true);
@@ -81,11 +84,7 @@ export function useContractPricing() {
   };
 
   const pickPrice = (row: any, months: number): number | null => {
-    const column = monthColumnMap[months];
-    if (!row || !column) return null;
-    const v = row[column];
-    if (v === null || v === undefined) return null;
-    return Number(v) || 0;
+    return durationPrice(row, months, durations);
   };
 
   // ✅ موحد: البحث عن السعر باستخدام size_id (رقمي) أو اسم المقاس (نصي مثل 8x3)

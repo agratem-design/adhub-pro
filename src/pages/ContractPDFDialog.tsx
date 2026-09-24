@@ -27,6 +27,8 @@ import { Installment, generatePaymentsClauseText } from '@/utils/paymentGrouping
 import { numberToArabicWords } from '@/lib/printUtils';
 import { preparePrintWindow, writePrintWindow, openPrintDirectly } from '@/utils/printWindowHelper';
 import { getBillboardDimensions } from '@/lib/billboardDimensions';
+import { usePricingDurations } from '@/hooks/usePricingDurations';
+import { getContractDurationName, replaceDurationVariable } from '@/utils/pricingDuration';
 
 interface ContractPDFDialogProps {
   open: boolean;
@@ -315,9 +317,10 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
   // WhatsApp sending
   const { sendMessage, loading: sendingWhatsApp } = useSendWhatsApp();
 
-  // ✅ جلب إعدادات القالب من قاعدة البيانات
+  // جلب إعدادات القالب من قاعدة البيانات
   const { data: templateData } = useContractTemplateSettings();
   const templateSettings = templateData?.settings || DEFAULT_SECTION_SETTINGS;
+  const { data: durations = [] } = usePricingDurations();
   const templateBgUrl = templateData?.backgroundUrl || '/bgc1.svg';
   const tableBgUrl = templateData?.tableBackgroundUrl || '/bgc2.svg';
   const configuredNoStampBgUrl = templateData?.noStampBgUrl || '/bgc1not.svg';
@@ -734,26 +737,28 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
     });
   };
 
-  // ✅ REFACTORED: Calculate contract details
+  // Calculate contract details
   const calculateContractDetails = () => {
     const startDate = contract?.start_date || contract?.['Contract Date'];
     const endDate = contract?.end_date || contract?.['End Date'];
     const currencyInfo = getCurrencyInfo();
 
-    // ✅ FIXED: استخدم Total مباشرة لأنه يحتوي على السعر بالعملة المحولة
     const finalTotal = contract?.Total || contract?.total_cost || 0;
     const rentalCost = contract?.['Total Rent'] || contract?.rent_cost || 0;
     const installationCost = contract?.installation_cost || 0;
 
-    let duration = '';
+    let durationDays = '';
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       const days = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-      duration = `${days}`;
+      if (days > 0) durationDays = `${days}`;
     }
 
-    // ✅ FIXED: Format dates with Arabic month names
+    const durationName = getContractDurationName(contract, durations);
+    const durationLabel = durationName || (durationDays ? `${durationDays} يوم` : '');
+
+    // Format dates with Arabic month names
     const formatArabicDate = (dateString: string): string => {
       if (!dateString) return '';
 
@@ -774,7 +779,9 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
       finalTotal: formatArabicNumber(finalTotal),
       rentalCost: formatArabicNumber(rentalCost),
       installationCost: formatArabicNumber(installationCost),
-      duration,
+      duration: durationLabel,
+      durationLabel,
+      durationDays,
       startDate: startDate ? formatArabicDate(startDate) : '',
       endDate: endDate ? formatArabicDate(endDate) : '',
       currencyInfo
@@ -888,7 +895,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
     const rent_end_date = customEndDate || getBillboardRentEndDate(b, contractDetails.endDate || '');
     
     // Get duration days - priority to custom dates duration
-    let duration_days = contractDetails.duration || '';
+    let duration_days = contractDetails.durationDays || contractDetails.duration || '';
     if (customStartDate && customEndDate) {
       try {
         const start = new Date(customStartDate);
@@ -1613,7 +1620,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
       customerPhone: customerData.phone,
       contractStartDate: contractDetails.startDate,
       contractEndDate: contractDetails.endDate,
-      contractDuration: contractDetails.duration,
+      contractDuration: contractDetails.durationLabel,
       currencySymbol: currencyInfo.symbol,
       currencyWrittenName: currencyInfo.writtenName,
       items: groupedBillboards as any[],
@@ -1768,7 +1775,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         endDate: contractDetails.endDate,
         finalTotal: contractDetails.finalTotal,
         rentalCost: contractDetails.rentalCost,
-        duration: contractDetails.duration,
+        duration: contractDetails.durationLabel,
         year: year.toString(),
         companyName: '',
         phoneNumber: '',
@@ -1862,12 +1869,9 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           }
         }
 
-        // ✅ FIX: Use same logic as ContractTermsSettings preview
         const rent_end_date = getBillboardRentEndDate(b, contractDetails.endDate || '');
-
-        // ✅ FIX: مدة اللوحات تعتمد على تواريخ العقد (المصدر الوحيد للحقيقة)
-        // لا نعتمد على Days_Count المخزن في جدول اللوحات لأنه قد لا يتزامن بعد تعديل مدة العقد
-        const duration_days = contractDetails.duration || '';
+        // مدة اللوحات تعتمد على تواريخ العقد
+        const duration_days = contractDetails.durationDays || contractDetails.duration || '';
 
         // باقي الحقول
         let coords: string = String(b.GPS_Coordinates ?? b.coords ?? b.coordinates ?? b.GPS ?? '');
@@ -2429,8 +2433,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
             if (printCostEnabled) { inclusionParts.push('شامل الطباعة'); } else { inclusionParts.push('غير شامل الطباعة'); }
             const inclusionText = inclusionParts.join(' و');
 
-            let result = text
-              .replace(/{duration}/g, contractData.duration)
+            let result = replaceDurationVariable(text, contractData.duration, contractDetails.durationDays, durations)
               .replace(/{startDate}/g, contractData.startDate)
               .replace(/{endDate}/g, contractData.endDate)
               .replace(/{customerName}/g, contractData.customerName)
@@ -2595,7 +2598,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           startDate: contractDetails.startDate,
           endDate: contractDetails.endDate,
           rawStartDate,
-          duration: contractDetails.duration,
+          duration: contractDetails.durationLabel,
+          durationDays: contractDetails.durationDays,
           customerName: customerData.name,
           customerCompany: customerData.company || '',
           customerPhone: customerData.phone || '',
@@ -2618,7 +2622,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           finalTotal: contractDetails.finalTotal,
           rentalCost: contractDetails.rentalCost,
           installationCost: contractDetails.installationCost,
-          duration: contractDetails.duration,
+          duration: contractDetails.durationLabel,
+          durationDays: contractDetails.durationDays,
           discount: discountInfo ? `بعد خصم ${discountInfo.text}` : '',
           installationEnabled: installationEnabled,
           printCostEnabled: printCostEnabled,
@@ -2715,7 +2720,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           startDate: contractDetails.startDate,
           endDate: contractDetails.endDate,
           rawStartDate,
-          duration: contractDetails.duration,
+          duration: contractDetails.durationLabel,
+          durationDays: contractDetails.durationDays,
           customerName: customerData.name,
           customerCompany: customerData.company || '',
           customerPhone: customerData.phone || '',
@@ -2738,7 +2744,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           finalTotal: contractDetails.finalTotal,
           rentalCost: contractDetails.rentalCost,
           installationCost: contractDetails.installationCost,
-          duration: contractDetails.duration,
+          duration: contractDetails.durationLabel,
+          durationDays: contractDetails.durationDays,
           discount: discountInfo ? `بعد خصم ${discountInfo.text}` : '',
           installationEnabled: installationEnabled,
           printCostEnabled: printCostEnabled,
@@ -3001,7 +3008,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           startDate: contractDetails.startDate,
           endDate: contractDetails.endDate,
           rawStartDate,
-          duration: contractDetails.duration,
+          duration: contractDetails.durationLabel,
+          durationDays: contractDetails.durationDays,
           customerName: customerData.name,
           customerCompany: customerData.company || '',
           customerPhone: customerData.phone || '',
@@ -3024,7 +3032,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           finalTotal: contractDetails.finalTotal,
           rentalCost: contractDetails.rentalCost,
           installationCost: contractDetails.installationCost,
-          duration: contractDetails.duration,
+          duration: contractDetails.durationLabel,
+          durationDays: contractDetails.durationDays,
           discount: discountInfo ? `بعد خصم ${discountInfo.text}` : '',
           installationEnabled: installationEnabled,
           printCostEnabled: printCostEnabled,
@@ -3288,7 +3297,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           contractNumber: isOffer ? (contract?.offer_number || contract?.id || '') : (contract?.id || contract?.Contract_Number || ''),
           yearlyCode: await getYearlyCode(), year: year.toString(),
           startDate: contractDetails.startDate, endDate: contractDetails.endDate, rawStartDate,
-          duration: contractDetails.duration,
+          duration: contractDetails.durationLabel,
+          durationDays: contractDetails.durationDays,
           customerName: customerData.name, customerCompany: customerData.company || '', customerPhone: customerData.phone || '',
           isOffer, adType: contract?.ad_type || contract?.['Ad Type'] || (isOffer ? 'عرض سعر' : 'عقد إيجار'),
           billboardsCount, currencyName: currencyInfo.name,
@@ -3301,7 +3311,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         currencyInfo: { symbol: currencyInfo.symbol, writtenName: currencyInfo.writtenName },
         contractDetails: {
           finalTotal: contractDetails.finalTotal, rentalCost: contractDetails.rentalCost,
-          installationCost: contractDetails.installationCost, duration: contractDetails.duration,
+          installationCost: contractDetails.installationCost, duration: contractDetails.durationLabel,
+          durationDays: contractDetails.durationDays,
           discount: discountInfo ? `بعد خصم ${discountInfo.text}` : '',
           installationEnabled, printCostEnabled,
         },
@@ -3514,7 +3525,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           startDate: contractDetails.startDate,
           endDate: contractDetails.endDate,
           rawStartDate, // ISO date for Hijri conversion
-          duration: contractDetails.duration,
+          duration: contractDetails.durationLabel,
+          durationDays: contractDetails.durationDays,
           customerName: customerData.name,
           customerCompany: customerData.company || '',
           customerPhone: customerData.phone || '',
@@ -3537,7 +3549,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           finalTotal: contractDetails.finalTotal,
           rentalCost: contractDetails.rentalCost,
           installationCost: contractDetails.installationCost,
-          duration: contractDetails.duration,
+          duration: contractDetails.durationLabel,
+          durationDays: contractDetails.durationDays,
  discount: discountInfo ? `بعد خصم ${discountInfo.text}` : '', // تمرير نص الخصم
  installationEnabled: installationEnabled, // تمرير حالة التركيب
  printCostEnabled: printCostEnabled, // تمرير حالة الطباعة
@@ -3619,7 +3632,10 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
                   </div>
                   <div className="flex-1 rounded-xl bg-card border p-3">
                     <p className="text-xs text-muted-foreground">المدة</p>
-                    <p className="text-2xl font-bold">{contractDetails.duration} <span className="text-sm font-normal">يوم</span></p>
+                    <p className="text-2xl font-bold">{contractDetails.duration}</p>
+                    {contractDetails.durationDays && !contractDetails.duration.includes(contractDetails.durationDays) && (
+                      <p className="text-xs text-muted-foreground mt-0.5">{contractDetails.durationDays} يوم</p>
+                    )}
                   </div>
                 </div>
 

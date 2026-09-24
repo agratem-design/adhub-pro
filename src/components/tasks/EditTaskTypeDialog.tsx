@@ -40,9 +40,31 @@ export function EditTaskTypeDialog({
 
     setSaving(true);
     try {
+      const updateData: any = { task_type: taskType };
+      if (taskType === 'reinstallation') {
+        const { data: currentTask } = await supabase
+          .from('installation_tasks')
+          .select('contract_id, reinstallation_number')
+          .eq('id', taskId)
+          .maybeSingle();
+
+        let nextNum = currentTask?.reinstallation_number;
+        if (!nextNum && currentTask?.contract_id) {
+          const { data: existing } = await supabase
+            .from('installation_tasks')
+            .select('reinstallation_number')
+            .eq('contract_id', currentTask.contract_id)
+            .eq('task_type', 'reinstallation')
+            .order('reinstallation_number', { ascending: false })
+            .limit(1);
+          nextNum = ((existing?.[0]?.reinstallation_number as number) || 0) + 1;
+        }
+        updateData.reinstallation_number = nextNum || 1;
+      }
+
       const { error } = await supabase
         .from('installation_tasks')
-        .update({ task_type: taskType })
+        .update(updateData)
         .eq('id', taskId);
 
       if (error) throw error;

@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
+import { createRequestId } from '@/lib/requestId';
 import {
   Image as ImageIcon,
   Download,
@@ -233,7 +234,7 @@ export const ExcelImageImportDialog: React.FC<ExcelImageImportDialogProps> = ({
       }
 
       return {
-        id: crypto.randomUUID(),
+        id: createRequestId(),
         rowNumber: index + 2,
         image_name: imageName,
         image_url: imageUrl,

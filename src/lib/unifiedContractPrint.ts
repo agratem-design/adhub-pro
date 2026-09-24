@@ -8,6 +8,7 @@
 import { PageSectionSettings, DiscountDisplaySettings, FallbackSettings, DEFAULT_DISCOUNT_DISPLAY, DEFAULT_FALLBACK_SETTINGS } from '@/hooks/useContractTemplateSettings';
 import { buildTableTermHtml } from '@/lib/contractTableTerm';
 import { formatLongArabicDate } from '@/lib/utils';
+import { replaceDurationVariable } from '@/utils/pricingDuration';
 import QRCode from 'qrcode';
 
 // ===== DESIGN DIMENSIONS (same as preview) =====
@@ -151,6 +152,7 @@ export interface ContractData {
   endDate: string;
   rawStartDate?: string; // ISO date for Hijri conversion (e.g. "2025-07-20")
   duration: string;
+  durationDays?: string | number;
   customerName: string;
   customerCompany?: string;
   customerPhone?: string;
@@ -215,6 +217,7 @@ export interface UnifiedPrintOptions {
     rentalCost: string;
     installationCost: string;
     duration: string;
+    durationDays?: string | number;
     discount?: string;
     installationEnabled?: boolean;
     printCostEnabled?: boolean;
@@ -394,8 +397,8 @@ function replaceVariables(
   }
   const inclusionText = inclusionParts.join(' و');
   
-  return text
-    .replace(/{duration}/g, contractData.duration)
+  const days = contractData.durationDays || contractDetails.durationDays;
+  return replaceDurationVariable(text, contractData.duration, days)
     .replace(/{startDate}/g, contractData.startDate)
     .replace(/{endDate}/g, contractData.endDate)
     .replace(/{customerName}/g, contractData.customerName)

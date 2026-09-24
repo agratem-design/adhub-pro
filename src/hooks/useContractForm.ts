@@ -1,3 +1,5 @@
+import { usePricingDurations } from '@/hooks/usePricingDurations';
+import { durationEnd, durationPrice } from '@/utils/pricingDuration';
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
@@ -28,6 +30,7 @@ export interface Installment {
 }
 
 export const useContractForm = (initialData?: Partial<ContractFormData>) => {
+  const { data: durations } = usePricingDurations();
   // Form state
   const [formData, setFormData] = useState<ContractFormData>({
     customerName: '',
@@ -189,21 +192,14 @@ export const useContractForm = (initialData?: Partial<ContractFormData>) => {
     const d = new Date(formData.startDate);
     const end = new Date(d);
     if (formData.pricingMode === 'months') {
-      if (use30DayMonth) {
-        // كل شهر = 30 يوم بالضبط
-        const days = Math.max(0, Number(formData.durationMonths || 0)) * 30;
-        end.setDate(end.getDate() + days);
-      } else {
-        // أشهر تقويمية حقيقية
-        end.setMonth(end.getMonth() + Math.max(0, Number(formData.durationMonths || 0)));
-      }
+      end.setTime(durationEnd(formData.startDate, formData.durationMonths, use30DayMonth, durations).getTime());
     } else {
       const days = Math.max(0, Number(formData.durationDays || 0));
       end.setDate(end.getDate() + days);
     }
     const iso = end.toISOString().split('T')[0];
     setFormData(prev => ({ ...prev, endDate: iso }));
-  }, [formData.startDate, formData.durationMonths, formData.durationDays, formData.pricingMode, use30DayMonth]);
+  }, [formData.startDate, formData.durationMonths, formData.durationDays, formData.pricingMode, use30DayMonth, durations]);
 
   // ✅ FIXED: Price calculation functions using size_id
   const getPriceFromDatabase = (sizeId: number | null, level: any, customer: string, months: number): number | null => {
@@ -217,18 +213,8 @@ export const useContractForm = (initialData?: Partial<ContractFormData>) => {
     );
     
     if (dbRow) {
-      const monthColumnMap: { [key: number]: string } = {
-        1: 'one_month',
-        2: '2_months', 
-        3: '3_months',
-        6: '6_months',
-        12: 'full_year'
-      };
-      
-      const column = monthColumnMap[months];
-      if (column && dbRow[column] !== null && dbRow[column] !== undefined) {
-        return Number(dbRow[column]) || 0;
-      }
+      const price = durationPrice(dbRow, months, durations);
+      if (price !== null) return price;
     }
     if (customer !== 'عادي') {
       return getPriceFromDatabase(sizeId, level, 'عادي', months);

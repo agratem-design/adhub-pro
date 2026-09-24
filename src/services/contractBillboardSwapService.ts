@@ -5,6 +5,7 @@ import { executePauseAtomic } from './contractEditService';
  */
 
 import { supabase } from '@/integrations/supabase/client';
+import { createRequestId } from '@/lib/requestId';
 import {
   calculateRemainingBillboardValue,
 } from '@/utils/contractBillboardCalculations';
@@ -209,7 +210,7 @@ export async function executeInstantBillboardSwap(
     };
   }
 
-  const stableSwapRequestId = params.swapRequestId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined);
+  const stableSwapRequestId = params.swapRequestId || createRequestId();
 
   try {
     const { data: rpcRes, error: rpcErr } = await supabase.rpc('execute_instant_billboard_swap', {

@@ -45,10 +45,13 @@ export function formatWindowsSafeFileName(title?: string): string {
   if (!title) return 'مستند';
   return title
     .replace(/\.pdf$/i, '')
-    .replace(/[\\/:*?"<>|•–—]/g, '-')
+    .replace(/:\s*/g, ' ')
+    .replace(/[:]/g, '')
+    .replace(/[\\/*?"<>|•–—]/g, '-')
     .replace(/_+/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/-+/g, '-')
+    .replace(/\s*-\s*/g, ' - ')
     .replace(/^-|-$/g, '')
     .trim() || 'مستند';
 }

@@ -1024,8 +1024,8 @@ export const InstallationTasksTable: React.FC<Props> = ({
     const pct = items.length > 0 ? Math.round((completed / items.length) * 100) : 0;
     // نوع الإعلان: إذا مدمجة نجمع الأنواع الفريدة
     const adTypes = isMerged
-      ? [...new Set(effectiveContractIds.map((cId: number) => contractById[cId]?.['Ad Type']).filter(Boolean))].join(' / ')
-      : contract?.['Ad Type'];
+      ? [...new Set(effectiveContractIds.map((cId: number) => contractById[cId]?.['Ad Type'] || (contractById[cId] as any)?.ad_type).filter(Boolean))].join(' / ')
+      : (contract?.['Ad Type'] || (contract as any)?.ad_type || designs[0]?.design_name || (task as any)?.task_name || '');
     // حساب عدد صور التركيب والتصاميم المدخلة
     const itemsWithInstallPhotos = items.filter(i => i.installed_image_face_a_url || i.installed_image_face_b_url).length;
     const itemsWithDesigns = items.filter(i => 
@@ -1857,7 +1857,7 @@ export const InstallationTasksTable: React.FC<Props> = ({
               team_id: t.team_id,
               has_cutout: item.has_cutout,
               contract_number: t.contract_id,
-              ad_type: t.designName,
+              ad_type: t.designName !== '—' ? t.designName : '',
             }));
           });
           const firstContract = selectedTasks[0];
@@ -1868,12 +1868,16 @@ export const InstallationTasksTable: React.FC<Props> = ({
               contextType="installation"
               contextNumber={firstContract?.contract_id || 0}
               customerName={selectedTasks.length === 1 ? firstContract?.customerName : `${selectedTasks.length} مهام محددة`}
-              adType={selectedTasks.length === 1 ? firstContract?.designName : ''}
+              adType={selectedTasks.length === 1 ? (firstContract?.designName !== '—' ? firstContract?.designName : '') : ''}
               items={bulkItems}
               billboards={billboardById}
               teams={teamById}
               showTeamFilter={true}
-              title={`طباعة ${selected.size} مهمة (${bulkItems.length} لوحة)`}
+              title={selectedTasks.length === 1 ? undefined : `طباعة ${selected.size} مهمة (${bulkItems.length} لوحة)`}
+              taskId={selectedTasks.length === 1 ? firstContract?.id : undefined}
+              taskIds={selectedTasks.map(t => t.id)}
+              taskType={selectedTasks.length === 1 ? firstContract?.task_type : (selectedTasks.every(t => t.task_type === 'reinstallation') ? 'reinstallation' : selectedTasks.every(t => t.task_type === 'installation') ? 'installation' : undefined)}
+              reinstallationNumber={selectedTasks.length === 1 ? (firstContract?.task_type === 'reinstallation' ? (firstContract?.reinstallation_number || 1) : null) : (selectedTasks.every(t => t.task_type === 'reinstallation') ? (firstContract?.reinstallation_number || 1) : undefined)}
             />
           );
         })()}

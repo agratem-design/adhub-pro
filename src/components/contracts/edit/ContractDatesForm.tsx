@@ -1,3 +1,5 @@
+import { usePricingDurations } from '@/hooks/usePricingDurations';
+import { durationEnd, durationName } from '@/utils/pricingDuration';
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -41,41 +43,16 @@ export function ContractDatesForm({
   use30DayMonth = true,
   setUse30DayMonth
 }: ContractDatesFormProps) {
-  // حساب عدد الأيام الفعلية
-  const totalDays = React.useMemo(() => {
-    if (pricingMode === 'days') return durationDays;
-    // إذا كان use30DayMonth مفعل: كل شهر = 30 يوم
-    // إذا كان معطل: نحسب الأيام الفعلية من تاريخ البداية للنهاية
-    if (use30DayMonth) {
-      return durationMonths * 30;
-    }
-    // حساب الأيام الفعلية بناءً على الأشهر التقويمية
-    if (startDate) {
-      const start = new Date(startDate);
-      const end = new Date(startDate);
-      end.setMonth(end.getMonth() + durationMonths);
-      return Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    }
-    return durationMonths * 30; // fallback
-  }, [pricingMode, durationMonths, durationDays, use30DayMonth, startDate]);
+  const { data: durations } = usePricingDurations();
+  const monthOptions = Array.from(new Set([...durations.filter(d => d.is_active && d.months > 0).map(d => Number(d.months)), ...(!durations.length ? [1, 2, 3, 6, 9, 12] : []), durationMonths])).filter(m => m > 0).sort((a,b) => a-b);
 
-  // حساب تاريخ الانتهاء المتوقع
   const calculatedEndDate = React.useMemo(() => {
     if (!startDate) return null;
-    const start = new Date(startDate);
-    if (isNaN(start.getTime())) return null;
-    
-    if (pricingMode === 'days') {
-      start.setDate(start.getDate() + durationDays);
-    } else {
-      if (use30DayMonth) {
-        start.setDate(start.getDate() + (durationMonths * 30));
-      } else {
-        start.setMonth(start.getMonth() + durationMonths);
-      }
-    }
-    return start;
-  }, [startDate, pricingMode, durationMonths, durationDays, use30DayMonth]);
+    const end = pricingMode === 'months' ? durationEnd(startDate, durationMonths, use30DayMonth, durations) : new Date(startDate);
+    if (pricingMode === 'days') end.setDate(end.getDate() + durationDays);
+    return isNaN(end.getTime()) ? null : end;
+  }, [startDate, pricingMode, durationMonths, durationDays, use30DayMonth, durations]);
+  const totalDays = calculatedEndDate ? Math.round((calculatedEndDate.getTime() - new Date(startDate).getTime()) / 86400000) : 0;
 
   return (
     <Card className="border-border shadow-lg overflow-hidden">
@@ -147,7 +124,7 @@ export function ContractDatesForm({
                 </TooltipProvider>
               </div>
               <span className="text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded-full tabular-nums">
-                {use30DayMonth ? `${durationMonths * 30} يوم` : 'أيام فعلية'}
+                {use30DayMonth ? `${totalDays} يوم` : 'أيام فعلية'}
               </span>
             </div>
           </div>
@@ -196,11 +173,11 @@ export function ContractDatesForm({
                   <SelectValue placeholder="الأشهر" />
                 </SelectTrigger>
                 <SelectContent className="bg-popover border-border z-[10000]">
-                  {[1, 2, 3, 6, 9, 12].map((m) => (
+                  {monthOptions.map((m) => (
                     <SelectItem key={m} value={String(m)} className="font-medium">
-                      {m} {m === 1 ? 'شهر' : m === 2 ? 'شهرين' : 'أشهر'}
+                      {durationName(m, durations)}
                       {use30DayMonth && (
-                        <span className="text-muted-foreground mr-2">({m * 30} يوم)</span>
+                        <span className="text-muted-foreground mr-2">({durations.find(d => Number(d.months) === m)?.days ?? m * 30} يوم)</span>
                       )}
                     </SelectItem>
                   ))}

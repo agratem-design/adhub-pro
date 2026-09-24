@@ -1,3 +1,5 @@
+import { usePricingDurations } from '@/hooks/usePricingDurations';
+import { durationPrice, durationName, durationEnd } from '@/utils/pricingDuration';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -273,6 +275,7 @@ export default function ContractEdit() {
   // Contract form data
   const [startDate, setStartDate] = useState('');
   const [pricingMode, setPricingMode] = useState<'months' | 'days'>('months');
+  const { data: durations } = usePricingDurations();
   const [durationMonths, setDurationMonths] = useState<number>(3);
   const [durationDays, setDurationDays] = useState<number>(0);
   const [endDate, setEndDate] = useState('');
@@ -1220,21 +1223,14 @@ export default function ContractEdit() {
     const d = new Date(startDate);
     const end = new Date(d);
     if (pricingMode === 'months') {
-      if (use30DayMonth) {
-        // حساب الشهر = 30 يوم ثابت
-        const days = Math.max(0, Number(durationMonths || 0)) * 30;
-        end.setDate(end.getDate() + days);
-      } else {
-        // حساب الأيام الفعلية للشهر
-        end.setMonth(end.getMonth() + durationMonths);
-      }
+      end.setTime(durationEnd(startDate, durationMonths, use30DayMonth, durations).getTime());
     } else {
       const days = Math.max(0, Number(durationDays || 0));
       end.setDate(end.getDate() + days);
     }
     const iso = end.toISOString().split('T')[0];
     setEndDate(iso);
-  }, [startDate, durationMonths, durationDays, pricingMode, use30DayMonth]);
+  }, [startDate, durationMonths, durationDays, pricingMode, use30DayMonth, durations]);
 
 
   // ✅ FIXED: Enhanced price lookup with fallback to size name matching (Optimized Logging)
@@ -1265,18 +1261,8 @@ export default function ContractEdit() {
     }
     
     if (dbRow) {
-      const monthColumnMap: { [key: number]: string } = {
-        1: 'one_month',
-        2: '2_months', 
-        3: '3_months',
-        6: '6_months',
-        12: 'full_year'
-      };
-      
-      const column = monthColumnMap[months];
-      if (column && dbRow[column] !== null && dbRow[column] !== undefined) {
-        return Number(dbRow[column]) || 0;
-      }
+      const price = durationPrice(dbRow, months, durations);
+      if (price !== null) return price;
     }
     
     if (customer !== 'عادي') {
@@ -1453,7 +1439,7 @@ export default function ContractEdit() {
     const convertedPrice = applyExchangeRate(basePrice);
     
     return convertedPrice;
-  }, [useStoredPrices, useFactorsPricing, pricingMode, durationMonths, durationDays, pricingCategory, pricingData, contractCurrency, exchangeRate, basePrices, municipalityFactors, categoryFactors, currentContract, billboardPriceOverrides]);
+  }, [useStoredPrices, useFactorsPricing, pricingMode, durationMonths, durationDays, pricingCategory, pricingData, durations, contractCurrency, exchangeRate, basePrices, municipalityFactors, categoryFactors, currentContract, billboardPriceOverrides]);
 
   // Supplier costs are frozen contract inputs. Only an explicit supplier pricing
   // action may replace them; customer pricing changes must never overwrite them.
@@ -3015,7 +3001,7 @@ export default function ContractEdit() {
         'Contract Date': startDate,
         'End Date': endDate,
         Duration: pricingMode === 'months'
-          ? `${durationMonths} ${durationMonths === 1 ? 'شهر' : durationMonths === 2 ? 'شهرين' : 'أشهر'}`
+          ? durationName(durationMonths, durations)
           : `${durationDays} يوم`,
 
         // ✅ Persist pricing mode/duration explicitly so editing the contract again

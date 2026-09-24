@@ -61,6 +61,7 @@ interface Offer {
   start_date: string;
   end_date?: string;
   duration_months: number;
+  duration_label?: string;
   total: number;
   discount: number;
   discount_type?: 'fixed' | 'percentage';
@@ -1902,6 +1903,7 @@ export default function OffersPage() {
                           'Contract Date': offer.start_date,
                           end_date: offer.end_date,
                           'End Date': offer.end_date,
+                          Duration: offer.duration_label,
                           Total: offer.total,
                           'Total Rent': offer.total,
                           Discount: offer.discount || 0,

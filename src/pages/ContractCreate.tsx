@@ -1,3 +1,5 @@
+import { usePricingDurations } from '@/hooks/usePricingDurations';
+import { durationName } from '@/utils/pricingDuration';
 // @ts-nocheck
 import React, { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
@@ -38,6 +40,7 @@ const CURRENCIES = [
 ];
 
 export default function ContractCreate() {
+  const { data: durations } = usePricingDurations();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [billboards, setBillboards] = useState<Billboard[]>([]);
@@ -707,7 +710,7 @@ export default function ContractCreate() {
         'Contract Date': formData.startDate,
         'End Date': formData.endDate,
         'Duration': formData.pricingMode === 'months'
-          ? `${formData.durationMonths} ${formData.durationMonths === 1 ? 'شهر' : 'أشهر'}`
+          ? durationName(formData.durationMonths, durations)
           : `${formData.durationDays} يوم`,
         'Total': calculations.finalTotal,
         'Total Rent': rentalCostOnly,

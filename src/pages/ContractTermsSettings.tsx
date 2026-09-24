@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
 import QRCode from 'qrcode';
 import { Installment, generatePaymentsClauseText } from "@/utils/paymentGrouping";
+import { replaceDurationVariable } from '@/utils/pricingDuration';
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -243,6 +244,7 @@ const SAMPLE_CONTRACT_DATA = {
   startDate: '2025-07-20',
   endDate: '2026-07-15',
   duration: '360',
+  durationDays: '360',
   totalAmount: '402,000',
   totalRent: '393,700',
   currency: 'دينار ليبي',
@@ -737,6 +739,16 @@ export default function ContractTermsSettings() {
           }
         }
         
+        let durationDays = '';
+        if (c['Contract Date'] && c['End Date']) {
+          const start = new Date(c['Contract Date']);
+          const end = new Date(c['End Date']);
+          const diff = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+          if (diff > 0) durationDays = `${diff}`;
+        } else if (c.days) {
+          durationDays = `${c.days}`;
+        }
+
         setPreviewContractData({
           contractNumber: String(c.Contract_Number),
           customerName,
@@ -745,6 +757,7 @@ export default function ContractTermsSettings() {
           startDate: c['Contract Date'] || '',
           endDate: c['End Date'] || '',
           duration: c.Duration || '',
+          durationDays,
           totalAmount: c.Total ? c.Total.toLocaleString() : '0',
           totalRent: totalRent ? totalRent.toLocaleString() : '0',
           currency: curr.written,
@@ -1074,8 +1087,7 @@ export default function ContractTermsSettings() {
     }
     const inclusionText = inclusionParts.join(' و');
 
-    return text
-      .replace(/{duration}/g, data.duration)
+    return replaceDurationVariable(text, data.duration, (data as any).durationDays)
       .replace(/{startDate}/g, data.startDate)
       .replace(/{endDate}/g, data.endDate)
       .replace(/{customerName}/g, data.customerName)

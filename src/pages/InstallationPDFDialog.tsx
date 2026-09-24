@@ -12,6 +12,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { usePricingDurations } from '@/hooks/usePricingDurations';
+import { getContractDurationName } from '@/utils/pricingDuration';
 
 interface InstallationPDFDialogProps {
   open: boolean;
@@ -46,6 +48,7 @@ const formatArabicNumber = (num: number): string => {
 export default function InstallationPDFDialog({ open, onOpenChange, contract }: InstallationPDFDialogProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [printMode, setPrintMode] = useState<'auto' | 'manual'>('auto');
+  const { data: durations = [] } = usePricingDurations();
   const [customerData, setCustomerData] = useState<{
     name: string;
     company: string | null;
@@ -146,13 +149,16 @@ export default function InstallationPDFDialog({ open, onOpenChange, contract }: 
     const startDate = contract?.start_date || contract?.['Contract Date'];
     const endDate = contract?.end_date || contract?.['End Date'];
 
-    let duration = '';
+    let durationDays = '';
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
       const days = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-      duration = `${days}`;
+      if (days > 0) durationDays = `${days}`;
     }
+
+    const durationName = getContractDurationName(contract, durations);
+    const duration = durationName || (durationDays ? `${durationDays} يوم` : '');
 
     const formatArabicDate = (dateString: string): string => {
       if (!dateString) return '';
@@ -825,7 +831,7 @@ export default function InstallationPDFDialog({ open, onOpenChange, contract }: 
                   {customerData?.phone && (
                     <p><strong>الهاتف:</strong> {customerData.phone}</p>
                   )}
-                  <p><strong>مدة العقد:</strong> {contractDetails.duration} يوم</p>
+                  <p><strong>مدة العقد:</strong> {contractDetails.duration.includes('يوم') || contractDetails.duration.includes('شهر') || contractDetails.duration.includes('سنة') ? contractDetails.duration : `${contractDetails.duration} يوم`}</p>
                   <p><strong>تاريخ البداية:</strong> {contractDetails.startDate}</p>
                   <p><strong>تاريخ النهاية:</strong> {contractDetails.endDate}</p>
                 </div>

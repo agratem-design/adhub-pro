@@ -69,13 +69,26 @@ export function ContractPrintDialog({ contract, trigger }: ContractPrintDialogPr
     
     // Calculate duration in days
     let duration = '';
+    let durationDays = 0;
     if (startDate && endDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
-      const durationDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-      duration = `${durationDays}`;
+      durationDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+      duration = `${durationDays} يومًا`;
     }
     
+    const rawDuration = String((contract as any).Duration || '').replace(/[<>&"']/g, '').trim();
+    if (rawDuration) {
+      const isNamed = /شهر|أشهر|شهرين|شهران|سنة|سنوات|عام|أعوام/.test(rawDuration);
+      if (isNamed) {
+        duration = durationDays > 0 ? `${rawDuration} (${durationDays}) يوماً` : rawDuration;
+      } else {
+        duration = rawDuration;
+      }
+    } else {
+      duration = duration.replace(/[<>&"']/g, '');
+    }
+
     // Format price
     const formattedPrice = `${totalCost.toLocaleString('ar-LY')}`;
     
@@ -737,7 +750,7 @@ export function ContractPrintDialog({ contract, trigger }: ContractPrintDialogPr
                 dominant-baseline="middle"
                 style="direction: rtl; text-align: center"
               >
-                مدة العقد ${contractData.duration} يومًا تبدأ من ${contractData.startDate} وتنتهي في ${contractData.endDate}، ويجوز تجديده برضى الطرفين قبل
+                مدة العقد ${contractData.duration} تبدأ من ${contractData.startDate} وتنتهي في ${contractData.endDate}، ويجوز تجديده برضى الطرفين قبل
               </text>
               <text
                 x="1800"

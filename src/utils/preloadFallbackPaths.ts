@@ -150,7 +150,7 @@ export function preloadFallbackPaths(immediate = false): Promise<void> {
       await loadFromBillboardHistory();
 
       loaded = true;
-      console.log(`[FallbackPaths] ✅ Loaded ${globalFallbackMap.size} URL→path mappings`);
+      console.log(`[FallbackPaths] Loaded ${globalFallbackMap.size} URL→path mappings`);
     } catch (e) {
       console.warn('[FallbackPaths] Error during preload:', e);
     } finally {

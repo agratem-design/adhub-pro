@@ -23,6 +23,7 @@ import {
   X,
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import { createRequestId } from '@/lib/requestId';
 import {
   executeInstantBillboardSwap,
   InstantBillboardSwapResult,
@@ -281,7 +282,7 @@ export function InstantBillboardSwapDialog({
     if (!selectedCandidate || !originalBillboard || isExecuting) return;
 
     if (!swapRequestIdRef.current) {
-      swapRequestIdRef.current = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : undefined;
+      swapRequestIdRef.current = createRequestId();
     }
 
     setIsExecuting(true);

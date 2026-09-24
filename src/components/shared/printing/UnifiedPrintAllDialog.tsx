@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Printer, FileDown, Users, Check, FileText, Settings2, Table2, MessageCircle } from 'lucide-react';
+import { Printer, FileDown, Users, Check, FileText, Settings2, Table2, MessageCircle, Wrench, RefreshCw, Hash, Tag } from 'lucide-react';
 import QRCode from 'qrcode';
 import html2pdf from 'html2pdf.js';
 import { supabase } from '@/integrations/supabase/client';
@@ -62,6 +62,11 @@ export interface UnifiedPrintAllDialogProps {
   showTeamFilter?: boolean;
   title?: string;
   customerPhone?: string;
+  taskId?: string | number | null;
+  taskIds?: string[];
+  taskType?: 'installation' | 'reinstallation' | string | null;
+  reinstallationNumber?: number | null;
+  taskName?: string | null;
 }
 
 // دالة مساعدة لجلب الإعلانات السابقة لجميع اللوحات بدقة
@@ -188,8 +193,8 @@ export const resolveBillboardPreviousAds = async (
 export const resolveBillboardDesigns = async (
   items: BillboardPrintItem[],
   billboardsMap: Record<number, any> = {}
-): Promise<Record<string, { design_face_a?: string; design_face_b?: string }>> => {
-  const result: Record<string, { design_face_a?: string; design_face_b?: string }> = {};
+): Promise<Record<string, { design_face_a?: string; design_face_b?: string; design_name?: string }>> => {
+  const result: Record<string, { design_face_a?: string; design_face_b?: string; design_name?: string }> = {};
   if (!items || items.length === 0) return result;
 
   const billboardIds = [...new Set(items.map(i => Number(i.billboard_id)).filter(id => !isNaN(id) && id > 0))];
@@ -201,8 +206,9 @@ export const resolveBillboardDesigns = async (
     const b = billboardsMap[item.billboard_id] || billboardsMap[Number(item.billboard_id)];
     const faceA = item.design_face_a || b?.design_face_a || b?.installed_design_face_a || undefined;
     const faceB = item.design_face_b || b?.design_face_b || b?.installed_design_face_b || undefined;
-    if (faceA || faceB) {
-      result[idKey] = { design_face_a: faceA, design_face_b: faceB };
+    const dName = item.ad_type || b?.ad_type || b?.design_name || b?.ad_name || b?.current_ad || undefined;
+    if (faceA || faceB || dName) {
+      result[idKey] = { design_face_a: faceA, design_face_b: faceB, design_name: dName };
       result[String(Number(idKey))] = result[idKey];
     }
   });
@@ -217,6 +223,7 @@ export const resolveBillboardDesigns = async (
         design_face_b,
         selected_design_id,
         task_designs:selected_design_id(
+          design_name,
           design_face_a_url,
           design_face_b_url
         ),
@@ -229,13 +236,13 @@ export const resolveBillboardDesigns = async (
     if (taskDesigns && taskDesigns.length > 0) {
       taskDesigns.forEach((row: any) => {
         const idKey = String(row.billboard_id);
-        if (!result[idKey] || (!result[idKey].design_face_a && !result[idKey].design_face_b)) {
-          const faceA = row.design_face_a || row.task_designs?.design_face_a_url || undefined;
-          const faceB = row.design_face_b || row.task_designs?.design_face_b_url || undefined;
-          if (faceA || faceB) {
-            result[idKey] = { design_face_a: faceA, design_face_b: faceB };
-            result[String(Number(idKey))] = result[idKey];
-          }
+        const prev = result[idKey] || {};
+        const faceA = row.design_face_a || row.task_designs?.design_face_a_url || prev.design_face_a || undefined;
+        const faceB = row.design_face_b || row.task_designs?.design_face_b_url || prev.design_face_b || undefined;
+        const dName = row.task_designs?.design_name || prev.design_name || undefined;
+        if (faceA || faceB || dName) {
+          result[idKey] = { design_face_a: faceA, design_face_b: faceB, design_name: dName };
+          result[String(Number(idKey))] = result[idKey];
         }
       });
     }
@@ -259,7 +266,12 @@ export function UnifiedPrintAllDialog({
   teams = {},
   showTeamFilter = false,
   title,
-  customerPhone = ''
+  customerPhone = '',
+  taskId,
+  taskIds,
+  taskType,
+  reinstallationNumber,
+  taskName,
 }: UnifiedPrintAllDialogProps) {
   const PDF_PORTRAIT_WIDTH_PX = 2480;
   const PDF_PORTRAIT_HEIGHT_PX = 3508;
@@ -311,6 +323,106 @@ export function UnifiedPrintAllDialog({
   const [showPreviousAd, setShowPreviousAd] = useState(false);
   const [dynamicDesignsMap, setDynamicDesignsMap] = useState<Record<number, { design_face_a?: string; design_face_b?: string }>>({});
   const [previousAdsData, setPreviousAdsData] = useState<Record<number, string>>({});
+  const [resolvedTaskAdType, setResolvedTaskAdType] = useState<string>('');
+  const [resolvedReinstallationNumber, setResolvedReinstallationNumber] = useState<number | null>(
+    (reinstallationNumber !== null && reinstallationNumber !== undefined && Number(reinstallationNumber) > 0)
+      ? Number(reinstallationNumber)
+      : (taskType === 'reinstallation' ? 1 : null)
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    if (reinstallationNumber && Number(reinstallationNumber) > 0) {
+      setResolvedReinstallationNumber(Number(reinstallationNumber));
+    } else if (taskType === 'reinstallation') {
+      setResolvedReinstallationNumber(prev => (prev && prev > 0 ? prev : 1));
+    }
+    const initialAd = (adType || '').trim();
+    if (initialAd) {
+      setResolvedTaskAdType(initialAd);
+    }
+
+    if (contextType === 'installation') {
+      (async () => {
+        try {
+          const tIds = [taskId, ...(taskIds || [])].filter(Boolean).map(String);
+          if (tIds.length > 0) {
+            // التحقق من رقم إعادة التركيب إذا كانت المهمة إعادة تركيب ولم يُمرر الرقم
+            if (taskType === 'reinstallation' && (!reinstallationNumber || Number(reinstallationNumber) <= 0)) {
+              const { data: taskData } = await supabase
+                .from('installation_tasks')
+                .select('id, contract_id, reinstallation_number, created_at')
+                .eq('id', tIds[0])
+                .maybeSingle();
+
+              if (taskData) {
+                if (taskData.reinstallation_number && Number(taskData.reinstallation_number) > 0) {
+                  setResolvedReinstallationNumber(Number(taskData.reinstallation_number));
+                } else if (taskData.contract_id) {
+                  const { data: allReinstalls } = await supabase
+                    .from('installation_tasks')
+                    .select('id, created_at')
+                    .eq('contract_id', taskData.contract_id)
+                    .eq('task_type', 'reinstallation')
+                    .order('created_at', { ascending: true });
+
+                  if (allReinstalls && allReinstalls.length > 0) {
+                    const idx = allReinstalls.findIndex(t => t.id === taskData.id);
+                    setResolvedReinstallationNumber(idx >= 0 ? idx + 1 : 1);
+                  } else {
+                    setResolvedReinstallationNumber(1);
+                  }
+                } else {
+                  setResolvedReinstallationNumber(1);
+                }
+              } else {
+                setResolvedReinstallationNumber(1);
+              }
+            }
+
+            if (!initialAd) {
+              const { data: dData } = await supabase
+                .from('task_designs')
+                .select('design_name')
+                .in('task_id', tIds)
+                .not('design_name', 'is', null)
+                .limit(1);
+              if (dData && dData[0]?.design_name) {
+                setResolvedTaskAdType(dData[0].design_name);
+                return;
+              }
+
+              const { data: tData } = await supabase
+                .from('installation_tasks')
+                .select('task_name')
+                .in('id', tIds)
+                .not('task_name', 'is', null)
+                .limit(1);
+              if (tData && (tData[0] as any)?.task_name) {
+                setResolvedTaskAdType((tData[0] as any).task_name);
+                return;
+              }
+            }
+          }
+
+          if (!initialAd && contextNumber) {
+            const { data: cData } = await supabase
+              .from('Contract')
+              .select('"Ad Type", ad_type')
+              .eq('Contract_Number', Number(contextNumber))
+              .limit(1);
+            const cAd = cData && (cData[0]?.['Ad Type'] || (cData[0] as any)?.ad_type);
+            if (cAd) {
+              setResolvedTaskAdType(cAd);
+              return;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      })();
+    }
+  }, [open, contextType, taskType, adType, taskId, taskIds, contextNumber, reinstallationNumber]);
 
   const parseDimensions = (sizeStr: string) => {
     if (!sizeStr) return { length: '', width: '', height: '' };
@@ -727,7 +839,39 @@ export function UnifiedPrintAllDialog({
   const selectAllTeams = () => setSelectedTeamIds(new Set(Object.keys(itemsByTeam)));
   const clearTeamSelection = () => setSelectedTeamIds(new Set());
 
+  const getInstallationTitle = () => {
+    const primaryTaskId = taskId ? String(taskId) : (taskIds && taskIds.length > 0 ? String(taskIds[0]) : '');
+    const taskShortId = primaryTaskId ? (primaryTaskId.length > 8 ? primaryTaskId.slice(0, 8) : primaryTaskId) : '';
+    const isReinstall = taskType === 'reinstallation';
+    const rawNum = reinstallationNumber ?? resolvedReinstallationNumber;
+    const reinstallNum = (rawNum !== null && rawNum !== undefined && Number(rawNum) > 0)
+      ? Number(rawNum)
+      : (isReinstall ? 1 : null);
+    const taskTypeLabel = isReinstall
+      ? `إعادة تركيب رقم ${reinstallNum || 1}`
+      : 'تركيب جديد';
+
+    const parts: string[] = [];
+    if (contextNumber) {
+      parts.push(`تركيب رقم: ${contextNumber}`);
+    }
+    if (taskShortId) {
+      parts.push(`مهمة #${taskShortId}`);
+    }
+    parts.push(taskTypeLabel);
+    const rawAd = (adType || resolvedTaskAdType || taskName || '').trim();
+    const cleanAd = rawAd.replace(/^نوع\s*الإعلان\s*:\s*/, '').trim();
+    if (cleanAd) {
+      parts.push(`نوع الإعلان: ${cleanAd}`);
+    }
+    return parts.join(' - ');
+  };
+
   const getCleanDocumentTitle = () => {
+    if (contextType === 'installation') {
+      return getInstallationTitle();
+    }
+
     const label = getContextLabel();
     let rawCust = (customerName || '').trim();
     let rawCompany = (companyName || '').trim();
@@ -880,11 +1024,34 @@ export function UnifiedPrintAllDialog({
         : '');
 
       const itemContractNumber = item.contract_number || contextNumber;
-      const itemAdType = item.ad_type || adType;
+      const b = billboard || {};
+      const rawItemAdType = (
+        item.ad_type ||
+        dynDesign?.design_name ||
+        adType ||
+        resolvedTaskAdType ||
+        b.ad_type ||
+        b.design_name ||
+        b.ad_name ||
+        b.current_ad ||
+        taskName ||
+        ''
+      ).trim();
+      const cleanAdType = rawItemAdType.replace(/^نوع\s*الإعلان\s*:\s*/, '').trim();
       const customerCompanyText = !hideCustomerName ? [customerName, companyName].filter(Boolean).join(' - ') : '';
-      const contractInfoText = itemContractNumber 
-        ? `${getContextLabel()} رقم: ${itemContractNumber}${customerCompanyText ? ' - الزبون: ' + customerCompanyText : ''}${itemAdType ? ' - نوع الإعلان: ' + itemAdType : ''}`
-        : (itemAdType ? `${customerCompanyText ? 'الزبون: ' + customerCompanyText + ' - ' : ''}نوع الإعلان: ${itemAdType}` : customerCompanyText ? `الزبون: ${customerCompanyText}` : '');
+      
+      let contractInfoText = '';
+      if (contextType === 'installation') {
+        if (cleanAdType) {
+          contractInfoText = `نوع الإعلان: ${cleanAdType}`;
+        } else if (itemContractNumber) {
+          contractInfoText = `تركيب رقم: ${itemContractNumber}`;
+        }
+      } else {
+        contractInfoText = itemContractNumber 
+          ? `${getContextLabel()} رقم: ${itemContractNumber}${customerCompanyText ? ' - الزبون: ' + customerCompanyText : ''}${cleanAdType ? ' - نوع الإعلان: ' + cleanAdType : ''}`
+          : (cleanAdType ? `${customerCompanyText ? 'الزبون: ' + customerCompanyText + ' - ' : ''}نوع الإعلان: ${cleanAdType}` : customerCompanyText ? `الزبون: ${customerCompanyText}` : '');
+      }
 
       // تحديد الصورة الرئيسية والتراكب المفرغ إن وجد
       const hasMainImage = !!mainImage;
@@ -1390,6 +1557,9 @@ export function UnifiedPrintAllDialog({
       ? enabledColumns.filter(col => columnHasData[col.id])
       : enabledColumns;
 
+    const rawAdType = (adType || resolvedTaskAdType || taskName || '').trim();
+    const cleanAdType = rawAdType.replace(/^نوع\s*الإعلان\s*:\s*/, '').trim();
+
     const pages: string[] = [];
     const rowsPerPage = Math.min(s.rows_per_page || 11, 11);
     
@@ -1456,7 +1626,9 @@ export function UnifiedPrintAllDialog({
             case 'landmark':
               return `<td style="text-align: right; padding: 4px; font-size: 8px;">${billboard.Nearest_Landmark || '-'}</td>`;
             case 'contract_number':
-              return `<td style="font-size: 8px;">${showPreviousAd && tblPreviousAd ? `<span style="font-size:7px;color:#444;font-weight:700;">السابق: ${tblPreviousAd}</span><br/>` : ''}${itemContractNumber}${itemAdType ? '<br/><span style="font-size:7px;color:#666;">' + itemAdType + '</span>' : ''}</td>`;
+              const rawRowAd = (item.ad_type || dynDesign?.design_name || cleanAdType || itemAdType || '').trim();
+              const cleanRowAd = rawRowAd.replace(/^نوع\s*الإعلان\s*:\s*/, '').trim();
+              return `<td style="font-size: 8px;">${showPreviousAd && tblPreviousAd ? `<span style="font-size:7px;color:#444;font-weight:700;">السابق: ${tblPreviousAd}</span><br/>` : ''}${contextType === 'installation' ? (cleanRowAd ? `نوع الإعلان: ${cleanRowAd}` : itemContractNumber) : `${itemContractNumber}${cleanRowAd ? '<br/><span style="font-size:7px;color:#666;">' + cleanRowAd + '</span>' : ''}`}</td>`;
             case 'installation_date':
               return `<td style="font-size: 8px;">${installationDate}</td>`;
             case 'design_images':
@@ -1496,9 +1668,15 @@ export function UnifiedPrintAllDialog({
       });
 
       const customerCompanyText = !hideCustomerName ? [customerName, companyName].filter(Boolean).join(' - ') : '';
+      const primaryTaskId = taskId ? String(taskId) : (taskIds && taskIds.length > 0 ? String(taskIds[0]) : '');
+
+      const infoBarText = contextType === 'installation'
+        ? (cleanAdType ? `نوع الإعلان: ${cleanAdType}` : `تركيب رقم: ${contextNumber}`)
+        : `${getContextLabel()} رقم: ${contextNumber}${customerCompanyText ? ' | ' + customerCompanyText : ''}${cleanAdType ? ' | نوع الإعلان: ' + cleanAdType : ''}`;
+
       pages.push(`
         <div class="info-bar">
-          <span>${getContextLabel()} رقم: ${contextNumber}${customerCompanyText ? ' | ' + customerCompanyText : ''}${adType ? ' | ' + adType : ''}${printType === 'installation' && showTeamInContent && selectedTeamNames ? ' | الفريق: ' + selectedTeamNames : ''} | صفحة ${pageIndex + 1} من ${Math.ceil(sortedItems.length / rowsPerPage)}</span>
+          <span>${infoBarText}${printType === 'installation' && showTeamInContent && selectedTeamNames ? ' | الفريق: ' + selectedTeamNames : ''} | صفحة ${pageIndex + 1} من ${Math.ceil(sortedItems.length / rowsPerPage)}</span>
         </div>
         <table>
           <thead><tr>${headerCells.join('')}</tr></thead>
@@ -1961,7 +2139,12 @@ export function UnifiedPrintAllDialog({
       const isTableLandscape = printMode === 'table' && tableSettings.page_orientation === 'landscape';
       const html = printMode === 'table' ? await generateTablePrintHTML() : await generatePrintHTML();
       const pdfBlob = await buildPdfBlobFromHtml(html, isTableLandscape);
-      const pdfFileName = `${getCleanDocumentTitle().replace(/[\\/:*?"<>|#]/g, '-').replace(/\s+/g, ' ').replace(/-+/g, '-').trim()}.pdf`;
+      const pdfFileName = `${getCleanDocumentTitle()
+        .replace(/[:]/g, '')
+        .replace(/[\\/*?"<>|#]/g, '-')
+        .replace(/\s+/g, ' ')
+        .replace(/-+/g, '-')
+        .trim()}.pdf`;
       downloadPdfBlob(pdfBlob, pdfFileName);
       toast.success('تم تحميل ملف PDF بنجاح');
       onOpenChange(false);
@@ -1990,8 +2173,12 @@ export function UnifiedPrintAllDialog({
       const base64Data = await blobToBase64(pdfBlob);
       const { uploadFileToGoogleDrive } = await import('@/services/imageUploadService');
 
-      const driveFolder = contextType === 'installation' ? 'installation-tasks' : contextType === 'removal' ? 'removal-tasks' : 'contracts';
-      const pdfFileName = `${getCleanDocumentTitle().replace(/[\\/:*?"<>|#]/g, '-').replace(/\s+/g, ' ').replace(/-+/g, '-').trim()}.pdf`;
+      const pdfFileName = `${getCleanDocumentTitle()
+        .replace(/[:]/g, '')
+        .replace(/[\\/*?"<>|#]/g, '-')
+        .replace(/\s+/g, ' ')
+        .replace(/-+/g, '-')
+        .trim()}.pdf`;
       const pdfUrl = await uploadFileToGoogleDrive(base64Data, pdfFileName, 'application/pdf', driveFolder, false, progress);
 
       const cleanPhone = phone.replace(/[^0-9+]/g, '').replace(/^\+/, '');
@@ -2016,24 +2203,87 @@ export function UnifiedPrintAllDialog({
     }
   };
 
-  const dialogTitle = title || `${getContextLabel()} لوحات`;
+  const isInstallation = contextType === 'installation';
+  const isReinstall = taskType === 'reinstallation';
+  const rawNum = reinstallationNumber ?? resolvedReinstallationNumber;
+  const reinstallNum = (rawNum !== null && rawNum !== undefined && Number(rawNum) > 0)
+    ? Number(rawNum)
+    : (isReinstall ? 1 : null);
+  const primaryTaskId = taskId ? String(taskId) : (taskIds && taskIds.length > 0 ? String(taskIds[0]) : '');
+  const taskShortId = primaryTaskId ? (primaryTaskId.length > 8 ? primaryTaskId.slice(0, 8) : primaryTaskId) : '';
+
+  const dialogTitle = isInstallation
+    ? (title && !title.startsWith('طباعة مهمة') && !title.startsWith('طباعة إعادة') ? title : getInstallationTitle())
+    : (title || `${getContextLabel()} لوحات`);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
         <DialogHeader>
-          <DialogTitle className="flex flex-col gap-1">
+          <DialogTitle className="flex flex-col gap-2">
             <div className="flex items-center gap-2 text-lg font-bold">
               <div className="p-1.5 bg-primary/20 rounded-lg">
-                <FileText className="h-5 w-5 text-primary" />
+                {isInstallation ? (
+                  isReinstall ? <RefreshCw className="h-5 w-5 text-amber-500" /> : <Wrench className="h-5 w-5 text-primary" />
+                ) : (
+                  <FileText className="h-5 w-5 text-primary" />
+                )}
               </div>
               <span>{dialogTitle}</span>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-sm font-normal text-muted-foreground mr-9">
-              {adType && <Badge variant="secondary">{adType}</Badge>}
-              <span>{getContextLabel()} #{contextNumber}</span>
-              <span>•</span>
-              <Badge className="bg-primary/20 text-primary border-0">{filteredItems.length} لوحة</Badge>
+            <div className="flex flex-wrap items-center gap-2 text-sm font-normal mr-9">
+              {/* رقم مهمة التركيب */}
+              {isInstallation && taskShortId && (
+                <Badge variant="outline" className="font-mono text-xs font-bold bg-muted/60 border-primary/30 text-foreground flex items-center gap-1">
+                  <Hash className="h-3 w-3 text-primary" />
+                  <span>مهمة #{taskShortId}</span>
+                  {taskIds && taskIds.length > 1 && (
+                    <span className="text-[10px] text-muted-foreground font-normal">(+{taskIds.length - 1})</span>
+                  )}
+                </Badge>
+              )}
+
+              {/* نوع التركيب ورقم إعادة التركيب */}
+              {isInstallation && (
+                isReinstall ? (
+                  <Badge className="bg-amber-500/15 text-amber-500 border border-amber-500/30 font-bold text-xs flex items-center gap-1">
+                    <RefreshCw className="h-3 w-3" />
+                    <span>إعادة تركيب رقم {reinstallNum || 1}</span>
+                  </Badge>
+                ) : (
+                  <Badge className="bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 font-bold text-xs flex items-center gap-1">
+                    <Wrench className="h-3 w-3" />
+                    <span>تركيب جديد</span>
+                  </Badge>
+                )
+              )}
+
+              {/* نوع الإعلان */}
+              {(adType || resolvedTaskAdType) && (
+                <Badge variant="secondary" className="bg-primary/10 text-primary border border-primary/25 font-bold text-xs flex items-center gap-1">
+                  <Tag className="h-3 w-3" />
+                  <span>نوع الإعلان: {(adType || resolvedTaskAdType).replace(/^نوع\s*الإعلان\s*:\s*/, '').trim()}</span>
+                </Badge>
+              )}
+
+              {!isInstallation && (
+                <>
+                  <span className="text-muted-foreground text-xs font-medium">
+                    {getContextLabel()} #{contextNumber}
+                  </span>
+
+                  {customerName && (
+                    <>
+                      <span className="text-muted-foreground">•</span>
+                      <span className="text-foreground text-xs font-medium truncate max-w-[200px]">{customerName}</span>
+                    </>
+                  )}
+
+                  <span className="text-muted-foreground">•</span>
+                </>
+              )}
+
+              <Badge className="bg-primary/20 text-primary border-0 font-bold text-xs">{filteredItems.length} لوحة</Badge>
             </div>
           </DialogTitle>
         </DialogHeader>

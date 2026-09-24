@@ -4059,6 +4059,9 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
             teams={teams}
             showTeamFilter={true}
             title={`طباعة مهمة التركيب (شامل لجميع الفرق) - عقد #${installationWorkflowTask.contract_id} (${printItems.length} لوحة)`}
+            taskId={installationWorkflowTask.installation_task_id || installationWorkflowData.primaryTaskId || undefined}
+            taskType={installationWorkflowTask.task_type || 'installation'}
+            reinstallationNumber={installationWorkflowTask.reinstallation_number ?? null}
           />
         );
       })()}

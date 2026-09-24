@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { createRequestId } from '@/lib/requestId';
 import { Plus, Trash2, Zap, Copy, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 
 interface BulkAddDialogProps {
@@ -68,7 +69,7 @@ export const BulkAddDialog: React.FC<BulkAddDialogProps> = ({
   // إضافة صف جديد
   const addRow = () => {
     setBillboards(prev => [...prev, {
-      id: crypto.randomUUID(),
+      id: createRequestId(),
       Municipality: defaultValues.Municipality,
       Level: defaultValues.Level,
       Size: defaultValues.Size,
@@ -85,7 +86,7 @@ export const BulkAddDialog: React.FC<BulkAddDialogProps> = ({
     const newRows: BulkBillboard[] = [];
     for (let i = 0; i < quickAddCount; i++) {
       newRows.push({
-        id: crypto.randomUUID(),
+        id: createRequestId(),
         Municipality: defaultValues.Municipality,
         Level: defaultValues.Level,
         Size: defaultValues.Size,
@@ -115,7 +116,7 @@ export const BulkAddDialog: React.FC<BulkAddDialogProps> = ({
   const duplicateRow = (billboard: BulkBillboard) => {
     setBillboards(prev => [...prev, {
       ...billboard,
-      id: crypto.randomUUID(),
+      id: createRequestId(),
       status: 'pending'
     }]);
   };

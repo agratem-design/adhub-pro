@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
-import { Home, MapPin, Trash2, Wrench, FileText, Users, Merge, TrendingUp, TrendingDown, CreditCard, DollarSign, Calculator, Calendar, BarChart3, Settings, LogOut, Printer, Database, AlertCircle, MessageSquare, Moon, Sun, FolderKanban, Building2, Link, Briefcase, FileSpreadsheet, AlertTriangle, CalendarPlus, Percent, Palette, Shield, Images, Image, ChevronDown, Send, Camera, Activity, Bot, Upload, CloudUpload, Download, Receipt, Type } from 'lucide-react';
+import { Home, MapPin, Trash2, Wrench, FileText, Users, Merge, TrendingUp, TrendingDown, CreditCard, DollarSign, Calculator, Calendar, BarChart3, Settings, LogOut, Printer, Database, AlertCircle, MessageSquare, Moon, Sun, FolderKanban, Building2, Link, Briefcase, FileSpreadsheet, AlertTriangle, CalendarPlus, Percent, Palette, Shield, Images, Image, ChevronDown, Send, Camera, Activity, Bot, Upload, CloudUpload, Download, Receipt, Type, Search, X } from 'lucide-react';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -32,7 +32,7 @@ const coreItems: SidebarItem[] = [
   { id: 'booking_requests', label: 'طلبات الحجز', icon: Calendar, path: '/admin/booking-requests' },
 ];
 
-const sidebarSections: SidebarSection[] = [
+const sidebarInventory: SidebarSection[] = [
   {
     id: 'billboards',
     title: 'اللوحات',
@@ -181,6 +181,24 @@ const sidebarSections: SidebarSection[] = [
   },
 ];
 
+// Keep permissions and destinations from the existing item definitions.
+const allSidebarItems = new Map(sidebarInventory.flatMap(section => section.items).map(item => [item.id, item]));
+const group = (id: string, title: string, icon: LucideIcon, ids: string[]): SidebarSection => ({
+  id, title, icon, items: ids.map(key => allSidebarItems.get(key)!).filter(Boolean),
+});
+const sidebarSections: SidebarSection[] = [
+  group('sales', 'العملاء والأسعار', Users, ['customers', 'pricing', 'pricing_factors', 'export_pricing', 'customer_merge']),
+  group('billboards', 'اللوحات والمواقع', MapPin, ['billboards', 'billboard_photos', 'extended_billboards', 'delayed_billboards', 'billboard_maintenance', 'smart_distribution', 'billboard_cleanup']),
+  group('operations', 'التنفيذ والتصميم', FolderKanban, ['tasks', 'comprehensive_installation_tasks', 'removal_tasks', 'design_studio', 'image_gallery', 'field_photos', 'rephotography', 'drive_uploader']),
+  group('finance', 'المالية والحسابات', DollarSign, ['payments', 'overdue_payments', 'account_overdue_payments', 'revenue', 'expenses', 'printed_invoices_page', 'printer_accounts', 'installation_team_accounts', 'custody', 'salaries', 'contract_closure_simulator']),
+  group('partnerships', 'الشركات والشراكات', Building2, ['company_management', 'shared_companies', 'shared_billboards', 'friend_billboards', 'friend_accounts', 'logo_management']),
+  group('municipalities', 'البلديات', MapPin, ['municipality_organizer', 'municipality_stickers', 'municipality_rent_prices', 'municipality_stats']),
+  group('reports', 'التقارير والأداء', BarChart3, ['reports', 'kpi_dashboard', 'profitability_reports', 'activity_log']),
+  group('team', 'الفريق والصلاحيات', Users, ['installation_teams', 'printers', 'users', 'roles']),
+  group('communication', 'التواصل والمساعد', MessageSquare, ['bulk_whatsapp', 'messaging_settings', 'ai_assistant']),
+  group('settings', 'الإعدادات والطباعة', Settings, ['settings', 'currency_settings', 'contract_terms', 'print_design', 'billboard_print_settings', 'export_content_settings', 'site_appearance', 'font_settings', 'system_settings', 'database_backup', 'database_setup']),
+];
+
 interface SidebarProps {
   className?: string;
   onNavigate?: () => void;
@@ -188,6 +206,8 @@ interface SidebarProps {
 
 export function Sidebar({ className, onNavigate }: SidebarProps) {
   const location = useLocation();
+  const [search, setSearch] = useState('');
+  const matchesSearch = (label: string) => label.includes(search.trim());
   const navigate = useNavigate();
   const { profile, user, signOut, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -198,18 +218,18 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
   ), [hasPermission]);
 
   const filteredCoreItems = useMemo(
-    () => coreItems.filter(canViewItem),
-    [canViewItem]
+    () => coreItems.filter(item => canViewItem(item) && matchesSearch(item.label)),
+    [canViewItem, search]
   );
 
   const filteredSections = useMemo(
     () => sidebarSections
       .map(section => ({
         ...section,
-        items: section.items.filter(canViewItem)
+        items: section.items.filter(item => canViewItem(item) && (matchesSearch(section.title) || matchesSearch(item.label)))
       }))
       .filter(section => section.items.length > 0),
-    [canViewItem]
+    [canViewItem, search]
   );
 
   const isActive = useCallback((path: string) => {
@@ -218,7 +238,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
       return ['/admin/composite-tasks', '/admin/installation-tasks', '/admin/print-tasks', '/admin/cutout-tasks']
         .some(alias => location.pathname.startsWith(alias));
     }
-    return location.pathname.startsWith(path);
+    return location.pathname === path || location.pathname.startsWith(`${path}/`);
   }, [location.pathname]);
 
   const activeSectionIds = useMemo(
@@ -234,7 +254,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
   useEffect(() => {
     if (activeSectionIds.length > 0) {
       setExpandedSections(prev => {
-        const next = new Set(prev);
+        const next = new Set<string>();
         activeSectionIds.forEach(id => next.add(id));
         return next;
       });
@@ -254,6 +274,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
     if (location.pathname !== path) {
       navigate(path);
     }
+    setSearch('');
     onNavigate?.();
   };
 
@@ -272,9 +293,17 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
         </div>
       </div>
 
+      <div className="px-3 py-3" dir="rtl">
+        <div className="relative">
+          <Search className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-sidebar-foreground/60" />
+          <input aria-label="البحث في القائمة" placeholder="ابحث عن صفحة..." value={search} onChange={e => setSearch(e.target.value)} className="h-10 w-full rounded-xl border border-sidebar-border bg-sidebar-accent/30 pr-9 pl-8 text-sm text-sidebar-foreground outline-none focus:ring-2 focus:ring-primary" />
+          {search && <button aria-label="مسح البحث" onClick={() => setSearch('')} className="absolute left-2 top-2.5 cursor-pointer"><X className="h-5 w-5" /></button>}
+        </div>
+      </div>
       {/* Scrollable nav */}
       <div className="flex-1 overflow-y-auto sidebar-scroll">
         <nav className="px-3 py-3 space-y-1" style={{ direction: 'rtl' }}>
+          <p className="px-3 pb-2 text-xs font-semibold text-sidebar-foreground/65">الوصول السريع</p>
           {/* Core items */}
           {filteredCoreItems.map((item) => {
             const Icon = item.icon;
@@ -301,16 +330,18 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
 
           {/* Collapsible sections */}
           {filteredSections.map((section) => {
-            const isExpanded = expandedSections.has(section.id);
+            const isExpanded = !!search.trim() || expandedSections.has(section.id);
             const hasActiveChild = section.items.some(item => isActive(item.path));
             const SectionIcon = section.icon;
 
             return (
               <div key={section.id} className="mb-0.5">
                 <button
+                  aria-expanded={isExpanded}
+                  aria-controls={`sidebar-${section.id}`}
                   onClick={() => toggleSection(section.id)}
                   className={cn(
-                    'sidebar-section-header group',
+                    'sidebar-section-header group cursor-pointer transition-all duration-200 !text-sm !font-semibold !py-3',
                     hasActiveChild && 'text-primary'
                   )}
                 >
@@ -327,6 +358,8 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
 
                 {/* Animated collapse */}
                 <div
+                  id={`sidebar-${section.id}`}
+                  hidden={!isExpanded}
                   className={cn(
                     'overflow-hidden transition-all duration-200',
                     isExpanded ? 'max-h-[2000px] opacity-100' : 'max-h-0 opacity-0'
@@ -342,7 +375,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
                           key={item.id}
                           onClick={() => handleNavigate(item.path)}
                           className={cn(
-                            'sidebar-sub-item group',
+                            'sidebar-sub-item group cursor-pointer transition-all duration-200 !text-sm !py-2.5',
                             active && 'sidebar-sub-item-active'
                           )}
                         >
@@ -360,6 +393,7 @@ export function Sidebar({ className, onNavigate }: SidebarProps) {
               </div>
             );
           })}
+          {filteredCoreItems.length === 0 && filteredSections.length === 0 && <p className="px-3 py-6 text-sm text-sidebar-foreground/70">لا توجد صفحة مطابقة للبحث.</p>}
         </nav>
       </div>
 

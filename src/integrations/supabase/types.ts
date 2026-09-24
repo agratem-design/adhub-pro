@@ -5458,6 +5458,8 @@ export type Database = {
       }
       offers: {
         Row: {
+          duration_label: string | null
+          use_30_day_month: boolean | null
           ad_type: string | null
           billboard_prices: Json | null
           billboards_count: number | null
@@ -5505,6 +5507,8 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          duration_label?: string | null
+          use_30_day_month?: boolean | null
           ad_type?: string | null
           billboard_prices?: Json | null
           billboards_count?: number | null
@@ -5552,6 +5556,8 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          duration_label?: string | null
+          use_30_day_month?: boolean | null
           ad_type?: string | null
           billboard_prices?: Json | null
           billboards_count?: number | null
@@ -6104,6 +6110,7 @@ export type Database = {
       }
       pricing: {
         Row: {
+          duration_prices: Json
           "2_months": number | null
           "3_months": number | null
           "6_months": number | null
@@ -6118,6 +6125,7 @@ export type Database = {
           size_id: number | null
         }
         Insert: {
+          duration_prices?: Json
           "2_months"?: number | null
           "3_months"?: number | null
           "6_months"?: number | null
@@ -6132,6 +6140,7 @@ export type Database = {
           size_id?: number | null
         }
         Update: {
+          duration_prices?: Json
           "2_months"?: number | null
           "3_months"?: number | null
           "6_months"?: number | null

@@ -1,3 +1,8 @@
+import { printablePricing } from '@/utils/printablePricing';
+import { DurationEditor } from '@/components/pricing/DurationEditor';
+import { useQueryClient } from '@tanstack/react-query';
+import { isCustomDuration, readDurationPrice } from '@/utils/pricingDuration';
+import { createRequestId } from '@/lib/requestId';
 import { useMemo, useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import MultiSelect from '@/components/ui/multi-select';
@@ -5,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import * as UIDialog from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Printer, Edit2, Trash2, Plus, Minus, Download } from 'lucide-react';
+import { Printer, Edit2, Trash2, Plus, Minus, Download, Tag, Users, Search, Check, Filter, X, ChevronDown, RotateCcw } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -81,6 +86,8 @@ interface PricingData {
   '6_months': number;
   full_year: number;
   one_day: number;
+  size_id?: number | null;
+  duration_prices?: Record<string, number> | null;
 }
 
 interface SizeData {
@@ -91,6 +98,7 @@ interface SizeData {
 }
 
 export default function PricingList() {
+  const queryClient = useQueryClient();
   // البيانات من قاعدة البيانات
   const [levels, setLevels] = useState<BillboardLevel[]>([]);
   const [categories, setCategories] = useState<PricingCategory[]>([]);
@@ -128,17 +136,17 @@ export default function PricingList() {
   // استخراج المستويات المتاحة - مرتبة حسب sort_order
   const allLevels = useMemo(() => {
     const levelSet = new Set<string>();
-    
+
     // استخراج من المقاسات والفئات والأسعار (البيانات الموجودة فعلاً)
     if (sizesData.length > 0 && sizesData[0].level) {
       sizesData.forEach(s => s.level && levelSet.add(s.level));
     }
     // الفئات أصبحت عامة وليست مرتبطة بمستوى
     pricingData.forEach(p => levelSet.add(p.billboard_level));
-    
+
     // إضافة من جدول المستويات إذا كان متاحاً
     levels.forEach(l => levelSet.add(l.level_code));
-    
+
     // ترتيب المستويات حسب sort_order
     const result = Array.from(levelSet).sort((a, b) => {
       const levelA = levels.find(l => l.level_code === a);
@@ -147,8 +155,7 @@ export default function PricingList() {
       const orderB = levelB?.sort_order ?? 999;
       return orderA - orderB;
     });
-    
-    console.log('📊 المستويات المتاحة (مرتبة حسب sort_order):', result);
+
     return result;
   }, [levels, sizesData, categories, pricingData]);
 
@@ -170,7 +177,7 @@ export default function PricingList() {
   const [newLevelOrder, setNewLevelOrder] = useState<number>(1);
   const [deleteLevelOpen, setDeleteLevelOpen] = useState(false);
   const [deletingLevel, setDeletingLevel] = useState<string | null>(null);
-  
+
   // حالات تعديل المستوى
   const [editLevelOpen, setEditLevelOpen] = useState(false);
   const [editingLevel, setEditingLevel] = useState<BillboardLevel | null>(null);
@@ -212,6 +219,7 @@ export default function PricingList() {
 
   // حالات إدارة المدد
   const [addDurationOpen, setAddDurationOpen] = useState(false);
+  const [savingDuration, setSavingDuration] = useState(false);
   const [editDurationOpen, setEditDurationOpen] = useState(false);
   const [deleteDurationOpen, setDeleteDurationOpen] = useState(false);
   const [editingDuration, setEditingDuration] = useState<PricingDuration | null>(null);
@@ -221,70 +229,69 @@ export default function PricingList() {
   const [newDurationDays, setNewDurationDays] = useState<number>(30);
   const [newDurationMonths, setNewDurationMonths] = useState<number>(1);
   const [newDurationOrder, setNewDurationOrder] = useState<number>(1);
-  const [newDurationDbColumn, setNewDurationDbColumn] = useState('');
  const [isUpdatingSizeIds, setIsUpdatingSizeIds] = useState(false); // حالة تحديث size_id
 
-  // ✅ دالة تحديث size_id للأسعار التي ليس لديها size_id
+  // دالة تحديث size_id للأسعار التي ليس لديها size_id
   const updateMissingSizeIds = async () => {
     try {
       setIsUpdatingSizeIds(true);
-      console.log('🔄 بدء تحديث size_id للأسعار...');
-      
+      console.log('[Pricing] بدء تحديث size_id للأسعار...');
+
       // الحصول على الأسعار التي ليس لديها size_id
       const { data: pricingWithoutSizeId, error: fetchError } = await supabase
         .from('pricing')
         .select('id, size')
         .is('size_id', null);
-      
+
       if (fetchError) {
-        console.error('❌ خطأ في جلب الأسعار:', fetchError);
+        console.error('[Pricing] خطأ في جلب الأسعار:', fetchError);
         toast.error('فشل في جلب الأسعار');
         return;
       }
-      
+
       if (!pricingWithoutSizeId || pricingWithoutSizeId.length === 0) {
         toast.success('جميع الأسعار لديها size_id بالفعل!');
         return;
       }
-      
-      console.log(`📊 وجدت ${pricingWithoutSizeId.length} سجل بدون size_id`);
-      
+
+      console.log(`[Pricing] وجد ${pricingWithoutSizeId.length} سجل بدون size_id`);
+
       let updatedCount = 0;
       let failedCount = 0;
-      
+
       for (const pricing of pricingWithoutSizeId) {
         // البحث عن size_id المناسب
         const sizeInfo = sizesData.find(s => s.name === pricing.size);
-        
+
         if (sizeInfo?.id) {
           const { error: updateError } = await supabase
             .from('pricing')
             .update({ size_id: sizeInfo.id })
             .eq('id', pricing.id);
-          
+
           if (updateError) {
-            console.error(`❌ فشل تحديث السجل ${pricing.id}:`, updateError);
+            console.error(`[Pricing] فشل تحديث السجل ${pricing.id}:`, updateError);
             failedCount++;
           } else {
             updatedCount++;
           }
         } else {
-          console.warn(`⚠️ لم يتم العثور على size_id للمقاس: ${pricing.size}`);
+          console.warn(`[Pricing] لم يتم العثور على size_id للمقاس: ${pricing.size}`);
           failedCount++;
         }
       }
-      
-      console.log(`✅ تم تحديث ${updatedCount} سجل`);
+
+      console.log(`[Pricing] تم تحديث ${updatedCount} سجل`);
       if (failedCount > 0) {
-        console.log(`⚠️ فشل تحديث ${failedCount} سجل`);
+        console.log(`[Pricing] فشل تحديث ${failedCount} سجل`);
       }
-      
+
       // إعادة تحميل البيانات
       await loadData();
-      
+
       toast.success(`تم تحديث ${updatedCount} سجل بنجاح${failedCount > 0 ? ` (${failedCount} فشل)` : ''}`);
     } catch (error) {
-      console.error('💥 خطأ في تحديث size_id:', error);
+      console.error('[Pricing] خطأ في تحديث size_id:', error);
       toast.error('حدث خطأ في تحديث size_id');
     } finally {
       setIsUpdatingSizeIds(false);
@@ -297,7 +304,7 @@ export default function PricingList() {
       setLoading(true);
       setConnectionError(null);
 
-      console.log('🔄 بدء تحميل البيانات من قاعدة البيانات...');
+      console.log('[Pricing] بدء تحميل البيانات من قاعدة البيانات...');
 
       // اختبار الاتصال بقاعدة البيانات أولاً
       const { data: testData, error: testError } = await supabase
@@ -305,25 +312,25 @@ export default function PricingList() {
         .select('count', { count: 'exact', head: true });
 
       if (testError) {
-        console.error('❌ خطأ في الاتصال بقاعدة البيانات:', testError);
+        console.error('[Pricing] خطأ في الاتصال بقاعدة البيانات:', testError);
         setConnectionError(`خطأ في الاتصال: ${testError.message}`);
         return;
       }
 
-      console.log('✅ تم الاتصال بقاعدة البيانات بنجاح');
+      console.log('[Pricing] تم الاتصال بقاعدة البيانات بنجاح');
 
       // تحميل المستويات من جدول billboard_levels
-      console.log('📊 تحميل المستويات...');
+      console.log('[Pricing] تحميل المستويات...');
       const { data: levelsData, error: levelsError } = await supabase
         .from('billboard_levels')
         .select('*')
         .order('sort_order', { ascending: true });
 
       if (levelsError) {
-        console.error('❌ خطأ في تحميل المستويات:', levelsError);
-        console.log('⚠️ سيتم استخراج المستويات من البيانات الموجودة');
+        console.error('[Pricing] خطأ في تحميل المستويات:', levelsError);
+        console.log('[Pricing] سيتم استخراج المستويات من البيانات الموجودة');
       } else {
-        console.log('✅ تم تحميل المستويات:', levelsData?.length || 0, 'مستوى');
+        console.log('[Pricing] تم تحميل المستويات:', levelsData?.length || 0, 'مستوى');
         if (levelsData && levelsData.length > 0) {
           console.table(levelsData);
         }
@@ -331,17 +338,17 @@ export default function PricingList() {
       }
 
       // تحميل الفئات من جدول pricing_categories
-      console.log('📋 تحميل الفئات...');
+      console.log('[Pricing] تحميل الفئات...');
       const { data: categoriesData, error: catError } = await supabase
         .from('pricing_categories')
         .select('id, name, created_at')
         .order('name');
 
       if (catError) {
-        console.error('❌ خطأ في تحميل الفئات:', catError);
+        console.error('[Pricing] خطأ في تحميل الفئات:', catError);
         toast.error(`فشل في تحميل الفئات: ${catError.message}`);
       } else {
-        console.log('✅ تم تحميل الفئات:', categoriesData?.length || 0, 'فئة');
+        console.log('[Pricing] تم تحميل الفئات:', categoriesData?.length || 0, 'فئة');
         if (categoriesData && categoriesData.length > 0) {
           console.table(categoriesData);
         }
@@ -349,56 +356,55 @@ export default function PricingList() {
       }
 
       // محاولة تحميل المقاسات من جدول sizes (إذا كان موجود) مرتبة حسب sort_order
-      console.log('📏 محاولة تحميل المقاسات...');
+      console.log('[Pricing] محاولة تحميل المقاسات...');
       const { data: sizesData, error: sizesError } = await supabase
         .from('sizes')
         .select('*')
         .order('sort_order', { ascending: true, nullsFirst: false });
 
       if (sizesError) {
-        console.error('❌ خطأ في تحميل المقاسات من جدول sizes:', sizesError);
-        console.log('⚠️ سيتم استخراج المقاسات من جدول الأسعار');
+        console.error('[Pricing] خطأ في تحميل المقاسات من جدول sizes:', sizesError);
+        console.log('[Pricing] سيتم استخراج المقاسات من جدول الأسعار');
         setSizesData([]);
       } else {
-        console.log('✅ تم تحميل المقاسات:', sizesData?.length || 0, 'مقاس');
+        console.log('[Pricing] تم تحميل المقاسات:', sizesData?.length || 0, 'مقاس');
         setSizesData(sizesData || []);
       }
 
       // تحميل بيانات الأسعار
-      console.log('💰 تحميل الأسعار...');
+      console.log('[Pricing] تحميل الأسعار...');
       const { data: pricingData, error: pricingError } = await supabase
         .from('pricing')
         .select('*')
         .order('billboard_level, customer_category, size');
 
       if (pricingError) {
-        console.error('❌ خطأ في تحميل الأسعار:', pricingError);
+        console.error('[Pricing] خطأ في تحميل الأسعار:', pricingError);
         toast.error(`فشل في تحميل الأسعار: ${pricingError.message}`);
       } else {
-        console.log('✅ تم تحميل الأسعار:', pricingData?.length || 0, 'سعر');
+        console.log('[Pricing] تم تحميل الأسعار:', pricingData?.length || 0, 'سعر');
         setPricingData(pricingData || []);
       }
 
       // تحميل المدد الزمنية
-      console.log('⏱️ تحميل المدد...');
+      console.log('[Pricing] تحميل المدد...');
       const { data: durationsData, error: durationsError } = await supabase
         .from('pricing_durations')
         .select('*')
-        .eq('is_active', true)
         .order('sort_order', { ascending: true });
 
       if (durationsError) {
-        console.error('❌ خطأ في تحميل المدد:', durationsError);
-        console.log('⚠️ سيتم استخدام المدد الافتراضية');
+        console.error('[Pricing] خطأ في تحميل المدد:', durationsError);
+        console.log('[Pricing] سيتم استخدام المدد الافتراضية');
       } else {
-        console.log('✅ تم تحميل المدد:', durationsData?.length || 0, 'مدة');
+        console.log('[Pricing] تم تحميل المدد:', durationsData?.length || 0, 'مدة');
         setDurations(durationsData || []);
       }
 
-      console.log('🎉 تم الانتهاء من تحميل جميع البيانات');
+      console.log('[Pricing] تم الانتهاء من تحميل جميع البيانات');
 
     } catch (error) {
-      console.error('💥 خطأ عام في الاتصال بقاعدة البيانات:', error);
+      console.error('[Pricing] خطأ عام في الاتصال بقاعدة البيانات:', error);
       setConnectionError(`خطأ عام: ${error}`);
       toast.error('حدث خطأ في تحميل البيانات');
     } finally {
@@ -415,7 +421,7 @@ export default function PricingList() {
   useEffect(() => {
     if (allLevels.length > 0 && !allLevels.includes(selectedLevel)) {
       setSelectedLevel(allLevels[0]);
-      console.log('🔄 تم تغيير المستوى المحدد إلى:', allLevels[0]);
+      console.log('[Pricing] تم تغيير المستوى المحدد إلى:', allLevels[0]);
     }
   }, [allLevels, selectedLevel]);
 
@@ -423,7 +429,7 @@ export default function PricingList() {
   const addNewLevel = async () => {
     const levelCode = newLevelCode.trim().toUpperCase();
     const levelName = newLevelName.trim();
-    
+
     if (!levelCode || !levelName) {
       toast.error('يرجى إدخال كود واسم المستوى');
       return;
@@ -445,8 +451,8 @@ export default function PricingList() {
       // إضافة المستوى الجديد إلى جدول billboard_levels
       const { error: levelError } = await supabase
         .from('billboard_levels')
-        .insert([{ 
-          level_code: levelCode, 
+        .insert([{
+          level_code: levelCode,
           level_name: levelName,
           description: `مستوى ${levelName}`,
           sort_order: newLevelOrder
@@ -468,7 +474,7 @@ export default function PricingList() {
         .select('id')
         .eq('name', 'المدينة')
         .maybeSingle();
-      
+
       if (!existingCat) {
         const { error: catError } = await supabase
           .from('pricing_categories')
@@ -481,7 +487,7 @@ export default function PricingList() {
 
       // إعادة تحميل البيانات
       await loadData();
-      
+
       setSelectedLevel(levelCode);
       setAddLevelOpen(false);
       setNewLevelCode('');
@@ -497,10 +503,10 @@ export default function PricingList() {
   // تعديل مستوى
   const updateLevel = async () => {
     if (!editingLevel) return;
-    
+
     const levelCode = editLevelCode.trim().toUpperCase();
     const levelName = editLevelName.trim();
-    
+
     if (!levelCode || !levelName) {
       toast.error('يرجى إدخال كود واسم المستوى');
       return;
@@ -523,8 +529,8 @@ export default function PricingList() {
       // تحديث المستوى
       const { error } = await supabase
         .from('billboard_levels')
-        .update({ 
-          level_code: levelCode, 
+        .update({
+          level_code: levelCode,
           level_name: levelName,
           sort_order: editLevelOrder
         })
@@ -554,11 +560,11 @@ export default function PricingList() {
 
       // إعادة تحميل البيانات
       await loadData();
-      
+
       if (selectedLevel === editingLevel.level_code) {
         setSelectedLevel(levelCode);
       }
-      
+
       setEditLevelOpen(false);
       setEditingLevel(null);
       toast.success(`تم تحديث المستوى بنجاح`);
@@ -630,9 +636,7 @@ export default function PricingList() {
     if (!deletingSize) return;
 
     try {
-      console.log('🗑️ بدء حذف المقاس من قائمة الأسعار...');
-      console.log('📏 المقاس المحدد للحذف:', deletingSize);
-      console.log('📊 المستوى المحدد:', selectedLevel);
+      console.log('[Pricing] بدء حذف المقاس من قائمة الأسعار...', deletingSize, selectedLevel);
 
       // حذف جميع الأسعار للمقاس في المستوى المحدد
       const { error } = await supabase
@@ -642,21 +646,21 @@ export default function PricingList() {
         .eq('billboard_level', selectedLevel);
 
       if (error) {
-        console.error('❌ خطأ في حذف المقاس من قائمة الأسعار:', error);
+        console.error('[Pricing] خطأ في حذف المقاس من قائمة الأسعار:', error);
         toast.error(`حدث خطأ في حذف المقاس: ${error.message}`);
         return;
       }
 
-      console.log('✅ تم حذف المقاس من قائمة الأسعار بنجاح');
+      console.log('[Pricing] تم حذف المقاس من قائمة الأسعار بنجاح');
 
       // إعادة تحميل البيانات
       await loadData();
-      
+
       setDeleteSizeOpen(false);
       setDeletingSize(null);
       toast.success(`تم حذف المقاس ${deletingSize} من قائمة الأسعار بنجاح`);
     } catch (error) {
-      console.error('💥 خطأ في الاتصال بقاعدة البيانات:', error);
+      console.error('[Pricing] خطأ في الاتصال بقاعدة البيانات:', error);
       toast.error('حدث خطأ في الاتصال بقاعدة البيانات');
     }
   };
@@ -667,10 +671,10 @@ export default function PricingList() {
       toast.error('يرجى إدخال اسم الفئة');
       return;
     }
-    
-    if (PRIMARY_CUSTOMERS.includes(name)) { 
+
+    if (PRIMARY_CUSTOMERS.includes(name)) {
       toast.error('لا يمكن استخدام اسم فئة أساسية');
-      return; 
+      return;
     }
 
     try {
@@ -703,7 +707,7 @@ export default function PricingList() {
 
       // إعادة تحميل البيانات
       await loadData();
-      
+
       setOtherCustomer(name);
       setAddCatOpen(false);
       setNewCatName('');
@@ -723,14 +727,10 @@ export default function PricingList() {
     }
 
     try {
-      console.log('🔄 بدء إضافة المقاس إلى قائمة الأسعار...');
-      console.log('📏 المقاس المحدد:', sz);
-      console.log('📊 المستوى المحدد:', selectedLevel);
+      console.log('[Pricing] بدء إضافة المقاس إلى قائمة الأسعار...', sz, selectedLevel);
 
       // الحصول على جميع الفئات (الفئات عامة لجميع المستويات)
       const allCustomerCategories = Array.from(new Set([...PRIMARY_CUSTOMERS, ...categories.map(c => c.name)]));
-
-      console.log('👥 الفئات المتاحة:', allCustomerCategories);
 
       // التحقق من السجلات الموجودة
       const { data: existingPricing } = await supabase
@@ -740,7 +740,7 @@ export default function PricingList() {
         .eq('billboard_level', selectedLevel);
 
       const existingCategories = new Set(existingPricing?.map(p => p.customer_category) || []);
-      
+
       // فقط الفئات التي لا توجد بالفعل
       const newCategories = allCustomerCategories.filter(cat => !existingCategories.has(cat));
 
@@ -749,18 +749,14 @@ export default function PricingList() {
         return;
       }
 
-      console.log('➕ الفئات الجديدة للإضافة:', newCategories.length);
-
-      // ✅ الحصول على size_id من sizesData
+      // الحصول على size_id من sizesData
       const sizeInfo = sizesData.find(s => s.name === sz);
       const sizeId = sizeInfo?.id || null;
-      
-      console.log('🔑 size_id للمقاس:', sizeId);
 
       // إنشاء سجلات أسعار للمقاس الجديد للفئات الجديدة فقط
       const pricingInserts = newCategories.map(category => ({
         size: sz,
- size_id: sizeId, // إضافة size_id
+        ...(sizeId != null ? { size_id: sizeId } : {}),
         billboard_level: selectedLevel,
         customer_category: category,
         one_month: 0,
@@ -768,10 +764,9 @@ export default function PricingList() {
         '3_months': 0,
         '6_months': 0,
         full_year: 0,
-        one_day: 0
+        one_day: 0,
+        duration_prices: {}
       }));
-
-      console.log('💰 إدراج أسعار جديدة:', pricingInserts.length, 'سجل');
 
       const { data, error } = await supabase
         .from('pricing')
@@ -781,22 +776,22 @@ export default function PricingList() {
         .select();
 
       if (error) {
-        console.error('❌ خطأ في إضافة الأسعار:', error);
+        console.error('[Pricing] خطأ في إضافة الأسعار:', error);
         toast.error(`حدث خطأ في إضافة المقاس: ${error.message}`);
         return;
       }
 
-      console.log('✅ تم إضافة الأسعار بنجاح:', data?.length, 'سجل');
+      console.log('[Pricing] تم إضافة الأسعار بنجاح:', data?.length, 'سجل');
 
       // إعادة تحميل البيانات
       await loadData();
-      
+
       setAddSizeOpen(false);
       setSelectedNewSize('');
       setNewSizeName('');
       toast.success(`تم إضافة المقاس ${sz} إلى قائمة الأسعار بنجاح`);
     } catch (error) {
-      console.error('💥 خطأ في الاتصال بقاعدة البيانات:', error);
+      console.error('[Pricing] خطأ في الاتصال بقاعدة البيانات:', error);
       toast.error('حدث خطأ في الاتصال بقاعدة البيانات');
     }
   };
@@ -806,7 +801,7 @@ export default function PricingList() {
     if (!editingCategory || !editCatName.trim()) return;
 
     const newName = editCatName.trim();
-    
+
     if (PRIMARY_CUSTOMERS.includes(newName)) {
       toast.error('لا يمكن استخدام اسم فئة أساسية');
       return;
@@ -906,14 +901,15 @@ export default function PricingList() {
   };
 
   // ========== إدارة المدد ==========
-  
+
   // إضافة مدة جديدة
   const addNewDuration = async () => {
+    if (savingDuration) return;
     const name = newDurationName.trim();
     const label = newDurationLabel.trim();
-    const dbColumn = newDurationDbColumn.trim().toLowerCase().replace(/\s+/g, '_');
-    
-    if (!name || !label || !dbColumn) {
+    const dbColumn = `duration_${createRequestId().replace(/-/g, '')}`;
+
+    if (!name || !label) {
       toast.error('يرجى ملء جميع الحقول المطلوبة');
       return;
     }
@@ -921,17 +917,24 @@ export default function PricingList() {
     // التحقق من عدم تكرار الاسم أو العمود
     const existingName = durations.find(d => d.name === name);
     const existingColumn = durations.find(d => d.db_column === dbColumn);
-    
+
     if (existingName) {
       toast.error('هذا الاسم مستخدم بالفعل');
       return;
     }
-    
+
     if (existingColumn) {
       toast.error('هذا العمود مستخدم بالفعل');
       return;
     }
 
+    if (!Number.isInteger(newDurationDays) || newDurationDays < 1 || !Number.isFinite(newDurationMonths) || newDurationMonths < 0 || (newDurationMonths === 0 && !editingDuration)) {
+      toast.error('أدخل أياماً صحيحة وأشهراً أكبر من صفر'); return;
+    }
+    if (durations.some(d => d.id !== editingDuration?.id && Number(d.months) === newDurationMonths)) {
+      toast.error('توجد مدة بنفس عدد الأشهر؛ عدّل أسعارها بدلاً من تكرارها'); return;
+    }
+    setSavingDuration(true);
     try {
       const { error } = await supabase
         .from('pricing_durations')
@@ -952,27 +955,37 @@ export default function PricingList() {
       }
 
       await loadData();
+      queryClient.invalidateQueries({ queryKey: ['pricing-durations'] });
+      setSelectedMonthKey(name);
       setAddDurationOpen(false);
       resetDurationForm();
       toast.success('تم إضافة المدة بنجاح');
     } catch (error) {
       console.error('خطأ في الاتصال بقاعدة البيانات:', error);
       toast.error('حدث خطأ في الاتصال بقاعدة البيانات');
-    }
+    } finally { setSavingDuration(false); }
   };
 
   // تعديل مدة
   const updateDuration = async () => {
+    if (savingDuration) return;
     if (!editingDuration) return;
-    
+
     const name = newDurationName.trim();
     const label = newDurationLabel.trim();
-    
+
     if (!name || !label) {
       toast.error('يرجى ملء جميع الحقول المطلوبة');
       return;
     }
 
+    if (!Number.isInteger(newDurationDays) || newDurationDays < 1 || !Number.isFinite(newDurationMonths) || newDurationMonths < 0 || (newDurationMonths === 0 && !editingDuration)) {
+      toast.error('أدخل أياماً صحيحة وأشهراً أكبر من صفر'); return;
+    }
+    if (durations.some(d => d.id !== editingDuration?.id && Number(d.months) === newDurationMonths)) {
+      toast.error('توجد مدة بنفس عدد الأشهر؛ عدّل أسعارها بدلاً من تكرارها'); return;
+    }
+    setSavingDuration(true);
     try {
       const { error } = await supabase
         .from('pricing_durations')
@@ -992,6 +1005,8 @@ export default function PricingList() {
       }
 
       await loadData();
+      queryClient.invalidateQueries({ queryKey: ['pricing-durations'] });
+      setSelectedMonthKey(name);
       setEditDurationOpen(false);
       setEditingDuration(null);
       resetDurationForm();
@@ -999,7 +1014,7 @@ export default function PricingList() {
     } catch (error) {
       console.error('خطأ في الاتصال بقاعدة البيانات:', error);
       toast.error('حدث خطأ في الاتصال بقاعدة البيانات');
-    }
+    } finally { setSavingDuration(false); }
   };
 
   // حذف مدة
@@ -1009,7 +1024,7 @@ export default function PricingList() {
     try {
       const { error } = await supabase
         .from('pricing_durations')
-        .delete()
+        .update({ is_active: false })
         .eq('id', deletingDuration.id);
 
       if (error) {
@@ -1019,6 +1034,8 @@ export default function PricingList() {
       }
 
       await loadData();
+      queryClient.invalidateQueries({ queryKey: ['pricing-durations'] });
+      setSelectedMonthKey('شهر واحد');
       setDeleteDurationOpen(false);
       setDeletingDuration(null);
       toast.success('تم حذف المدة بنجاح');
@@ -1036,7 +1053,6 @@ export default function PricingList() {
     setNewDurationDays(duration.days);
     setNewDurationMonths(duration.months);
     setNewDurationOrder(duration.sort_order);
-    setNewDurationDbColumn(duration.db_column);
     setEditDurationOpen(true);
   };
 
@@ -1048,12 +1064,12 @@ export default function PricingList() {
 
   // إعادة تعيين نموذج المدة
   const resetDurationForm = () => {
+    setEditingDuration(null);
     setNewDurationName('');
     setNewDurationLabel('');
     setNewDurationDays(30);
     setNewDurationMonths(1);
     setNewDurationOrder(durations.length + 1);
-    setNewDurationDbColumn('');
   };
 
   // الحصول على المقاسات للمستوى المحدد مع الترتيب حسب sort_order
@@ -1064,23 +1080,23 @@ export default function PricingList() {
         .filter(p => p.billboard_level === selectedLevel)
         .map(p => p.size)
     ));
-    
+
     // إنشاء خريطة لـ sort_order من جدول sizes
     const sizeOrderMap = new Map<string, number>();
     sizesData.forEach(s => {
       sizeOrderMap.set(s.name, s.sort_order ?? 999); // استخدام sort_order
     });
-    
+
     // ترتيب المقاسات حسب sort_order
     const sortedSizes = levelSizes.sort((a, b) => {
       const orderA = sizeOrderMap.get(a) ?? 999;
       const orderB = sizeOrderMap.get(b) ?? 999;
       return orderA - orderB;
     });
-    
+
     // فلترة المقاسات الفارغة
     const validSizes = sortedSizes.filter(s => s && s.trim() !== '');
-    
+
     return sizeFilter.length ? validSizes.filter(s => sizeFilter.includes(s)) : validSizes;
   }, [selectedLevel, sizeFilter, pricingData, sizesData]);
 
@@ -1091,63 +1107,54 @@ export default function PricingList() {
 
   // الحصول على المقاسات المتاحة للإضافة - من جميع المقاسات الموجودة في النظام
   const availableSizesForLevel = useMemo(() => {
-    console.log('🔍 بدء حساب المقاسات المتاحة للمستوى:', selectedLevel);
-    
     // المقاسات الموجودة في قائمة الأسعار للمستوى الحالي
     const currentLevelSizes = Array.from(new Set(
       pricingData
         .filter(p => p.billboard_level === selectedLevel)
         .map(p => p.size)
     ));
-    
-    console.log('📊 المقاسات الموجودة في قائمة الأسعار للمستوى', selectedLevel, ':', currentLevelSizes);
-    
+
     // جميع المقاسات الموجودة في النظام (من جدول الأسعار + جدول sizes)
     const allAvailableSizes = Array.from(new Set([
       ...pricingData.map(p => p.size),
-      ...sizesData.map(s => s.name) // إضافة المقاسات من جدول sizes
+      ...sizesData.map(s => s.name)
     ]));
-    
-    console.log('📏 جميع المقاسات الموجودة في النظام:', allAvailableSizes);
-    
+
     // المقاسات غير الموجودة في قائمة الأسعار للمستوى الحالي
     const availableSizes = allAvailableSizes.filter(size => !currentLevelSizes.includes(size));
-    
-    console.log('✅ المقاسات المتاحة للإضافة:', availableSizes);
-    
     return availableSizes;
   }, [pricingData, sizesData, selectedLevel]);
 
-  // عرض جميع الفئات (أصبحت عامة لجميع المستويات)
+  // عرض جميع الفئات (مرتبة ومستبعدة منها الفئات الأساسية المجمعة)
   const otherCategories = useMemo(() => {
-    console.log('🔍 جميع الفئات المحملة:', categories);
-    
-    // جميع الفئات متاحة لجميع المستويات
-    const allCategories = categories.map(c => c.name);
-    
-    // إزالة التكرار
-    const uniqueCategories = Array.from(new Set(allCategories));
-    
-    console.log('📋 الفئات المتاحة:', uniqueCategories);
+    const allCatNames = [
+      ...categories.map(c => c.name),
+      ...pricingData.map(p => p.customer_category)
+    ];
+
+    const uniqueCategories = Array.from(new Set(allCatNames))
+      .filter(c => c && !PRIMARY_CUSTOMERS.includes(c))
+      .sort((a, b) => a.localeCompare('ar'));
+
     return uniqueCategories;
-  }, [categories]);
+  }, [categories, pricingData]);
 
   const getVal = (size: string, customer: string, month: MonthKeyAll): number | null => {
     // البحث في قاعدة البيانات
-    const dbRow = pricingData.find(p => 
-      p.size === size && 
-      p.billboard_level === selectedLevel && 
+    const dbRow = pricingData.find(p =>
+      p.size === size &&
+      p.billboard_level === selectedLevel &&
       p.customer_category === customer
     );
-    
+
     if (dbRow) {
       const monthOption = MONTH_OPTIONS.find(m => m.key === month);
       if (monthOption) {
-        const value = (dbRow as any)[monthOption.dbColumn];
+        const value = readDurationPrice(dbRow, monthOption.dbColumn);
         return normalize(value);
       }
     }
-    
+
     return null;
   };
 
@@ -1155,60 +1162,66 @@ export default function PricingList() {
     try {
       const monthOption = MONTH_OPTIONS.find(m => m.key === month);
       if (!monthOption) return;
+      if (value != null && (!Number.isFinite(value) || value < 0)) { toast.error('أدخل سعراً صحيحاً غير سالب'); return; }
 
-      // ✅ الحصول على size_id من sizesData
+      // الحصول على size_id من sizesData
       const sizeInfo = sizesData.find(s => s.name === size);
       const sizeId = sizeInfo?.id || null;
-      
-      console.log('💾 حفظ السعر:', { size, sizeId, customer, month, value });
 
       // البحث عن السجل الموجود
-      const existingRow = pricingData.find(p => 
-        p.size === size && 
-        p.billboard_level === selectedLevel && 
+      const existingRow = pricingData.find(p =>
+        p.size === size &&
+        p.billboard_level === selectedLevel &&
         p.customer_category === customer
       );
 
-      const updateData = {
-        [monthOption.dbColumn]: value || 0,
- size_id: sizeId // إضافة size_id عند التحديث
+      const isCustom = isCustomDuration(monthOption.dbColumn);
+      const updateData: any = {
+        ...(isCustom
+          ? { duration_prices: { ...((existingRow as any)?.duration_prices || {}), [monthOption.dbColumn]: value ?? 0 } }
+          : { [monthOption.dbColumn]: value ?? 0 })
       };
+      if (sizeId != null) {
+        updateData.size_id = sizeId;
+      }
 
       if (existingRow) {
         // تحديث السجل الموجود
         const { error } = await supabase
           .from('pricing')
-          .update(updateData as any)
+          .update(updateData)
           .eq('id', existingRow.id);
 
         if (error) {
-          console.error('خطأ في تحديث السعر:', error);
+          console.error('[Pricing] خطأ في تحديث السعر:', error);
           toast.error(`حدث خطأ في تحديث السعر: ${error.message}`);
           return;
         }
 
         // تحديث البيانات المحلية
-        setPricingData(prev => prev.map(p => 
-          p.id === existingRow.id 
+        setPricingData(prev => prev.map(p =>
+          p.id === existingRow.id
             ? { ...p, ...updateData }
             : p
         ));
       } else {
-        // إنشاء سجل جديد مع size_id
-        const newRow = {
+        // إنشاء سجل جديد
+        const newRow: any = {
           size,
- size_id: sizeId, // إضافة size_id عند الإنشاء
           billboard_level: selectedLevel,
           customer_category: customer,
-          one_month: monthOption.dbColumn === 'one_month' ? (value || 0) : 0,
-          '2_months': monthOption.dbColumn === '2_months' ? (value || 0) : 0,
-          '3_months': monthOption.dbColumn === '3_months' ? (value || 0) : 0,
-          '6_months': monthOption.dbColumn === '6_months' ? (value || 0) : 0,
-          full_year: monthOption.dbColumn === 'full_year' ? (value || 0) : 0,
-          one_day: monthOption.dbColumn === 'one_day' ? (value || 0) : 0
+          one_month: 0,
+          '2_months': 0,
+          '3_months': 0,
+          '6_months': 0,
+          full_year: 0,
+          one_day: 0,
+          duration_prices: {},
+          ...updateData
         };
-
-        console.log('➕ إضافة سجل جديد:', newRow);
+        if (sizeId != null) {
+          newRow.size_id = sizeId;
+        }
 
         const { data, error } = await supabase
           .from('pricing')
@@ -1217,18 +1230,20 @@ export default function PricingList() {
           .single();
 
         if (error) {
-          console.error('خطأ في إضافة السعر:', error);
+          console.error('[Pricing] خطأ في إضافة السعر:', error);
           toast.error(`حدث خطأ في إضافة السعر: ${error.message}`);
           return;
         }
 
         // إضافة السجل الجديد للبيانات المحلية
-        setPricingData(prev => [...prev, data]);
+        if (data) {
+          setPricingData(prev => [...prev, data]);
+        }
       }
 
       toast.success('تم حفظ السعر بنجاح');
     } catch (error) {
-      console.error('خطأ في الاتصال بقاعدة البيانات:', error);
+      console.error('[Pricing] خطأ في الاتصال بقاعدة البيانات:', error);
       toast.error('حدث خطأ في الاتصال بقاعدة البيانات');
     }
   };
@@ -1241,16 +1256,16 @@ export default function PricingList() {
   const buildPrintHtml = (cat: string, logoSrc: string, levelFilter: string, showLevel: boolean, theme: 'dark' | 'light' = 'dark') => {
     const cats = [cat]; // Always use single category
     const today = new Date().toLocaleDateString('ar-LY');
-    
+
     // إنشاء خريطة لـ sort_order من جدول sizes
     const sizeOrderMap = new Map<string, number>();
     sizesData.forEach(s => {
       sizeOrderMap.set(s.name, s.sort_order ?? 999);
     });
-    
+
     // تحديد المستويات المطلوب طباعتها
     const levelsToShow = levelFilter === 'all' ? allLevels : [levelFilter];
-    
+
     // جمع جميع المقاسات من المستويات المحددة
     const allUniqueSizes = Array.from(new Set(
       pricingData
@@ -1261,34 +1276,35 @@ export default function PricingList() {
       const orderB = sizeOrderMap.get(b) ?? 999;
       return orderA - orderB;
     });
-    
+
     // إنشاء صفحات منفصلة لكل مستوى
     const levelPages = levelsToShow.map((level, levelIndex) => {
       const levelInfo = levels.find(l => l.level_code === level);
-      
+
       // الحصول على السعر لمستوى معين
       const getPriceForLevel = (size: string, customer: string, month: MonthKey): number | null => {
-        const dbRow = pricingData.find(p => 
-          p.size === size && 
-          p.billboard_level === level && 
+        const dbRow = pricingData.find(p =>
+          p.size === size &&
+          p.billboard_level === level &&
           p.customer_category === customer
         );
-        
+
         if (dbRow) {
           const monthOption = MONTH_OPTIONS.find(m => m.key === month);
           if (monthOption) {
-            const value = (dbRow as any)[monthOption.dbColumn];
+            const value = readDurationPrice(dbRow, monthOption.dbColumn);
             return normalize(value);
           }
         }
-        
+
         return null;
       };
 
       // المقاسات لهذا المستوى
-      const sizesForThisLevel = allUniqueSizes.filter(size => 
-        pricingData.some(p => p.size === size && p.billboard_level === level)
+      const { rows: sizesForThisLevel, columns: printDurations } = printablePricing(
+        allUniqueSizes, MONTH_OPTIONS, (size, option) => getPriceForLevel(size, cats[0], option.key)
       );
+      if (!sizesForThisLevel.length) return '';
 
       // إنشاء صفوف الجدول لكل مقاس مع جميع الفترات (بما في ذلك اليومي)
       const rows = sizesForThisLevel.map(size => {
@@ -1296,9 +1312,9 @@ export default function PricingList() {
           <tr>
             <td class="size-cell">${size}</td>
             ${showLevel ? `<td class="level-cell">${levelInfo?.level_name || level}</td>` : ''}
-            ${MONTH_OPTIONS.map(monthOpt => {
+            ${printDurations.map(monthOpt => {
               const v = getPriceForLevel(size, cats[0], monthOpt.key);
-              const price = v == null ? '0' : `${Number(v).toLocaleString('ar-LY')}`;
+              const price = v == null || v <= 0 ? '—' : `${Number(v).toLocaleString('ar-LY')}`;
               return `<td class="price-cell">${price}</td>`;
             }).join('')}
           </tr>
@@ -1306,7 +1322,7 @@ export default function PricingList() {
       }).join('');
 
       return `
-        <div class="page ${levelIndex > 0 ? 'page-break' : ''}">
+        <div class="page">
           <div class="page-content">
             <div class="header">
               ${logoSrc ? `<div class="logo-area">
@@ -1314,28 +1330,23 @@ export default function PricingList() {
               </div>` : ''}
               <div class="title-area" style="${!logoSrc ? 'text-align: center; width: 100%;' : ''}">
                 <h1 class="main-title">قائمة الأسعار</h1>
-                <div class="subtitle">المستوى ${levelInfo?.level_name || level}</div>
+                <div class="subtitle">فئة ${cat} — المستوى ${levelInfo?.level_name || level}</div>
               </div>
             </div>
-            
+
             <table class="prices-table">
               <thead>
                 <tr>
                   <th class="size-header">المقاس</th>
                   ${showLevel ? '<th class="level-header">المستوى</th>' : ''}
-                  <th>شهر</th>
-                  <th>شهرين</th>
-                  <th>3 أشهر</th>
-                  <th>6 أشهر</th>
-                  <th>سنة</th>
-                  <th>يومي</th>
+                  ${printDurations.map(option => `<th>${option.label}</th>`).join('')}
                 </tr>
               </thead>
               <tbody>
                 ${rows}
               </tbody>
             </table>
-            
+
             <div class="footer">
               <div class="footer-left">${today}</div>
               <div class="footer-center">الأسعار بالدينار الليبي وقابلة للتغيير</div>
@@ -1354,7 +1365,7 @@ export default function PricingList() {
   <title>قائمة الأسعار</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
-    
+
     * {
       margin: 0;
       padding: 0;
@@ -1363,7 +1374,7 @@ export default function PricingList() {
       print-color-adjust: exact !important;
       color-adjust: exact !important;
     }
-    
+
     body {
       font-family: 'Cairo', sans-serif;
       background: ${theme === 'dark' ? '#1a1a1a' : '#ffffff'};
@@ -1374,8 +1385,8 @@ export default function PricingList() {
       height: 297mm;
       margin: 0 auto 20px;
       position: relative;
-      background: ${theme === 'dark' 
-        ? 'linear-gradient(145deg, #0d0d0d 0%, #1a1a1a 30%, #252525 60%, #1f1f1f 100%)' 
+      background: ${theme === 'dark'
+        ? 'linear-gradient(145deg, #0d0d0d 0%, #1a1a1a 30%, #252525 60%, #1f1f1f 100%)'
         : 'linear-gradient(145deg, #ffffff 0%, #f8f9fa 30%, #f0f2f5 60%, #fafafa 100%)'};
       overflow: hidden;
     }
@@ -1389,7 +1400,7 @@ export default function PricingList() {
       pointer-events: none;
     }
 
-    .page-break { page-break-before: always; }
+    .page + .page { page-break-before: always; }
 
     .page-content {
       position: relative; z-index: 1;
@@ -1409,7 +1420,7 @@ export default function PricingList() {
 
     .main-title {
       font-size: 28pt; font-weight: 800;
-      ${theme === 'dark' 
+      ${theme === 'dark'
         ? 'background: linear-gradient(135deg, #d4af37 0%, #f4d03f 50%, #d4af37 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;'
         : 'color: #8B6914;'}
       margin-bottom: 2mm; letter-spacing: 2px;
@@ -1428,8 +1439,8 @@ export default function PricingList() {
     }
 
     .prices-table thead {
-      background: ${theme === 'dark' 
-        ? 'linear-gradient(135deg, rgba(212, 175, 55, 0.18) 0%, rgba(212, 175, 55, 0.1) 100%)' 
+      background: ${theme === 'dark'
+        ? 'linear-gradient(135deg, rgba(212, 175, 55, 0.18) 0%, rgba(212, 175, 55, 0.1) 100%)'
         : 'linear-gradient(135deg, rgba(180, 140, 20, 0.1) 0%, rgba(180, 140, 20, 0.05) 100%)'};
     }
 
@@ -1513,19 +1524,21 @@ export default function PricingList() {
       body { background: ${theme === 'dark' ? '#0d0d0d' : '#ffffff'}; }
       .page { width: 100%; height: 100vh; margin: 0; box-shadow: none; }
       .print-btn { display: none !important; }
-      .page-break { page-break-before: always; }
+      .page + .page { page-break-before: always; }
       @page { size: A4 portrait; margin: 0; }
     }
   </style>
 </head>
 <body>
   ${levelPages}
- <button class="print-btn" onclick="window.print()">️ طباعة القائمة</button>
+  <button class="print-btn" onclick="window.print()">طباعة القائمة</button>
 </body>
 </html>`;
   };
 
   const handlePrint = () => {
+    const hasPrices = pricingData.some(row => row.customer_category === printCategory && (printLevel === 'all' || row.billboard_level === printLevel) && MONTH_OPTIONS.some(option => (readDurationPrice(row, option.dbColumn) ?? 0) > 0));
+    if (!hasPrices) { toast.info('لا توجد أسعار أكبر من صفر لهذه الفئة ضمن المستويات المختارة'); return; }
     const w = window.open('', '_blank');
     if (!w) return;
 
@@ -1542,24 +1555,24 @@ export default function PricingList() {
     try {
       toast.info('جاري تحضير ملف Excel...');
       const cats = cat === PRIMARY_SENTINEL ? PRIMARY_CUSTOMERS : [cat];
-      
+
       // الحصول على جميع المقاسات من جميع المستويات
       const allSizesSet = new Set<string>();
       pricingData.forEach(p => allSizesSet.add(p.size));
       const allSizesArray = Array.from(allSizesSet).sort();
-      
+
       // دالة لحساب السعر مع الزيادة
       const applyMarkup = (price: number | null): number => {
         if (price === null || price === 0) return 0;
         return Math.round(price * (1 + markupPercent / 100));
       };
-      
+
       // إنشاء بيانات لكل مستوى وفترة
       const allData: any[] = [];
-      
+
       // تحديد المستويات المطلوبة
       const targetLevels = printLevel === 'all' ? allLevels : [printLevel];
-      
+
       targetLevels.forEach(level => {
         // الحصول على المقاسات المتوفرة لهذا المستوى
         const levelSizes = Array.from(new Set(
@@ -1567,15 +1580,15 @@ export default function PricingList() {
             .filter(p => p.billboard_level === level)
             .map(p => p.size)
         )).sort();
-        
+
         if (levelSizes.length === 0) return;
-        
+
         MONTH_OPTIONS.forEach(monthOpt => {
           levelSizes.forEach(size => {
             // الحصول على size_id من sizesData
             const sizeInfo = sizesData.find(s => s.name === size);
             const sizeId = sizeInfo?.id || '';
-            
+
             const row: any = {
               'billboard_level': level,
               'الفترة': monthOpt.label,
@@ -1584,14 +1597,14 @@ export default function PricingList() {
             };
             cats.forEach(c => {
               // البحث عن السعر في قاعدة البيانات
-              const dbRow = pricingData.find(p => 
-                p.size === size && 
-                p.billboard_level === level && 
+              const dbRow = pricingData.find(p =>
+                p.size === size &&
+                p.billboard_level === level &&
                 p.customer_category === c
               );
-              
+
               if (dbRow) {
-                const value = (dbRow as any)[monthOpt.dbColumn];
+                const value = readDurationPrice(dbRow, monthOpt.dbColumn);
                 const originalPrice = normalize(value) ?? 0;
                 row[c] = applyMarkup(originalPrice);
               } else {
@@ -1605,7 +1618,7 @@ export default function PricingList() {
 
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(allData);
-      
+
       // تعيين عرض الأعمدة
       const colWidths = [{ wch: 12 }, { wch: 15 }, { wch: 10 }, { wch: 12 }];
       cats.forEach(() => colWidths.push({ wch: 15 }));
@@ -1627,11 +1640,11 @@ export default function PricingList() {
       toast.error('فشل في تصدير ملف Excel');
     }
   };
-  
+
   // حساب معاينة الأسعار مع الزيادة للمستوى المحدد
   const previewPricesWithMarkup = useMemo(() => {
     if (priceMarkupPercent <= 0) return [];
-    
+
     const targetLevels = printLevel === 'all' ? allLevels : [printLevel];
     const preview: Array<{
       level: string;
@@ -1641,25 +1654,25 @@ export default function PricingList() {
       newPrice: number;
       increase: number;
     }> = [];
-    
+
     targetLevels.slice(0, 2).forEach(level => {
       const levelSizes = Array.from(new Set(
         pricingData
           .filter(p => p.billboard_level === level)
           .map(p => p.size)
       )).slice(0, 3); // أول 3 مقاسات فقط للمعاينة
-      
+
       levelSizes.forEach(size => {
         // نستخدم الفترة المحددة حالياً
-        const dbRow = pricingData.find(p => 
-          p.size === size && 
-          p.billboard_level === level && 
+        const dbRow = pricingData.find(p =>
+          p.size === size &&
+          p.billboard_level === level &&
           p.customer_category === printCategory
         );
-        
+
         if (dbRow) {
           const monthOpt = MONTH_OPTIONS.find(m => m.key === selectedMonthKey) || MONTH_OPTIONS[0];
-          const originalPrice = normalize((dbRow as any)[monthOpt.dbColumn]) ?? 0;
+          const originalPrice = normalize(readDurationPrice(dbRow, monthOpt.dbColumn)) ?? 0;
           if (originalPrice > 0) {
             const newPrice = Math.round(originalPrice * (1 + priceMarkupPercent / 100));
             preview.push({
@@ -1674,7 +1687,7 @@ export default function PricingList() {
         }
       });
     });
-    
+
     return preview;
   }, [priceMarkupPercent, printLevel, printCategory, pricingData, allLevels, selectedMonthKey, MONTH_OPTIONS]);
 
@@ -1694,7 +1707,7 @@ export default function PricingList() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
- <div className="text-red-500 text-lg mb-4">️ خطأ في الاتصال بقاعدة البيانات</div>
+          <div className="text-red-500 text-lg mb-4">خطأ في الاتصال بقاعدة البيانات</div>
           <p className="text-muted-foreground mb-4">{connectionError}</p>
           <Button onClick={loadData} variant="outline">
             إعادة المحاولة
@@ -1722,27 +1735,27 @@ export default function PricingList() {
   }
 
   return (
-    <div className="expenses-container">
-      <Card className="bg-gradient-to-br from-card to-primary/10 border-0 shadow-lg">
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
+    <div dir="rtl" className="mx-auto max-w-[1600px] space-y-6 p-3 sm:p-6 [&_button]:cursor-pointer [&_button]:transition-all [&_button]:duration-200">
+      <Card className="rounded-2xl border border-border bg-card shadow-sm">
+        <CardHeader className="space-y-6 border-b border-border bg-primary/5 p-4 sm:p-6">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div>
-              <CardTitle className="text-2xl text-primary">قائمة الأسعار</CardTitle>
+              <CardTitle className="text-2xl text-primary">إدارة الأسعار والمدد</CardTitle>
               <p className="text-muted-foreground text-sm">
-                إدارة أسعار اللوحات الإعلانية حسب المستوى والفئة
+                اختر المدة والمستوى، ثم اضبط أسعار المقاسات لكل فئة عملاء.
                 <span className="ml-2 text-xs text-primary/70">
                   ({levels.length} مستوى، {categories.length} فئة، {allSizes.length} مقاس)
                 </span>
               </p>
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap xl:max-w-3xl">
               {MONTH_OPTIONS.map(opt => (
                 <button
                   key={`m-${opt.key}`}
                   className={`px-3 py-1.5 rounded-lg text-sm border transition-all duration-200 ${selectedMonthKey === opt.key ? 'bg-primary text-primary-foreground border-primary shadow-lg' : 'bg-background text-foreground border-border hover:bg-muted'}`}
                   onClick={() => setSelectedMonthKey(opt.key)}
                 >
-                  {opt.months === 1 ? 'شهرياً' : opt.months === 0 ? 'يومي' : opt.label}
+                  {opt.label}
                 </button>
               ))}
               <Button
@@ -1755,11 +1768,11 @@ export default function PricingList() {
                 }}
                 title="إضافة مدة جديدة"
               >
-                <Plus className="h-4 w-4" />
+                <Plus className="h-4 w-4 ml-2" /> إضافة مدة
               </Button>
               {durations.length > 0 && (
-                <Select 
-                  value="" 
+                <Select
+                  value=""
                   onValueChange={(val) => {
                     const duration = durations.find(d => d.id === val);
                     if (duration) openEditDuration(duration);
@@ -1769,7 +1782,7 @@ export default function PricingList() {
                     <SelectValue placeholder="تعديل المدد" />
                   </SelectTrigger>
                   <SelectContent>
-                    {durations.sort((a, b) => a.sort_order - b.sort_order).map(d => (
+                    {[...durations].filter(d => d.is_active).sort((a, b) => a.sort_order - b.sort_order).map(d => (
                       <SelectItem key={d.id} value={d.id}>
                         {d.name} ({d.days} يوم)
                       </SelectItem>
@@ -1781,11 +1794,11 @@ export default function PricingList() {
               <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setPrintOpen(true)}>
                 <Printer className="h-4 w-4 ml-2" /> طباعة الأسعار
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 onClick={updateMissingSizeIds}
                 disabled={isUpdatingSizeIds}
-                title="تحديث size_id للأسعار القديمة"
+                title="مزامنة ارتباط الأسعار بالمقاسات"
               >
                 {isUpdatingSizeIds ? (
                   <span className="flex items-center gap-2">
@@ -1793,90 +1806,196 @@ export default function PricingList() {
                     جاري التحديث...
                   </span>
                 ) : (
-                  'تحديث size_id'
+                  'مزامنة المقاسات'
                 )}
               </Button>
             </div>
           </div>
 
-          {/* شريط الفئات المنفصل */}
-          <div className="flex items-center gap-3 bg-muted/30 rounded-xl px-4 py-3 border border-border/50">
-            <div className="flex items-center gap-2 flex-1 min-w-0">
-              <Select
-                value={otherCustomer}
-                onValueChange={(val) => setOtherCustomer(val)}
-              >
-                <SelectTrigger className="w-44 h-9 bg-background border-border">
-                  <SelectValue placeholder="اختر الفئة" />
-                </SelectTrigger>
-                <SelectContent>
-                  <div className="px-2 pb-2 pt-1">
-                    <Input
-                      type="text"
- placeholder=" بحث..."
-                      value={categorySearchTerm}
-                      onChange={(e) => setCategorySearchTerm(e.target.value)}
-                      className="h-7 text-xs"
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    />
-                  </div>
-                  <SelectItem value={PRIMARY_SENTINEL}>
-                    <span className="font-semibold">الأساسية</span>
-                    <span className="text-muted-foreground text-xs mr-1">(عادي، مسوق، شركات)</span>
-                  </SelectItem>
-                  {otherCategories
-                    .filter(c => !categorySearchTerm || c.includes(categorySearchTerm))
-                    .map((c, index) => (
-                      <SelectItem key={`cat-select-${index}-${c}`} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
-
-              <span className="text-xs text-muted-foreground whitespace-nowrap">
-                الفئة الحالية:
-              </span>
-              <span className="text-sm font-bold text-primary whitespace-nowrap">
-                {otherCustomer === PRIMARY_SENTINEL ? 'الأساسية' : otherCustomer}
-              </span>
-
-              {otherCustomer !== PRIMARY_SENTINEL && otherCategories.includes(otherCustomer) && (
-                <div className="flex items-center gap-1 mr-2">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7"
-                    onClick={() => openEditCategory(otherCustomer)}
-                    title="تعديل الفئة"
-                  >
-                    <Edit2 className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7 text-destructive hover:text-destructive"
-                    onClick={() => openDeleteCategory(otherCustomer)}
-                    title="حذف الفئة"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+          {/* قسم اختيار وإدارة فئات التسعير */}
+          <div className="rounded-2xl border border-border/70 bg-gradient-to-b from-muted/30 to-muted/10 p-3.5 sm:p-4 space-y-3.5 shadow-sm">
+            {/* الصف العلوي: عنوان الفئة، الفئة النشطة، وإجراءات الإضافة */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/40 pb-3">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <div className="flex items-center gap-2 text-primary font-bold text-sm sm:text-base">
+                  <Tag className="h-4 w-4" />
+                  <span>فئة العملاء:</span>
                 </div>
-              )}
+
+                {/* شارة الفئة المحددة حالياً */}
+                {otherCustomer === PRIMARY_SENTINEL ? (
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary text-primary-foreground font-semibold text-xs shadow-sm">
+                    <Users className="h-3.5 w-3.5" />
+                    <span>الفئات الأساسية (عادي • مسوق • شركات)</span>
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/15 text-primary border border-primary/30 font-bold text-xs shadow-sm">
+                    <Users className="h-3.5 w-3.5" />
+                    <span>الفئة المعروضة: {otherCustomer}</span>
+                    <button
+                      type="button"
+                      onClick={() => setOtherCustomer(PRIMARY_SENTINEL)}
+                      className="hover:bg-primary/20 rounded-full p-0.5 transition-colors cursor-pointer"
+                      title="العودة للفئات الأساسية"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                {/* أزرار تعديل وحذف الفئة المخصصة المحددة */}
+                {otherCustomer !== PRIMARY_SENTINEL && otherCategories.includes(otherCustomer) && (
+                  <div className="flex items-center gap-1.5 mr-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground border border-border/60 hover:bg-muted"
+                      onClick={() => openEditCategory(otherCustomer)}
+                      title="تعديل اسم هذه الفئة"
+                    >
+                      <Edit2 className="h-3 w-3 ml-1" />
+                      تعديل الاسم
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 px-2.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10 border border-destructive/20"
+                      onClick={() => openDeleteCategory(otherCustomer)}
+                      title="حذف هذه الفئة"
+                    >
+                      <Trash2 className="h-3 w-3 ml-1" />
+                      حذف الفئة
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* أزرار الإضافة السريعة */}
+              <div className="flex items-center gap-2 shrink-0">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setAddCatOpen(true)}
+                  className="h-8 text-xs font-semibold border-primary/40 hover:border-primary hover:bg-primary/10 text-primary cursor-pointer"
+                >
+                  <Plus className="h-3.5 w-3.5 ml-1" />
+                  إضافة فئة عميل
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setAddSizeOpen(true)}
+                  className="h-8 text-xs font-semibold cursor-pointer"
+                >
+                  <Plus className="h-3.5 w-3.5 ml-1" />
+                  إضافة مقاس
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setAddCatOpen(true)}>
-                <Plus className="h-3.5 w-3.5 ml-1" /> إضافة فئة
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setAddSizeOpen(true)}>
-                <Plus className="h-3.5 w-3.5 ml-1" /> إضافة مقاس
-              </Button>
+
+            {/* الصف السفلي: حقل البحث السريع ورقائق اختيار الفئات */}
+            <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
+              {/* حقل البحث السريع الفوري */}
+              <div className="relative w-full md:w-64 shrink-0">
+                <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                <Input
+                  type="text"
+                  aria-label="البحث عن فئة العميل" placeholder="ابحث عن فئة العميل..."
+                  value={categorySearchTerm}
+                  onChange={(e) => setCategorySearchTerm(e.target.value)}
+                  className="h-11 pr-8 pl-8 text-sm bg-background"
+                />
+                {categorySearchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setCategorySearchTerm('')}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    title="مسح البحث"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* قائمة رقائق الفئات الأفقية */}
+              <div className="flex items-center gap-1.5 flex-wrap max-h-40 overflow-y-auto p-1 flex-1 min-w-0">
+                {/* الفئات الأساسية */}
+                <button
+                  type="button"
+                  onClick={() => setOtherCustomer(PRIMARY_SENTINEL)}
+                  className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 shrink-0 border flex items-center gap-1.5 cursor-pointer ${
+                    otherCustomer === PRIMARY_SENTINEL
+                      ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                      : 'bg-background hover:bg-muted text-foreground border-border'
+                  }`}
+                >
+                  <Users className="h-3.5 w-3.5" />
+                  <span>مقارنة الفئات الأساسية</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded ${
+                    otherCustomer === PRIMARY_SENTINEL ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted text-muted-foreground'
+                  }`}>
+                    عادي / مسوق / شركات
+                  </span>
+                </button>
+
+                {/* الفئات المخصصة المفلترة بالبحث */}
+                {[...PRIMARY_CUSTOMERS, ...otherCategories]
+                  .filter(c => !categorySearchTerm.trim() || c.toLowerCase().includes(categorySearchTerm.trim().toLowerCase()))
+                  .map((c) => {
+                    const isSelected = otherCustomer === c;
+                    const column = MONTH_OPTIONS.find(option => option.key === selectedMonthKey)?.dbColumn;
+                    const pricesCount = pricingData.filter(p => p.billboard_level === selectedLevel && p.customer_category === c && column && (readDurationPrice(p, column) ?? 0) > 0).length;
+                    return (
+                      <button
+                        key={`cat-pill-${c}`}
+                        type="button"
+                        aria-pressed={otherCustomer === c}
+                        onClick={() => { setOtherCustomer(c); setPrintCategory(c); }}
+                        className={`group px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 shrink-0 border flex items-center gap-1.5 cursor-pointer ${
+                          isSelected
+                            ? 'bg-primary text-primary-foreground border-primary shadow-sm font-bold'
+                            : 'bg-background hover:bg-muted text-foreground border-border hover:border-primary/40'
+                        }`}
+                        title={`فئة: ${c} (${pricesCount} مقاسات مسعرة في المستوى ${selectedLevel})`}
+                      >
+                        <span>{c}</span>
+                        {pricesCount > 0 && (
+                          <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                            isSelected ? 'bg-primary-foreground/25 text-primary-foreground' : 'bg-primary/10 text-primary font-semibold'
+                          }`}>
+                            {pricesCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+
+                {categorySearchTerm.trim() && [...PRIMARY_CUSTOMERS, ...otherCategories].filter(c => c.toLowerCase().includes(categorySearchTerm.trim().toLowerCase())).length === 0 && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground px-2 py-1 shrink-0">
+                    <span>لا توجد فئة باسم "{categorySearchTerm}"</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewCatName(categorySearchTerm.trim());
+                        setAddCatOpen(true);
+                      }}
+                      className="text-primary hover:underline font-semibold cursor-pointer"
+                    >
+                      إضافتها الآن؟
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between bg-gradient-to-r from-blue-50/20 to-primary/10 border border-primary/20 rounded-xl px-4 py-3">
+        <CardContent className="space-y-5 p-4 sm:p-6">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-primary/30 bg-primary/5 p-4"><p className="text-xs text-muted-foreground">المدة المحددة</p><p className="mt-1 text-lg font-bold">{selectedMonthKey}</p><p className="text-sm text-muted-foreground">{MONTH_OPTIONS.find(d => d.key === selectedMonthKey)?.days} يوم</p></div>
+            <div className="rounded-xl border border-border bg-muted/20 p-4"><p className="text-xs text-muted-foreground">مستوى التسعير</p><p className="mt-1 text-lg font-bold">{levels.find(l => l.level_code === selectedLevel)?.level_name || selectedLevel}</p><p className="text-sm text-muted-foreground">أسعار مستقلة لكل مدة ومقاس</p></div>
+            <div className="rounded-xl border border-border bg-muted/20 p-4"><p className="text-xs text-muted-foreground">تعديل الأسعار</p><p className="mt-1 text-lg font-bold">{sizesForLevel.length} مقاس</p><p className="text-sm text-muted-foreground">اضغط على السعر لتعديله؛ يُحفظ عند مغادرة الحقل</p></div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-4 bg-muted/20 border border-border rounded-xl px-4 py-3">
             <div className="flex items-center gap-3">
               <span className="inline-flex items-center gap-2 bg-primary text-primary-foreground font-semibold rounded-lg px-3 py-1 shadow-lg">
                 مستوى {levels.find(l => l.level_code === selectedLevel)?.level_name || selectedLevel}
@@ -1885,7 +2004,7 @@ export default function PricingList() {
                 أسعار الأحجام حسب فئة العميل ({sizesForLevel.length} مقاس، {otherCategories.length} فئة إضافية)
               </span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {allLevels.map((lvl, index) => {
                 const levelInfo = levels.find(l => l.level_code === lvl);
                 return (
@@ -1957,66 +2076,38 @@ export default function PricingList() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <MultiSelect 
-              options={allSizes.map((s, index) => ({ label: s, value: s }))} 
-              value={sizeFilter} 
-              onChange={setSizeFilter} 
-              placeholder="تصفية الأحجام" 
+            <MultiSelect
+              options={allSizes.map((s, index) => ({ label: s, value: s }))}
+              value={sizeFilter}
+              onChange={setSizeFilter}
+              placeholder="تصفية الأحجام"
             />
           </div>
 
-          <div className="expenses-table-container">
-            <table className="w-full text-sm text-right">
+          <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-4" aria-live="polite">
+            <h2 className="text-lg font-bold text-foreground">{otherCustomer === PRIMARY_SENTINEL ? 'مقارنة أسعار: عادي، مسوق، شركات' : `أسعار فئة: ${otherCustomer}`}</h2>
+            <p className="mt-1 text-sm text-foreground">المدة: {selectedMonthKey} · المستوى: {levels.find(l => l.level_code === selectedLevel)?.level_name || selectedLevel} · العملة: الدينار الليبي</p>
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full min-w-[480px] text-sm text-right">
               <thead>
                 <tr className="bg-muted/20 border-b border-border/30">
+                  <th scope="col" className="sticky right-0 z-20 w-44 min-w-36 border-l border-border bg-muted p-4 text-right text-lg font-bold text-foreground">المقاس</th>
                   {(otherCustomer === PRIMARY_SENTINEL ? PRIMARY_CUSTOMERS : [otherCustomer]).map((c, index) => (
-                    <th key={`head-${index}-${c}`} className="p-3 font-medium text-primary">{c}</th>
+                    <th key={`head-${index}-${c}`} className="p-4 text-base font-semibold text-foreground">{c}</th>
                   ))}
-                  <th className="p-3 text-center w-32 bg-muted/20 font-medium text-primary">الحجم</th>
                 </tr>
               </thead>
               <tbody>
                 {sizesForLevel.map((size, sizeIndex) => (
                   <tr key={`size-${sizeIndex}-${size}`} className="border-b border-border/20 hover:bg-background/50">
-                    {(otherCustomer === PRIMARY_SENTINEL ? PRIMARY_CUSTOMERS : [otherCustomer]).map((c, customerIndex) => {
-                      const isEditing = editing && editing.size === size && editing.customer === c && editing.month === selectedMonthKey;
-                      const current = getVal(size, c, selectedMonthKey);
-                      return (
-                        <td key={`col-${sizeIndex}-${customerIndex}-${c}`} className="p-3">
-                          {isEditing ? (
-                            <input
-                              autoFocus
-                              type="number"
-                              className="w-24 rounded-md border px-2 py-1 bg-background"
-                              defaultValue={current ?? ''}
-                              onBlur={(e) => { 
-                                const v = e.target.value.trim(); 
-                                setVal(size, c, selectedMonthKey, v === '' ? null : Number(v)); 
-                                setEditing(null); 
-                              }}
-                              onKeyDown={(e) => { 
-                                if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); 
-                                if (e.key === 'Escape') setEditing(null); 
-                              }}
-                            />
-                          ) : (
-                            <button 
-                              className="text-right w-full text-foreground hover:bg-muted/50 rounded px-2 py-1" 
-                              onClick={() => setEditing({ size, customer: c, month: selectedMonthKey })}
-                            >
-                              {priceFor(size, c)}
-                            </button>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td className="p-3 text-center font-semibold bg-muted/20">
-                      <div className="flex items-center justify-center gap-2">
-                        <span className="text-primary font-bold">{size}</span>
+                    <th scope="row" className="sticky right-0 z-10 border-l border-border bg-card p-3 sm:p-4 text-right">
+                      <div className="flex items-center justify-between gap-3">
+                        <span dir="ltr" className="whitespace-nowrap text-2xl sm:text-3xl font-extrabold tracking-wide tabular-nums text-foreground">{size}</span>
                         <Button
                           size="sm"
                           variant="outline"
-                          className="text-red-500 hover:text-red-700 p-1 h-6 w-6"
+                          className="text-muted-foreground hover:text-destructive p-1 h-8 w-8 shrink-0"
                           onClick={() => {
                             setDeletingSize(size);
                             setDeleteSizeOpen(true);
@@ -2026,7 +2117,43 @@ export default function PricingList() {
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
-                    </td>
+                    </th>
+                    {(otherCustomer === PRIMARY_SENTINEL ? PRIMARY_CUSTOMERS : [otherCustomer]).map((c, customerIndex) => {
+                      const isEditing = editing && editing.size === size && editing.customer === c && editing.month === selectedMonthKey;
+                      const current = getVal(size, c, selectedMonthKey);
+                      return (
+                        <td key={`col-${sizeIndex}-${customerIndex}-${c}`} className="p-3">
+                          {isEditing ? (
+                            <input
+                              autoFocus
+                              aria-label={`سعر ${size} لفئة ${c} خلال ${selectedMonthKey}`}
+                              min={0}
+                              type="number"
+                              className="w-full min-w-28 h-16 rounded-xl border-2 border-primary px-4 py-3 bg-background text-2xl font-bold tabular-nums"
+                              defaultValue={current ?? ''}
+                              onBlur={(e) => {
+                                const v = e.target.value.trim();
+                                setVal(size, c, selectedMonthKey, v === '' ? null : Number(v));
+                                setEditing(null);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                                if (e.key === 'Escape') setEditing(null);
+                              }}
+                            />
+                          ) : (
+                            <button
+                              aria-label={`تعديل سعر ${size} لفئة ${c} لمدة ${selectedMonthKey}`} className="group flex min-h-16 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3 text-right text-foreground hover:border-primary hover:bg-primary/5 focus-visible:ring-2 focus-visible:ring-primary"
+                              onClick={() => setEditing({ size, customer: c, month: selectedMonthKey })}
+                            >
+                              <span className="text-xl sm:text-2xl font-bold tabular-nums">{current == null ? 'أضف سعرًا' : current.toLocaleString('ar-LY')}<span className="mr-2 text-sm font-medium text-muted-foreground">{current == null ? '' : 'د.ل'}</span></span>
+                              <Edit2 className="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-primary" />
+                            </button>
+                          )}
+                        </td>
+                      );
+                    })}
+
                   </tr>
                 ))}
               </tbody>
@@ -2047,27 +2174,27 @@ export default function PricingList() {
           <div className="expenses-dialog-form">
             <div>
               <label className="expenses-form-label">كود المستوى</label>
-              <Input 
-                placeholder="مثال: C, D, E" 
-                value={newLevelCode} 
+              <Input
+                placeholder="مثال: C, D, E"
+                value={newLevelCode}
                 onChange={e=>setNewLevelCode(e.target.value)}
                 maxLength={2}
               />
             </div>
             <div>
               <label className="expenses-form-label">اسم المستوى</label>
-              <Input 
-                placeholder="مثال: ممتاز، جيد، عادي" 
-                value={newLevelName} 
+              <Input
+                placeholder="مثال: ممتاز، جيد، عادي"
+                value={newLevelName}
                 onChange={e=>setNewLevelName(e.target.value)}
               />
             </div>
             <div>
               <label className="expenses-form-label">الترتيب</label>
-              <Input 
+              <Input
                 type="number"
-                placeholder="مثال: 1, 2, 3" 
-                value={newLevelOrder} 
+                placeholder="مثال: 1, 2, 3"
+                value={newLevelOrder}
                 onChange={e=>setNewLevelOrder(Number(e.target.value))}
                 min={1}
               />
@@ -2095,27 +2222,27 @@ export default function PricingList() {
           <div className="expenses-dialog-form">
             <div>
               <label className="expenses-form-label">كود المستوى</label>
-              <Input 
-                placeholder="مثال: C, D, E" 
-                value={editLevelCode} 
+              <Input
+                placeholder="مثال: C, D, E"
+                value={editLevelCode}
                 onChange={e=>setEditLevelCode(e.target.value)}
                 maxLength={2}
               />
             </div>
             <div>
               <label className="expenses-form-label">اسم المستوى</label>
-              <Input 
-                placeholder="مثال: ممتاز، جيد، عادي" 
-                value={editLevelName} 
+              <Input
+                placeholder="مثال: ممتاز، جيد، عادي"
+                value={editLevelName}
                 onChange={e=>setEditLevelName(e.target.value)}
               />
             </div>
             <div>
               <label className="expenses-form-label">الترتيب</label>
-              <Input 
+              <Input
                 type="number"
-                placeholder="مثال: 1, 2, 3" 
-                value={editLevelOrder} 
+                placeholder="مثال: 1, 2, 3"
+                value={editLevelOrder}
                 onChange={e=>setEditLevelOrder(Number(e.target.value))}
                 min={1}
               />
@@ -2142,11 +2269,11 @@ export default function PricingList() {
           </UIDialog.DialogHeader>
           <div className="py-4 space-y-3">
             <p className="text-sm text-muted-foreground">
-              هل أنت متأكد من حذف المستوى <strong>"{deletingLevel}"</strong>؟ 
+              هل أنت متأكد من حذف المستوى <strong>"{deletingLevel}"</strong>؟
             </p>
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
               <p className="text-sm text-red-600 dark:text-red-400">
- ️ تحذير: سيتم حذف جميع المقاسات والأسعار والفئات المرتبطة بهذا المستوى نهائياً ولا يمكن التراجع عن هذا الإجراء.
+  تحذير: سيتم حذف جميع المقاسات والأسعار والفئات المرتبطة بهذا المستوى نهائياً ولا يمكن التراجع عن هذا الإجراء.
               </p>
             </div>
           </div>
@@ -2168,11 +2295,11 @@ export default function PricingList() {
           </UIDialog.DialogHeader>
           <div className="py-4 space-y-3">
             <p className="text-sm text-muted-foreground">
-              هل أنت متأكد من حذف المقاس <strong>"{deletingSize}"</strong> من قائمة الأسعار للمستوى <strong>"{selectedLevel}"</strong>؟ 
+              هل أنت متأكد من حذف المقاس <strong>"{deletingSize}"</strong> من قائمة الأسعار للمستوى <strong>"{selectedLevel}"</strong>؟
             </p>
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
               <p className="text-sm text-red-600 dark:text-red-400">
- ️ تحذير: سيتم حذف جميع الأسعار المرتبطة بهذا المقاس في هذا المستوى نهائياً ولا يمكن التراجع عن هذا الإجراء.
+  تحذير: سيتم حذف جميع الأسعار المرتبطة بهذا المقاس في هذا المستوى نهائياً ولا يمكن التراجع عن هذا الإجراء.
               </p>
             </div>
           </div>
@@ -2202,7 +2329,7 @@ export default function PricingList() {
                   size="sm"
                   onClick={() => setPrintTheme('light')}
                 >
- ️ فاتح (مناسب للطباعة)
+  فاتح (مناسب للطباعة)
                 </Button>
                 <Button
                   variant={printTheme === 'dark' ? "default" : "outline"}
@@ -2272,7 +2399,7 @@ export default function PricingList() {
             <div className="border-t pt-4">
               <label className="text-sm font-medium mb-2 block">المستوى</label>
               <div className="flex flex-wrap gap-2">
-                <Button 
+                <Button
                   variant={printLevel === 'all' ? "default" : "outline"}
                   size="sm"
                   onClick={() => setPrintLevel('all')}
@@ -2282,7 +2409,7 @@ export default function PricingList() {
                 {allLevels.map((lvl, index) => {
                   const levelInfo = levels.find(l => l.level_code === lvl);
                   return (
-                    <Button 
+                    <Button
                       key={`print-level-${index}-${lvl}`}
                       variant={printLevel === lvl ? "default" : "outline"}
                       size="sm"
@@ -2310,7 +2437,7 @@ export default function PricingList() {
                 </label>
               </div>
             </div>
-            
+
             {/* زيادة الأسعار */}
             <div className="border-t pt-4">
               <label className="text-sm font-medium mb-2 block">زيادة الأسعار (%)</label>
@@ -2327,7 +2454,7 @@ export default function PricingList() {
                 />
                 <span className="text-sm text-muted-foreground">النسبة المئوية للزيادة على الأسعار الأصلية</span>
               </div>
-              
+
               {/* معاينة الأسعار مع الزيادة */}
               {priceMarkupPercent > 0 && previewPricesWithMarkup.length > 0 && (
                 <div className="mt-3 bg-muted/30 rounded-lg p-3 border border-border/50">
@@ -2409,9 +2536,9 @@ export default function PricingList() {
             <div>
               <label className="expenses-form-label">الاسم الحالي: {editingCategory?.name}</label>
             </div>
-            <Input 
-              placeholder="اسم الفئة الجديد" 
-              value={editCatName} 
+            <Input
+              placeholder="اسم الفئة الجديد"
+              value={editCatName}
               onChange={e=>setEditCatName(e.target.value)}
               autoFocus
             />
@@ -2434,11 +2561,11 @@ export default function PricingList() {
           </UIDialog.DialogHeader>
           <div className="py-4 space-y-3">
             <p className="text-sm text-muted-foreground">
-              هل أنت متأكد من حذف الفئة <strong>"{deletingCategory?.name}"</strong>؟ 
+              هل أنت متأكد من حذف الفئة <strong>"{deletingCategory?.name}"</strong>؟
             </p>
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
               <p className="text-sm text-red-600 dark:text-red-400">
- ️ تحذير: سيتم حذف جميع الأسعار المرتبطة بهذه الفئة نهائياً ولا يمكن التراجع عن هذا الإجراء.
+  تحذير: سيتم حذف جميع الأسعار المرتبطة بهذه الفئة نهائياً ولا يمكن التراجع عن هذا الإجراء.
               </p>
             </div>
           </div>
@@ -2478,18 +2605,18 @@ export default function PricingList() {
                 <p className="text-sm text-muted-foreground">جميع المقاسات الموجودة في النظام مضافة بالفعل لهذا المستوى</p>
               )}
             </div>
-            
+
             <div className="flex items-center gap-2">
               <div className="flex-1 h-px bg-border"></div>
               <span className="text-xs text-muted-foreground">أو</span>
               <div className="flex-1 h-px bg-border"></div>
             </div>
-            
+
             <div>
               <label className="expenses-form-label">أدخل مقاس جديد</label>
-              <Input 
-                placeholder="مثال: 15x6, 9x4, إلخ..." 
-                value={newSizeName} 
+              <Input
+                placeholder="مثال: 15x6, 9x4, إلخ..."
+                value={newSizeName}
                 onChange={e=>setNewSizeName(e.target.value)}
               />
               <p className="text-xs text-muted-foreground mt-1">
@@ -2499,8 +2626,8 @@ export default function PricingList() {
           </div>
           <UIDialog.DialogFooter>
             <Button variant="outline" onClick={()=>{setAddSizeOpen(false); setSelectedNewSize(''); setNewSizeName('');}}>إلغاء</Button>
-            <Button 
-              onClick={saveNewSize} 
+            <Button
+              onClick={saveNewSize}
               disabled={!selectedNewSize.trim() && !newSizeName.trim()}
             >
               حفظ
@@ -2511,155 +2638,32 @@ export default function PricingList() {
 
       {/* نافذة إضافة مدة جديدة */}
       <UIDialog.Dialog open={addDurationOpen} onOpenChange={setAddDurationOpen}>
-        <UIDialog.DialogContent className="max-w-md">
-          <UIDialog.DialogHeader>
-            <UIDialog.DialogTitle>إضافة مدة جديدة</UIDialog.DialogTitle>
-            <UIDialog.DialogDescription>
-              أضف مدة زمنية جديدة لقائمة الأسعار
-            </UIDialog.DialogDescription>
+        <UIDialog.DialogContent dir="rtl" className="max-w-lg overflow-y-auto [&_button]:cursor-pointer [&_button]:transition-all [&_button]:duration-200">
+          <UIDialog.DialogHeader className="border-b border-border pb-4 pl-8">
+            <UIDialog.DialogTitle className="text-xl">إضافة مدة تسعير</UIDialog.DialogTitle>
+            <UIDialog.DialogDescription>حدد اسم المدة وطولها ليظهر سعرها في العقود والعروض.</UIDialog.DialogDescription>
           </UIDialog.DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium mb-1 block">الاسم</label>
-                <Input 
-                  placeholder="مثال: 4 أشهر" 
-                  value={newDurationName} 
-                  onChange={e => setNewDurationName(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-1 block">التسمية المختصرة</label>
-                <Input 
-                  placeholder="مثال: كل 4 أشهر" 
-                  value={newDurationLabel} 
-                  onChange={e => setNewDurationLabel(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium mb-1 block">عدد الأيام</label>
-                <Input 
-                  type="number" 
-                  min={1}
-                  value={newDurationDays} 
-                  onChange={e => setNewDurationDays(Number(e.target.value))}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-1 block">عدد الأشهر (للحساب)</label>
-                <Input 
-                  type="number" 
-                  min={0}
-                  step={0.5}
-                  value={newDurationMonths} 
-                  onChange={e => setNewDurationMonths(Number(e.target.value))}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium mb-1 block">اسم العمود (بالإنجليزية)</label>
-                <Input 
-                  placeholder="مثال: 4_months" 
-                  value={newDurationDbColumn} 
-                  onChange={e => setNewDurationDbColumn(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground mt-1">يجب أن يكون فريداً</p>
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-1 block">الترتيب</label>
-                <Input 
-                  type="number" 
-                  min={1}
-                  value={newDurationOrder} 
-                  onChange={e => setNewDurationOrder(Number(e.target.value))}
-                />
-              </div>
-            </div>
-          </div>
-          <UIDialog.DialogFooter>
-            <Button variant="outline" onClick={() => { setAddDurationOpen(false); resetDurationForm(); }}>إلغاء</Button>
-            <Button onClick={addNewDuration} disabled={!newDurationName.trim() || !newDurationLabel.trim() || !newDurationDbColumn.trim()}>
-              إضافة
-            </Button>
+          <DurationEditor name={newDurationName} months={newDurationMonths} days={newDurationDays}
+            onChange={({ name, months, days }) => { setNewDurationName(name); setNewDurationLabel(name); setNewDurationMonths(months); setNewDurationDays(days); }} />
+          <UIDialog.DialogFooter className="border-t border-border pt-4">
+            <Button className="h-11 flex-1" onClick={addNewDuration} disabled={savingDuration || !newDurationName.trim() || newDurationDays < 1 || !Number.isFinite(newDurationDays)}>{savingDuration ? 'جارٍ الحفظ...' : 'إضافة المدة وتحديد أسعارها'}</Button>
+            <Button className="h-11" variant="outline" onClick={() => { setAddDurationOpen(false); resetDurationForm(); }}>إلغاء</Button>
           </UIDialog.DialogFooter>
         </UIDialog.DialogContent>
       </UIDialog.Dialog>
 
       {/* نافذة تعديل المدة */}
       <UIDialog.Dialog open={editDurationOpen} onOpenChange={setEditDurationOpen}>
-        <UIDialog.DialogContent className="max-w-md">
-          <UIDialog.DialogHeader>
-            <UIDialog.DialogTitle>تعديل المدة</UIDialog.DialogTitle>
-            <UIDialog.DialogDescription>
-              تعديل بيانات المدة الزمنية
-            </UIDialog.DialogDescription>
+        <UIDialog.DialogContent dir="rtl" className="max-w-lg overflow-y-auto [&_button]:cursor-pointer [&_button]:transition-all [&_button]:duration-200">
+          <UIDialog.DialogHeader className="border-b border-border pb-4 pl-8">
+            <UIDialog.DialogTitle className="text-xl">تعديل مدة التسعير</UIDialog.DialogTitle>
+            <UIDialog.DialogDescription>حدد اسم المدة وطولها ليظهر سعرها في العقود والعروض.</UIDialog.DialogDescription>
           </UIDialog.DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium mb-1 block">الاسم</label>
-                <Input 
-                  placeholder="مثال: 4 أشهر" 
-                  value={newDurationName} 
-                  onChange={e => setNewDurationName(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-1 block">التسمية المختصرة</label>
-                <Input 
-                  placeholder="مثال: كل 4 أشهر" 
-                  value={newDurationLabel} 
-                  onChange={e => setNewDurationLabel(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium mb-1 block">عدد الأيام</label>
-                <Input 
-                  type="number" 
-                  min={1}
-                  value={newDurationDays} 
-                  onChange={e => setNewDurationDays(Number(e.target.value))}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-1 block">عدد الأشهر (للحساب)</label>
-                <Input 
-                  type="number" 
-                  min={0}
-                  step={0.5}
-                  value={newDurationMonths} 
-                  onChange={e => setNewDurationMonths(Number(e.target.value))}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="text-sm font-medium mb-1 block">الترتيب</label>
-              <Input 
-                type="number" 
-                min={1}
-                value={newDurationOrder} 
-                onChange={e => setNewDurationOrder(Number(e.target.value))}
-              />
-            </div>
-            <div className="bg-muted/50 rounded-lg p-3">
-              <p className="text-sm text-muted-foreground">
-                <strong>اسم العمود:</strong> {editingDuration?.db_column}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                لا يمكن تغيير اسم العمود بعد الإنشاء
-              </p>
-            </div>
-          </div>
-          <UIDialog.DialogFooter>
-            <Button variant="outline" onClick={() => { setEditDurationOpen(false); setEditingDuration(null); resetDurationForm(); }}>إلغاء</Button>
-            <Button onClick={updateDuration} disabled={!newDurationName.trim() || !newDurationLabel.trim()}>
-              تحديث
-            </Button>
+          <DurationEditor name={newDurationName} months={newDurationMonths} days={newDurationDays}
+            onChange={({ name, months, days }) => { setNewDurationName(name); setNewDurationLabel(name); setNewDurationMonths(months); setNewDurationDays(days); }} />
+          <UIDialog.DialogFooter className="border-t border-border pt-4">
+            <Button className="h-11 flex-1" onClick={updateDuration} disabled={savingDuration || !newDurationName.trim() || newDurationDays < 1 || !Number.isFinite(newDurationDays)}>{savingDuration ? 'جارٍ الحفظ...' : 'حفظ التعديلات'}</Button>
+            <Button className="h-11" variant="outline" onClick={() => { setEditDurationOpen(false); resetDurationForm(); }}>إلغاء</Button>
           </UIDialog.DialogFooter>
         </UIDialog.DialogContent>
       </UIDialog.Dialog>
@@ -2679,7 +2683,7 @@ export default function PricingList() {
             </p>
             <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
               <p className="text-sm text-amber-600 dark:text-amber-400">
- ️ ملاحظة: حذف المدة لن يؤثر على البيانات المحفوظة في قاعدة البيانات، لكنها لن تظهر في واجهة الأسعار.
+ ملاحظة: ستُخفى المدة من الاختيارات الجديدة وتبقى أسعارها محفوظة للعقود السابقة.
               </p>
             </div>
           </div>

@@ -11,6 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { generateMunicipalityCode } from '@/utils/contractUtils';
+import { createRequestId } from '@/lib/requestId';
 import { 
   FileSpreadsheet, 
   Download, 
@@ -345,7 +346,7 @@ export const ExcelImportDialog: React.FC<ExcelImportDialogProps> = ({
         }
 
         return {
-          id: crypto.randomUUID(),
+          id: createRequestId(),
           rowNumber: index + 2,
           Municipality: municipality,
           Level: level,
