@@ -19,7 +19,7 @@ import { ContractPDFDialog } from '@/components/Contract';
 import { getBillboardDimensions } from '@/lib/billboardDimensions';
 import type { Billboard } from '@/types';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, DollarSign, Settings, Wrench, FileText, List, Map as MapIcon, Trash2, Calculator, PauseCircle, AlertTriangle } from 'lucide-react';
+import { RefreshCw, DollarSign, Settings, Wrench, FileText, List, Map as MapIcon, Trash2, Calculator, PauseCircle, AlertTriangle, Layers, Filter, ChevronDown, Plus } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -248,6 +248,46 @@ export default function ContractEdit() {
   
   // Map view state
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  const [boardsViewMode, setBoardsViewMode] = useState<'cards' | 'map' | 'split'>('cards');
+  const [catalogFiltersCollapsed, setCatalogFiltersCollapsed] = useState(false);
+
+  // Memoized billboards for map display
+  const selectedBillboardsMapped = useMemo(() => {
+    return billboards
+      .filter((b) => selectedBillboardsSet.has(String((b as any).ID)))
+      .map(b => ({
+        ...b,
+        ID: (b as any).ID || 0,
+        Billboard_Name: (b as any).Billboard_Name || (b as any).name || '',
+        City: (b as any).City || '',
+        District: (b as any).District || '',
+        Size: (b as any).Size || (b as any).size || '',
+        Status: (b as any).Status || 'متاح',
+        Price: (b as any).Price || '0',
+        Level: (b as any).Level || '',
+        Image_URL: (b as any).Image_URL || (b as any).image || '',
+        GPS_Coordinates: (b as any).GPS_Coordinates || '',
+        GPS_Link: (b as any).GPS_Link || '',
+        Nearest_Landmark: (b as any).Nearest_Landmark || '',
+        Faces_Count: (b as any).Faces_Count || '1',
+        Municipality: (b as any).Municipality || '',
+        Rent_End_Date: (b as any).Rent_End_Date || null,
+        Customer_Name: (b as any).Customer_Name || customerName || '',
+        Ad_Type: (b as any).Ad_Type || adType || '',
+        is_visible_in_available: (b as any).is_visible_in_available,
+        id: String((b as any).ID || ''),
+        name: (b as any).Billboard_Name || (b as any).name || '',
+        location: (b as any).Nearest_Landmark || '',
+        size: (b as any).Size || (b as any).size || '',
+        status: (b as any).Status || 'متاح',
+        coordinates: (b as any).GPS_Coordinates || '',
+        imageUrl: (b as any).Image_URL || (b as any).image || '',
+        expiryDate: (b as any).Rent_End_Date || null,
+        area: (b as any).District || '',
+        municipality: (b as any).Municipality || '',
+        size_id: (b as any).size_id || null,
+      })) as Billboard[];
+  }, [billboards, selectedBillboardsSet, customerName, adType]);
 
   // Installation and operating costs
   const [installationCost, setInstallationCost] = useState<number>(0);
@@ -3301,8 +3341,45 @@ export default function ContractEdit() {
             <div className={workspaceSection !== 'catalog' ? 'space-y-3' : 'hidden'}>
             <div className={workspaceSection === 'boards' ? 'space-y-3' : 'hidden'}>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-base font-bold">لوحات العقد والإيقافات</h2>
-              <Button type="button" variant="outline" onClick={() => setWorkspaceSection('catalog')} className="min-h-10 cursor-pointer gap-2 transition-all duration-200">اختيار لوحات جديدة</Button>
+              <div className="flex flex-wrap items-center gap-3">
+                <h2 className="text-base font-bold">لوحات العقد والإيقافات</h2>
+                <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl border border-border">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={boardsViewMode === 'cards' ? 'default' : 'ghost'}
+                    onClick={() => setBoardsViewMode('cards')}
+                    className="h-8 gap-1.5 text-xs font-medium cursor-pointer"
+                  >
+                    <List className="h-3.5 w-3.5" />
+                    قائمة البطاقات
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={boardsViewMode === 'map' ? 'default' : 'ghost'}
+                    onClick={() => setBoardsViewMode('map')}
+                    className="h-8 gap-1.5 text-xs font-medium cursor-pointer"
+                  >
+                    <MapIcon className="h-3.5 w-3.5" />
+                    خريطة اللوحات ({selected.length})
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={boardsViewMode === 'split' ? 'default' : 'ghost'}
+                    onClick={() => setBoardsViewMode('split')}
+                    className="h-8 gap-1.5 text-xs font-medium cursor-pointer"
+                  >
+                    <Layers className="h-3.5 w-3.5" />
+                    عرض مدمج
+                  </Button>
+                </div>
+              </div>
+              <Button type="button" variant="outline" onClick={() => setWorkspaceSection('catalog')} className="min-h-10 cursor-pointer gap-2 transition-all duration-200">
+                <Plus className="h-4 w-4" />
+                اختيار لوحات جديدة
+              </Button>
             </div>
             {/* أزرار الاستعارة والإيقاف الخارجي */}
             <details className="rounded-xl border border-border p-3"><summary className="cursor-pointer text-sm font-medium text-foreground">إجراءات إضافية للوحات</summary><div className="mt-3 flex justify-end gap-2 flex-wrap">
@@ -3327,7 +3404,51 @@ export default function ContractEdit() {
               </Button>
             </div>
             </details>
+            {/* خريطة لوحات العقد الموسعة عند اختيار نمط الخريطة أو النمط المدمج */}
+            {boardsViewMode === 'map' && (
+              <div className="w-full h-[760px] lg:h-[84vh] min-h-[620px] rounded-2xl overflow-hidden border border-border shadow-sm relative">
+                <SelectableGoogleHomeMap
+                  className="w-full h-full"
+                  billboards={selectedBillboardsMapped}
+                  selectedBillboards={selectedBillboardsSet}
+                  onToggleSelection={(billboardId) => {
+                    const billboard = billboards.find((b) => String((b as any).ID) === billboardId);
+                    if (billboard) {
+                      toggleSelect(billboard);
+                    }
+                  }}
+                  pricingMode={pricingMode}
+                  durationMonths={durationMonths}
+                  durationDays={durationDays}
+                  pricingCategory={pricingCategory}
+                  calculateBillboardPrice={(b) => calculateBillboardPrice(b as Billboard)}
+                />
+              </div>
+            )}
+
+            {boardsViewMode === 'split' && (
+              <div className="w-full h-[540px] lg:h-[58vh] min-h-[440px] rounded-2xl overflow-hidden border border-border shadow-sm relative mb-4">
+                <SelectableGoogleHomeMap
+                  className="w-full h-full"
+                  billboards={selectedBillboardsMapped}
+                  selectedBillboards={selectedBillboardsSet}
+                  onToggleSelection={(billboardId) => {
+                    const billboard = billboards.find((b) => String((b as any).ID) === billboardId);
+                    if (billboard) {
+                      toggleSelect(billboard);
+                    }
+                  }}
+                  pricingMode={pricingMode}
+                  durationMonths={durationMonths}
+                  durationDays={durationDays}
+                  pricingCategory={pricingCategory}
+                  calculateBillboardPrice={(b) => calculateBillboardPrice(b as Billboard)}
+                />
+              </div>
+            )}
+
             {/* اللوحات المرتبطة */}
+            {boardsViewMode !== 'map' && (
             <SelectedBillboardsCard
               contractNumber={Number(contractNumber) || undefined}
               previousContractNumber={currentContract?.previous_contract_number}
@@ -3393,6 +3514,7 @@ export default function ContractEdit() {
               adType={adType}
               onRefresh={refreshContractData}
             />
+            )}
 
             </div>
             <div className={workspaceSection === 'friends' ? 'space-y-3' : 'hidden'}>
@@ -3445,7 +3567,7 @@ export default function ContractEdit() {
             {/* خريطة اللوحات المرتبطة - مطوية افتراضياً */}
             {selected.length > 0 && (
               <Card className="bg-card border-border shadow-card overflow-hidden">
-                <Collapsible defaultOpen={false}>
+                <Collapsible defaultOpen={true}>
                   <CollapsibleTrigger asChild>
                     <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-accent/50 transition-colors">
                       <div className="flex items-center gap-3">
@@ -3465,44 +3587,15 @@ export default function ContractEdit() {
                     </div>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <div className="border-t border-border">
-                      <SelectableGoogleHomeMap
-                        hideInternalFilters
-                        billboards={billboards
-                          .filter((b) => selected.includes(String((b as any).ID)))
-                          .map(b => ({
-                            ...b,
-                            ID: (b as any).ID || 0,
-                            Billboard_Name: (b as any).Billboard_Name || '',
-                            City: (b as any).City || '',
-                            District: (b as any).District || '',
-                            Size: (b as any).Size || '',
-                            Status: (b as any).Status || 'متاح',
-                            Price: (b as any).Price || '0',
-                            Level: (b as any).Level || '',
-                            Image_URL: (b as any).Image_URL || '',
-                            GPS_Coordinates: (b as any).GPS_Coordinates || '',
-                            GPS_Link: (b as any).GPS_Link || '',
-                            Nearest_Landmark: (b as any).Nearest_Landmark || '',
-                            Faces_Count: (b as any).Faces_Count || '1',
-                            Municipality: (b as any).Municipality || '',
-                            Rent_End_Date: (b as any).Rent_End_Date || null,
-                            Customer_Name: (b as any).Customer_Name || customerName || '',
-                            Ad_Type: (b as any).Ad_Type || adType || '',
-                            is_visible_in_available: (b as any).is_visible_in_available,
-                            id: String((b as any).ID || ''),
-                            name: (b as any).Billboard_Name || '',
-                            location: (b as any).Nearest_Landmark || '',
-                            size: (b as any).Size || '',
-                            status: (b as any).Status || 'متاح',
-                            coordinates: (b as any).GPS_Coordinates || '',
-                            imageUrl: (b as any).Image_URL || '',
-                            expiryDate: (b as any).Rent_End_Date || null,
-                            area: (b as any).District || '',
-                            municipality: (b as any).Municipality || '',
-                          })) as Billboard[]}
-                        selectedBillboards={selectedBillboardsSet}
-                      />
+                    <div className="border-t border-border p-2">
+                      <div className="w-full h-[720px] lg:h-[80vh] min-h-[600px] rounded-xl overflow-hidden relative">
+                        <SelectableGoogleHomeMap
+                          className="w-full h-full"
+                          hideInternalFilters
+                          billboards={selectedBillboardsMapped}
+                          selectedBillboards={selectedBillboardsSet}
+                        />
+                      </div>
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
@@ -3537,31 +3630,49 @@ export default function ContractEdit() {
                 <div><h2 className="text-lg font-bold">اختيار لوحات جديدة</h2><p className="text-sm text-muted-foreground">ابحث وحدد اللوحات، ثم عد لمراجعة اختياراتك داخل العقد.</p></div>
                 <Button type="button" variant="outline" onClick={() => setWorkspaceSection('boards')} className="min-h-10 cursor-pointer transition-all duration-200">مراجعة لوحات العقد ({selected.length})</Button>
               </div>
-            <Card className="flex min-h-[640px] flex-col overflow-hidden border-border shadow-sm lg:h-[76vh]">
+            <Card className="flex min-h-[700px] flex-col overflow-hidden border-border shadow-sm">
               <div className="shrink-0 border-b border-border bg-gradient-to-l from-primary/10 via-primary/5 to-transparent p-3 lg:p-4">
-                <BillboardFilters
-                  searchQuery={searchQuery}
-                  setSearchQuery={setSearchQuery}
-                  cityFilter={cityFilter}
-                  setCityFilter={setCityFilter}
-                  sizeFilter={sizeFilter}
-                  setSizeFilter={setSizeFilter}
-                  statusFilter={statusFilter}
-                  setStatusFilter={setStatusFilter}
-                  pricingCategory={pricingCategory}
-                  setPricingCategory={handlePricingCategoryChange}
-                  cities={cities}
-                  sizes={sizes}
-                  pricingCategories={pricingCategories}
-                  municipalities={municipalities}
-                  municipalityFilter={municipalityFilter}
-                  setMunicipalityFilter={setMunicipalityFilter}
-                  onCleanup={handleCleanup}
-                  sizeFilters={sizeFilters}
-                  setSizeFilters={setSizeFilters}
-                  totalCount={billboards.length}
-                  selectedCount={selected.length}
-                />
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                    <Filter className="h-3.5 w-3.5 text-primary" />
+                    فلاتر البحث والتصفية
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setCatalogFiltersCollapsed(prev => !prev)}
+                    className="h-7 px-2.5 text-xs gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer rounded-lg border border-border/60 bg-background/50 hover:bg-muted"
+                  >
+                    <span>{catalogFiltersCollapsed ? 'إظهار الفلاتر' : 'طي الفلاتر لتوسيع المساحة'}</span>
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${catalogFiltersCollapsed ? '' : 'rotate-180'}`} />
+                  </Button>
+                </div>
+                {!catalogFiltersCollapsed && (
+                  <BillboardFilters
+                    searchQuery={searchQuery}
+                    setSearchQuery={setSearchQuery}
+                    cityFilter={cityFilter}
+                    setCityFilter={setCityFilter}
+                    sizeFilter={sizeFilter}
+                    setSizeFilter={setSizeFilter}
+                    statusFilter={statusFilter}
+                    setStatusFilter={setStatusFilter}
+                    pricingCategory={pricingCategory}
+                    setPricingCategory={handlePricingCategoryChange}
+                    cities={cities}
+                    sizes={sizes}
+                    pricingCategories={pricingCategories}
+                    municipalities={municipalities}
+                    municipalityFilter={municipalityFilter}
+                    setMunicipalityFilter={setMunicipalityFilter}
+                    onCleanup={handleCleanup}
+                    sizeFilters={sizeFilters}
+                    setSizeFilters={setSizeFilters}
+                    totalCount={billboards.length}
+                    selectedCount={selected.length}
+                  />
+                )}
               </div>
 
               <Tabs defaultValue="list" className="w-full flex-1 flex flex-col min-h-0">
@@ -3582,7 +3693,7 @@ export default function ContractEdit() {
                   </TabsList>
                 </div>
                 
-                <TabsContent value="list" className="m-0 flex-1 overflow-y-auto min-h-0">
+                <TabsContent value="list" className="m-0 flex-1 overflow-y-auto min-h-[500px] max-h-[75vh]">
                   <div className="space-y-3 p-3 lg:p-5">
                     <AvailableBillboardsGrid
                       billboards={filtered}
@@ -3601,9 +3712,9 @@ export default function ContractEdit() {
                   </div>
                 </TabsContent>
                 
-                <TabsContent value="map" className="m-0 p-0 flex-1 min-h-0">
+                <TabsContent value="map" className="m-0 p-0 flex-1 min-h-[650px] h-[760px] lg:h-[84vh] relative">
                   <SelectableGoogleHomeMap
-                    className="w-full h-full"
+                    className="w-full h-full min-h-[650px]"
                     hideInternalFilters
                     billboards={filtered.map((b) => {
                       const endDate = (b as any).Rent_End_Date ?? (b as any).rent_end_date ?? null;

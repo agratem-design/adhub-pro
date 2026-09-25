@@ -2014,18 +2014,45 @@ export default function PricingList() {
                   <Users className="h-4 w-4 text-primary" />
                   فئة العميل <span className="font-normal text-muted-foreground">· {otherCustomer}</span>
                 </h3>
-                <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => { setNewCatName(''); setAddCatOpen(true); }}
+                    className="gap-1.5 h-10 cursor-pointer font-bold shadow-sm"
+                    title="إضافة فئة عميل جديدة"
+                  >
+                    <Plus className="h-4 w-4 ml-1" />
+                    <span>إضافة فئة</span>
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => setCategoryOrderOpen(true)}
-                    className="gap-1.5 h-10 cursor-pointer text-xs font-semibold"
-                    title="تعديل ترتيب ظهور فئات العملاء"
+                    className="gap-1.5 h-10 cursor-pointer font-semibold border-border hover:border-primary/60 shadow-sm"
+                    title="تعديل وترتيب ظهور فئات العملاء"
                   >
                     <ArrowUpDown className="h-4 w-4 text-primary ml-1" />
                     <span>ترتيب الفئات</span>
                   </Button>
-                  <Input aria-label="البحث عن فئة العميل" placeholder="ابحث عن فئة..." value={categorySearchTerm} onChange={event => setCategorySearchTerm(event.target.value)} className="w-full sm:w-60 h-10" />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      const cat = categories.find(c => c.name === otherCustomer);
+                      if (cat) {
+                        openEditCategory(otherCustomer);
+                      } else {
+                        toast.info(`فئة «${otherCustomer}» هي فئة نظام أساسية، يمكنك استخدام زر «ترتيب الفئات» لتغيير ترتيب ظهورها.`);
+                      }
+                    }}
+                    className="gap-1.5 h-10 cursor-pointer text-xs"
+                    title="تعديل اسم الفئة المحددة حالياً"
+                  >
+                    <Edit2 className="h-3.5 w-3.5 ml-1 text-muted-foreground" />
+                    <span>تعديل الفئة</span>
+                  </Button>
+                  <Input aria-label="البحث عن فئة العميل" placeholder="ابحث عن فئة..." value={categorySearchTerm} onChange={event => setCategorySearchTerm(event.target.value)} className="w-full sm:w-52 h-10" />
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto" role="group" aria-label="فئات العملاء">
@@ -2034,12 +2061,114 @@ export default function PricingList() {
               </div>
             </section>
             <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="مستوى اللوحات"><span className="text-sm font-bold ml-2">المستوى</span>{allLevels.map(code => <Button key={code} variant={selectedLevel === code ? 'default' : 'outline'} aria-pressed={selectedLevel === code} className="h-10" onClick={() => setSelectedLevel(code)}>{levels.find(l => l.level_code === code)?.level_name || code}<span className="mr-1 text-xs opacity-70">({code})</span></Button>)}</div>
-              <div className="flex items-center gap-2 w-full sm:w-auto"><MultiSelect options={allSizes.filter(Boolean).map(size => ({ label: size, value: size }))} value={sizeFilter} onChange={setSizeFilter} placeholder="تصفية المقاسات" className="w-full sm:w-60" />{sizeFilter.length > 0 && <Button variant="ghost" onClick={() => setSizeFilter([])} aria-label="إلغاء تصفية المقاسات"><X className="h-4 w-4" /></Button>}</div>
+              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="مستوى اللوحات">
+                <span className="text-sm font-bold ml-2 flex items-center gap-1.5">
+                  <Layers className="h-4 w-4 text-primary" />
+                  المستوى
+                </span>
+                {allLevels.map(code => (
+                  <Button
+                    key={code}
+                    variant={selectedLevel === code ? 'default' : 'outline'}
+                    aria-pressed={selectedLevel === code}
+                    className="h-10"
+                    onClick={() => setSelectedLevel(code)}
+                  >
+                    {levels.find(l => l.level_code === code)?.level_name || code}
+                    <span className="mr-1 text-xs opacity-70">({code})</span>
+                  </Button>
+                ))}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setNewLevelCode('');
+                    setNewLevelName('');
+                    setNewLevelOrder(levels.length + 1);
+                    setAddLevelOpen(true);
+                  }}
+                  className="gap-1.5 h-10 cursor-pointer font-semibold border-dashed border-primary/40 hover:border-primary hover:bg-primary/5"
+                  title="إضافة مستوى جديد"
+                >
+                  <Plus className="h-4 w-4 ml-1 text-primary" />
+                  <span>إضافة مستوى</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const lvl = levels.find(l => l.level_code === selectedLevel);
+                    if (lvl) {
+                      openEditLevel(lvl);
+                    } else {
+                      setNewLevelCode(selectedLevel);
+                      setNewLevelName(selectedLevel);
+                      setNewLevelOrder(levels.length + 1);
+                      setAddLevelOpen(true);
+                    }
+                  }}
+                  className="gap-1 h-10 cursor-pointer text-xs text-muted-foreground hover:text-foreground"
+                  title="تعديل بيانات المستوى المحدد وترتيبه"
+                >
+                  <Edit2 className="h-3.5 w-3.5 ml-1" />
+                  <span>تعديل المستوى</span>
+                </Button>
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <MultiSelect options={allSizes.filter(Boolean).map(size => ({ label: size, value: size }))} value={sizeFilter} onChange={setSizeFilter} placeholder="تصفية المقاسات" className="w-full sm:w-60" />
+                {sizeFilter.length > 0 && <Button variant="ghost" onClick={() => setSizeFilter([])} aria-label="إلغاء تصفية المقاسات"><X className="h-4 w-4" /></Button>}
+              </div>
             </div>
-            <section className="rounded-xl bg-muted/30 border border-border p-3 flex flex-wrap items-center gap-2" aria-label="مدة الإيجار">
-              <span className="text-sm font-bold ml-2 flex items-center gap-2"><Calendar className="h-4 w-4 text-primary" />مدة الإيجار</span>
-              {MONTH_OPTIONS.map(option => <Button key={option.key} variant={selectedMonthKey === option.key ? 'default' : 'outline'} aria-pressed={selectedMonthKey === option.key} className="h-10 gap-2" onClick={() => setSelectedMonthKey(option.key)}>{option.label}<span className="text-xs opacity-70">{option.days} يوم</span></Button>)}
+            <section className="rounded-xl bg-muted/30 border border-border p-3 flex flex-wrap items-center justify-between gap-3" aria-label="مدة الإيجار">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-bold ml-2 flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-primary" />
+                  مدة الإيجار
+                </span>
+                {MONTH_OPTIONS.map(option => (
+                  <Button
+                    key={option.key}
+                    variant={selectedMonthKey === option.key ? 'default' : 'outline'}
+                    aria-pressed={selectedMonthKey === option.key}
+                    className="h-10 gap-2"
+                    onClick={() => setSelectedMonthKey(option.key)}
+                  >
+                    {option.label}
+                    <span className="text-xs opacity-70">{option.days} يوم</span>
+                  </Button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    resetDurationForm();
+                    setNewDurationOrder(durations.length + 1);
+                    setAddDurationOpen(true);
+                  }}
+                  className="gap-1.5 h-10 cursor-pointer font-semibold border-dashed border-primary/40 hover:border-primary hover:bg-primary/5"
+                  title="إضافة مدة تسعير جديدة"
+                >
+                  <Plus className="h-4 w-4 ml-1 text-primary" />
+                  <span>إضافة مدة</span>
+                </Button>
+                {durations.some(d => d.name === selectedMonthKey) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      const d = durations.find(dur => dur.name === selectedMonthKey);
+                      if (d) openEditDuration(d);
+                    }}
+                    className="gap-1 h-10 cursor-pointer text-xs text-muted-foreground hover:text-foreground"
+                    title="تعديل المدة المحددة حالياً أو ترتيبها"
+                  >
+                    <Edit2 className="h-3.5 w-3.5 ml-1" />
+                    <span>تعديل المدة</span>
+                  </Button>
+                )}
+              </div>
             </section>
           </div>
         </CardHeader>
