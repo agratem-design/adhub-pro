@@ -178,6 +178,7 @@ interface PricingData {
 
 interface SizeData {
   print_size?: string | null;
+  show_in_catalog?: boolean;
   id: number;
   name: string;
   level?: string; // جعل level اختياري لأنه قد لا يكون موجود

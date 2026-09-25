@@ -10,7 +10,7 @@ describe('print size catalog', () => {
     expect(html).toContain('pricing-knight-watermark.svg');
   });
 
-  it('fits normal catalog sizes (up to 18) on one single page strictly without extra text', () => {
+  it('fits normal catalog sizes (up to 18) on one single page strictly without extra text and without numbering', () => {
     const sampleSizes = [
       { name: '13x5', print_size: '13.20 × 4.70', sort_order: 1 },
       { name: '12x4', print_size: '12.10 × 4.10', sort_order: 2 },
@@ -30,6 +30,33 @@ describe('print size catalog', () => {
     expect(html).not.toContain('المقاسات الافتراضية للمساحات الإعلانية');
     expect(html).toContain('دليل مقاسات الطباعة المعتمدة');
     expect(html.match(/class="size-card catalog-card"/g)).toHaveLength(11);
+    // Asserts numbering badge is removed from DOM elements
+    expect(html).not.toContain('catalog-badge');
+    expect(html).not.toContain('>#1<');
+    expect(html).not.toContain('>#11<');
+    // Asserts 11th (last odd) card has data-last-odd="true"
+    expect(html.match(/<section[^>]*data-last-odd="true"/g)).toHaveLength(1);
+  });
+
+  it('filters out sizes marked with show_in_catalog: false', () => {
+    const sizes = [
+      { name: '13x5', print_size: '13.20 × 4.70', show_in_catalog: true },
+      { name: '4X2.5', print_size: '4.20 × 2.70', show_in_catalog: false },
+      { name: '12x4', print_size: '12.10 × 4.10' },
+    ];
+    const html = buildPrintSizeCatalog(sizes, 'http://localhost');
+    expect(html).not.toContain('4X2.5');
+    expect(html).toContain('13x5');
+    expect(html).toContain('12x4');
+    expect(html.match(/class="size-card catalog-card"/g)).toHaveLength(2);
+  });
+
+  it('centers the last card only when total count on page is odd', () => {
+    const oddHtml = buildPrintSizeCatalog([{ name: '13x5' }, { name: '12x4' }, { name: '10x4' }], 'http://localhost');
+    expect(oddHtml.match(/<section[^>]*data-last-odd="true"/g)).toHaveLength(1);
+
+    const evenHtml = buildPrintSizeCatalog([{ name: '13x5' }, { name: '12x4' }, { name: '10x4' }, { name: '8x3' }], 'http://localhost');
+    expect(evenHtml.match(/<section[^>]*data-last-odd="true"/g)).toBeNull();
   });
 
   it('paginates when exceeding single page capacity (e.g. 25 sizes)', () => {

@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Switch } from '@/components/ui/switch';
 import {
   Printer, Plus, Edit, Trash2, Layers, Tag, Save, X, MapPin, RefreshCw, DollarSign, Ruler, Image as ImageIcon,
   Building, Upload, Sparkles, CheckCircle2, Loader2
@@ -20,6 +21,7 @@ import { uploadImage } from '@/services/imageUploadService';
 
 interface BillboardSize {
   print_size?: string | null;
+  show_in_catalog?: boolean;
   id: number;
   name: string;
   width: number;
@@ -84,6 +86,7 @@ export default function BillboardSettings() {
     id: 0,
     name: '',
     print_size: '',
+    show_in_catalog: true,
     width: 0,
     height: 0,
     description: '',
@@ -195,6 +198,7 @@ export default function BillboardSettings() {
       const payload = {
         name: sizeForm.name.trim(),
         ...(sizeForm.print_size?.trim() || sizes.find(s => s.id === sizeForm.id)?.print_size !== undefined ? { print_size: sizeForm.print_size?.trim() || null } : {}),
+        show_in_catalog: sizeForm.show_in_catalog ?? true,
         width: sizeForm.width,
         height: sizeForm.height,
         description: sizeForm.description,
@@ -225,7 +229,7 @@ export default function BillboardSettings() {
       }
 
       setSizeDialog(false);
-      setSizeForm({ id: 0, name: '', print_size: '', width: 0, height: 0, description: '', installation_price: 0, sort_order: 999, image_url: '' });
+      setSizeForm({ id: 0, name: '', print_size: '', show_in_catalog: true, width: 0, height: 0, description: '', installation_price: 0, sort_order: 999, image_url: '' });
       setEditMode(false);
       loadData();
     } catch (error: any) {
@@ -239,6 +243,7 @@ export default function BillboardSettings() {
       id: size.id,
       name: size.name,
       print_size: size.print_size || '',
+      show_in_catalog: size.show_in_catalog !== false,
       width: size.width,
       height: size.height,
       description: size.description || '',
@@ -534,7 +539,7 @@ export default function BillboardSettings() {
                   <DialogTrigger asChild>
                     <Button
                       onClick={() => {
-                        setSizeForm({ id: 0, name: '', print_size: '', width: 0, height: 0, description: '', installation_price: 0, sort_order: sizes.length + 1, image_url: '' });
+                        setSizeForm({ id: 0, name: '', print_size: '', show_in_catalog: true, width: 0, height: 0, description: '', installation_price: 0, sort_order: sizes.length + 1, image_url: '' });
                         setEditMode(false);
                       }}
                       className="rounded-xl bg-primary text-primary-foreground font-semibold shadow gap-2 h-10 px-5"
@@ -650,6 +655,18 @@ export default function BillboardSettings() {
                             </div>
                           );
                         })()}
+                      </div>
+                      {/* التحكم في ظهور المقاس في دليل طباعة المقاسات */}
+                      <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-muted/20">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="size-show-in-catalog" className="text-xs font-semibold">إظهار في دليل مقاسات الطباعة</Label>
+                          <p className="text-[11px] text-muted-foreground">تحديد ما إذا كان هذا المقاس يظهر عند طباعة مقاسات الطباعة</p>
+                        </div>
+                        <Switch
+                          id="size-show-in-catalog"
+                          checked={sizeForm.show_in_catalog}
+                          onCheckedChange={checked => setSizeForm(p => ({ ...p, show_in_catalog: checked }))}
+                        />
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
@@ -843,6 +860,13 @@ export default function BillboardSettings() {
                             {area} م²
                           </Badge>
                         </div>
+                        {size.show_in_catalog === false && (
+                            <div className="flex justify-start">
+                              <Badge variant="outline" className="bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20 text-[10px]">
+                                مخفي من دليل الطباعة
+                              </Badge>
+                            </div>
+                          )}
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
                           <span>الأبعاد: {size.width} × {size.height} م</span>
                           <span>التركيب: {size.installation_price ? `${size.installation_price} د.ل` : 'مجاني'}</span>

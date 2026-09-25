@@ -6,6 +6,7 @@ export interface SizeCatalogItem {
   name: string;
   print_size?: string | null;
   sort_order?: number | null;
+  show_in_catalog?: boolean | null;
 }
 
 export function escapePrintText(value: unknown): string {
@@ -13,8 +14,11 @@ export function escapePrintText(value: unknown): string {
 }
 
 export function buildPrintSizeCatalog(sizes: SizeCatalogItem[], origin: string) {
+  // Exclude sizes configured not to appear in catalog
+  const catalogSizes = sizes.filter(s => s.show_in_catalog !== false);
+
   // 1. Sort strictly according to defined sort_order rank
-  const sortedSizes = [...sizes].sort((a, b) => {
+  const sortedSizes = [...catalogSizes].sort((a, b) => {
     const orderA = a.sort_order ?? 999;
     const orderB = b.sort_order ?? 999;
     if (orderA !== orderB) return orderA - orderB;
@@ -50,11 +54,10 @@ export function buildPrintSizeCatalog(sizes: SizeCatalogItem[], origin: string) 
 
           <div class="catalog-grid" data-count="${pageSizes.length}">
             ${pageSizes.map((size, idx) => {
-              const rank = size.sort_order ?? (offset + idx + 1);
+              const isLastOdd = (pageSizes.length % 2 !== 0) && (idx === pageSizes.length - 1);
               return `
-              <section class="size-card catalog-card">
+              <section class="size-card catalog-card"${isLastOdd ? ' data-last-odd="true"' : ''}>
                 <div class="catalog-card-top">
-                  <span class="catalog-badge">#${rank}</span>
                   <span class="catalog-label-name">مقاس المساحة الإعلانية</span>
                   <bdi class="catalog-val-name" dir="ltr">${escapePrintText(size.name)}</bdi>
                 </div>
@@ -80,10 +83,11 @@ export function buildPrintSizeCatalog(sizes: SizeCatalogItem[], origin: string) 
 }
 
 export function printSizeCatalog(sizes: SizeCatalogItem[]) {
-  if (!sizes.length) { toast.info('لا توجد مقاسات للطباعة'); return; }
+  const visibleSizes = sizes.filter(s => s.show_in_catalog !== false);
+  if (!visibleSizes.length) { toast.info('لا توجد مقاسات للطباعة'); return; }
   const preview = window.open('', '_blank');
   if (!preview) { toast.error('تعذر فتح المعاينة. اسمح بالنوافذ المنبثقة ثم أعد المحاولة.'); return; }
-  preview.document.write(buildPrintSizeCatalog(sizes, window.location.origin));
+  preview.document.write(buildPrintSizeCatalog(visibleSizes, window.location.origin));
   preview.document.close();
   preview.focus();
 }

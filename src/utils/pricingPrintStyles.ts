@@ -3,8 +3,12 @@ export function pricingPrintStyles(theme: 'light' | 'dark') {
   const dark = theme === 'dark';
   return `
     @font-face { font-family: Doran; src: url('/Doran-Regular.otf') format('opentype'); font-weight: 400; }
-    @font-face { font-family: Doran; src: url('/Doran-Bold.otf') format('opentype'); font-weight: 700 900; }
+    @font-face { font-family: Doran; src: url('/Doran-Bold.otf') format('opentype'); font-weight: 700; }
+    @font-face { font-family: Doran; src: url('/Doran-ExtraBold.otf') format('opentype'); font-weight: 800 900; }
+    @font-face { font-family: Manrope; src: url('/Manrope-Regular.otf') format('opentype'); font-weight: 400; }
     @font-face { font-family: Manrope; src: url('/Manrope-SemiBold.ttf') format('truetype'); font-weight: 600; }
+    @font-face { font-family: Manrope; src: url('/Manrope-Bold.otf') format('opentype'); font-weight: 700; }
+    @font-face { font-family: Manrope; src: url('/Manrope-ExtraBold.otf') format('opentype'); font-weight: 800 900; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root { --paper: ${dark ? '#171717' : '#fff'}; --ink: ${dark ? '#f8f8f8' : '#181818'}; --muted: ${dark ? '#ccc' : '#505050'}; --gold: #d4ad27; }
     body { font-family: Doran, sans-serif; color: var(--ink); background: #3b3b3b; line-height: 1.4; padding: 0; margin: 0; }
@@ -112,94 +116,296 @@ export function pricingPrintStyles(theme: 'light' | 'dark') {
     .price-cards:not([data-count]) .size-label span,
     .price-cards:not([data-count]) .print-size-label span { font-size: 11.5pt; line-height: 1; }
 
-    /* دليل مقاسات الطباعة في ورقة واحدة (تنسيق شبكي بعمودين متوازيين) */
+    /* دليل مقاسات الطباعة في ورقة واحدة (تنسيق شبكي بعمودين متوازيين مع خط عمودي موحد ومستقيم تماماً) */
     .catalog-page-content {
       display: flex !important;
       flex-direction: column !important;
-      justify-content: space-between !important;
       min-height: 297mm;
       height: 297mm;
-      padding: 5mm 6mm 4mm 6mm;
+      padding: 5mm 7mm 4mm 7mm;
       box-sizing: border-box;
     }
     .catalog-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 3mm 4.5mm;
+      gap: 8.5mm 8mm;
       align-content: start;
-      margin: 2mm 0;
-      flex: 1;
+      margin: 3.5mm 0 auto 0;
+      width: 100%;
+      --val-w: 43mm;
     }
     .catalog-card {
       break-inside: avoid;
       page-break-inside: avoid;
       display: flex;
       flex-direction: column;
-      gap: 0.8mm;
+      border: .45mm solid var(--ink);
+      border-radius: 4mm 0 4mm 0;
+      overflow: hidden;
+      background: ${dark ? '#1a1a1a' : '#fff'};
+      box-shadow: 0 1.2mm 3mm rgba(0,0,0,0.04);
+    }
+    .catalog-card:last-child:nth-child(odd),
+    .catalog-card[data-last-odd="true"] {
+      grid-column: 1 / -1;
+      width: calc((100% - 8mm) / 2);
+      justify-self: center;
+    }
+    .catalog-card-top,
+    .catalog-card-bottom {
+      display: grid !important;
+      grid-template-columns: 1fr var(--val-w, 43mm) !important;
+      align-items: stretch;
+      height: 16mm;
+      padding: 0;
+      margin: 0;
+      box-sizing: border-box;
+      width: 100%;
     }
     .catalog-card-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 2mm;
-      padding: 1.2mm 3mm;
-      border: .35mm solid var(--ink);
-      border-radius: 2.5mm 0 2.5mm 0;
-      background: ${dark ? '#222' : '#fafafa'};
-      height: 9.5mm;
-      box-sizing: border-box;
-    }
-    .catalog-badge {
-      font-size: 7.5pt;
-      font-weight: 700;
-      color: var(--muted);
-      background: #ece26030;
-      padding: 0.4mm 1.5mm;
-      border-radius: 1mm;
-      font-variant-numeric: tabular-nums;
-    }
-    .catalog-label-name {
-      flex: 1;
-      font-size: 8.5pt;
-      font-weight: 700;
-      color: var(--ink);
-      white-space: nowrap;
-      text-align: right;
-      padding-right: 1.5mm;
-    }
-    .catalog-val-name {
-      font: 600 12pt Manrope, Doran, sans-serif;
-      color: var(--ink);
-      white-space: nowrap;
-      padding-right: 2.5mm;
-      border-right: .35mm solid var(--ink);
-      font-variant-numeric: tabular-nums;
+      border-bottom: .45mm solid var(--ink);
+      background: ${dark ? '#252525' : '#f8f7f2'};
     }
     .catalog-card-bottom {
+      background: ${dark ? '#1a1a1a' : '#fff'};
+    }
+    .catalog-label-name,
+    .catalog-label-print {
+      width: 100%;
+      min-width: 0;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 2mm;
-      padding: 1.4mm 3mm;
-      border: .35mm solid var(--ink);
-      border-radius: 0 0 2.5mm 2.5mm;
-      background: ${dark ? '#1a1a1a' : '#fff'};
-      height: 11mm;
+      justify-content: center;
+      color: var(--ink);
+      white-space: nowrap;
+      text-align: center;
+      padding: 0 2.5mm;
+      margin: 0;
       box-sizing: border-box;
+      overflow: hidden;
+    }
+    .catalog-label-name {
+      font-size: 13pt;
+      font-weight: 800;
     }
     .catalog-label-print {
-      flex: 1;
-      font-size: 8.5pt;
-      font-weight: 700;
-      color: var(--muted);
-      white-space: nowrap;
-      text-align: right;
+      font-size: 16.5pt;
+      font-weight: 800;
     }
+    .catalog-val-name,
     .catalog-val-print {
-      font: 600 12pt Manrope, Doran, sans-serif;
+      width: 100%;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      direction: ltr;
+      unicode-bidi: normal;
+      border-right: .45mm solid var(--ink);
       color: var(--ink);
       white-space: nowrap;
       font-variant-numeric: tabular-nums;
+      padding: 0;
+      margin: 0;
+      box-sizing: border-box;
+    }
+    .catalog-val-name {
+      font: 900 19.5pt Manrope, Doran, Tajawal, sans-serif;
+      letter-spacing: 0.3px;
+    }
+    .catalog-val-print {
+      font: 800 15pt Manrope, Doran, Tajawal, sans-serif;
+      letter-spacing: 0.2px;
+    }
+
+    /* تكيف المسافات رأسياً والارتفاع وعرض عمود الأرقام لضمان استقامة الخط الفاصل بنسبة 100% */
+    .catalog-grid[data-count="1"],
+    .catalog-grid[data-count="2"],
+    .catalog-grid[data-count="3"],
+    .catalog-grid[data-count="4"] {
+      --val-w: 46mm;
+      gap: 15mm 9mm;
+      margin: 10mm 0 auto 0;
+    }
+    .catalog-grid[data-count="1"] .catalog-card[data-last-odd="true"],
+    .catalog-grid[data-count="3"] .catalog-card[data-last-odd="true"],
+    .catalog-grid[data-count="1"]:last-child:nth-child(odd),
+    .catalog-grid[data-count="3"]:last-child:nth-child(odd) {
+      width: calc((100% - 9mm) / 2);
+    }
+    .catalog-grid[data-count="1"] .catalog-card-top,
+    .catalog-grid[data-count="1"] .catalog-card-bottom,
+    .catalog-grid[data-count="2"] .catalog-card-top,
+    .catalog-grid[data-count="2"] .catalog-card-bottom,
+    .catalog-grid[data-count="3"] .catalog-card-top,
+    .catalog-grid[data-count="3"] .catalog-card-bottom,
+    .catalog-grid[data-count="4"] .catalog-card-top,
+    .catalog-grid[data-count="4"] .catalog-card-bottom {
+      height: 18mm;
+    }
+    .catalog-grid[data-count="1"] .catalog-val-name,
+    .catalog-grid[data-count="2"] .catalog-val-name,
+    .catalog-grid[data-count="3"] .catalog-val-name,
+    .catalog-grid[data-count="4"] .catalog-val-name {
+      font-size: 21pt;
+    }
+    .catalog-grid[data-count="1"] .catalog-val-print,
+    .catalog-grid[data-count="2"] .catalog-val-print,
+    .catalog-grid[data-count="3"] .catalog-val-print,
+    .catalog-grid[data-count="4"] .catalog-val-print {
+      font-size: 16.5pt;
+    }
+    .catalog-grid[data-count="1"] .catalog-label-print,
+    .catalog-grid[data-count="2"] .catalog-label-print,
+    .catalog-grid[data-count="3"] .catalog-label-print,
+    .catalog-grid[data-count="4"] .catalog-label-print {
+      font-size: 18.5pt;
+    }
+
+    .catalog-grid[data-count="5"],
+    .catalog-grid[data-count="6"],
+    .catalog-grid[data-count="7"],
+    .catalog-grid[data-count="8"] {
+      --val-w: 45mm;
+      gap: 11mm 8.5mm;
+      margin: 6mm 0 auto 0;
+    }
+    .catalog-grid[data-count="5"] .catalog-card[data-last-odd="true"],
+    .catalog-grid[data-count="7"] .catalog-card[data-last-odd="true"] {
+      width: calc((100% - 8.5mm) / 2);
+    }
+    .catalog-grid[data-count="5"] .catalog-card-top,
+    .catalog-grid[data-count="5"] .catalog-card-bottom,
+    .catalog-grid[data-count="6"] .catalog-card-top,
+    .catalog-grid[data-count="6"] .catalog-card-bottom,
+    .catalog-grid[data-count="7"] .catalog-card-top,
+    .catalog-grid[data-count="7"] .catalog-card-bottom,
+    .catalog-grid[data-count="8"] .catalog-card-top,
+    .catalog-grid[data-count="8"] .catalog-card-bottom {
+      height: 17mm;
+    }
+    .catalog-grid[data-count="5"] .catalog-val-name,
+    .catalog-grid[data-count="6"] .catalog-val-name,
+    .catalog-grid[data-count="7"] .catalog-val-name,
+    .catalog-grid[data-count="8"] .catalog-val-name {
+      font-size: 20pt;
+    }
+    .catalog-grid[data-count="5"] .catalog-val-print,
+    .catalog-grid[data-count="6"] .catalog-val-print,
+    .catalog-grid[data-count="7"] .catalog-val-print,
+    .catalog-grid[data-count="8"] .catalog-val-print {
+      font-size: 15.5pt;
+    }
+    .catalog-grid[data-count="5"] .catalog-label-print,
+    .catalog-grid[data-count="6"] .catalog-label-print,
+    .catalog-grid[data-count="7"] .catalog-label-print,
+    .catalog-grid[data-count="8"] .catalog-label-print {
+      font-size: 17.5pt;
+    }
+
+    .catalog-grid[data-count="9"],
+    .catalog-grid[data-count="10"],
+    .catalog-grid[data-count="11"],
+    .catalog-grid[data-count="12"] {
+      --val-w: 43mm;
+      gap: 8.5mm 8mm;
+      margin: 3.5mm 0 auto 0;
+    }
+    .catalog-grid[data-count="9"] .catalog-card[data-last-odd="true"],
+    .catalog-grid[data-count="11"] .catalog-card[data-last-odd="true"] {
+      width: calc((100% - 8mm) / 2);
+    }
+    .catalog-grid[data-count="9"] .catalog-card-top,
+    .catalog-grid[data-count="9"] .catalog-card-bottom,
+    .catalog-grid[data-count="10"] .catalog-card-top,
+    .catalog-grid[data-count="10"] .catalog-card-bottom,
+    .catalog-grid[data-count="11"] .catalog-card-top,
+    .catalog-grid[data-count="11"] .catalog-card-bottom,
+    .catalog-grid[data-count="12"] .catalog-card-top,
+    .catalog-grid[data-count="12"] .catalog-card-bottom {
+      height: 16mm;
+    }
+    .catalog-grid[data-count="9"] .catalog-label-print,
+    .catalog-grid[data-count="10"] .catalog-label-print,
+    .catalog-grid[data-count="11"] .catalog-label-print,
+    .catalog-grid[data-count="12"] .catalog-label-print {
+      font-size: 16.5pt;
+    }
+
+    .catalog-grid[data-count="13"],
+    .catalog-grid[data-count="14"] {
+      --val-w: 40mm;
+      gap: 6mm 7mm;
+      margin: 3mm 0 auto 0;
+    }
+    .catalog-grid[data-count="13"] .catalog-card[data-last-odd="true"] {
+      width: calc((100% - 7mm) / 2);
+    }
+    .catalog-grid[data-count="13"] .catalog-card-top,
+    .catalog-grid[data-count="13"] .catalog-card-bottom,
+    .catalog-grid[data-count="14"] .catalog-card-top,
+    .catalog-grid[data-count="14"] .catalog-card-bottom {
+      height: 13.5mm;
+    }
+    .catalog-grid[data-count="13"] .catalog-val-name,
+    .catalog-grid[data-count="14"] .catalog-val-name {
+      font-size: 16pt;
+    }
+    .catalog-grid[data-count="13"] .catalog-val-print,
+    .catalog-grid[data-count="14"] .catalog-val-print {
+      font-size: 13.5pt;
+    }
+    .catalog-grid[data-count="13"] .catalog-label-print,
+    .catalog-grid[data-count="14"] .catalog-label-print {
+      font-size: 14.5pt;
+    }
+
+    .catalog-grid[data-count="15"],
+    .catalog-grid[data-count="16"],
+    .catalog-grid[data-count="17"],
+    .catalog-grid[data-count="18"] {
+      --val-w: 36mm;
+      gap: 3.5mm 6mm;
+      margin: 2mm 0 auto 0;
+    }
+    .catalog-grid[data-count="15"] .catalog-card[data-last-odd="true"],
+    .catalog-grid[data-count="17"] .catalog-card[data-last-odd="true"] {
+      width: calc((100% - 6mm) / 2);
+    }
+    .catalog-grid[data-count="15"] .catalog-card-top,
+    .catalog-grid[data-count="15"] .catalog-card-bottom,
+    .catalog-grid[data-count="16"] .catalog-card-top,
+    .catalog-grid[data-count="16"] .catalog-card-bottom,
+    .catalog-grid[data-count="17"] .catalog-card-top,
+    .catalog-grid[data-count="17"] .catalog-card-bottom,
+    .catalog-grid[data-count="18"] .catalog-card-top,
+    .catalog-grid[data-count="18"] .catalog-card-bottom {
+      height: 11mm;
+    }
+    .catalog-grid[data-count="15"] .catalog-val-name,
+    .catalog-grid[data-count="16"] .catalog-val-name,
+    .catalog-grid[data-count="17"] .catalog-val-name,
+    .catalog-grid[data-count="18"] .catalog-val-name {
+      font-size: 13.5pt;
+    }
+    .catalog-grid[data-count="15"] .catalog-val-print,
+    .catalog-grid[data-count="16"] .catalog-val-print,
+    .catalog-grid[data-count="17"] .catalog-val-print,
+    .catalog-grid[data-count="18"] .catalog-val-print {
+      font-size: 11.5pt;
+    }
+    .catalog-grid[data-count="15"] .catalog-label-name,
+    .catalog-grid[data-count="16"] .catalog-label-name,
+    .catalog-grid[data-count="17"] .catalog-label-name,
+    .catalog-grid[data-count="18"] .catalog-label-name {
+      font-size: 10.5pt;
+    }
+    .catalog-grid[data-count="15"] .catalog-label-print,
+    .catalog-grid[data-count="16"] .catalog-label-print,
+    .catalog-grid[data-count="17"] .catalog-label-print,
+    .catalog-grid[data-count="18"] .catalog-label-print {
+      font-size: 12.5pt;
     }
 
     .footer { display: flex; justify-content: space-between; gap: 4mm; margin-top: auto; padding-top: 1.5mm; align-items: center; font-size: 8.5pt; color: var(--muted); border-top: .25mm solid #ddd; }
@@ -211,6 +417,7 @@ export function pricingPrintStyles(theme: 'light' | 'dark') {
     @media screen and (max-width: 650px) {
       .page-content { padding: 14px 10px 24px; min-height: 0; height: auto; display: flex; flex-direction: column; }
       .catalog-grid { grid-template-columns: 1fr; gap: 8px; }
+      .catalog-card:last-child:nth-child(odd), .catalog-card[data-last-odd="true"] { width: 100% !important; }
       .price-cards { display: flex; flex-direction: column; gap: 10px; }
       .size-heading { height: auto; flex-wrap: wrap; }
       .size-label, .print-size-label { min-width: 0; min-height: 38px; }
