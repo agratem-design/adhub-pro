@@ -64,14 +64,12 @@ export const useBillboardContract = () => {
     try {
       let query = supabase
         .from('Contract')
-        .select('Contract_Number, Customer Name, Ad Type, Contract Date, End Date')
+        .select('*')
         .order('Contract_Number', { ascending: false });
 
       if (searchTerm.trim()) {
-        const searchPattern = `%${searchTerm.trim()}%`;
-        query = query.or(
-          `Contract_Number.ilike.${searchPattern},Customer Name.ilike.${searchPattern},Ad Type.ilike.${searchPattern}`
-        );
+        const pattern = `%${searchTerm.trim()}%`;
+        query = query.or(`Contract_Number.ilike.${pattern},Customer Name.ilike.${pattern},Ad Type.ilike.${pattern}`);
       }
 
       const { data, error } = await query;

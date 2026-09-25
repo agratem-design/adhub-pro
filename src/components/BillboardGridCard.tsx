@@ -1073,6 +1073,7 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                 onUpdate={onUpdate || (() => {})}
                 onLocalUpdate={onLocalUpdate}
                 onOpenOverlayEditor={onOpenOverlayEditor}
+                onExtendRental={(selected) => setExtendDialogOpen(true)}
               />
             ) : (
               <div className="w-7 h-7" />

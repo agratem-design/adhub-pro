@@ -3,6 +3,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MultiSelect } from '@/components/ui/multi-select';
+import { Ruler } from 'lucide-react';
+import { calculatePrintMargins } from '@/utils/printMargins';
 
 interface BillboardFormFieldsProps {
   form: any;
@@ -229,7 +231,12 @@ export const BillboardFormFields: React.FC<BillboardFormFieldsProps> = ({
                     setForm((p: any) => ({ ...p, Size: newSize.trim() }));
                   }
                 } else {
-                  setForm((p: any) => ({ ...p, Size: v }));
+                  const selectedSize = sizes.find(s => s.name === v);
+                  setForm((p: any) => ({ 
+                    ...p, 
+                    Size: v,
+                    print_size: selectedSize?.print_size || p.print_size || ''
+                  }));
                 }
               }}
             >
@@ -245,6 +252,40 @@ export const BillboardFormFields: React.FC<BillboardFormFieldsProps> = ({
                 </SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <Label className="text-xs text-muted-foreground block flex items-center gap-1">
+                <Ruler className="h-3 w-3 text-primary" />
+                <span>مقاس الطباعة (متر)</span>
+              </Label>
+              <span className="text-[10px] text-muted-foreground">لمعرفة الهوامش</span>
+            </div>
+            <Input
+              dir="ltr"
+              value={form.print_size || ''}
+              onChange={(e) => setForm((p: any) => ({ ...p, print_size: e.target.value }))}
+              placeholder={sizes.find(s => s.name === form.Size)?.print_size || 'مثال: 12.20 × 4.20'}
+              className="text-sm bg-background border-border h-9 font-mono"
+            />
+            {(() => {
+              const matchedSize = sizes.find(s => s.name === form.Size || s.id === form.size_id);
+              const effectivePrintSize = form.print_size?.trim() || matchedSize?.print_size;
+              const marginCalc = calculatePrintMargins(
+                effectivePrintSize,
+                form.Size,
+                matchedSize?.width,
+                matchedSize?.height,
+                sizes
+              );
+              if (!marginCalc.hasValidPrintSize) return null;
+              return (
+                <div className="mt-1.5 p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-700 dark:text-amber-300">
+                  <span className="font-bold">هوامش الطباعة: </span>
+                  <span>{marginCalc.summaryText}</span>
+                </div>
+              );
+            })()}
           </div>
           <div>
             <Label className="text-xs text-muted-foreground mb-1.5 block">المستوى *</Label>

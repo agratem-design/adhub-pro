@@ -1,3 +1,4 @@
+import { RentalCompensationAlert, withCompensation, type CompensationChoices } from '@/components/contracts/RentalCompensationAlert';
 import { usePricingDurations } from '@/hooks/usePricingDurations';
 import { durationName } from '@/utils/pricingDuration';
 // @ts-nocheck
@@ -40,6 +41,7 @@ const CURRENCIES = [
 ];
 
 export default function ContractCreate() {
+  const [compensationChoices, setCompensationChoices] = useState<CompensationChoices>({});
   const { data: durations } = usePricingDurations();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -721,7 +723,7 @@ export default function ContractCreate() {
         billboards_data: JSON.stringify(selectedBillboardsData),
         billboards_count: selectedBillboardsData.length,
         // ✅ Store billboard prices with discount details for history
-        billboard_prices: JSON.stringify(selectedBillboardsData.map(b => {
+        billboard_prices: JSON.stringify(withCompensation(selectedBillboardsData.map(b => {
           const billboardPrice = b.contractPrice; // السعر قبل الخصم
           const discountPerBillboard = selected.length > 0 
             ? calculations.discountAmount * (billboardPrice / estimatedTotalWithPrint)
@@ -738,7 +740,7 @@ export default function ContractCreate() {
             pricingMode: b.pricingMode,
             duration: b.duration
           };
-        })),
+        }), compensationChoices)),
         installments_data: installments,
         installation_cost: installationEnabled ? convertPrice(installationCost) : 0,
         installation_enabled: installationEnabled,
@@ -806,6 +808,7 @@ export default function ContractCreate() {
 
   return (
     <div className="container mx-auto px-4 py-6 space-y-6" dir="rtl">
+      <RentalCompensationAlert billboards={billboards.filter(b => selected.includes(String(b.ID)))} startDate={formData.startDate} endDate={formData.endDate} choices={compensationChoices} onChange={setCompensationChoices} />
 
       {/* ── حوار تحذير التأجير المزدوج ── */}
       <BillboardConflictDialog

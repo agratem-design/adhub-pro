@@ -1,3 +1,4 @@
+import { RentalCompensationAlert, withCompensation, type CompensationChoices } from '@/components/contracts/RentalCompensationAlert';
 import { usePricingDurations } from '@/hooks/usePricingDurations';
 import { durationPrice, durationName, durationEnd } from '@/utils/pricingDuration';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -71,6 +72,7 @@ const CONTRACT_EDIT_BILLBOARDS_QUERY_KEY = ['contract-edit', 'billboards'] as co
 const CONTRACT_EDIT_BILLBOARDS_STALE_TIME = 5 * 60 * 1000;
 
 export default function ContractEdit() {
+  const [compensationChoices, setCompensationChoices] = useState<CompensationChoices>({});
   const [workspaceSection, setWorkspaceSection] = useState<'basics' | 'boards' | 'catalog' | 'pricing' | 'friends' | 'designs'>('boards');
   const navigate = useNavigate();
   const location = useLocation();
@@ -3028,7 +3030,7 @@ export default function ContractEdit() {
         billboard_ids: selected, // Pass as array, updateContract will handle conversion
 
         // ✅ Store billboard prices using unified pricing helper (matches UI cards exactly)
-        billboard_prices: JSON.stringify(selectedBillboardPricingSnapshot),
+        billboard_prices: JSON.stringify(withCompensation(selectedBillboardPricingSnapshot, compensationChoices, currentContract?.billboard_prices)),
 
         // ✅ Service costs
         installation_cost: (installationEnabled ? installationCostCombined : 0) + Number(pausedTotals.installSum || 0),
@@ -3205,6 +3207,7 @@ export default function ContractEdit() {
     <div onClickCapture={guardOperationalAction} className="min-h-screen bg-muted/20 text-foreground p-3 md:p-4" dir="rtl">
       <div className="max-w-[1440px] mx-auto space-y-3">
         <div className="sticky top-0 z-30 space-y-2 bg-background/95 pb-2 backdrop-blur">
+        <RentalCompensationAlert billboards={billboards.filter(b => selected.includes(String(b.ID)))} startDate={startDate} endDate={endDate} contractNumber={contractNumber} savedPrices={currentContract?.billboard_prices} choices={compensationChoices} onChange={setCompensationChoices} />
         <ContractEditHeader
           contractNumber={contractNumber}
           onBack={() => navigate('/admin/contracts')}
@@ -4279,7 +4282,7 @@ export default function ContractEdit() {
           onOpenChange={setPdfOpen}
           contract={{
             ...(currentContract || {}),
-            billboard_prices: JSON.stringify(selectedBillboardPricingSnapshot),
+            billboard_prices: JSON.stringify(withCompensation(selectedBillboardPricingSnapshot, compensationChoices, currentContract?.billboard_prices)),
           }}
           liveBillboardPrices={selectedBillboardPricingSnapshot as any[]}
         />

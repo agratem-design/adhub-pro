@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
-import { Home, MapPin, Trash2, Wrench, FileText, Users, Merge, TrendingUp, TrendingDown, CreditCard, DollarSign, Calculator, Calendar, BarChart3, Settings, LogOut, Printer, Database, AlertCircle, MessageSquare, Moon, Sun, FolderKanban, Building2, Link, Briefcase, FileSpreadsheet, AlertTriangle, CalendarPlus, Percent, Palette, Shield, Images, Image, ChevronDown, Send, Camera, Activity, Bot, Upload, CloudUpload, Download, Receipt, Type, Search, X } from 'lucide-react';
+import { Home, MapPin, Trash2, Wrench, FileText, Users, Merge, TrendingUp, TrendingDown, CreditCard, DollarSign, Calculator, Calendar, BarChart3, Settings, LogOut, Printer, Database, AlertCircle, MessageSquare, Moon, Sun, FolderKanban, Building2, Link, Briefcase, FileSpreadsheet, AlertTriangle, CalendarPlus, Percent, Palette, Shield, Images, Image, ChevronDown, Send, Camera, Activity, Bot, Upload, CloudUpload, Download, Receipt, Type, Search, X, Tag } from 'lucide-react';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -29,6 +29,7 @@ const coreItems: SidebarItem[] = [
   { id: 'billboards', label: 'جميع اللوحات', icon: MapPin, path: '/admin/billboards' },
   { id: 'contracts', label: 'العقود', icon: FileText, path: '/admin/contracts' },
   { id: 'events_contracts', label: 'عقود المناسبات', icon: CalendarPlus, path: '/admin/events-contracts' },
+  { id: 'events_pricing', label: 'أسعار المناسبات', icon: Tag, path: '/admin/events-pricing' },
   { id: 'offers', label: 'العروض', icon: FileSpreadsheet, path: '/admin/offers' },
   { id: 'booking_requests', label: 'طلبات الحجز', icon: Calendar, path: '/admin/booking-requests' },
 ];

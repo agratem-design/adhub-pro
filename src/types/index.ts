@@ -5,6 +5,7 @@ export interface Billboard {
   City: string;
   District: string;
   Size: string;
+  print_size?: string | null;
   Status: string;
   Price: string;
   Level: string;

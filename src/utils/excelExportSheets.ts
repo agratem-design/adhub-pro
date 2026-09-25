@@ -6,8 +6,9 @@ import { normalizeGoogleImageUrl } from '@/utils/imageUtils';
  * Adds pricing, slides, companies, and cities sheets to an existing XLSX workbook.
  */
 export async function addExtraSheets(wb: XLSX.WorkBook): Promise<void> {
-  // Order: الأسعار → المدن → الشركات → السلايدات
+  // Order: الأسعار الرئيسية → المعاملات → المدن → الشركات → السلايدات
   await addPricingSheet(wb);
+  await addFactorsSheet(wb);
   await addCitiesSheet(wb);
   await addCompaniesSheet(wb);
   await addSlidesSheet(wb);
@@ -15,11 +16,10 @@ export async function addExtraSheets(wb: XLSX.WorkBook): Promise<void> {
 
 async function addPricingSheet(wb: XLSX.WorkBook) {
   try {
-    // ✅ يجلب الأسعار حصراً من صفحة "أسعار التصدير" (customer_category = 'شركات')
-    // مطابقاً للقالب: billboard_level | الفترة | size_id | المقاس | شركات
+    // مصدر شيت الأسعار هو جدول الأسعار الرئيسي حتى تطابق ملفات التصدير صفحة الأسعار ونظام المعاملات.
     const { data, error } = await supabase
-      .from('export_pricing')
-      .select('size, billboard_level, one_month, "2_months", "3_months", "6_months", full_year, one_day')
+      .from('pricing')
+      .select('size, size_id, billboard_level, one_month, "2_months", "3_months", "6_months", full_year, one_day, duration_prices')
       .eq('customer_category', 'شركات');
 
     if (error || !data || data.length === 0) return;
@@ -84,7 +84,8 @@ async function addPricingSheet(wb: XLSX.WorkBook) {
       for (const period of periods) {
         for (const size of sortedSizes) {
           const rec = idx.get(`${level}|${size}`);
-          const val = rec ? rec[period.key] : null;
+          const custom = rec?.duration_prices && typeof rec.duration_prices === 'object' ? rec.duration_prices[period.key] : undefined;
+          const val = rec ? (custom ?? rec[period.key]) : null;
           rows.push([level, period.label, ensureSizeId(size), size, Number(val ?? 0)]);
         }
       }
@@ -101,6 +102,27 @@ async function addPricingSheet(wb: XLSX.WorkBook) {
     XLSX.utils.book_append_sheet(wb, ws, 'الأسعار');
   } catch (e) {
     console.error('Error adding pricing sheet:', e);
+  }
+}
+
+async function addFactorsSheet(wb: XLSX.WorkBook) {
+  try {
+    const [{ data: categories }, { data: municipalities }] = await Promise.all([
+      supabase.from('category_factors').select('category_name, factor, description').eq('is_active', true).order('category_name'),
+      supabase.from('municipality_factors').select('municipality_name, factor, description').eq('is_active', true).order('municipality_name'),
+    ]);
+    const rows = [
+      ['نوع المعامل', 'الاسم', 'المعامل', 'الوصف'],
+      ...(categories || []).map((r: any) => ['فئة سعرية', r.category_name, Number(r.factor ?? 1), r.description || '']),
+      ...(municipalities || []).map((r: any) => ['بلدية', r.municipality_name, Number(r.factor ?? 1), r.description || '']),
+    ];
+    if (rows.length > 1) {
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws['!cols'] = [{ wch: 16 }, { wch: 26 }, { wch: 12 }, { wch: 42 }];
+      XLSX.utils.book_append_sheet(wb, ws, 'المعاملات');
+    }
+  } catch (e) {
+    console.error('Error adding factors sheet:', e);
   }
 }
 

@@ -1,0 +1,35 @@
+/* Shared surfaces for selects, action menus and searchable pickers. */
+.app-menu-surface {
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  font-family: 'Tajawal', sans-serif;
+  box-shadow: 0 12px 32px -12px rgb(0 0 0 / .3);
+}
+.app-menu-surface :is([role='option'], [role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio'], [cmdk-item]) {
+  min-height: 44px;
+  border-radius: 8px;
+  font-size: 15px;
+  line-height: 1.6;
+  gap: 8px;
+  cursor: pointer;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+.app-menu-surface :is([role='option'], [role^='menuitem'], [cmdk-item]):is([data-highlighted], [data-selected='true'], :focus-visible) {
+  background: hsl(var(--primary) / .12);
+  color: hsl(var(--popover-foreground));
+  box-shadow: inset 0 0 0 1px hsl(var(--primary) / .35);
+}
+.app-menu-surface :is([role='option'], [role='menuitemcheckbox'], [role='menuitemradio'])[data-state='checked'] {
+  background: hsl(var(--primary) / .1);
+  font-weight: 700;
+}
+.app-menu-surface :is([data-disabled]:not([data-disabled='false']), [aria-disabled='true']) {
+  cursor: not-allowed;
+}
+.app-menu-surface [role='separator'] { background: hsl(var(--border)); margin-block: 6px; }
+.app-menu-surface [cmdk-group-heading] { font-size: 13px; font-weight: 700; padding-block: 10px; }
+@media (prefers-reduced-motion: reduce) {
+  .app-menu-surface, .app-menu-surface * { animation: none !important; transition: none !important; }
+}

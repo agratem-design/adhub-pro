@@ -10,7 +10,32 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "13.0.4"
+    PostgrestVersion: "14.5"
+  }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
   public: {
     Tables: {
@@ -457,6 +482,7 @@ export type Database = {
           print_cost: number | null
           rent_amount: number | null
           start_date: string | null
+          task_type: string | null
           team_name: string | null
           total_before_discount: number | null
           updated_at: string | null
@@ -497,6 +523,7 @@ export type Database = {
           print_cost?: number | null
           rent_amount?: number | null
           start_date?: string | null
+          task_type?: string | null
           team_name?: string | null
           total_before_discount?: number | null
           updated_at?: string | null
@@ -537,6 +564,7 @@ export type Database = {
           print_cost?: number | null
           rent_amount?: number | null
           start_date?: string | null
+          task_type?: string | null
           team_name?: string | null
           total_before_discount?: number | null
           updated_at?: string | null
@@ -694,6 +722,7 @@ export type Database = {
           billboard_status_enabled: string
           billboard_status_font_size: string
           billboard_status_offset_y: string
+          calc_meters_by_faces: string | null
           contract_number_alignment: string | null
           contract_number_color: string | null
           contract_number_font_size: string | null
@@ -711,7 +740,6 @@ export type Database = {
           cover_logo_size: string | null
           cover_logo_top: string | null
           cover_logo_url: string | null
-          calc_meters_by_faces: string | null
           cover_municipality_align: string | null
           cover_municipality_font_size: string | null
           cover_municipality_left: string | null
@@ -731,7 +759,9 @@ export type Database = {
           designs_width: string | null
           faces_count_alignment: string | null
           faces_count_color: string | null
+          faces_count_font_family: string | null
           faces_count_font_size: string | null
+          faces_count_font_weight: string | null
           faces_count_left: string | null
           faces_count_offset_x: string | null
           faces_count_show: string | null
@@ -813,6 +843,7 @@ export type Database = {
           billboard_status_enabled?: string
           billboard_status_font_size?: string
           billboard_status_offset_y?: string
+          calc_meters_by_faces?: string | null
           contract_number_alignment?: string | null
           contract_number_color?: string | null
           contract_number_font_size?: string | null
@@ -830,7 +861,6 @@ export type Database = {
           cover_logo_size?: string | null
           cover_logo_top?: string | null
           cover_logo_url?: string | null
-          calc_meters_by_faces?: string | null
           cover_municipality_align?: string | null
           cover_municipality_font_size?: string | null
           cover_municipality_left?: string | null
@@ -850,11 +880,13 @@ export type Database = {
           designs_width?: string | null
           faces_count_alignment?: string | null
           faces_count_color?: string | null
+          faces_count_font_family?: string | null
           faces_count_font_size?: string | null
+          faces_count_font_weight?: string | null
           faces_count_left?: string | null
           faces_count_offset_x?: string | null
-          faces_count_top?: string | null
           faces_count_show?: string | null
+          faces_count_top?: string | null
           id?: string
           installation_date_alignment?: string | null
           installation_date_color?: string | null
@@ -932,6 +964,7 @@ export type Database = {
           billboard_status_enabled?: string
           billboard_status_font_size?: string
           billboard_status_offset_y?: string
+          calc_meters_by_faces?: string | null
           contract_number_alignment?: string | null
           contract_number_color?: string | null
           contract_number_font_size?: string | null
@@ -949,7 +982,6 @@ export type Database = {
           cover_logo_size?: string | null
           cover_logo_top?: string | null
           cover_logo_url?: string | null
-          calc_meters_by_faces?: string | null
           cover_municipality_align?: string | null
           cover_municipality_font_size?: string | null
           cover_municipality_left?: string | null
@@ -969,11 +1001,13 @@ export type Database = {
           designs_width?: string | null
           faces_count_alignment?: string | null
           faces_count_color?: string | null
+          faces_count_font_family?: string | null
           faces_count_font_size?: string | null
+          faces_count_font_weight?: string | null
           faces_count_left?: string | null
           faces_count_offset_x?: string | null
-          faces_count_top?: string | null
           faces_count_show?: string | null
+          faces_count_top?: string | null
           id?: string
           installation_date_alignment?: string | null
           installation_date_color?: string | null
@@ -1312,6 +1346,7 @@ export type Database = {
       }
       billboards: {
         Row: {
+          print_size: string | null
           Ad_Type: string | null
           Billboard_Name: string | null
           billboard_type: string | null
@@ -1361,6 +1396,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          print_size?: string | null
           Ad_Type?: string | null
           Billboard_Name?: string | null
           billboard_type?: string | null
@@ -1410,6 +1446,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          print_size?: string | null
           Ad_Type?: string | null
           Billboard_Name?: string | null
           billboard_type?: string | null
@@ -1632,6 +1669,24 @@ export type Database = {
         }
         Relationships: []
       }
+      cities: {
+        Row: {
+          created_at: string
+          id: number
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          id?: number
+          name: string
+        }
+        Update: {
+          created_at?: string
+          id?: number
+          name?: string
+        }
+        Relationships: []
+      }
       cleanup_logs: {
         Row: {
           billboard_ids_cleaned: number[] | null
@@ -1700,6 +1755,7 @@ export type Database = {
           print_task_id: string | null
           profit_percentage: number | null
           status: string | null
+          task_name: string | null
           task_number: number
           task_type: string
           total_cost: number | null
@@ -1742,6 +1798,7 @@ export type Database = {
           print_task_id?: string | null
           profit_percentage?: number | null
           status?: string | null
+          task_name?: string | null
           task_number?: number
           task_type: string
           total_cost?: number | null
@@ -1784,6 +1841,7 @@ export type Database = {
           print_task_id?: string | null
           profit_percentage?: number | null
           status?: string | null
+          task_name?: string | null
           task_number?: number
           task_type?: string
           total_cost?: number | null
@@ -1900,6 +1958,7 @@ export type Database = {
           friend_rental_operating_fee_enabled: boolean | null
           friend_rental_operating_fee_rate: number | null
           id: number
+          ignore_removal_alert: boolean | null
           include_installation_in_price: boolean
           include_operating_in_installation: boolean | null
           include_operating_in_print: boolean | null
@@ -1914,6 +1973,7 @@ export type Database = {
           installment_first_payment_type: string | null
           installment_interval: string | null
           installments_data: string | null
+          is_visible_in_available: boolean | null
           level_discounts: Json | null
           operating_fee_rate: number | null
           operating_fee_rate_installation: number | null
@@ -1943,6 +2003,7 @@ export type Database = {
           "Total Rent": number | null
           total_extension_days: number | null
           use_30_day_month: boolean | null
+          version: number
         }
         Insert: {
           "Ad Type"?: string | null
@@ -1974,6 +2035,7 @@ export type Database = {
           friend_rental_operating_fee_enabled?: boolean | null
           friend_rental_operating_fee_rate?: number | null
           id?: number
+          ignore_removal_alert?: boolean | null
           include_installation_in_price?: boolean
           include_operating_in_installation?: boolean | null
           include_operating_in_print?: boolean | null
@@ -1988,6 +2050,7 @@ export type Database = {
           installment_first_payment_type?: string | null
           installment_interval?: string | null
           installments_data?: string | null
+          is_visible_in_available?: boolean | null
           level_discounts?: Json | null
           operating_fee_rate?: number | null
           operating_fee_rate_installation?: number | null
@@ -2017,6 +2080,7 @@ export type Database = {
           "Total Rent"?: number | null
           total_extension_days?: number | null
           use_30_day_month?: boolean | null
+          version?: number
         }
         Update: {
           "Ad Type"?: string | null
@@ -2048,6 +2112,7 @@ export type Database = {
           friend_rental_operating_fee_enabled?: boolean | null
           friend_rental_operating_fee_rate?: number | null
           id?: number
+          ignore_removal_alert?: boolean | null
           include_installation_in_price?: boolean
           include_operating_in_installation?: boolean | null
           include_operating_in_print?: boolean | null
@@ -2062,6 +2127,7 @@ export type Database = {
           installment_first_payment_type?: string | null
           installment_interval?: string | null
           installments_data?: string | null
+          is_visible_in_available?: boolean | null
           level_discounts?: Json | null
           operating_fee_rate?: number | null
           operating_fee_rate_installation?: number | null
@@ -2091,6 +2157,7 @@ export type Database = {
           "Total Rent"?: number | null
           total_extension_days?: number | null
           use_30_day_month?: boolean | null
+          version?: number
         }
         Relationships: [
           {
@@ -2252,6 +2319,91 @@ export type Database = {
         }
         Relationships: []
       }
+      contract_original_compensation: {
+        Row: {
+          billboard_id: number
+          days: number
+          source_contract: number
+          target_contract: number
+        }
+        Insert: {
+          billboard_id: number
+          days?: number
+          source_contract: number
+          target_contract: number
+        }
+        Update: {
+          billboard_id?: number
+          days?: number
+          source_contract?: number
+          target_contract?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contract_original_compensation_billboard_id_fkey"
+            columns: ["billboard_id"]
+            isOneToOne: false
+            referencedRelation: "billboard_partnership_status"
+            referencedColumns: ["billboard_id"]
+          },
+          {
+            foreignKeyName: "contract_original_compensation_billboard_id_fkey"
+            columns: ["billboard_id"]
+            isOneToOne: false
+            referencedRelation: "billboards"
+            referencedColumns: ["ID"]
+          },
+          {
+            foreignKeyName: "contract_original_compensation_billboard_id_fkey"
+            columns: ["billboard_id"]
+            isOneToOne: false
+            referencedRelation: "contract_billboard_summary"
+            referencedColumns: ["billboard_id"]
+          },
+          {
+            foreignKeyName: "contract_original_compensation_source_contract_fkey"
+            columns: ["source_contract"]
+            isOneToOne: false
+            referencedRelation: "Contract"
+            referencedColumns: ["Contract_Number"]
+          },
+          {
+            foreignKeyName: "contract_original_compensation_source_contract_fkey"
+            columns: ["source_contract"]
+            isOneToOne: false
+            referencedRelation: "contract_billboard_summary"
+            referencedColumns: ["Contract_Number"]
+          },
+          {
+            foreignKeyName: "contract_original_compensation_source_contract_fkey"
+            columns: ["source_contract"]
+            isOneToOne: false
+            referencedRelation: "contract_summary"
+            referencedColumns: ["Contract_Number"]
+          },
+          {
+            foreignKeyName: "contract_original_compensation_target_contract_fkey"
+            columns: ["target_contract"]
+            isOneToOne: false
+            referencedRelation: "Contract"
+            referencedColumns: ["Contract_Number"]
+          },
+          {
+            foreignKeyName: "contract_original_compensation_target_contract_fkey"
+            columns: ["target_contract"]
+            isOneToOne: false
+            referencedRelation: "contract_billboard_summary"
+            referencedColumns: ["Contract_Number"]
+          },
+          {
+            foreignKeyName: "contract_original_compensation_target_contract_fkey"
+            columns: ["target_contract"]
+            isOneToOne: false
+            referencedRelation: "contract_summary"
+            referencedColumns: ["Contract_Number"]
+          },
+        ]
+      }
       contract_template_settings: {
         Row: {
           background_url: string | null
@@ -2391,6 +2543,7 @@ export type Database = {
           description: string
           expense_category: string
           expense_date: string
+          expense_payment_id: string | null
           id: string
           notes: string | null
           receipt_image_path: string | null
@@ -2406,6 +2559,7 @@ export type Database = {
           description: string
           expense_category: string
           expense_date?: string
+          expense_payment_id?: string | null
           id?: string
           notes?: string | null
           receipt_image_path?: string | null
@@ -2421,6 +2575,7 @@ export type Database = {
           description?: string
           expense_category?: string
           expense_date?: string
+          expense_payment_id?: string | null
           id?: string
           notes?: string | null
           receipt_image_path?: string | null
@@ -2435,6 +2590,13 @@ export type Database = {
             columns: ["custody_account_id"]
             isOneToOne: false
             referencedRelation: "custody_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "custody_expenses_expense_payment_id_fkey"
+            columns: ["expense_payment_id"]
+            isOneToOne: false
+            referencedRelation: "expense_payments"
             referencedColumns: ["id"]
           },
         ]
@@ -3044,6 +3206,54 @@ export type Database = {
         }
         Relationships: []
       }
+      design_templates: {
+        Row: {
+          bg_color: string | null
+          bg_image_url: string | null
+          bg_type: string | null
+          blur_amount: number | null
+          canvas_height: number | null
+          canvas_width: number | null
+          created_at: string | null
+          glass_panel_style: Json | null
+          id: string
+          image_style: Json | null
+          name: string
+          text_elements: Json | null
+          updated_at: string | null
+        }
+        Insert: {
+          bg_color?: string | null
+          bg_image_url?: string | null
+          bg_type?: string | null
+          blur_amount?: number | null
+          canvas_height?: number | null
+          canvas_width?: number | null
+          created_at?: string | null
+          glass_panel_style?: Json | null
+          id?: string
+          image_style?: Json | null
+          name: string
+          text_elements?: Json | null
+          updated_at?: string | null
+        }
+        Update: {
+          bg_color?: string | null
+          bg_image_url?: string | null
+          bg_type?: string | null
+          blur_amount?: number | null
+          canvas_height?: number | null
+          canvas_width?: number | null
+          created_at?: string | null
+          glass_panel_style?: Json | null
+          id?: string
+          image_style?: Json | null
+          name?: string
+          text_elements?: Json | null
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       distribution_items: {
         Row: {
           billboard_id: number
@@ -3273,6 +3483,7 @@ export type Database = {
           entry_date: string
           entry_type: string
           expense_id: string | null
+          expense_payment_id: string | null
           id: string
           notes: string | null
           payment_method: string | null
@@ -3288,6 +3499,7 @@ export type Database = {
           entry_date?: string
           entry_type?: string
           expense_id?: string | null
+          expense_payment_id?: string | null
           id?: string
           notes?: string | null
           payment_method?: string | null
@@ -3303,6 +3515,7 @@ export type Database = {
           entry_date?: string
           entry_type?: string
           expense_id?: string | null
+          expense_payment_id?: string | null
           id?: string
           notes?: string | null
           payment_method?: string | null
@@ -3322,6 +3535,13 @@ export type Database = {
             columns: ["expense_id"]
             isOneToOne: false
             referencedRelation: "expenses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_credit_entries_expense_payment_id_fkey"
+            columns: ["expense_payment_id"]
+            isOneToOne: false
+            referencedRelation: "expense_payments"
             referencedColumns: ["id"]
           },
         ]
@@ -3530,6 +3750,7 @@ export type Database = {
         Row: {
           billboard_id: string
           billboard_name: string | null
+          compensate_original: boolean
           created_at: string
           daily_price: number
           event_contract_id: string
@@ -3539,6 +3760,7 @@ export type Database = {
         Insert: {
           billboard_id: string
           billboard_name?: string | null
+          compensate_original?: boolean
           created_at?: string
           daily_price?: number
           event_contract_id: string
@@ -3548,6 +3770,7 @@ export type Database = {
         Update: {
           billboard_id?: string
           billboard_name?: string | null
+          compensate_original?: boolean
           created_at?: string
           daily_price?: number
           event_contract_id?: string
@@ -3620,6 +3843,77 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      event_original_compensation: {
+        Row: {
+          billboard_id: number
+          contract_number: number
+          days: number
+          event_id: string
+        }
+        Insert: {
+          billboard_id: number
+          contract_number: number
+          days?: number
+          event_id: string
+        }
+        Update: {
+          billboard_id?: number
+          contract_number?: number
+          days?: number
+          event_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "event_original_compensation_billboard_id_fkey"
+            columns: ["billboard_id"]
+            isOneToOne: false
+            referencedRelation: "billboard_partnership_status"
+            referencedColumns: ["billboard_id"]
+          },
+          {
+            foreignKeyName: "event_original_compensation_billboard_id_fkey"
+            columns: ["billboard_id"]
+            isOneToOne: false
+            referencedRelation: "billboards"
+            referencedColumns: ["ID"]
+          },
+          {
+            foreignKeyName: "event_original_compensation_billboard_id_fkey"
+            columns: ["billboard_id"]
+            isOneToOne: false
+            referencedRelation: "contract_billboard_summary"
+            referencedColumns: ["billboard_id"]
+          },
+          {
+            foreignKeyName: "event_original_compensation_contract_number_fkey"
+            columns: ["contract_number"]
+            isOneToOne: false
+            referencedRelation: "Contract"
+            referencedColumns: ["Contract_Number"]
+          },
+          {
+            foreignKeyName: "event_original_compensation_contract_number_fkey"
+            columns: ["contract_number"]
+            isOneToOne: false
+            referencedRelation: "contract_billboard_summary"
+            referencedColumns: ["Contract_Number"]
+          },
+          {
+            foreignKeyName: "event_original_compensation_contract_number_fkey"
+            columns: ["contract_number"]
+            isOneToOne: false
+            referencedRelation: "contract_summary"
+            referencedColumns: ["Contract_Number"]
+          },
+          {
+            foreignKeyName: "event_original_compensation_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "event_contracts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       expense_categories: {
         Row: {
@@ -4387,6 +4681,7 @@ export type Database = {
           replacement_status: string | null
           replaces_item_id: string | null
           selected_design_id: string | null
+          source_swap_id: string | null
           status: string
           task_id: string
           total_reinstalled_faces: number | null
@@ -4434,6 +4729,7 @@ export type Database = {
           replacement_status?: string | null
           replaces_item_id?: string | null
           selected_design_id?: string | null
+          source_swap_id?: string | null
           status?: string
           task_id: string
           total_reinstalled_faces?: number | null
@@ -4481,6 +4777,7 @@ export type Database = {
           replacement_status?: string | null
           replaces_item_id?: string | null
           selected_design_id?: string | null
+          source_swap_id?: string | null
           status?: string
           task_id?: string
           total_reinstalled_faces?: number | null
@@ -4583,7 +4880,9 @@ export type Database = {
           id: string
           print_task_id: string | null
           reinstallation_number: number | null
+          source_swap_id: string | null
           status: string
+          task_name: string | null
           task_type: string | null
           team_id: string | null
           updated_at: string
@@ -4598,7 +4897,9 @@ export type Database = {
           id?: string
           print_task_id?: string | null
           reinstallation_number?: number | null
+          source_swap_id?: string | null
           status?: string
+          task_name?: string | null
           task_type?: string | null
           team_id?: string | null
           updated_at?: string
@@ -4613,7 +4914,9 @@ export type Database = {
           id?: string
           print_task_id?: string | null
           reinstallation_number?: number | null
+          source_swap_id?: string | null
           status?: string
+          task_name?: string | null
           task_type?: string | null
           team_id?: string | null
           updated_at?: string
@@ -4682,13 +4985,6 @@ export type Database = {
             referencedRelation: "installation_teams"
             referencedColumns: ["id"]
           },
-          {
-            foreignKeyName: "installation_tasks_team_id_fkey"
-            columns: ["team_id"]
-            isOneToOne: false
-            referencedRelation: "installation_teams"
-            referencedColumns: ["id"]
-          },
         ]
       }
       installation_team_accounts: {
@@ -4697,6 +4993,7 @@ export type Database = {
           billboard_id: number
           contract_id: number
           created_at: string
+          distributed_payment_id: string | null
           id: string
           installation_date: string
           notes: string | null
@@ -4710,6 +5007,7 @@ export type Database = {
           billboard_id: number
           contract_id: number
           created_at?: string
+          distributed_payment_id?: string | null
           id?: string
           installation_date: string
           notes?: string | null
@@ -4723,6 +5021,7 @@ export type Database = {
           billboard_id?: number
           contract_id?: number
           created_at?: string
+          distributed_payment_id?: string | null
           id?: string
           installation_date?: string
           notes?: string | null
@@ -5227,6 +5526,7 @@ export type Database = {
           location_text: string | null
           longitude: number | null
           nearest_landmark: string | null
+          overlay_config: Json | null
           sequence_number: number
           size: string
           status: string | null
@@ -5247,6 +5547,7 @@ export type Database = {
           location_text?: string | null
           longitude?: number | null
           nearest_landmark?: string | null
+          overlay_config?: Json | null
           sequence_number: number
           size: string
           status?: string | null
@@ -5267,6 +5568,7 @@ export type Database = {
           location_text?: string | null
           longitude?: number | null
           nearest_landmark?: string | null
+          overlay_config?: Json | null
           sequence_number?: number
           size?: string
           status?: string | null
@@ -5458,8 +5760,6 @@ export type Database = {
       }
       offers: {
         Row: {
-          duration_label: string | null
-          use_30_day_month: boolean | null
           ad_type: string | null
           billboard_prices: Json | null
           billboards_count: number | null
@@ -5472,6 +5772,7 @@ export type Database = {
           discount: number | null
           discount_percentage: number | null
           discount_type: string | null
+          duration_label: string | null
           duration_months: number
           end_date: string | null
           exchange_rate: number | null
@@ -5481,14 +5782,14 @@ export type Database = {
           installation_cost: number | null
           installation_details: Json | null
           installation_enabled: boolean | null
-          installments_data: Json | null
           installment_auto_calculate: boolean | null
           installment_count: number | null
+          installment_distribution_type: string | null
           installment_first_at_signing: boolean | null
           installment_first_payment_amount: number | null
           installment_first_payment_type: string | null
-          installment_distribution_type: string | null
           installment_interval: string | null
+          installments_data: Json | null
           level_discounts: Json | null
           notes: string | null
           offer_number: number
@@ -5505,10 +5806,9 @@ export type Database = {
           status: string | null
           total: number | null
           updated_at: string | null
+          use_30_day_month: boolean | null
         }
         Insert: {
-          duration_label?: string | null
-          use_30_day_month?: boolean | null
           ad_type?: string | null
           billboard_prices?: Json | null
           billboards_count?: number | null
@@ -5521,6 +5821,7 @@ export type Database = {
           discount?: number | null
           discount_percentage?: number | null
           discount_type?: string | null
+          duration_label?: string | null
           duration_months?: number
           end_date?: string | null
           exchange_rate?: number | null
@@ -5530,14 +5831,14 @@ export type Database = {
           installation_cost?: number | null
           installation_details?: Json | null
           installation_enabled?: boolean | null
-          installments_data?: Json | null
           installment_auto_calculate?: boolean | null
           installment_count?: number | null
+          installment_distribution_type?: string | null
           installment_first_at_signing?: boolean | null
           installment_first_payment_amount?: number | null
           installment_first_payment_type?: string | null
-          installment_distribution_type?: string | null
           installment_interval?: string | null
+          installments_data?: Json | null
           level_discounts?: Json | null
           notes?: string | null
           offer_number?: number
@@ -5554,10 +5855,9 @@ export type Database = {
           status?: string | null
           total?: number | null
           updated_at?: string | null
+          use_30_day_month?: boolean | null
         }
         Update: {
-          duration_label?: string | null
-          use_30_day_month?: boolean | null
           ad_type?: string | null
           billboard_prices?: Json | null
           billboards_count?: number | null
@@ -5570,6 +5870,7 @@ export type Database = {
           discount?: number | null
           discount_percentage?: number | null
           discount_type?: string | null
+          duration_label?: string | null
           duration_months?: number
           end_date?: string | null
           exchange_rate?: number | null
@@ -5579,14 +5880,14 @@ export type Database = {
           installation_cost?: number | null
           installation_details?: Json | null
           installation_enabled?: boolean | null
-          installments_data?: Json | null
           installment_auto_calculate?: boolean | null
           installment_count?: number | null
+          installment_distribution_type?: string | null
           installment_first_at_signing?: boolean | null
           installment_first_payment_amount?: number | null
           installment_first_payment_type?: string | null
-          installment_distribution_type?: string | null
           installment_interval?: string | null
+          installments_data?: Json | null
           level_discounts?: Json | null
           notes?: string | null
           offer_number?: number
@@ -5603,6 +5904,7 @@ export type Database = {
           status?: string | null
           total?: number | null
           updated_at?: string | null
+          use_30_day_month?: boolean | null
         }
         Relationships: [
           {
@@ -5828,8 +6130,8 @@ export type Database = {
           original_price: number
           original_start_date: string | null
           pause_date: string
-          price_snapshot: Json | null
           price_before_discount: number | null
+          price_snapshot: Json | null
           refund_amount: number
           resumed_at: string | null
           updated_at: string
@@ -5852,8 +6154,8 @@ export type Database = {
           original_price?: number
           original_start_date?: string | null
           pause_date: string
-          price_snapshot?: Json | null
           price_before_discount?: number | null
+          price_snapshot?: Json | null
           refund_amount?: number
           resumed_at?: string | null
           updated_at?: string
@@ -5876,11 +6178,35 @@ export type Database = {
           original_price?: number
           original_start_date?: string | null
           pause_date?: string
-          price_snapshot?: Json | null
           price_before_discount?: number | null
+          price_snapshot?: Json | null
           refund_amount?: number
           resumed_at?: string | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      payment_distribution_requests: {
+        Row: {
+          created_at: string
+          group_id: string
+          owner_id: string
+          payload_hash: string
+          request_id: string
+        }
+        Insert: {
+          created_at?: string
+          group_id: string
+          owner_id?: string
+          payload_hash: string
+          request_id: string
+        }
+        Update: {
+          created_at?: string
+          group_id?: string
+          owner_id?: string
+          payload_hash?: string
+          request_id?: string
         }
         Relationships: []
       }
@@ -5925,6 +6251,45 @@ export type Database = {
           },
           {
             foreignKeyName: "payments_salary_payroll_item_id_fkey"
+            columns: ["payroll_item_id"]
+            isOneToOne: false
+            referencedRelation: "payroll_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payroll_advance_settlements: {
+        Row: {
+          advance_id: string
+          amount: number
+          created_at: string
+          id: string
+          payroll_item_id: string
+        }
+        Insert: {
+          advance_id: string
+          amount: number
+          created_at?: string
+          id?: string
+          payroll_item_id: string
+        }
+        Update: {
+          advance_id?: string
+          amount?: number
+          created_at?: string
+          id?: string
+          payroll_item_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payroll_advance_settlements_advance_id_fkey"
+            columns: ["advance_id"]
+            isOneToOne: false
+            referencedRelation: "employee_advances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payroll_advance_settlements_payroll_item_id_fkey"
             columns: ["payroll_item_id"]
             isOneToOne: false
             referencedRelation: "payroll_items"
@@ -6110,13 +6475,13 @@ export type Database = {
       }
       pricing: {
         Row: {
-          duration_prices: Json
           "2_months": number | null
           "3_months": number | null
           "6_months": number | null
           billboard_level: string
           created_at: string | null
           customer_category: string
+          duration_prices: Json
           full_year: number | null
           id: number
           one_day: number | null
@@ -6125,13 +6490,13 @@ export type Database = {
           size_id: number | null
         }
         Insert: {
-          duration_prices?: Json
           "2_months"?: number | null
           "3_months"?: number | null
           "6_months"?: number | null
           billboard_level: string
           created_at?: string | null
           customer_category: string
+          duration_prices?: Json
           full_year?: number | null
           id?: number
           one_day?: number | null
@@ -6140,13 +6505,13 @@ export type Database = {
           size_id?: number | null
         }
         Update: {
-          duration_prices?: Json
           "2_months"?: number | null
           "3_months"?: number | null
           "6_months"?: number | null
           billboard_level?: string
           created_at?: string | null
           customer_category?: string
+          duration_prices?: Json
           full_year?: number | null
           id?: number
           one_day?: number | null
@@ -6241,6 +6606,8 @@ export type Database = {
           created_at: string
           id: string
           is_default: boolean | null
+          logo_size: string | null
+          logo_url: string | null
           name: string
           thumbnail_url: string | null
           updated_at: string
@@ -6252,6 +6619,8 @@ export type Database = {
           created_at?: string
           id?: string
           is_default?: boolean | null
+          logo_size?: string | null
+          logo_url?: string | null
           name: string
           thumbnail_url?: string | null
           updated_at?: string
@@ -6263,6 +6632,8 @@ export type Database = {
           created_at?: string
           id?: string
           is_default?: boolean | null
+          logo_size?: string | null
+          logo_url?: string | null
           name?: string
           thumbnail_url?: string | null
           updated_at?: string
@@ -8181,10 +8552,12 @@ export type Database = {
       }
       sizes: {
         Row: {
+          print_size: string | null
           created_at: string | null
           description: string | null
           height: number | null
           id: number
+          image_url: string | null
           install_price_per_meter: number | null
           installation_price: number | null
           name: string
@@ -8192,10 +8565,12 @@ export type Database = {
           width: number | null
         }
         Insert: {
+          print_size?: string | null
           created_at?: string | null
           description?: string | null
           height?: number | null
           id?: number
+          image_url?: string | null
           install_price_per_meter?: number | null
           installation_price?: number | null
           name: string
@@ -8203,10 +8578,12 @@ export type Database = {
           width?: number | null
         }
         Update: {
+          print_size?: string | null
           created_at?: string | null
           description?: string | null
           height?: number | null
           id?: number
+          image_url?: string | null
           install_price_per_meter?: number | null
           installation_price?: number | null
           name?: string
@@ -9041,43 +9418,10 @@ export type Database = {
       }
     }
     Functions: {
-      edit_paused_billboard_atomic: {
-        Args: { p_pause_id: string; p_patch?: Json; p_delete?: boolean }
-        Returns: Json
-      }
-      pause_contract_billboard_atomic: {
-        Args: {
-          p_contract_number: number
-          p_billboard_id: number
-          p_pause_date: string
-          p_notes?: string
-          p_manual_refund?: number
-          p_expected_revision?: number
-        }
-        Returns: Json
-      }
-      replace_paused_billboard_atomic: {
-        Args: {
-          p_pause_id: string
-          p_replacement_billboard_id?: number
-          p_start_date?: string
-          p_end_date?: string
-          p_allocated_amount?: number
-        }
-        Returns: Json
-      }
-      resume_contract_billboard_atomic: {
-        Args: { p_pause_id: string; p_resume_date: string; p_cancel?: boolean }
-        Returns: Json
-      }
-      save_contract_edit_atomic: {
-        Args: {
-          p_contract_number: number
-          p_updates: Json
-          p_expected_revision: number
-          p_task_types?: Json
-        }
-        Returns: Json
+      available_operating_balance: { Args: never; Returns: number }
+      cancel_expense_settlement: {
+        Args: { p_expense_id: string }
+        Returns: undefined
       }
       cleanup_expired_billboards: {
         Args: never
@@ -9088,12 +9432,106 @@ export type Database = {
         }[]
       }
       cleanup_orphaned_data: { Args: never; Returns: number }
+      contract_collected_operating_fee: {
+        Args: { c: Json; paid: number }
+        Returns: number
+      }
       contracts_by_customer: { Args: { cust_id: string }; Returns: Json }
+      create_contract_atomic: {
+        Args: {
+          p_ad_type?: string
+          p_billboard_ids?: string
+          p_contract_payload: Json
+          p_customer_name?: string
+          p_end_date?: string
+          p_start_date?: string
+        }
+        Returns: Json
+      }
+      create_expense_with_settlement: {
+        Args: { p_custody_id?: string; p_expense: Json; p_request_id: string }
+        Returns: string
+      }
       create_installation_tasks_for_contract: {
         Args: { p_contract_number: number }
         Returns: Json
       }
+      create_payroll_draft: {
+        Args: { p_end: string; p_start: string }
+        Returns: string
+      }
       delete_billboard: { Args: { billboard_id: number }; Returns: undefined }
+      delete_contract_atomic: {
+        Args: { p_contract_number: number; p_expected_version?: number }
+        Returns: Json
+      }
+      edit_paused_billboard_atomic: {
+        Args: { p_delete?: boolean; p_patch: Json; p_pause_id: string }
+        Returns: Json
+      }
+      execute_billboard_swap_atomic:
+        | {
+            Args: {
+              p_ad_type?: string
+              p_contract_end_date?: string
+              p_contract_number: number
+              p_customer_name?: string
+              p_effective_date?: string
+              p_expected_version: number
+              p_original_billboard_id: number
+              p_replacement_billboard_id: number
+              p_updated_billboard_ids?: string
+              p_updated_prices_json?: string
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_ad_type?: string
+              p_contract_end_date?: string
+              p_contract_number: number
+              p_customer_name?: string
+              p_effective_date?: string
+              p_original_billboard_id: number
+              p_replacement_billboard_id: number
+              p_updated_billboard_ids?: string
+              p_updated_prices_json?: string
+            }
+            Returns: Json
+          }
+      execute_instant_billboard_swap:
+        | {
+            Args: {
+              p_contract_number: number
+              p_original_billboard_id: number
+              p_replacement_billboard_id: number
+              p_user_id?: string
+            }
+            Returns: Json
+          }
+        | {
+            Args: {
+              p_contract_number: number
+              p_original_billboard_id: number
+              p_replacement_billboard_id: number
+              p_swap_event_id?: string
+              p_user_id?: string
+            }
+            Returns: Json
+          }
+      extend_billboard_rental_atomic: {
+        Args: {
+          p_billboard_id: number
+          p_contract_number: number
+          p_days: number
+          p_expected_end?: string
+          p_notes?: string
+          p_reason: string
+          p_type?: string
+        }
+        Returns: Json
+      }
+      get_email_by_username: { Args: { p_username: string }; Returns: string }
       get_table_schema: {
         Args: { p_table_name: string }
         Returns: {
@@ -9116,6 +9554,41 @@ export type Database = {
         Returns: boolean
       }
       is_admin: { Args: never; Returns: boolean }
+      pause_contract_billboard_atomic: {
+        Args: {
+          p_billboard_id: number
+          p_contract_number: number
+          p_expected_revision?: number
+          p_manual_refund?: number
+          p_notes?: string
+          p_pause_date: string
+        }
+        Returns: Json
+      }
+      pay_employee_due: {
+        Args: {
+          p_amount: number
+          p_employee: string
+          p_method: string
+          p_notes: string
+          p_reference: string
+          p_request_id: string
+        }
+        Returns: string
+      }
+      quick_billboard_contract_change: {
+        Args: {
+          p_action: string
+          p_amount: number
+          p_billboard_id: number
+          p_compensate?: boolean
+          p_contract_number: number
+          p_effective: string
+          p_revision: number
+          p_source_contract?: number
+        }
+        Returns: Json
+      }
       recompute_expense_paid_amount: {
         Args: { _expense_id: string }
         Returns: undefined
@@ -9124,11 +9597,66 @@ export type Database = {
         Args: { _expense_id: string }
         Returns: undefined
       }
+      reconcile_contract_billboards_atomic: {
+        Args: {
+          p_ad_type?: string
+          p_contract_number: number
+          p_customer_name?: string
+          p_end_date?: string
+          p_expected_version?: number
+          p_new_billboard_ids: string
+          p_start_date?: string
+        }
+        Returns: Json
+      }
+      record_expense_payment: {
+        Args: {
+          p_amount: number
+          p_expense_id: string
+          p_notes?: string
+          p_paid_at: string
+          p_request_id?: string
+          p_source: string
+        }
+        Returns: string
+      }
+      replace_paused_billboard_atomic: {
+        Args: {
+          p_amount: number
+          p_end: string
+          p_pause_id: string
+          p_replacement_id: number
+          p_start: string
+        }
+        Returns: Json
+      }
+      resume_contract_billboard_atomic: {
+        Args: { p_cancel?: boolean; p_pause_id: string; p_resume_date: string }
+        Returns: Json
+      }
       round: { Args: { digits: number; val: number }; Returns: number }
       safe_delete_billboard: {
         Args: { input_billboard_id: number }
         Returns: boolean
       }
+      save_contract_edit_atomic: {
+        Args: {
+          p_contract_number: number
+          p_expected_revision: number
+          p_task_types?: Json
+          p_updates: Json
+        }
+        Returns: Json
+      }
+      save_event_rental_atomic: {
+        Args: { p_id: string; p_payload: Json }
+        Returns: Json
+      }
+      save_payment_distribution: {
+        Args: { p_payload: Json; p_request_id: string }
+        Returns: string
+      }
+      settle_payroll_run: { Args: { p_run_id: string }; Returns: undefined }
       setval_billboards_seq: { Args: never; Returns: undefined }
       shared_company_summary: {
         Args: { p_beneficiary: string }
@@ -9147,6 +9675,20 @@ export type Database = {
       }
       sync_billboards_from_contract: {
         Args: { p_contract_number: number }
+        Returns: Json
+      }
+      transfer_contract_billboard_atomic: {
+        Args: {
+          p_billboard_id: number
+          p_expected_source_version: number
+          p_expected_target_version: number
+          p_source_contract_number: number
+          p_target_ad_type?: string
+          p_target_contract_number: number
+          p_target_customer_name?: string
+          p_target_end_date?: string
+          p_target_start_date?: string
+        }
         Returns: Json
       }
     }
@@ -9175,12 +9717,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -9204,11 +9746,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -9229,11 +9771,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -9254,11 +9796,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -9271,11 +9813,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -9285,6 +9827,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       app_role: [

@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { rentalRpc } from '@/services/billboardRentalService';
 import { supabase } from '@/integrations/supabase/client';
 
 export interface EventContract {
@@ -23,6 +24,7 @@ export interface EventContractBillboard {
   event_contract_id?: string;
   billboard_id: string;
   billboard_name?: string | null;
+  compensate_original?: boolean;
   daily_price: number;
   total_price: number;
 }
@@ -33,7 +35,15 @@ export async function listEventContracts() {
     .select('*')
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data || []) as unknown as EventContract[];
+  const contracts = (data || []) as unknown as EventContract[];
+  if (!contracts.length) return contracts;
+  const { data: rows } = await supabase
+    .from('event_contract_billboards' as any)
+    .select('event_contract_id')
+    .in('event_contract_id', contracts.map((c) => c.id));
+  const counts = new Map<string, number>();
+  (rows || []).forEach((row: any) => counts.set(row.event_contract_id, (counts.get(row.event_contract_id) || 0) + 1));
+  return contracts.map((contract: any) => ({ ...contract, billboard_count: counts.get(contract.id) || 0 }));
 }
 
 export async function getEventContract(id: string) {
@@ -62,81 +72,15 @@ export async function createEventContract(payload: {
   notes?: string;
   billboards: EventContractBillboard[];
 }) {
-  const { data: contract, error } = await supabase
-    .from('event_contracts' as any)
-    .insert({
-      customer_id: payload.customer_id || null,
-      customer_name: payload.customer_name,
-      event_name: payload.event_name,
-      event_type: payload.event_type || null,
-      start_date: payload.start_date,
-      end_date: payload.end_date,
-      total_amount: payload.total_amount,
-      discount_amount: payload.discount_amount || 0,
-      notes: payload.notes || null,
-    })
-    .select()
-    .single();
-  if (error) throw error;
-
-  const contractId = (contract as any).id;
-  if (payload.billboards.length > 0) {
-    const rows = payload.billboards.map(b => ({
-      event_contract_id: contractId,
-      billboard_id: b.billboard_id,
-      billboard_name: b.billboard_name || null,
-      daily_price: b.daily_price,
-      total_price: b.total_price,
-    }));
-    const { error: bbErr } = await supabase.from('event_contract_billboards' as any).insert(rows);
-    if (bbErr) throw bbErr;
-
-    const reservations = payload.billboards.map(b => ({
-      event_contract_id: contractId,
-      billboard_id: b.billboard_id,
-      start_date: payload.start_date,
-      end_date: payload.end_date,
-      status: 'active',
-    }));
-    await supabase.from('event_billboard_reservations' as any).insert(reservations);
-  }
-
-  return contract as unknown as EventContract;
+  return rentalRpc('save_event_rental_atomic', { p_id: null, p_payload: payload }) as Promise<EventContract>;
 }
 
 export async function updateEventContract(id: string, patch: Partial<EventContract> & { billboards?: EventContractBillboard[] }) {
-  const { billboards, ...rest } = patch as any;
-  const { error } = await supabase.from('event_contracts' as any).update(rest).eq('id', id);
-  if (error) throw error;
-
-  if (billboards) {
-    await supabase.from('event_contract_billboards' as any).delete().eq('event_contract_id', id);
-    await supabase.from('event_billboard_reservations' as any).delete().eq('event_contract_id', id);
-
-    if (billboards.length > 0) {
-      const rows = billboards.map((b: EventContractBillboard) => ({
-        event_contract_id: id,
-        billboard_id: b.billboard_id,
-        billboard_name: b.billboard_name || null,
-        daily_price: b.daily_price,
-        total_price: b.total_price,
-      }));
-      await supabase.from('event_contract_billboards' as any).insert(rows);
-
-      const start = (rest as any).start_date;
-      const end = (rest as any).end_date;
-      if (start && end) {
-        const reservations = billboards.map((b: EventContractBillboard) => ({
-          event_contract_id: id,
-          billboard_id: b.billboard_id,
-          start_date: start,
-          end_date: end,
-          status: 'active',
-        }));
-        await supabase.from('event_billboard_reservations' as any).insert(reservations);
-      }
-    }
+  if (patch.billboards) {
+    return rentalRpc('save_event_rental_atomic', { p_id: id, p_payload: patch });
   }
+  const { error } = await supabase.from('event_contracts' as any).update(patch).eq('id', id);
+  if (error) throw error;
 }
 
 export async function deleteEventContract(id: string) {

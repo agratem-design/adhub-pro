@@ -1,0 +1,49 @@
+.pricing-factors-page,
+.pricing-factors-dialog {
+  color: hsl(var(--foreground));
+  font-family: 'Tajawal', sans-serif;
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+:is(.pricing-factors-page, .pricing-factors-dialog) .text-xs {
+  font-size: 14px;
+  line-height: 1.7;
+}
+:is(.pricing-factors-page, .pricing-factors-dialog) .text-sm {
+  font-size: 15px;
+  line-height: 1.7;
+}
+:is(.pricing-factors-page, .pricing-factors-dialog) .text-muted-foreground {
+  color: hsl(var(--foreground) / .8);
+}
+:is(.pricing-factors-page, .pricing-factors-dialog) :is(input, [role='combobox']) {
+  min-height: 44px;
+  font-size: 16px;
+  background: hsl(var(--background));
+}
+.pricing-factors-page [role='tab'] { font-size: 15px; font-weight: 700; }
+.pricing-factors-page [role='tabpanel'] > div { border-radius: 16px; box-shadow: none; }
+.pricing-factors-page [role='tabpanel'] > div > :first-child {
+  padding: 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--primary) / .05);
+  border-radius: 16px 16px 0 0;
+}
+.pricing-factors-page th { font-size: 15px; color: hsl(var(--foreground)); font-weight: 700; }
+.pricing-factors-page td { font-size: 16px; }
+.pricing-factors-page thead { background: hsl(var(--muted)); }
+.pricing-factors-page tbody tr:nth-child(even) { background: hsl(var(--muted) / .3); }
+.pricing-factors-page th.text-center { text-align: center; }
+.pricing-factors-dialog { max-height: 90dvh; overflow-y: auto; gap: 24px; }
+.pricing-factors-dialog > div:first-child { padding: 0 0 16px 24px; border-bottom: 1px solid hsl(var(--border)); }
+.pricing-factors-dialog h2 { font-size: 20px; line-height: 1.6; }
+.pricing-factors-dialog label { display: block; margin-bottom: 8px; font-size: 15px; font-weight: 600; }
+.pricing-factors-dialog button { cursor: pointer; }
+.pricing-factors-dialog > div:last-child { border-top: 1px solid hsl(var(--border)); padding-top: 16px; }
+@media (max-width: 639px) {
+  .pricing-summary > div > div { padding: 12px 8px; }
+  .pricing-summary .text-sm { font-size: 13px; }
+  .pricing-factors-page [role='tabpanel'] > div > :first-child { padding: 16px; }
+}

@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
-import { MoreVertical, Edit, Link, Unlink, Trash2, ExternalLink, Camera, Wrench, Settings, AlertTriangle, Sparkles } from 'lucide-react';
+import { MoreVertical, Edit, Link, Unlink, Trash2, ExternalLink, Camera, Wrench, Settings, AlertTriangle, Sparkles, CalendarPlus } from 'lucide-react';
 import { Billboard } from '@/types';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -24,6 +24,7 @@ interface BillboardCardActionsProps {
   onUpdate: () => void;
   onLocalUpdate?: (id: number | string, updates: Record<string, any>) => void;
   onOpenOverlayEditor?: (billboard: Billboard) => void;
+  onExtendRental?: (billboard: Billboard) => void;
 }
 
 export const BillboardCardActions: React.FC<BillboardCardActionsProps> = ({
@@ -37,6 +38,7 @@ export const BillboardCardActions: React.FC<BillboardCardActionsProps> = ({
   onUpdate,
   onLocalUpdate,
   onOpenOverlayEditor,
+  onExtendRental,
 }) => {
   const billboardId = (billboard as any).ID || (billboard as any).id;
 
@@ -121,6 +123,12 @@ export const BillboardCardActions: React.FC<BillboardCardActionsProps> = ({
                 </>
               )}
             </DropdownMenuItem>
+            {hasContract && onExtendRental && (
+              <DropdownMenuItem onClick={() => onExtendRental(billboard)} className="cursor-pointer gap-2">
+                <CalendarPlus className="h-4 w-4 text-emerald-600" />
+                تمديد اللوحة
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
           </>
         )}

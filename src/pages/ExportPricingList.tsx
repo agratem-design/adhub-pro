@@ -36,6 +36,11 @@ interface SizeRecord {
   sort_order: number | null;
 }
 
+interface FactorSummary {
+  category: number;
+  municipalities: number;
+}
+
 interface EntryForm {
   size: string;
   level: string;
@@ -86,23 +91,27 @@ export default function ExportPricingList() {
   const [editing, setEditing] = useState<{ id: number; field: DurationKey } | null>(null);
   const [editValue, setEditValue] = useState('');
   const [selectedLevel, setSelectedLevel] = useState<string>('all');
-  const [selectedDuration, setSelectedDuration] = useState<DurationKey>('one_month');
+  const [selectedDuration, setSelectedDuration] = useState<DurationKey>('full_year');
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showAddSizeDialog, setShowAddSizeDialog] = useState(false);
   const [newEntry, setNewEntry] = useState<EntryForm>(emptyEntry);
   const [newSize, setNewSize] = useState<NewSizeForm>({ name: '', width: '', height: '', sort_order: '', description: '' });
+  const [factorSummary, setFactorSummary] = useState<FactorSummary>({ category: 1, municipalities: 0 });
 
   const loadData = async () => {
     setLoading(true);
-    const [{ data: rows }, { data: lvls }, { data: szs }] = await Promise.all([
-      supabase.from('export_pricing').select('*'),
+    const [{ data: rows }, { data: lvls }, { data: szs }, { data: catFactor }, { data: municipalityFactors }] = await Promise.all([
+      supabase.from('pricing').select('*').eq('customer_category', 'شركات'),
       supabase.from('billboard_levels').select('*').order('sort_order'),
       supabase.from('sizes').select('*').order('sort_order').order('name'),
+      supabase.from('category_factors').select('factor').eq('category_name', 'شركات').eq('is_active', true).maybeSingle(),
+      supabase.from('municipality_factors').select('id').eq('is_active', true),
     ]);
 
     setData((rows || []) as ExportPricingData[]);
     setLevels((lvls || []) as BillboardLevel[]);
     setSizes((szs || []) as SizeRecord[]);
+    setFactorSummary({ category: Number((catFactor as any)?.factor ?? 1), municipalities: municipalityFactors?.length || 0 });
     setLoading(false);
   };
 
@@ -112,7 +121,9 @@ export default function ExportPricingList() {
 
   const availableLevels = useMemo(() => {
     const usedLevels = new Set(data.map((item) => item.billboard_level));
-    return levels.filter((level) => usedLevels.has(level.level_code)).sort((a, b) => a.sort_order - b.sort_order);
+    return Array.from(usedLevels).filter(Boolean).map((code, index) =>
+      levels.find(level => level.level_code === code) || { id: -index - 1, level_code: code, level_name: code, sort_order: 999 }
+    ).sort((a, b) => a.sort_order - b.sort_order || a.level_code.localeCompare(b.level_code));
   }, [data, levels]);
 
   const sortedSizeNames = useMemo(() => {
@@ -183,7 +194,7 @@ export default function ExportPricingList() {
       return;
     }
 
-    const { error } = await supabase.from('export_pricing').update({ [editing.field]: numVal } as any).eq('id', editing.id);
+    const { error } = await supabase.from('pricing').update({ [editing.field]: numVal } as any).eq('id', editing.id).eq('customer_category', 'شركات');
     if (error) {
       toast.error('فشل في حفظ السعر');
       return;
@@ -197,7 +208,7 @@ export default function ExportPricingList() {
   const deleteRow = async (id: number) => {
     if (!window.confirm('هل تريد حذف هذا السعر؟')) return;
 
-    const { error } = await supabase.from('export_pricing').delete().eq('id', id);
+    const { error } = await supabase.from('pricing').delete().eq('id', id).eq('customer_category', 'شركات');
     if (error) {
       toast.error('فشل في الحذف');
       return;
@@ -218,7 +229,7 @@ export default function ExportPricingList() {
       return;
     }
 
-    const { error } = await supabase.from('export_pricing').insert({
+    const { error } = await supabase.from('pricing').insert({
       size: newEntry.size,
       billboard_level: newEntry.level,
       customer_category: 'شركات',
@@ -292,35 +303,13 @@ export default function ExportPricingList() {
   };
 
   const syncFromPricing = async () => {
-    const confirmed = window.confirm('هل تريد مزامنة أسعار فئة "شركات" من جدول أسعار الإيجار؟ سيتم استبدال جميع أسعار التصدير الحالية.');
+    const confirmed = window.confirm('سيتم تحديث شاشة أسعار التصدير من صفحة الأسعار الرئيسية لفئة شركات. هل تريد المتابعة؟');
     if (!confirmed) return;
 
     setSyncing(true);
     try {
-      await supabase.from('export_pricing').delete().neq('id', 0);
-      const { data: pricingData } = await supabase
-        .from('pricing')
-        .select('size, billboard_level, customer_category, one_month, "2_months", "3_months", "6_months", full_year, one_day')
-        .eq('customer_category', 'شركات');
-
-      if (pricingData?.length) {
-        const inserts = pricingData.map((item: any) => ({
-          size: item.size,
-          billboard_level: item.billboard_level,
-          customer_category: item.customer_category,
-          one_month: item.one_month || 0,
-          '2_months': item['2_months'] || 0,
-          '3_months': item['3_months'] || 0,
-          '6_months': item['6_months'] || 0,
-          full_year: item.full_year || 0,
-          one_day: item.one_day || 0,
-        }));
-
-        await supabase.from('export_pricing').insert(inserts as any);
-      }
-
-      toast.success(`تمت مزامنة ${pricingData?.length || 0} سجل من فئة "شركات"`);
-      loadData();
+      await loadData();
+      toast.success('تم تحديث أسعار التصدير من صفحة الأسعار الرئيسية');
     } catch {
       toast.error('فشل في المزامنة');
     } finally {
@@ -337,40 +326,40 @@ export default function ExportPricingList() {
   }
 
   return (
-    <div className="space-y-6 p-4 sm:p-6" dir="rtl">
-      <Card className="border-0 bg-gradient-to-l from-primary/5 via-background to-background shadow-lg">
-        <CardHeader className="pb-4">
+    <div className="mx-auto w-full min-w-0 max-w-[1600px] space-y-5 p-3 text-foreground sm:p-6 [&_.text-xs]:text-sm [&_button]:cursor-pointer" dir="rtl">
+      <Card className="overflow-hidden rounded-2xl border border-border bg-primary/5 shadow-sm">
+        <CardHeader className="relative pb-5">
           <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
             <div className="flex items-center gap-3">
-              <div className="rounded-xl border border-primary/20 bg-primary/10 p-3">
+              <div className="rounded-xl border border-border bg-card p-3">
                 <Download className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <CardTitle className="text-2xl font-bold">أسعار التصدير</CardTitle>
-                <p className="mt-1 text-sm text-muted-foreground">الأسعار المعروضة في شيت الأسعار بملفات التصدير — فئة شركات</p>
+                <div className="mb-1 flex flex-wrap items-center gap-2"><CardTitle className="text-2xl font-black tracking-tight">أسعار التصدير</CardTitle><Badge className="border-primary/30 bg-primary/15 text-primary hover:bg-primary/20">فئة شركات</Badge></div>
+                <p className="mt-1 text-base leading-7 text-foreground/80">نفس أسعار صفحة الأسعار الرئيسية مع معاملات الفئات والبلديات.</p>
               </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => setShowAddDialog(true)} variant="outline" className="gap-2">
+              <Button onClick={() => setShowAddDialog(true)} variant="outline" className="gap-2 bg-background">
                 <Plus className="h-4 w-4" />
                 إضافة سعر
               </Button>
-              <Button onClick={openAddSizeDialog} variant="outline" className="gap-2">
+              <Button onClick={openAddSizeDialog} variant="outline" className="gap-2 bg-background">
                 <Ruler className="h-4 w-4" />
                 إضافة مقاس
               </Button>
-              <Button onClick={syncFromPricing} variant="outline" className="gap-2 border-primary/30 hover:bg-primary/5" disabled={syncing}>
+              <Button onClick={syncFromPricing} className="gap-2" disabled={syncing}>
                 <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-                مزامنة من أسعار الإيجار
+                تحديث من صفحة الأسعار
               </Button>
             </div>
           </div>
         </CardHeader>
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Card className="border border-border/50">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <Card className="border-border/70 bg-card shadow-sm">
           <CardContent className="flex items-center gap-3 p-4">
             <div className="rounded-lg bg-primary/10 p-2.5">
               <Layers className="h-5 w-5 text-primary" />
@@ -381,7 +370,19 @@ export default function ExportPricingList() {
             </div>
           </CardContent>
         </Card>
-        <Card className="border border-border/50">
+        <Card className="border-primary/25 bg-primary/5 shadow-sm">
+          <CardContent className="flex items-center gap-3 p-4">
+            <div className="rounded-lg bg-primary/15 p-2.5"><TrendingUp className="h-5 w-5 text-primary" /></div>
+            <div><p className="text-xs text-muted-foreground">معامل فئة شركات</p><p className="text-xl font-bold text-primary">{factorSummary.category}×</p></div>
+          </CardContent>
+        </Card>
+        <Card className="border-border/70 bg-card shadow-sm">
+          <CardContent className="flex items-center gap-3 p-4">
+            <div className="rounded-lg bg-primary/10 p-2.5"><Ruler className="h-5 w-5 text-primary" /></div>
+            <div><p className="text-xs text-muted-foreground">معاملات البلديات النشطة</p><p className="text-xl font-bold">{factorSummary.municipalities}</p></div>
+          </CardContent>
+        </Card>
+        <Card className="border-border/70 bg-card shadow-sm">
           <CardContent className="flex items-center gap-3 p-4">
             <div className="rounded-lg bg-primary/10 p-2.5">
               <DollarSign className="h-5 w-5 text-primary" />
@@ -392,7 +393,7 @@ export default function ExportPricingList() {
             </div>
           </CardContent>
         </Card>
-        <Card className="border border-border/50">
+        <Card className="border-border/70 bg-card shadow-sm">
           <CardContent className="flex items-center gap-3 p-4">
             <div className="rounded-lg bg-primary/10 p-2.5">
               <TrendingUp className="h-5 w-5 text-primary" />
@@ -405,36 +406,40 @@ export default function ExportPricingList() {
         </Card>
       </div>
 
-      <Card className="border border-border/50">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Layers className="h-4 w-4 text-primary" />
-            المستويات
-          </CardTitle>
+      <Card className="border-border/70 bg-card shadow-sm">
+        <CardHeader className="border-b border-border/60 pb-3">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between"><CardTitle className="flex items-center gap-2 text-base"><Layers className="h-4 w-4 text-primary" />اختيار المستوى والمدة</CardTitle><span className="text-xs text-muted-foreground">انقر على السعر لتعديله مباشرة</span></div>
         </CardHeader>
-        <CardContent className="pt-0">
-          <Tabs value={selectedLevel} onValueChange={setSelectedLevel}>
-            <TabsList className="h-auto flex-wrap gap-1 bg-muted/50 p-1">
-              <TabsTrigger value="all" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                الكل
-                <Badge variant="secondary" className="mr-1.5 px-1.5 py-0 text-[10px]">{data.length}</Badge>
+        <CardContent className="space-y-4 p-4">
+          <Tabs dir="rtl" value={selectedLevel} onValueChange={setSelectedLevel}>
+            <p className="mb-2 text-sm font-semibold">مستوى اللوحة</p>
+            <TabsList aria-label="مستوى اللوحة" className="grid h-auto w-full grid-cols-2 gap-2 bg-transparent p-0 sm:grid-cols-3 xl:grid-cols-5">
+              <TabsTrigger value="all" className="min-h-16 min-w-0 cursor-pointer justify-between gap-2 rounded-xl border border-border bg-background px-3 py-3 text-foreground transition-all duration-200 data-[state=active]:border-primary data-[state=active]:bg-primary/10 data-[state=active]:text-foreground data-[state=active]:shadow-none">
+                <span className="text-right font-bold">كل المستويات</span>
+                <span className="rounded-md bg-muted px-2 py-1 text-xs tabular-nums">{data.length}</span>
               </TabsTrigger>
               {availableLevels.map((level) => {
                 const count = data.filter((item) => item.billboard_level === level.level_code).length;
                 return (
-                  <TabsTrigger key={level.level_code} value={level.level_code} className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                    {level.level_code}
-                    <Badge variant="secondary" className="mr-1.5 px-1.5 py-0 text-[10px]">{count}</Badge>
+                  <TabsTrigger key={level.level_code} value={level.level_code} className="min-h-16 min-w-0 cursor-pointer justify-start gap-3 rounded-xl border border-border bg-background px-3 py-3 text-foreground transition-all duration-200 data-[state=active]:border-primary data-[state=active]:bg-primary/10 data-[state=active]:text-foreground data-[state=active]:shadow-none">
+                    <span dir="ltr" className="flex h-9 min-w-9 shrink-0 items-center justify-center rounded-lg bg-muted px-1 font-bold">{level.level_code}</span>
+                    <span className="min-w-0 text-right"><span className="block truncate font-semibold" title={level.level_name}>{level.level_name || `المستوى ${level.level_code}`}</span><span className="block text-xs font-normal text-muted-foreground">{count} سعر</span></span>
                   </TabsTrigger>
                 );
               })}
+            </TabsList>
+          </Tabs>
+          <Tabs dir="rtl" value={selectedDuration} onValueChange={(value) => setSelectedDuration(value as DurationKey)}>
+            <p className="mb-2 text-sm font-semibold">مدة الإيجار</p>
+            <TabsList className="grid h-auto w-full grid-cols-3 gap-1 bg-transparent p-0 sm:grid-cols-6">
+              {DURATION_TABS.map((tab) => <TabsTrigger key={tab.key} value={tab.key} className="cursor-pointer rounded-lg border border-border/70 px-2 py-2 text-xs transition-all duration-200 data-[state=active]:border-primary data-[state=active]:bg-primary/10 data-[state=active]:text-primary">{tab.label}</TabsTrigger>)}
             </TabsList>
           </Tabs>
         </CardContent>
       </Card>
 
       <Card className="overflow-hidden border border-border/50">
-        <CardHeader className="border-b bg-muted/30 pb-0">
+        <CardHeader className="border-b border-border/70 bg-card pb-3">
           <div className="mb-3 flex items-center justify-between">
             <CardTitle className="flex items-center gap-2 text-base">
               <DollarSign className="h-4 w-4 text-primary" />
@@ -442,39 +447,26 @@ export default function ExportPricingList() {
               <Badge variant="outline" className="mr-2 text-xs">{filtered.length} سجل</Badge>
             </CardTitle>
           </div>
-          <Tabs value={selectedDuration} onValueChange={(value) => setSelectedDuration(value as DurationKey)}>
-            <TabsList className="h-auto w-full justify-start gap-0 bg-transparent p-0">
-              {DURATION_TABS.map((tab) => (
-                <TabsTrigger
-                  key={tab.key}
-                  value={tab.key}
-                  className="rounded-b-none border-b-2 border-transparent px-4 py-2.5 text-sm data-[state=active]:border-primary data-[state=active]:bg-background data-[state=active]:shadow-none"
-                >
-                  {tab.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b bg-muted/40">
-                <th className="sticky right-0 z-10 min-w-[120px] bg-muted/40 p-3.5 text-right font-bold text-foreground">المقاس</th>
+          <table className="w-full min-w-[620px] text-sm">
+            <thead className="sticky top-0 z-20">
+              <tr className="border-b bg-muted/80 backdrop-blur">
+                <th className="sticky right-0 z-10 min-w-[150px] bg-muted/90 p-4 text-right font-bold text-foreground">المقاس</th>
                 {displayLevelCodes.map((levelCode) => (
-                  <th key={levelCode} className="min-w-[130px] p-3.5 text-center font-bold text-foreground">
+                  <th key={levelCode} className="min-w-[130px] p-4 text-center font-bold text-foreground">
                     <Badge variant="outline" className="border-primary/20 bg-primary/5 px-2.5 py-0.5 text-xs font-bold">
                       {levelCode}
                     </Badge>
                   </th>
                 ))}
-                <th className="w-[60px] p-3.5 text-center font-bold text-foreground">حذف</th>
+                <th className="w-[64px] p-4 text-center font-bold text-foreground">إجراء</th>
               </tr>
             </thead>
             <tbody>
               {sizeRows.map((row, idx) => (
-                <tr key={row.size} className={`border-b transition-colors hover:bg-primary/5 ${idx % 2 === 0 ? 'bg-background' : 'bg-muted/10'}`}>
-                  <td className="sticky right-0 z-10 bg-inherit p-3.5 font-bold text-foreground">
+                <tr key={row.size} className={`border-b border-border/60 transition-colors hover:bg-primary/5 ${idx % 2 === 0 ? 'bg-background' : 'bg-muted/10'}`}>
+                  <td className="sticky right-0 z-10 bg-inherit p-4 font-bold text-foreground">
                     <div className="flex items-center gap-2">
                       <div className="h-2 w-2 rounded-full bg-primary/60" />
                       {row.size}
@@ -509,7 +501,7 @@ export default function ExportPricingList() {
                           </div>
                         ) : (
                           <button
-                            className="w-full rounded-lg px-3 py-2 text-center text-base font-semibold tabular-nums transition-all hover:bg-primary/10 hover:text-primary"
+                            className="w-full cursor-pointer rounded-xl border border-transparent px-3 py-2.5 text-center text-base font-semibold tabular-nums transition-all hover:border-primary/25 hover:bg-primary/10 hover:text-primary"
                             onClick={() => startEdit(cell.id, selectedDuration, cell.value)}
                             title="انقر للتعديل"
                           >
@@ -524,7 +516,7 @@ export default function ExportPricingList() {
                       const firstCell = row.levels.values().next().value as { id: number } | undefined;
                       if (!firstCell) return null;
                       return (
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => deleteRow(firstCell.id)}>
+                        <Button size="icon" variant="ghost" className="h-8 w-8 cursor-pointer text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => deleteRow(firstCell.id)}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       );

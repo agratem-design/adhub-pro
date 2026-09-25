@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
-import { Plus, MapPin, Clock, Calendar, Search, Filter, FileText, User } from 'lucide-react';
+import { Plus, MapPin, Clock, Calendar, Search, Filter, FileText, User, RefreshCw, ArrowLeft, TimerReset } from 'lucide-react';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 import { BillboardExtendRentalDialog } from '@/components/billboards/BillboardExtendRentalDialog';
@@ -54,10 +54,9 @@ export default function ExtendedBillboards() {
 
       // جلب بيانات اللوحات
       const billboardIds = extensionsData?.map(e => e.billboard_id) || [];
-      const { data: billboards } = await supabase
-        .from('billboards')
-        .select('*')
-        .in('ID', billboardIds);
+      const { data: billboards } = billboardIds.length
+        ? await supabase.from('billboards').select('*').in('ID', billboardIds)
+        : { data: [] as any[] };
 
       // دمج البيانات
       const enrichedExtensions: ExtendedBillboard[] = extensionsData?.map(ext => ({
@@ -103,38 +102,41 @@ export default function ExtendedBillboards() {
 
   return (
     <>
-      <div className="space-y-6 p-6">
+      <div className="min-h-screen space-y-6 bg-muted/20 p-4 md:p-6" dir="rtl">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Plus className="h-7 w-7 text-orange-500" />
-              اللوحات الممددة
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              جميع اللوحات التي تم تمديد إيجارها
-            </p>
+        <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-l from-primary/15 via-card to-card p-5 shadow-sm md:p-7">
+          <div className="absolute -left-10 -top-16 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
+          <div className="relative flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-lg shadow-primary/20"><TimerReset className="h-6 w-6" /></div>
+              <div>
+                <div className="mb-1 flex items-center gap-2"><h1 className="text-2xl font-black tracking-tight md:text-3xl">اللوحات الممددة</h1><Badge className="bg-primary/15 text-primary hover:bg-primary/20">سجل التمديدات</Badge></div>
+                <p className="text-sm text-muted-foreground">تابع مدد اللوحات وتواريخ توفرها الجديدة من مكان واحد.</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" className="cursor-pointer gap-2 bg-background/70 transition-all duration-200 hover:border-primary hover:text-primary" onClick={fetchExtensions} disabled={loading}><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />تحديث</Button>
+              <div className="rounded-xl border border-primary/20 bg-background/70 px-4 py-2 text-center"><p className="text-2xl font-black text-primary">{extensions.length}</p><p className="text-[11px] text-muted-foreground">عملية تمديد</p></div>
+            </div>
           </div>
-          <Badge className="bg-orange-500 hover:bg-orange-600 text-lg px-4 py-2">
-            {extensions.length} تمديد
-          </Badge>
         </div>
 
         {/* Filters */}
-        <Card>
-          <CardContent className="pt-4">
-            <div className="flex flex-col md:flex-row gap-4">
+        <Card className="border-border/80 shadow-sm">
+          <CardContent className="p-4">
+            <div className="mb-3 flex items-center gap-2 text-sm font-bold"><Filter className="h-4 w-4 text-primary" />تصفية سجل التمديدات</div>
+            <div className="flex flex-col gap-3 md:flex-row">
               <div className="relative flex-1">
                 <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="بحث باسم اللوحة أو السبب..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pr-10"
+                  className="h-11 pr-10"
                 />
               </div>
               <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger className="w-full md:w-[200px]">
+              <SelectTrigger className="h-11 w-full md:w-[220px]">
                   <Filter className="h-4 w-4 ml-2" />
                   <SelectValue placeholder="نوع التمديد" />
                 </SelectTrigger>
@@ -150,20 +152,18 @@ export default function ExtendedBillboards() {
         </Card>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card className="border-orange-500/50 bg-orange-500/5">
-            <CardContent className="pt-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Card className="border-primary/25 bg-primary/5 shadow-sm"><CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">إجمالي التمديدات</p>
-                  <p className="text-2xl font-bold text-orange-600">{extensions.length}</p>
+                  <p className="text-2xl font-bold text-primary">{extensions.length}</p>
                 </div>
-                <Plus className="h-8 w-8 text-orange-500" />
+                <Plus className="h-8 w-8 text-primary" />
               </div>
             </CardContent>
           </Card>
-          <Card className="border-blue-500/50 bg-blue-500/5">
-            <CardContent className="pt-4">
+          <Card className="border-blue-500/25 bg-blue-500/5 shadow-sm"><CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">إجمالي الأيام</p>
@@ -173,8 +173,7 @@ export default function ExtendedBillboards() {
               </div>
             </CardContent>
           </Card>
-          <Card className="border-green-500/50 bg-green-500/5">
-            <CardContent className="pt-4">
+          <Card className="border-emerald-500/25 bg-emerald-500/5 shadow-sm"><CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">مناسبات عامة</p>
@@ -184,8 +183,7 @@ export default function ExtendedBillboards() {
               </div>
             </CardContent>
           </Card>
-          <Card className="border-purple-500/50 bg-purple-500/5">
-            <CardContent className="pt-4">
+          <Card className="border-violet-500/25 bg-violet-500/5 shadow-sm"><CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">تأخير تركيب</p>
@@ -199,14 +197,16 @@ export default function ExtendedBillboards() {
 
         {/* Extensions Grid */}
         {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+          <div className="rounded-2xl border border-border bg-card py-16 text-center shadow-sm">
+            <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-primary/20 border-t-primary" />
+            <p className="text-sm text-muted-foreground">جاري تحميل سجل التمديدات...</p>
           </div>
         ) : filteredExtensions.length === 0 ? (
-          <Card>
-            <CardContent className="py-12 text-center">
-              <Plus className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-lg text-muted-foreground">لا توجد تمديدات</p>
+          <Card className="border-dashed shadow-sm"><CardContent className="py-16 text-center">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted"><TimerReset className="h-7 w-7 text-muted-foreground" /></div>
+              <p className="text-lg font-bold">لا توجد نتائج</p>
+              <p className="mt-1 text-sm text-muted-foreground">جرّب تغيير البحث أو نوع التمديد.</p>
+              {(searchTerm || filterType !== 'all') && <Button variant="ghost" className="mt-3 cursor-pointer text-primary" onClick={() => { setSearchTerm(''); setFilterType('all'); }}>مسح الفلاتر</Button>}
             </CardContent>
           </Card>
         ) : (
@@ -214,15 +214,15 @@ export default function ExtendedBillboards() {
             {filteredExtensions.map((ext) => (
               <Card 
                 key={ext.id} 
-                className="overflow-hidden border-2 border-orange-200 dark:border-orange-900 hover:shadow-lg transition-shadow"
+                className="group overflow-hidden border-border/80 bg-card shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-xl"
               >
                 {/* Billboard Image */}
-                <div className="relative aspect-video bg-muted">
+                <div className="relative aspect-[16/9] overflow-hidden bg-muted">
                   {ext.billboard?.Image_URL ? (
                     <img
                       src={ext.billboard.Image_URL}
                       alt={ext.billboard?.Billboard_Name || `لوحة #${ext.billboard_id}`}
-                      className="w-full h-full object-cover"
+                      className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                       onError={(e) => {
                         (e.target as HTMLImageElement).src = '/placeholder.svg';
                       }}
@@ -234,9 +234,8 @@ export default function ExtendedBillboards() {
                   )}
                   
                   {/* Extension Days Badge */}
-                  <div className="absolute top-2 right-2 bg-orange-500 text-white px-3 py-1 rounded-full flex items-center gap-1 shadow-lg">
-                    <Plus className="h-4 w-4" />
-                    <span className="text-sm font-bold">{ext.extension_days} يوم</span>
+                  <div className="absolute right-3 top-3 flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-white shadow-lg">
+                    <Plus className="h-3.5 w-3.5" /><span className="text-xs font-bold">{ext.extension_days} يوم تمديد</span>
                   </div>
                   
                   {/* Billboard ID */}
@@ -246,7 +245,7 @@ export default function ExtendedBillboards() {
 
                   {/* Extension Type */}
                   <div className="absolute top-2 left-2">
-                    <Badge variant="secondary" className="text-xs">
+                    <Badge variant="secondary" className="border-0 bg-background/90 text-xs shadow-sm backdrop-blur">
                       {EXTENSION_TYPE_LABELS[ext.extension_type] || ext.extension_type}
                     </Badge>
                   </div>
@@ -254,7 +253,7 @@ export default function ExtendedBillboards() {
 
                 <CardContent className="p-4 space-y-3">
                   {/* Billboard Name */}
-                  <h3 className="font-bold text-lg line-clamp-1">
+                  <h3 className="line-clamp-1 text-lg font-black">
                     {ext.billboard?.Billboard_Name || `لوحة #${ext.billboard_id}`}
                   </h3>
 
@@ -284,30 +283,26 @@ export default function ExtendedBillboards() {
 
                     {/* Dates */}
                     <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="flex items-center gap-1">
-                        <span className="text-muted-foreground">من:</span>
-                        <span className="font-medium text-destructive">
-                          {format(new Date(ext.old_end_date), 'dd/MM/yyyy')}
-                        </span>
+                      <div className="rounded-lg border border-destructive/15 bg-destructive/5 p-2">
+                        <span className="block text-muted-foreground">قبل التمديد</span>
+                        <span className="mt-1 block font-bold text-destructive">{format(new Date(ext.old_end_date), 'dd MMM yyyy', { locale: ar })}</span>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <span className="text-muted-foreground">إلى:</span>
-                        <span className="font-medium text-green-600">
-                          {format(new Date(ext.new_end_date), 'dd/MM/yyyy')}
-                        </span>
+                      <div className="rounded-lg border border-emerald-500/15 bg-emerald-500/5 p-2">
+                        <span className="block text-muted-foreground">بعد التمديد</span>
+                        <span className="mt-1 block font-bold text-emerald-700 dark:text-emerald-400">{format(new Date(ext.new_end_date), 'dd MMM yyyy', { locale: ar })}</span>
                       </div>
                     </div>
                   </div>
 
                   {/* Reason Box */}
-                  <div className="p-3 rounded-lg bg-orange-100 dark:bg-orange-900/30 border border-orange-300 dark:border-orange-800">
+                  <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
                     <div className="flex items-center gap-2 mb-1">
-                      <Plus className="h-4 w-4 text-orange-600" />
-                      <span className="font-bold text-sm text-orange-700 dark:text-orange-400">
+                      <Plus className="h-4 w-4 text-primary" />
+                      <span className="text-sm font-bold text-primary">
                         سبب التمديد
                       </span>
                     </div>
-                    <p className="text-sm text-orange-600 dark:text-orange-300 line-clamp-2">
+                    <p className="line-clamp-2 text-sm text-foreground/80">
                       {ext.reason}
                     </p>
                     {ext.notes && (
@@ -330,7 +325,7 @@ export default function ExtendedBillboards() {
                     <Button 
                       size="sm" 
                       variant="outline" 
-                      className="flex-1"
+                      className="flex-1 cursor-pointer transition-all duration-200 hover:border-primary hover:text-primary"
                       onClick={() => navigate(`/admin/contracts`)}
                     >
                       عرض العقد
@@ -338,7 +333,7 @@ export default function ExtendedBillboards() {
                     <Button 
                       size="sm" 
                       variant="default"
-                      className="flex-1 bg-orange-500 hover:bg-orange-600"
+                      className="flex-1 cursor-pointer bg-primary transition-all duration-200 hover:bg-primary/90"
                       onClick={() => handleExtendMore(ext.billboard)}
                     >
                       <Plus className="h-4 w-4 ml-1" />

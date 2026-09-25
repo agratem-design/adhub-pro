@@ -579,6 +579,7 @@ export const BillboardAddDialog: React.FC<BillboardAddDialogProps> = ({
     const payload: any = {
       ID: Number(ID),
       Billboard_Name,
+      ...(addForm.print_size?.trim() ? { print_size: addForm.print_size.trim() } : {}),
       City,
       Municipality,
       District,
@@ -1060,6 +1061,11 @@ export const BillboardAddDialog: React.FC<BillboardAddDialogProps> = ({
                     <Plus className="h-4 w-4" />
                   </Button>
                 </div>
+              </div>
+              <div>
+                <Label htmlFor="addForm-print-size" className="text-xs text-muted-foreground">مقاس الطباعة (متر)</Label>
+                <Input id="addForm-print-size" dir="ltr" value={addForm.print_size || ''} onChange={e => setAddForm((p: any) => ({ ...p, print_size: e.target.value }))} maxLength={100} placeholder={sizes.find(s => s.name === addForm.Size)?.print_size || 'مثال: 4.20 × 3.20'} />
+                <p className="text-[11px] text-muted-foreground mt-1">اختياري؛ يُستخدم مقاس الطباعة من إعدادات المقاس عند تركه فارغًا.</p>
               </div>
               <div>
                 <Label className="text-xs text-muted-foreground">عدد الأوجه</Label>

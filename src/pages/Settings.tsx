@@ -1,4 +1,6 @@
 // @ts-nocheck
+import { printSizeCatalog } from '@/utils/printSizeCatalog';
+import { calculatePrintMargins } from '@/utils/printMargins';
 import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import {
-  Plus, Edit, Trash2, Layers, Tag, Save, X, MapPin, RefreshCw, DollarSign, Ruler, Image as ImageIcon,
+  Printer, Plus, Edit, Trash2, Layers, Tag, Save, X, MapPin, RefreshCw, DollarSign, Ruler, Image as ImageIcon,
   Building, Upload, Sparkles, CheckCircle2, Loader2
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
@@ -17,6 +19,7 @@ import { toast } from 'sonner';
 import { uploadImage } from '@/services/imageUploadService';
 
 interface BillboardSize {
+  print_size?: string | null;
   id: number;
   name: string;
   width: number;
@@ -80,6 +83,7 @@ export default function BillboardSettings() {
   const [sizeForm, setSizeForm] = useState({
     id: 0,
     name: '',
+    print_size: '',
     width: 0,
     height: 0,
     description: '',
@@ -190,6 +194,7 @@ export default function BillboardSettings() {
 
       const payload = {
         name: sizeForm.name.trim(),
+        ...(sizeForm.print_size?.trim() || sizes.find(s => s.id === sizeForm.id)?.print_size !== undefined ? { print_size: sizeForm.print_size?.trim() || null } : {}),
         width: sizeForm.width,
         height: sizeForm.height,
         description: sizeForm.description,
@@ -199,17 +204,28 @@ export default function BillboardSettings() {
       };
 
       if (editMode) {
+        const oldSize = sizes.find(s => s.id === sizeForm.id);
         const { error } = await supabase.from('sizes').update(payload).eq('id', sizeForm.id);
         if (error) throw error;
-        toast.success('تم تحديث الحجم بنجاح');
+
+        // إذا تم تغيير اسم المقاس، نقوم بتحديث اللوحات والأسعار التابعة له لضمان عدم انفصال البيانات
+        if (oldSize && oldSize.name !== payload.name) {
+          console.log(`[Settings] تحديث اسم المقاس من "${oldSize.name}" إلى "${payload.name}" عبر الجداول...`);
+          await supabase.from('billboards').update({ Size: payload.name, Order_Size: payload.name }).eq('Size', oldSize.name);
+          await supabase.from('pricing').update({ size: payload.name }).eq('size', oldSize.name);
+          await supabase.from('installation_print_pricing').update({ size: payload.name }).eq('size', oldSize.name);
+          await supabase.from('export_pricing').update({ size: payload.name }).eq('size', oldSize.name);
+        }
+
+        toast.success('تم تحديث المقاس بنجاح');
       } else {
         const { error } = await supabase.from('sizes').insert(payload);
         if (error) throw error;
-        toast.success('تم إضافة الحجم بنجاح');
+        toast.success('تم إضافة المقاس بنجاح');
       }
 
       setSizeDialog(false);
-      setSizeForm({ id: 0, name: '', width: 0, height: 0, description: '', installation_price: 0, sort_order: 999, image_url: '' });
+      setSizeForm({ id: 0, name: '', print_size: '', width: 0, height: 0, description: '', installation_price: 0, sort_order: 999, image_url: '' });
       setEditMode(false);
       loadData();
     } catch (error: any) {
@@ -222,6 +238,7 @@ export default function BillboardSettings() {
     setSizeForm({
       id: size.id,
       name: size.name,
+      print_size: size.print_size || '',
       width: size.width,
       height: size.height,
       description: size.description || '',
@@ -512,11 +529,12 @@ export default function BillboardSettings() {
                     قم بتعديل المقاسات، ترتيبها، ورفع صورة PNG بدون خلفية لكل مقاس لدمجها تلقائياً في السكيل الواقعي
                   </CardDescription>
                 </div>
+                <Button variant="outline" className="cursor-pointer transition-all duration-200" onClick={() => printSizeCatalog(sizes)}><Printer className="h-4 w-4 ml-2" />طباعة مقاسات الطباعة</Button>
                 <Dialog open={sizeDialog} onOpenChange={setSizeDialog}>
                   <DialogTrigger asChild>
                     <Button
                       onClick={() => {
-                        setSizeForm({ id: 0, name: '', width: 0, height: 0, description: '', installation_price: 0, sort_order: sizes.length + 1, image_url: '' });
+                        setSizeForm({ id: 0, name: '', print_size: '', width: 0, height: 0, description: '', installation_price: 0, sort_order: sizes.length + 1, image_url: '' });
                         setEditMode(false);
                       }}
                       className="rounded-xl bg-primary text-primary-foreground font-semibold shadow gap-2 h-10 px-5"
@@ -534,39 +552,104 @@ export default function BillboardSettings() {
                     </DialogHeader>
 
                     <div className="space-y-4 py-2">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold">اسم المقاس *</Label>
-                        <Input
-                          value={sizeForm.name}
-                          onChange={e => setSizeForm(p => ({ ...p, name: e.target.value }))}
-                          placeholder="مثال: 12x4 أو 13x5"
-                          className="rounded-xl border-border bg-background h-10 font-bold"
-                        />
-                      </div>
-
+                      {/* 1. الأبعاد الأساسية: العرض أولاً ثم الارتفاع */}
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold">العرض (متر) *</Label>
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs font-semibold">العرض (متر) *</Label>
+                            <span className="text-[10px] text-primary font-bold">الأول في التسمية</span>
+                          </div>
                           <Input
                             type="number"
                             step="0.1"
                             value={sizeForm.width || ''}
-                            onChange={e => setSizeForm(p => ({ ...p, width: parseFloat(e.target.value) || 0 }))}
+                            onChange={e => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setSizeForm(p => ({
+                                ...p,
+                                width: val,
+                                ...(!editMode && val > 0 && p.height > 0 && (!p.name || p.name.includes('x') || p.name.includes('X'))
+                                  ? { name: `${val}x${p.height}` }
+                                  : {})
+                              }));
+                            }}
                             placeholder="12.0"
-                            className="rounded-xl border-border bg-background h-10"
+                            className="rounded-xl border-border bg-background h-10 font-bold"
                           />
                         </div>
                         <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold">الارتفاع (متر) *</Label>
+                          <div className="flex items-center justify-between">
+                            <Label className="text-xs font-semibold">الارتفاع (متر) *</Label>
+                            <span className="text-[10px] text-muted-foreground">الثاني في التسمية</span>
+                          </div>
                           <Input
                             type="number"
                             step="0.1"
                             value={sizeForm.height || ''}
-                            onChange={e => setSizeForm(p => ({ ...p, height: parseFloat(e.target.value) || 0 }))}
+                            onChange={e => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setSizeForm(p => ({
+                                ...p,
+                                height: val,
+                                ...(!editMode && val > 0 && p.width > 0 && (!p.name || p.name.includes('x') || p.name.includes('X'))
+                                  ? { name: `${p.width}x${val}` }
+                                  : {})
+                              }));
+                            }}
                             placeholder="4.0"
-                            className="rounded-xl border-border bg-background h-10"
+                            className="rounded-xl border-border bg-background h-10 font-bold"
                           />
                         </div>
+                      </div>
+
+                      {/* 2. اسم المقاس مع زر التوليد بالعرض أولاً */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs font-semibold">اسم المقاس *</Label>
+                          {sizeForm.width > 0 && sizeForm.height > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const suffixMatch = sizeForm.name.match(/[\s\-_].*$/);
+                                const suffix = suffixMatch ? suffixMatch[0] : '';
+                                setSizeForm(p => ({ ...p, name: `${sizeForm.width}x${sizeForm.height}${suffix}` }));
+                              }}
+                              className="text-[11px] text-primary hover:underline cursor-pointer font-medium"
+                            >
+                              توليد بالعرض أولاً: {sizeForm.width}x{sizeForm.height}
+                            </button>
+                          )}
+                        </div>
+                        <Input
+                          value={sizeForm.name}
+                          onChange={e => setSizeForm(p => ({ ...p, name: e.target.value }))}
+                          placeholder="مثال: 12x4 أو 13x5 (العرض × الارتفاع)"
+                          className="rounded-xl border-border bg-background h-10 font-bold"
+                        />
+                        <p className="text-[11px] text-muted-foreground">
+                          القاعدة القياسية المعتمدة: <strong className="text-foreground">العرض أولاً ثم الارتفاع</strong> دائماً (العرض × الارتفاع).
+                        </p>
+                      </div>
+
+                      {/* 3. مقاس الطباعة */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <Label htmlFor="size-print-size" className="text-xs font-semibold">مقاس الطباعة (متر)</Label>
+                          <span className="text-[10px] text-muted-foreground">لمعرفة هوامش الطباعة بدقة</span>
+                        </div>
+                        <Input id="size-print-size" dir="ltr" value={sizeForm.print_size || ''} onChange={e => setSizeForm(p => ({ ...p, print_size: e.target.value }))} placeholder="مثال: 12.20 × 4.20" maxLength={100} />
+                        {(() => {
+                          const marginCalc = calculatePrintMargins(sizeForm.print_size, sizeForm.name, sizeForm.width, sizeForm.height);
+                          if (!marginCalc.hasValidPrintSize) {
+                            return <p className="text-xs text-muted-foreground">المقاس الافتراضي للطباعة، ويظهر في قائمة الأسعار لمعرفة هوامش الطباعة بالضبط.</p>;
+                          }
+                          return (
+                            <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/25 text-xs text-amber-700 dark:text-amber-300">
+                              <span className="font-bold">هوامش الطباعة المحسوبة: </span>
+                              <span>{marginCalc.summaryText}</span>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
@@ -763,6 +846,14 @@ export default function BillboardSettings() {
                         <div className="flex items-center justify-between text-xs text-muted-foreground">
                           <span>الأبعاد: {size.width} × {size.height} م</span>
                           <span>التركيب: {size.installation_price ? `${size.installation_price} د.ل` : 'مجاني'}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground flex items-center justify-between flex-wrap gap-1">
+                          <span>مقاس الطباعة: <bdi className="font-semibold text-foreground">{size.print_size || 'غير محدد'}</bdi></span>
+                          {size.print_size && (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20">
+                              {calculatePrintMargins(size.print_size, size.name, size.width, size.height).shortSummary}
+                            </span>
+                          )}
                         </div>
                         {size.description && (
                           <p className="text-[11px] text-muted-foreground/70 truncate">{size.description}</p>

@@ -26,9 +26,13 @@ import {
   Clock,
   XCircle,
   DollarSign,
+  RefreshCw,
+  ExternalLink,
+  Printer,
 } from 'lucide-react';
 import {
   listEventContracts,
+  getEventContract,
   deleteEventContract,
   EventContract,
 } from '@/services/eventContractService';
@@ -96,6 +100,17 @@ export default function EventsContracts() {
     }
   };
 
+  const printEventContract = async (id: string) => {
+    const printWindow = window.open('', '_blank', 'width=900,height=700');
+    if (!printWindow) { toast.error('اسمح بفتح النوافذ المنبثقة للطباعة'); return; }
+    try {
+      const { contract, billboards } = await getEventContract(id);
+      const rows = billboards.map((b: any) => `<tr><td>${b.billboard_name || b.billboard_id}</td><td>${Number(b.daily_price || 0).toLocaleString('ar-LY')} د.ل</td><td>${Number(b.total_price || 0).toLocaleString('ar-LY')} د.ل</td></tr>`).join('');
+      printWindow.document.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${contract.event_contract_number}</title><style>body{font-family:Arial,sans-serif;padding:32px;color:#1f2937}h1{color:#b8860b;margin-bottom:4px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;background:#faf7ed;padding:16px;border-radius:8px}table{width:100%;border-collapse:collapse;margin-top:16px}th,td{border:1px solid #d1d5db;padding:10px;text-align:right}th{background:#f5e9b8}.total{font-size:20px;font-weight:bold;text-align:left;margin-top:20px}</style></head><body><h1>عقد إيجار لوحات مناسبة</h1><div>رقم العقد: <strong>${contract.event_contract_number}</strong></div><div class="meta"><div>المناسبة: <strong>${contract.event_name}</strong></div><div>العميل: <strong>${contract.customer_name}</strong></div><div>من: <strong>${contract.start_date}</strong></div><div>إلى: <strong>${contract.end_date}</strong></div><div>نوع المناسبة: <strong>${contract.event_type || '—'}</strong></div></div><h2>اللوحات المؤجرة للمناسبة</h2><table><thead><tr><th>اللوحة</th><th>سعر اليوم</th><th>الإجمالي</th></tr></thead><tbody>${rows}</tbody></table><div class="total">الإجمالي النهائي: ${Number(contract.total_amount || 0).toLocaleString('ar-LY')} د.ل</div><script>window.onload=function(){window.print()}</script></body></html>`);
+      printWindow.document.close();
+    } catch (e: any) { printWindow.close(); toast.error('تعذر تجهيز العقد للطباعة: ' + e.message); }
+  };
+
   const statusBadge = (s: string) => {
     if (s === 'active')
       return (
@@ -124,36 +139,38 @@ export default function EventsContracts() {
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold bg-gradient-to-l from-fuchsia-600 to-purple-600 bg-clip-text text-transparent flex items-center gap-2">
-            <PartyPopper className="h-7 w-7 text-fuchsia-500" />
+          <h1 className="text-3xl font-bold text-foreground flex items-center gap-2">
+            <PartyPopper className="h-7 w-7 text-primary" />
             عقود المناسبات
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             إدارة عقود إيجار اللوحات للمناسبات والفعاليات
           </p>
         </div>
-        <Button
-          onClick={() => navigate('/admin/events-contracts/new')}
-          className="gap-2 bg-fuchsia-600 hover:bg-fuchsia-700 text-white"
-        >
-          <Plus className="h-4 w-4" /> عقد مناسبة جديد
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="icon" onClick={load} disabled={loading} title="تحديث القائمة" className="cursor-pointer">
+            <RefreshCw className={loading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+          </Button>
+          <Button onClick={() => navigate('/admin/events-contracts/new')} className="gap-2 cursor-pointer">
+            <Plus className="h-4 w-4" /> عقد مناسبة جديد
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card className="border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-500/10 to-transparent">
+        <Card className="border-border bg-primary/5">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-muted-foreground">إجمالي العقود</p>
-                <p className="text-2xl font-bold text-fuchsia-600 tabular-nums">{stats.total}</p>
+                <p className="text-2xl font-bold text-primary tabular-nums">{stats.total}</p>
               </div>
-              <PartyPopper className="h-8 w-8 text-fuchsia-500/40" />
+              <PartyPopper className="h-8 w-8 text-primary/40" />
             </div>
           </CardContent>
         </Card>
-        <Card className="border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-transparent">
+          <Card className="border-border bg-emerald-500/5">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -164,7 +181,7 @@ export default function EventsContracts() {
             </div>
           </CardContent>
         </Card>
-        <Card className="border-blue-500/20 bg-gradient-to-br from-blue-500/10 to-transparent">
+          <Card className="border-border bg-blue-500/5">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -175,7 +192,7 @@ export default function EventsContracts() {
             </div>
           </CardContent>
         </Card>
-        <Card className="border-amber-500/20 bg-gradient-to-br from-amber-500/10 to-transparent">
+        <Card className="border-border bg-amber-500/5">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
@@ -224,7 +241,7 @@ export default function EventsContracts() {
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-fuchsia-500 mx-auto mb-4" />
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4" />
             <p className="text-muted-foreground">جاري التحميل...</p>
           </div>
         </div>
@@ -239,7 +256,7 @@ export default function EventsContracts() {
       ) : (
         <div>
           <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-            <CheckCircle className="h-5 w-5 text-fuchsia-500" />
+            <CheckCircle className="h-5 w-5 text-primary" />
             العقود ({filtered.length})
           </h3>
           <div
@@ -249,14 +266,14 @@ export default function EventsContracts() {
             {filtered.map((c) => (
               <Card
                 key={c.id}
-                className="hover:shadow-lg transition-all border-fuchsia-500/20 overflow-hidden"
+                className="hover:shadow-lg transition-all border-border hover:border-primary/40 overflow-hidden"
               >
-                <div className="h-1 bg-gradient-to-r from-fuchsia-500 to-purple-500" />
+                <div className="h-1 bg-primary" />
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <Badge
                       variant="outline"
-                      className="text-fuchsia-600 border-fuchsia-500/40 font-bold"
+                      className="text-primary border-primary/40 font-bold"
                     >
                       {c.event_contract_number}
                     </Badge>
@@ -276,9 +293,13 @@ export default function EventsContracts() {
                     <Calendar className="h-4 w-4" />
                     {c.start_date} ← {c.end_date}
                   </div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>لوحات المناسبة</span>
+                    <span className="font-semibold text-foreground">{Number((c as any).billboard_count || 0)} لوحة</span>
+                  </div>
                   <div className="flex items-center justify-between pt-2 border-t border-border">
                     <span className="text-xs text-muted-foreground">الإجمالي</span>
-                    <span className="text-lg font-bold text-fuchsia-600 tabular-nums">
+                    <span className="text-lg font-bold text-primary tabular-nums">
                       {Number(c.total_amount).toLocaleString('en-US')} د.ل
                     </span>
                   </div>
@@ -290,6 +311,12 @@ export default function EventsContracts() {
                       onClick={() => navigate(`/admin/events-contracts/edit/${c.id}`)}
                     >
                       <Pencil className="h-3.5 w-3.5" /> تعديل
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-1 cursor-pointer" onClick={() => navigate(`/admin/events-contracts/edit/${c.id}`)} title="فتح العقد">
+                      <ExternalLink className="h-3.5 w-3.5" /> فتح
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-1 cursor-pointer" onClick={() => printEventContract(c.id)} title="طباعة العقد">
+                      <Printer className="h-3.5 w-3.5" /> طباعة
                     </Button>
                     <Button
                       size="sm"

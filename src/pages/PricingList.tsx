@@ -1,3 +1,8 @@
+import { CompanyPriceEditor } from '@/components/pricing/CompanyPriceEditor';
+import { normalizePrintLevels, resolvePrintLevels, type PrintLevelSelection } from '@/utils/pricingPrintLevels';
+import { escapePrintText, printSizeCatalog } from '@/utils/printSizeCatalog';
+import './PricingList.css';
+import { pricingPrintStyles } from '@/utils/pricingPrintStyles';
 import { printablePricing } from '@/utils/printablePricing';
 import { DurationEditor } from '@/components/pricing/DurationEditor';
 import { useQueryClient } from '@tanstack/react-query';
@@ -10,11 +15,19 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import * as UIDialog from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Printer, Edit2, Trash2, Plus, Minus, Download, Tag, Users, Search, Check, Filter, X, ChevronDown, RotateCcw } from 'lucide-react';
+import { Printer, Edit2, Trash2, Plus, Minus, Download, Tag, Users, Search, Check, Filter, X, ChevronDown, RotateCcw, Sun, Moon, Layers, Palette, CheckCircle2, FileSpreadsheet, EyeOff, Percent, Sparkles, TrendingDown, TrendingUp, ShieldCheck, Calendar, Clock, ChevronLeft, ChevronRight, Save, ArrowUpDown } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
+import logoFaresSvgRaw from '@/assets/logofares.svg?raw';
 import logoFaresGoldSvgRaw from '@/assets/logofaresgold.svg?raw';
+import {
+  DEFAULT_PRIMARY_CUSTOMERS,
+  resolveOrderedCategories,
+  loadCachedCategoryOrder,
+  persistCategoryOrder,
+} from '@/utils/pricingCategoryOrder';
+import { CategoryOrderDialog } from '@/components/pricing/CategoryOrderDialog';
 
 function svgTextToDataUri(svgText: string): string {
   const bytes = new TextEncoder().encode(svgText);
@@ -23,7 +36,80 @@ function svgTextToDataUri(svgText: string): string {
   return `data:image/svg+xml;base64,${btoa(binary)}`;
 }
 
+const LOGO_FARES_BLACK_FALLBACK_SRC = svgTextToDataUri(logoFaresSvgRaw);
 const LOGO_FARES_GOLD_FALLBACK_SRC = svgTextToDataUri(logoFaresGoldSvgRaw);
+
+// مفتاح تخزين إعدادات وتفضيلات الطباعة والتصدير في التخزين المحلي
+const PRINT_SETTINGS_STORAGE_KEY = 'adhub_pricing_print_settings';
+
+export const ARABIC_MONTH_NAMES = [
+  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+] as const;
+
+export interface PricingPrintSettings {
+  category: string;
+  level: PrintLevelSelection;
+  theme: 'dark' | 'light';
+  logo: string;
+  showLevelColumn: boolean;
+  priceMarkupPercent: number;
+  autoSave?: boolean;
+  durationVisibility?: Record<string, boolean>;
+  month?: string;
+  year?: number;
+}
+
+const loadSavedPrintSettings = (): PricingPrintSettings => {
+  const currentMonth = ARABIC_MONTH_NAMES[new Date().getMonth()];
+  const currentYear = new Date().getFullYear();
+  if (typeof window === 'undefined') {
+    return {
+      category: 'شركات',
+      level: 'all',
+      theme: 'light',
+      logo: '/logofares.svg',
+      showLevelColumn: false,
+      priceMarkupPercent: 0,
+      autoSave: true,
+      month: currentMonth,
+      year: currentYear,
+    };
+  }
+  try {
+    const raw = localStorage.getItem(PRINT_SETTINGS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        category: typeof parsed.category === 'string' && parsed.category ? parsed.category : 'شركات',
+        level: normalizePrintLevels(parsed.level),
+        theme: parsed.theme === 'dark' ? 'dark' : 'light',
+        logo: typeof parsed.logo === 'string' && parsed.logo ? parsed.logo : '/logofares.svg',
+        showLevelColumn: parsed.showLevelColumn === true,
+        priceMarkupPercent: typeof parsed.priceMarkupPercent === 'number' ? parsed.priceMarkupPercent : 0,
+        autoSave: parsed.autoSave !== false,
+        durationVisibility: parsed.durationVisibility && typeof parsed.durationVisibility === 'object' && !Array.isArray(parsed.durationVisibility)
+          ? Object.fromEntries(Object.entries(parsed.durationVisibility).filter(([, value]) => typeof value === 'boolean')) as Record<string, boolean>
+          : {},
+        month: typeof parsed.month === 'string' && parsed.month ? parsed.month : currentMonth,
+        year: typeof parsed.year === 'number' && parsed.year > 2000 ? parsed.year : currentYear,
+      };
+    }
+  } catch (e) {
+    console.error('Error loading print settings:', e);
+  }
+  return {
+    category: 'شركات',
+    level: 'all',
+    theme: 'light',
+    logo: '/logofares.svg',
+    showLevelColumn: false,
+    priceMarkupPercent: 0,
+    autoSave: true,
+    month: currentMonth,
+    year: currentYear,
+  };
+};
 
 function normalize(val: any): number | null {
   if (val === null || val === undefined) return null;
@@ -34,14 +120,14 @@ function normalize(val: any): number | null {
 
 type MonthKeyAll = string;
 
-// المدد الافتراضية (احتياطي)
+// المدد الافتراضية (مرتبة تصاعدياً من المدة الأقل إلى المدة الأعلى)
 const DEFAULT_MONTH_OPTIONS = [
-  { key: 'شهر واحد', label: 'شهرياً', months: 1, days: 30, dbColumn: 'one_month', sort_order: 1 },
-  { key: '2 أشهر', label: 'كل شهرين', months: 2, days: 60, dbColumn: '2_months', sort_order: 2 },
-  { key: '3 أشهر', label: 'كل 3 أشهر', months: 3, days: 90, dbColumn: '3_months', sort_order: 3 },
-  { key: '6 أشهر', label: 'كل 6 أشهر', months: 6, days: 180, dbColumn: '6_months', sort_order: 4 },
-  { key: 'سنة كاملة', label: 'سنوي', months: 12, days: 365, dbColumn: 'full_year', sort_order: 5 },
-  { key: 'يوم واحد', label: 'يومي', months: 0, days: 1, dbColumn: 'one_day', sort_order: 6 },
+  { key: '15 يوم', label: '15 يوم', months: 0.5, days: 15, dbColumn: 'duration_15_days', sort_order: 1 },
+  { key: 'شهر واحد', label: 'شهرياً', months: 1, days: 30, dbColumn: 'one_month', sort_order: 2 },
+  { key: '2 أشهر', label: 'كل شهرين', months: 2, days: 60, dbColumn: '2_months', sort_order: 3 },
+  { key: '3 أشهر', label: 'كل 3 أشهر', months: 3, days: 90, dbColumn: '3_months', sort_order: 4 },
+  { key: '6 أشهر', label: 'كل 6 أشهر', months: 6, days: 180, dbColumn: '6_months', sort_order: 5 },
+  { key: 'سنة كاملة', label: 'سنوي', months: 12, days: 365, dbColumn: 'full_year', sort_order: 6 },
 ];
 
 interface PricingDuration {
@@ -57,7 +143,7 @@ interface PricingDuration {
 
 type MonthKey = string;
 
-const PRIMARY_CUSTOMERS: string[] = ['عادي', 'مسوق', 'شركات'];
+const PRIMARY_CUSTOMERS: string[] = DEFAULT_PRIMARY_CUSTOMERS;
 const PRIMARY_SENTINEL = '__primary__';
 
 interface BillboardLevel {
@@ -91,6 +177,7 @@ interface PricingData {
 }
 
 interface SizeData {
+  print_size?: string | null;
   id: number;
   name: string;
   level?: string; // جعل level اختياري لأنه قد لا يكون موجود
@@ -108,29 +195,38 @@ export default function PricingList() {
   const [loading, setLoading] = useState(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
 
-  // إنشاء MONTH_OPTIONS من المدد المحملة
+  // إنشاء MONTH_OPTIONS من المدد المحملة مرتبة تصاعدياً من الأقل إلى الأعلى
   const MONTH_OPTIONS = useMemo(() => {
-    if (durations.length === 0) {
-      return DEFAULT_MONTH_OPTIONS.map(d => ({
-        key: d.key,
-        label: d.label,
-        months: d.months,
-        days: d.days,
-        dbColumn: d.dbColumn,
-        sort_order: d.sort_order
-      }));
-    }
-    return durations
-      .filter(d => d.is_active)
-      .sort((a, b) => a.sort_order - b.sort_order)
-      .map(d => ({
-        key: d.name,
-        label: d.label,
-        months: d.months,
-        days: d.days,
-        dbColumn: d.db_column,
-        sort_order: d.sort_order
-      }));
+    const list = durations.length === 0
+      ? DEFAULT_MONTH_OPTIONS.map(d => ({
+          key: d.key,
+          label: d.label,
+          months: d.months,
+          days: d.days,
+          dbColumn: d.dbColumn,
+          sort_order: d.sort_order
+        }))
+      : durations
+          .filter(d => d.is_active && d.name !== 'يوم واحد' && d.db_column !== 'one_day' && Number(d.days) > 1)
+          .map(d => ({
+            key: d.name,
+            label: d.label,
+            months: d.months,
+            days: d.days,
+            dbColumn: d.db_column,
+            sort_order: d.sort_order
+          }));
+
+    // ترتيب المدد تصاعدياً: من المدة الأقل إلى المدة الأعلى
+    return [...list].sort((a, b) => {
+      const daysA = Number(a.days ?? 0);
+      const daysB = Number(b.days ?? 0);
+      if (daysA !== daysB) return daysA - daysB;
+      const monthsA = Number(a.months ?? 0);
+      const monthsB = Number(b.months ?? 0);
+      if (monthsA !== monthsB) return monthsA - monthsB;
+      return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+    });
   }, [durations]);
 
   // استخراج المستويات المتاحة - مرتبة حسب sort_order
@@ -160,9 +256,11 @@ export default function PricingList() {
   }, [levels, sizesData, categories, pricingData]);
 
   const [selectedLevel, setSelectedLevel] = useState<string>('A');
-  const [selectedMonthKey, setSelectedMonthKey] = useState<MonthKey>('شهر واحد');
+  const [selectedMonthKey, setSelectedMonthKey] = useState<MonthKey>('سنة كاملة');
   const [sizeFilter, setSizeFilter] = useState<string[]>([]);
-  const [otherCustomer, setOtherCustomer] = useState<string>(PRIMARY_SENTINEL);
+  const [otherCustomer, setOtherCustomer] = useState<string>('شركات');
+  const [customCategoryOrder, setCustomCategoryOrder] = useState<string[]>(loadCachedCategoryOrder);
+  const [categoryOrderOpen, setCategoryOrderOpen] = useState(false);
 
   const [editing, setEditing] = useState<{ size: string; customer: string; month: MonthKeyAll } | null>(null);
 
@@ -189,24 +287,118 @@ export default function PricingList() {
   const [deleteSizeOpen, setDeleteSizeOpen] = useState(false);
   const [deletingSize, setDeletingSize] = useState<string | null>(null);
 
+  const initialPrintSettings = useMemo(() => loadSavedPrintSettings(), []);
   const [printOpen, setPrintOpen] = useState(false);
-  const [printCategory, setPrintCategory] = useState<string>('عادي');
-  const [printLevel, setPrintLevel] = useState<string>('all');
-  const [showLevelColumn, setShowLevelColumn] = useState(true);
-  const [priceMarkupPercent, setPriceMarkupPercent] = useState<number>(0);
-  const [printTheme, setPrintTheme] = useState<'dark' | 'light'>('light');
+  const [printCategory, setPrintCategory] = useState<string>(initialPrintSettings.category);
+  const [printLevel, setPrintLevel] = useState<PrintLevelSelection>(initialPrintSettings.level);
+  const selectedPrintLevels = resolvePrintLevels(printLevel, allLevels);
+  const printLevelsLabel = printLevel === 'all' ? 'جميع المستويات' : selectedPrintLevels.length
+    ? selectedPrintLevels.map(code => levels.find(level => level.level_code === code)?.level_name || code).join('، ')
+    : 'لم يتم اختيار مستويات';
+  const togglePrintLevel = (code: string) => {
+    setPrintLevel(current => {
+      const selected = resolvePrintLevels(current, allLevels);
+      return selected.includes(code) ? selected.filter(level => level !== code) : [...selected, code];
+    });
+  };
+  const [durationVisibility, setDurationVisibility] = useState<Record<string, boolean>>(initialPrintSettings.durationVisibility || {});
+  const printMonthOptions = MONTH_OPTIONS.filter(option => durationVisibility[option.dbColumn] ?? ![15, 45].includes(option.days));
+  const [showLevelColumn, setShowLevelColumn] = useState<boolean>(initialPrintSettings.showLevelColumn);
+  const [priceMarkupPercent, setPriceMarkupPercent] = useState<number>(initialPrintSettings.priceMarkupPercent);
+  const [printTheme, setPrintTheme] = useState<'dark' | 'light'>(initialPrintSettings.theme);
   const [categorySearchTerm, setCategorySearchTerm] = useState('');
   const [printCategorySearch, setPrintCategorySearch] = useState('');
-  const [printLogo, setPrintLogo] = useState<string>('/logofaresgold.svg');
+  const [printLogo, setPrintLogo] = useState<string>(initialPrintSettings.logo);
+  const [autoSavePrintSettings, setAutoSavePrintSettings] = useState<boolean>(initialPrintSettings.autoSave ?? true);
+  const [printMonth, setPrintMonth] = useState<string>(() => initialPrintSettings.month || ARABIC_MONTH_NAMES[new Date().getMonth()]);
+  const [printYear, setPrintYear] = useState<number>(() => initialPrintSettings.year || new Date().getFullYear());
+  const [hasSavedSettings, setHasSavedSettings] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return !!localStorage.getItem(PRINT_SETTINGS_STORAGE_KEY);
+  });
+
+  // دالة حفظ إعدادات الطباعة والتصدير في المتصفح
+  const savePrintSettings = (showToast = true) => {
+    try {
+      const settingsToSave: PricingPrintSettings = {
+        category: printCategory,
+        level: printLevel,
+        theme: printTheme,
+        logo: printLogo,
+        showLevelColumn,
+        priceMarkupPercent,
+        autoSave: autoSavePrintSettings,
+        durationVisibility,
+        month: printMonth,
+        year: printYear,
+      };
+      localStorage.setItem(PRINT_SETTINGS_STORAGE_KEY, JSON.stringify(settingsToSave));
+      setHasSavedSettings(true);
+      if (showToast) {
+        toast.success('تم حفظ إعدادات وتفضيلات الطباعة بنجاح كإعدادات افتراضية');
+      }
+    } catch (e) {
+      console.error('Failed to save print settings', e);
+      if (showToast) toast.error('فشل في حفظ إعدادات الطباعة');
+    }
+  };
+
+  // دالة استعادة الإعدادات الأصلية
+  const resetPrintSettings = () => {
+    const currentMonth = ARABIC_MONTH_NAMES[new Date().getMonth()];
+    const currentYear = new Date().getFullYear();
+    const defaults: PricingPrintSettings = {
+      category: 'شركات',
+      level: 'all',
+      theme: 'light',
+      logo: '/logofares.svg',
+      showLevelColumn: false,
+      priceMarkupPercent: 0,
+      autoSave: true,
+      month: currentMonth,
+      year: currentYear,
+    };
+    setDurationVisibility({});
+    setPrintCategory(defaults.category);
+    setPrintLevel(defaults.level);
+    setPrintTheme(defaults.theme);
+    setPrintLogo(defaults.logo);
+    setShowLevelColumn(defaults.showLevelColumn);
+    setPriceMarkupPercent(defaults.priceMarkupPercent);
+    setPrintMonth(currentMonth);
+    setPrintYear(currentYear);
+    setAutoSavePrintSettings(true);
+    localStorage.removeItem(PRINT_SETTINGS_STORAGE_KEY);
+    setHasSavedSettings(false);
+    toast.info('تمت استعادة الإعدادات الافتراضية للطباعة والتصدير');
+  };
+  const [relativeTarget, setRelativeTarget] = useState<{ customer: string; size?: string; level?: string } | null>(null);
+  const [showCompanyComparison, setShowCompanyComparison] = useState<boolean>(true);
+  const [comparisonBenchmark, setComparisonBenchmark] = useState<string>('شركات');
+
+  const orderedCategories = useMemo(() => {
+    const allKnown = Array.from(new Set([...PRIMARY_CUSTOMERS, ...categories.map(c => c.name)]));
+    return resolveOrderedCategories(allKnown, customCategoryOrder);
+  }, [categories, customCategoryOrder]);
+
+  const handleSaveCategoryOrder = async (newOrder: string[]) => {
+    setCustomCategoryOrder(newOrder);
+    const ok = await persistCategoryOrder(newOrder);
+    if (ok) {
+      toast.success('تم حفظ ترتيب الفئات بنجاح');
+    } else {
+      toast.info('تم حفظ ترتيب الفئات محلياً');
+    }
+  };
 
   // الشعارات المتوفرة
   const AVAILABLE_LOGOS = [
-    { src: '/logofaresgold.svg', label: 'الفارس الذهبي' },
-    { src: '/logofaresgold.svg', label: 'الفارس' },
-    { src: '/logofares2.svg', label: 'الفارس 2' },
-    { src: '/new-logo.svg', label: 'الشعار الجديد' },
-    { src: '/logo-symbol.svg', label: 'الرمز' },
+    { src: '/logofares.svg', label: 'الفارس الذهبي (كتابة سوداء)' },
+    { src: '/logofaresgold.svg', label: 'الفارس الذهبي (كتابة ذهبية)' },
     { src: '/coplete logofares-text. and sympol.svg', label: 'الشعار الكامل' },
+    { src: '/new-logo.svg', label: 'الشعار الحديث' },
+    { src: '/logofares2.svg', label: 'النمط 2' },
+    { src: '/logo-symbol.svg', label: 'الرمز فقط' },
     { src: '', label: 'بدون شعار' },
   ];
 
@@ -355,6 +547,27 @@ export default function PricingList() {
         setCategories(categoriesData || []);
       }
 
+      // تحميل ترتيب الفئات المخصص من system_settings
+      try {
+        const { data: catOrderData } = await supabase
+          .from('system_settings')
+          .select('setting_value')
+          .eq('setting_key', 'pricing_categories_order')
+          .maybeSingle();
+
+        if (catOrderData?.setting_value) {
+          const parsed = JSON.parse(catOrderData.setting_value);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setCustomCategoryOrder(parsed);
+            try {
+              localStorage.setItem('pricing_categories_order', JSON.stringify(parsed));
+            } catch {}
+          }
+        }
+      } catch (err) {
+        console.warn('[Pricing] تعذر قراءة ترتيب الفئات من system_settings:', err);
+      }
+
       // محاولة تحميل المقاسات من جدول sizes (إذا كان موجود) مرتبة حسب sort_order
       console.log('[Pricing] محاولة تحميل المقاسات...');
       const { data: sizesData, error: sizesError } = await supabase
@@ -424,6 +637,25 @@ export default function PricingList() {
       console.log('[Pricing] تم تغيير المستوى المحدد إلى:', allLevels[0]);
     }
   }, [allLevels, selectedLevel]);
+
+  // عند فتح صفحة الأسعار يتم عرض أعلى مدة (العنصر الأخير في الترتيب التصاعدي)
+  const [hasInitializedDuration, setHasInitializedDuration] = useState(false);
+
+  useEffect(() => {
+    if (MONTH_OPTIONS.length > 0) {
+      if (!hasInitializedDuration) {
+        const highestDuration = MONTH_OPTIONS[MONTH_OPTIONS.length - 1];
+        setSelectedMonthKey(highestDuration.key);
+        setHasInitializedDuration(true);
+      } else {
+        const exists = MONTH_OPTIONS.some(m => m.key === selectedMonthKey);
+        if (!exists) {
+          const highestDuration = MONTH_OPTIONS[MONTH_OPTIONS.length - 1];
+          setSelectedMonthKey(highestDuration.key);
+        }
+      }
+    }
+  }, [MONTH_OPTIONS, hasInitializedDuration, selectedMonthKey]);
 
   // إضافة مستوى جديد
   const addNewLevel = async () => {
@@ -631,34 +863,52 @@ export default function PricingList() {
     }
   };
 
-  // دالة حذف المقاس من قائمة الأسعار
-  const deleteSize = async () => {
+  // دالة حذف المقاس من قائمة الأسعار (يدعم الحذف على مستوى الفئة فقط أو المستوى بالكامل)
+  const deleteSize = async (deleteAllCategories: boolean = false) => {
     if (!deletingSize) return;
 
     try {
-      console.log('[Pricing] بدء حذف المقاس من قائمة الأسعار...', deletingSize, selectedLevel);
+      const targetCustomer = otherCustomer === PRIMARY_SENTINEL ? 'عادي' : otherCustomer;
+      console.log('[Pricing] بدء حذف المقاس...', deletingSize, selectedLevel, targetCustomer, deleteAllCategories);
 
-      // حذف جميع الأسعار للمقاس في المستوى المحدد
-      const { error } = await supabase
-        .from('pricing')
-        .delete()
-        .eq('size', deletingSize)
-        .eq('billboard_level', selectedLevel);
+      if (!deleteAllCategories) {
+        // حذف من الفئة المحددة فقط
+        const { error } = await supabase
+          .from('pricing')
+          .delete()
+          .eq('size', deletingSize)
+          .eq('billboard_level', selectedLevel)
+          .eq('customer_category', targetCustomer);
 
-      if (error) {
-        console.error('[Pricing] خطأ في حذف المقاس من قائمة الأسعار:', error);
-        toast.error(`حدث خطأ في حذف المقاس: ${error.message}`);
-        return;
+        if (error) {
+          console.error('[Pricing] خطأ في حذف المقاس من الفئة:', error);
+          toast.error(`حدث خطأ في حذف المقاس من فئة ${targetCustomer}: ${error.message}`);
+          return;
+        }
+
+        toast.success(`تم حذف المقاس "${deletingSize}" من فئة "${targetCustomer}" بنجاح`);
+      } else {
+        // حذف لجميع الفئات في المستوى المحدد
+        const { error } = await supabase
+          .from('pricing')
+          .delete()
+          .eq('size', deletingSize)
+          .eq('billboard_level', selectedLevel);
+
+        if (error) {
+          console.error('[Pricing] خطأ في حذف المقاس من المستوى:', error);
+          toast.error(`حدث خطأ في حذف المقاس: ${error.message}`);
+          return;
+        }
+
+        toast.success(`تم حذف المقاس "${deletingSize}" من المستوى ${selectedLevel} بالكامل`);
       }
-
-      console.log('[Pricing] تم حذف المقاس من قائمة الأسعار بنجاح');
 
       // إعادة تحميل البيانات
       await loadData();
 
       setDeleteSizeOpen(false);
       setDeletingSize(null);
-      toast.success(`تم حذف المقاس ${deletingSize} من قائمة الأسعار بنجاح`);
     } catch (error) {
       console.error('[Pricing] خطأ في الاتصال بقاعدة البيانات:', error);
       toast.error('حدث خطأ في الاتصال بقاعدة البيانات');
@@ -729,23 +979,28 @@ export default function PricingList() {
     try {
       console.log('[Pricing] بدء إضافة المقاس إلى قائمة الأسعار...', sz, selectedLevel);
 
-      // الحصول على جميع الفئات (الفئات عامة لجميع المستويات)
-      const allCustomerCategories = Array.from(new Set([...PRIMARY_CUSTOMERS, ...categories.map(c => c.name)]));
+      // تحديد الفئات المستهدفة: إذا كان المستخدم يتصفح فئة محددة، نضيف المقاس لتلك الفئة فقط
+      const targetCategories = otherCustomer !== PRIMARY_SENTINEL
+        ? [otherCustomer]
+        : PRIMARY_CUSTOMERS;
 
       // التحقق من السجلات الموجودة
       const { data: existingPricing } = await supabase
         .from('pricing')
         .select('customer_category')
         .eq('size', sz)
-        .eq('billboard_level', selectedLevel);
+        .eq('billboard_level', selectedLevel)
+        .in('customer_category', targetCategories);
 
       const existingCategories = new Set(existingPricing?.map(p => p.customer_category) || []);
 
       // فقط الفئات التي لا توجد بالفعل
-      const newCategories = allCustomerCategories.filter(cat => !existingCategories.has(cat));
+      const newCategories = targetCategories.filter(cat => !existingCategories.has(cat));
 
       if (newCategories.length === 0) {
-        toast.error('هذا المقاس موجود بالفعل لجميع الفئات في هذا المستوى');
+        toast.error(otherCustomer !== PRIMARY_SENTINEL
+          ? `المقاس ${sz} موجود بالفعل لفئة "${otherCustomer}" في هذا المستوى`
+          : `هذا المقاس موجود بالفعل للفئات الأساسية في هذا المستوى`);
         return;
       }
 
@@ -1035,7 +1290,8 @@ export default function PricingList() {
 
       await loadData();
       queryClient.invalidateQueries({ queryKey: ['pricing-durations'] });
-      setSelectedMonthKey('شهر واحد');
+      const fallbackDuration = MONTH_OPTIONS[MONTH_OPTIONS.length - 1]?.key || 'سنة كاملة';
+      setSelectedMonthKey(fallbackDuration);
       setDeleteDurationOpen(false);
       setDeletingDuration(null);
       toast.success('تم حذف المدة بنجاح');
@@ -1072,14 +1328,18 @@ export default function PricingList() {
     setNewDurationOrder(durations.length + 1);
   };
 
-  // الحصول على المقاسات للمستوى المحدد مع الترتيب حسب sort_order
+  // الحصول على المقاسات للمستوى المحدد مع الترتيب حسب sort_order (مفلترة حسب الفئة إذا كانت فئة مخصصة)
   const sizesForLevel = useMemo(() => {
-    // الحصول على المقاسات من جدول الأسعار للمستوى المحدد
-    const levelSizes = Array.from(new Set(
-      pricingData
-        .filter(p => p.billboard_level === selectedLevel)
-        .map(p => p.size)
-    ));
+    // الحصول على المقاسات من جدول الأسعار للمستوى المحدد والفئة الحالية
+    const filteredRows = pricingData.filter(p => {
+      if (p.billboard_level !== selectedLevel) return false;
+      if (otherCustomer !== PRIMARY_SENTINEL) {
+        return p.customer_category === otherCustomer;
+      }
+      return true;
+    });
+
+    const levelSizes = Array.from(new Set(filteredRows.map(p => p.size)));
 
     // إنشاء خريطة لـ sort_order من جدول sizes
     const sizeOrderMap = new Map<string, number>();
@@ -1098,7 +1358,7 @@ export default function PricingList() {
     const validSizes = sortedSizes.filter(s => s && s.trim() !== '');
 
     return sizeFilter.length ? validSizes.filter(s => sizeFilter.includes(s)) : validSizes;
-  }, [selectedLevel, sizeFilter, pricingData, sizesData]);
+  }, [selectedLevel, sizeFilter, pricingData, sizesData, otherCustomer]);
 
   // الحصول على جميع المقاسات من جدول الأسعار
   const allSizes = useMemo(() => {
@@ -1107,12 +1367,8 @@ export default function PricingList() {
 
   // الحصول على المقاسات المتاحة للإضافة - من جميع المقاسات الموجودة في النظام
   const availableSizesForLevel = useMemo(() => {
-    // المقاسات الموجودة في قائمة الأسعار للمستوى الحالي
-    const currentLevelSizes = Array.from(new Set(
-      pricingData
-        .filter(p => p.billboard_level === selectedLevel)
-        .map(p => p.size)
-    ));
+    // المقاسات الحالية المعروضة في الجدول
+    const currentSizes = new Set(sizesForLevel);
 
     // جميع المقاسات الموجودة في النظام (من جدول الأسعار + جدول sizes)
     const allAvailableSizes = Array.from(new Set([
@@ -1120,10 +1376,10 @@ export default function PricingList() {
       ...sizesData.map(s => s.name)
     ]));
 
-    // المقاسات غير الموجودة في قائمة الأسعار للمستوى الحالي
-    const availableSizes = allAvailableSizes.filter(size => !currentLevelSizes.includes(size));
+    // المقاسات غير الموجودة في الجدول الحالي
+    const availableSizes = allAvailableSizes.filter(size => size && size.trim() !== '' && !currentSizes.has(size));
     return availableSizes;
-  }, [pricingData, sizesData, selectedLevel]);
+  }, [sizesForLevel, pricingData, sizesData]);
 
   // عرض جميع الفئات (مرتبة ومستبعدة منها الفئات الأساسية المجمعة)
   const otherCategories = useMemo(() => {
@@ -1157,6 +1413,137 @@ export default function PricingList() {
 
     return null;
   };
+
+  // دالة حساب المقارنة اللحظية مع الفئة المرجعية (افتراضياً: فئة الشركات)
+  const getComparison = (size: string, customer: string, month: MonthKeyAll) => {
+    if (!showCompanyComparison) return null;
+
+    if (customer === comparisonBenchmark) {
+      return { isBenchmark: true as const };
+    }
+
+    const currentPrice = getVal(size, customer, month);
+    const benchmarkPrice = getVal(size, comparisonBenchmark, month);
+
+    if (currentPrice == null || currentPrice < 0) {
+      return { hasPrice: false as const };
+    }
+
+    if (benchmarkPrice == null || benchmarkPrice <= 0) {
+      return { hasBenchmark: false as const, currentPrice };
+    }
+
+    const diff = currentPrice - benchmarkPrice;
+    const pct = ((currentPrice - benchmarkPrice) / benchmarkPrice) * 100;
+
+    return {
+      isBenchmark: false as const,
+      hasPrice: true as const,
+      hasBenchmark: true as const,
+      currentPrice,
+      benchmarkPrice,
+      diff,
+      pct,
+      isDiscount: diff < 0,
+      isMarkup: diff > 0,
+      isEqual: diff === 0
+    };
+  };
+
+  // إحصائيات المقارنة الإجمالية المعروضة
+  const comparisonStats = useMemo(() => {
+    if (!showCompanyComparison) return null;
+
+    const targetCustomer = otherCustomer !== PRIMARY_SENTINEL ? otherCustomer : null;
+
+    // حساب المقارنة لفئة محددة
+    if (targetCustomer && targetCustomer !== comparisonBenchmark) {
+      let totalDiffPercentCurrent = 0;
+      let countCurrent = 0;
+      let totalCurrentPrice = 0;
+      let totalBenchmarkPrice = 0;
+
+      let totalDiffPercentAnnual = 0;
+      let countAnnual = 0;
+      let totalAnnualCustomer = 0;
+      let totalAnnualBenchmark = 0;
+
+      sizesForLevel.forEach(size => {
+        // المدة المحددة حالياً
+        const curPrice = getVal(size, targetCustomer, selectedMonthKey);
+        const benchPrice = getVal(size, comparisonBenchmark, selectedMonthKey);
+
+        if (curPrice != null && curPrice > 0 && benchPrice != null && benchPrice > 0) {
+          const pct = ((curPrice - benchPrice) / benchPrice) * 100;
+          totalDiffPercentCurrent += pct;
+          countCurrent++;
+          totalCurrentPrice += curPrice;
+          totalBenchmarkPrice += benchPrice;
+        }
+
+        // السنوي
+        const annualCur = getVal(size, targetCustomer, 'سنة كاملة');
+        const annualBench = getVal(size, comparisonBenchmark, 'سنة كاملة');
+
+        if (annualCur != null && annualCur > 0 && annualBench != null && annualBench > 0) {
+          const pctAnnual = ((annualCur - annualBench) / annualBench) * 100;
+          totalDiffPercentAnnual += pctAnnual;
+          countAnnual++;
+          totalAnnualCustomer += annualCur;
+          totalAnnualBenchmark += annualBench;
+        }
+      });
+
+      const avgCurrentPct = countCurrent > 0 ? totalDiffPercentCurrent / countCurrent : null;
+      const avgAnnualPct = countAnnual > 0 ? totalDiffPercentAnnual / countAnnual : null;
+      const overallAnnualDiff = countAnnual > 0 ? totalAnnualCustomer - totalAnnualBenchmark : null;
+
+      return {
+        mode: 'single' as const,
+        targetCustomer,
+        countCurrent,
+        avgCurrentPct,
+        countAnnual,
+        avgAnnualPct,
+        overallAnnualDiff,
+        totalAnnualCustomer,
+        totalAnnualBenchmark
+      };
+    }
+
+    // حساب مقارنة الفئات الأساسية (عادي ومسوق مقابل شركات)
+    if (otherCustomer === PRIMARY_SENTINEL && comparisonBenchmark === 'شركات') {
+      const calcCatAvg = (cat: string) => {
+        let totalPct = 0;
+        let count = 0;
+        sizesForLevel.forEach(size => {
+          const cur = getVal(size, cat, 'سنة كاملة');
+          const bench = getVal(size, 'شركات', 'سنة كاملة');
+          if (cur != null && cur > 0 && bench != null && bench > 0) {
+            totalPct += ((cur - bench) / bench) * 100;
+            count++;
+          }
+        });
+        return count > 0 ? totalPct / count : null;
+      };
+
+      return {
+        mode: 'primary' as const,
+        targetCustomer: null,
+        countCurrent: 0,
+        avgCurrentPct: null,
+        countAnnual: 0,
+        avgAnnualPct: null,
+        overallAnnualDiff: null,
+        totalAnnualCustomer: 0,
+        totalAnnualBenchmark: 0,
+        aadiAvgAnnual: calcCatAvg('عادي'),
+        musawweqAvgAnnual: calcCatAvg('مسوق')
+      };
+    }
+
+    return null;
+  }, [showCompanyComparison, otherCustomer, comparisonBenchmark, sizesForLevel, selectedMonthKey, pricingData, selectedLevel]);
 
   const setVal = async (size: string, customer: string, month: MonthKeyAll, value: number | null) => {
     try {
@@ -1253,9 +1640,21 @@ export default function PricingList() {
     return v == null ? '—' : `${v.toLocaleString()} د.ل`;
   };
 
-  const buildPrintHtml = (cat: string, logoSrc: string, levelFilter: string, showLevel: boolean, theme: 'dark' | 'light' = 'dark') => {
+  const buildPrintHtml = (
+    cat: string,
+    logoSrc: string,
+    levelFilter: PrintLevelSelection,
+    showLevel: boolean,
+    theme: 'dark' | 'light' = 'dark',
+    monthName: string = ARABIC_MONTH_NAMES[new Date().getMonth()],
+    yearNum: number = new Date().getFullYear()
+  ) => {
     const cats = [cat]; // Always use single category
     const today = new Date().toLocaleDateString('ar-LY');
+    const catName = cat === PRIMARY_SENTINEL ? 'عادي' : cat;
+    const catDisplayTitle = catName === 'شركات' ? 'فئة الشركات' : `فئة ${catName}`;
+    const monthYearDisplay = `شهر ${monthName} ${yearNum}`;
+    const pageTitle = `قائمة أسعار ${catDisplayTitle} - ${monthName} ${yearNum}`;
 
     // إنشاء خريطة لـ sort_order من جدول sizes
     const sizeOrderMap = new Map<string, number>();
@@ -1264,12 +1663,12 @@ export default function PricingList() {
     });
 
     // تحديد المستويات المطلوب طباعتها
-    const levelsToShow = levelFilter === 'all' ? allLevels : [levelFilter];
+    const levelsToShow = resolvePrintLevels(levelFilter, allLevels);
 
     // جمع جميع المقاسات من المستويات المحددة
     const allUniqueSizes = Array.from(new Set(
       pricingData
-        .filter(p => p.size && p.size.trim() !== '' && (levelFilter === 'all' || p.billboard_level === levelFilter))
+        .filter(p => p.size && p.size.trim() !== '' && levelsToShow.includes(p.billboard_level))
         .map(p => p.size)
     )).sort((a, b) => {
       const orderA = sizeOrderMap.get(a) ?? 999;
@@ -1280,11 +1679,14 @@ export default function PricingList() {
     // إنشاء صفحات منفصلة لكل مستوى
     const levelPages = levelsToShow.map((level, levelIndex) => {
       const levelInfo = levels.find(l => l.level_code === level);
+      const levelTitle = levelInfo
+        ? `${levelInfo.level_name} (${levelInfo.level_code})`
+        : `المستوى ${level}`;
 
       // الحصول على السعر لمستوى معين
       const getPriceForLevel = (size: string, customer: string, month: MonthKey): number | null => {
         const dbRow = pricingData.find(p =>
-          p.size === size &&
+          p.size?.trim() === size.trim() &&
           p.billboard_level === level &&
           p.customer_category === customer
         );
@@ -1302,26 +1704,32 @@ export default function PricingList() {
 
       // المقاسات لهذا المستوى
       const { rows: sizesForThisLevel, columns: printDurations } = printablePricing(
-        allUniqueSizes, MONTH_OPTIONS, (size, option) => getPriceForLevel(size, cats[0], option.key)
+        allUniqueSizes, printMonthOptions, (size, option) => getPriceForLevel(size, cats[0], option.key)
       );
       if (!sizesForThisLevel.length) return '';
 
       // إنشاء صفوف الجدول لكل مقاس مع جميع الفترات (بما في ذلك اليومي)
-      const rows = sizesForThisLevel.map(size => {
-        return `
-          <tr>
-            <td class="size-cell">${size}</td>
-            ${showLevel ? `<td class="level-cell">${levelInfo?.level_name || level}</td>` : ''}
-            ${printDurations.map(monthOpt => {
+      const sheets: string[] = [];
+      // Keep every duration together; paginate only between sizes.
+      const sheetDurations = printDurations;
+      const totalPages = Math.ceil(sizesForThisLevel.length / 7);
+      const perPage = totalPages > 0 ? Math.ceil(sizesForThisLevel.length / totalPages) : 7;
+      for (let rowOffset = 0; rowOffset < sizesForThisLevel.length; rowOffset += perPage) {
+        const sheetSizes = sizesForThisLevel.slice(rowOffset, rowOffset + perPage);
+        const rows = sheetSizes.map(size => `
+        <section class="size-card">
+          <div class="size-heading"><div class="size-label"><span>مقاس المساحة الإعلانية</span><bdi dir="ltr">${escapePrintText(size)}</bdi>${showLevel ? `<small>${escapePrintText(level)}</small>` : ''}</div><div class="print-size-label"><span>مقاس الطباعة</span><bdi dir="ltr">${escapePrintText(sizesData.find(s => s.name.trim() === size.trim())?.print_size?.trim() || 'غير محدد')}</bdi></div></div>
+          <div class="duration-prices" style="--columns: ${sheetDurations.length}; --price-font: ${Math.max(6, Math.min(11, 66 / sheetDurations.length))}pt; --label-font: ${Math.max(6, Math.min(11, 70 / sheetDurations.length))}pt">
+            ${sheetDurations.map(monthOpt => {
               const v = getPriceForLevel(size, cats[0], monthOpt.key);
-              const price = v == null || v <= 0 ? '—' : `${Number(v).toLocaleString('ar-LY')}`;
-              return `<td class="price-cell">${price}</td>`;
+              const price = v == null || v <= 0 ? '—' : Number(v).toLocaleString('ar-LY');
+              return `<div class="duration-price"><div class="duration-label">${monthOpt.days} يوم</div><div class="price"><bdi>${price}</bdi>${v != null && v > 0 ? '<small>د.ل</small>' : ''}</div></div>`;
             }).join('')}
-          </tr>
-        `;
-      }).join('');
+          </div>
+        </section>
+      `).join('');
 
-      return `
+      sheets.push(`
         <div class="page">
           <div class="page-content">
             <div class="header">
@@ -1329,32 +1737,26 @@ export default function PricingList() {
                 <img src="${logoSrc}" class="logo" alt="شعار" onerror="this.style.display='none'" />
               </div>` : ''}
               <div class="title-area" style="${!logoSrc ? 'text-align: center; width: 100%;' : ''}">
-                <h1 class="main-title">قائمة الأسعار</h1>
-                <div class="subtitle">فئة ${cat} — المستوى ${levelInfo?.level_name || level}</div>
+                <h1 class="main-title"><span>أسعار إيجار</span><br><span>المساحات الإعلانية</span></h1>
+                <div class="header-note">السعر يشمل التركيب · <strong>ولا يشمل تكلفة الطباعة</strong></div>
               </div>
             </div>
 
-            <table class="prices-table">
-              <thead>
-                <tr>
-                  <th class="size-header">المقاس</th>
-                  ${showLevel ? '<th class="level-header">المستوى</th>' : ''}
-                  ${printDurations.map(option => `<th>${option.label}</th>`).join('')}
-                </tr>
-              </thead>
-              <tbody>
-                ${rows}
-              </tbody>
-            </table>
+            <div class="sheet-meta">
+              <span class="meta-level-title">${escapePrintText(levelTitle)}</span>
+              <span class="meta-currency">الأسعار بالدينار الليبي</span>
+            </div>
+            <div class="price-cards" data-count="${sheetSizes.length}" style="--size-count: ${sheetSizes.length};">${rows}</div>
 
             <div class="footer">
-              <div class="footer-left">${today}</div>
-              <div class="footer-center">الأسعار بالدينار الليبي وقابلة للتغيير</div>
-              <div class="footer-note">السعر لا يشمل الطباعة ويشمل التركيب فقط</div>
+              <div class="footer-left">تاريخ الإصدار: ${today} (${escapePrintText(monthYearDisplay)})</div>
+              <div class="footer-center">الأسعار قابلة للتغيير · ورقة ${sheets.length + 1} من ${totalPages || 1}</div>
             </div>
           </div>
         </div>
-      `;
+      `);
+        }
+      return sheets.join('');
     }).join('');
 
     return `<!DOCTYPE html>
@@ -1362,196 +1764,41 @@ export default function PricingList() {
 <head>
   <meta charset="UTF-8">
   <base href="${window.location.origin}/">
-  <title>قائمة الأسعار</title>
+  <title>${escapePrintText(pageTitle)}</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
-
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-      color-adjust: exact !important;
-    }
-
-    body {
-      font-family: 'Cairo', sans-serif;
-      background: ${theme === 'dark' ? '#1a1a1a' : '#ffffff'};
-    }
-
-    .page {
-      width: 210mm;
-      height: 297mm;
-      margin: 0 auto 20px;
-      position: relative;
-      background: ${theme === 'dark'
-        ? 'linear-gradient(145deg, #0d0d0d 0%, #1a1a1a 30%, #252525 60%, #1f1f1f 100%)'
-        : 'linear-gradient(145deg, #ffffff 0%, #f8f9fa 30%, #f0f2f5 60%, #fafafa 100%)'};
-      overflow: hidden;
-    }
-
-    .page::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      ${theme === 'dark' ? `background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="20" cy="20" r="1" fill="%23ffffff05"/><circle cx="80" cy="40" r="0.5" fill="%23ffffff03"/></svg>');` : ''}
-      background-size: 100px 100px;
-      pointer-events: none;
-    }
-
-    .page + .page { page-break-before: always; }
-
-    .page-content {
-      position: relative; z-index: 1;
-      padding: 18mm 12mm 15mm;
-      height: 100%; display: flex; flex-direction: column;
-    }
-
-    .header {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 12mm; padding-bottom: 6mm;
-      border-bottom: 2px solid ${theme === 'dark' ? 'rgba(212, 175, 55, 0.3)' : 'rgba(180, 140, 20, 0.3)'};
-    }
-
-    .logo-area { width: 90mm; }
-    .logo { width: 85mm; height: auto; }
-    .title-area { text-align: left; }
-
-    .main-title {
-      font-size: 28pt; font-weight: 800;
-      ${theme === 'dark'
-        ? 'background: linear-gradient(135deg, #d4af37 0%, #f4d03f 50%, #d4af37 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;'
-        : 'color: #8B6914;'}
-      margin-bottom: 2mm; letter-spacing: 2px;
-    }
-
-    .subtitle {
-      font-size: 16pt; font-weight: 700;
-      color: ${theme === 'dark' ? 'rgba(255, 255, 255, 0.9)' : '#444444'};
-    }
-
-    .prices-table {
-      width: 100%; border-collapse: separate; border-spacing: 0; flex: 1;
-      background: ${theme === 'dark' ? 'rgba(255, 255, 255, 0.02)' : 'rgba(0, 0, 0, 0.01)'};
-      border-radius: 8px; overflow: hidden;
-      border: 1px solid ${theme === 'dark' ? 'rgba(212, 175, 55, 0.25)' : 'rgba(180, 140, 20, 0.25)'};
-    }
-
-    .prices-table thead {
-      background: ${theme === 'dark'
-        ? 'linear-gradient(135deg, rgba(212, 175, 55, 0.18) 0%, rgba(212, 175, 55, 0.1) 100%)'
-        : 'linear-gradient(135deg, rgba(180, 140, 20, 0.1) 0%, rgba(180, 140, 20, 0.05) 100%)'};
-    }
-
-    .prices-table th {
-      padding: 3.5mm 2mm; font-size: 9pt; font-weight: 700;
-      color: ${theme === 'dark' ? '#d4af37' : '#8B6914'};
-      text-align: center;
-      border-bottom: 2px solid ${theme === 'dark' ? 'rgba(212, 175, 55, 0.35)' : 'rgba(180, 140, 20, 0.3)'};
-      letter-spacing: 0.5px;
-    }
-
-    .prices-table th.size-header { text-align: right; padding-right: 4mm; width: 20%; }
-
-    .prices-table td {
-      padding: 2.5mm 1.5mm; text-align: center;
-      border-bottom: 1px solid ${theme === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.06)'};
-      font-size: 10pt;
-      color: ${theme === 'dark' ? '#ffffff' : '#333333'};
-    }
-
-    .prices-table tr:nth-child(even) td {
-      background: ${theme === 'dark' ? 'rgba(255, 255, 255, 0.015)' : 'rgba(0, 0, 0, 0.02)'};
-    }
-
-    .prices-table tr:hover td {
-      background: ${theme === 'dark' ? 'rgba(212, 175, 55, 0.06)' : 'rgba(180, 140, 20, 0.06)'};
-    }
-
-    .size-cell {
-      font-weight: 800; font-size: 11pt; text-align: right !important; padding-right: 4mm !important;
-      color: ${theme === 'dark' ? '#d4af37' : '#8B6914'} !important;
-    }
-
-    .level-cell {
-      font-weight: 700; font-size: 10pt; text-align: center;
-      color: ${theme === 'dark' ? '#d4af37' : '#8B6914'} !important;
-      background: ${theme === 'dark' ? 'rgba(212, 175, 55, 0.08)' : 'rgba(180, 140, 20, 0.06)'};
-    }
-
-    .level-header { text-align: center; width: 12%; }
-
-    .price-cell {
-      font-weight: 600; font-size: 10pt; direction: ltr;
-      color: ${theme === 'dark' ? '#e8e8e8' : '#333333'};
-    }
-
-    .footer {
-      display: flex; justify-content: space-between; align-items: center;
-      margin-top: 8mm; padding-top: 4mm;
-      border-top: 1px solid ${theme === 'dark' ? 'rgba(212, 175, 55, 0.2)' : 'rgba(180, 140, 20, 0.2)'};
-      font-size: 8pt;
-      color: ${theme === 'dark' ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.4)'};
-    }
-
-    .footer-center {
-      color: ${theme === 'dark' ? 'rgba(212, 175, 55, 0.7)' : 'rgba(140, 105, 20, 0.8)'};
-      font-weight: 600;
-    }
-
-    .footer-note {
-      color: ${theme === 'dark' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.5)'};
-      font-weight: 600; font-size: 8pt; text-align: left;
-    }
-
-    .print-btn {
-      position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
-      padding: 14px 35px;
-      background: linear-gradient(135deg, #d4af37 0%, #f4d03f 100%);
-      color: #1a1a1a; border: none; border-radius: 10px;
-      font-weight: 700; cursor: pointer; font-size: 16px;
-      font-family: 'Cairo', sans-serif;
-      box-shadow: 0 4px 20px rgba(212, 175, 55, 0.4); z-index: 1000;
-    }
-
-    .print-btn:hover {
-      transform: translateX(-50%) translateY(-2px);
-      box-shadow: 0 6px 25px rgba(212, 175, 55, 0.5);
-    }
-
-    @media print {
-      body { background: ${theme === 'dark' ? '#0d0d0d' : '#ffffff'}; }
-      .page { width: 100%; height: 100vh; margin: 0; box-shadow: none; }
-      .print-btn { display: none !important; }
-      .page + .page { page-break-before: always; }
-      @page { size: A4 portrait; margin: 0; }
-    }
+    ${pricingPrintStyles(theme)}
   </style>
 </head>
 <body>
+<nav class="preview-toolbar" aria-label="أدوات معاينة الطباعة"><button class="print-btn" onclick="window.print()">طباعة</button><button class="close-preview-btn" onclick="if(window.opener){window.opener.focus();window.close();}else{window.location.href='/admin/pricing';}">إغلاق والرجوع</button></nav>
   ${levelPages}
-  <button class="print-btn" onclick="window.print()">طباعة القائمة</button>
 </body>
 </html>`;
   };
 
   const handlePrint = () => {
-    const hasPrices = pricingData.some(row => row.customer_category === printCategory && (printLevel === 'all' || row.billboard_level === printLevel) && MONTH_OPTIONS.some(option => (readDurationPrice(row, option.dbColumn) ?? 0) > 0));
+    if (!selectedPrintLevels.length) { toast.info('اختر مستوى واحدًا على الأقل للطباعة'); return; }
+    if (!printMonthOptions.length) { toast.info('اختر مدة واحدة على الأقل للطباعة'); return; }
+    const hasPrices = pricingData.some(row => row.customer_category === printCategory && selectedPrintLevels.includes(row.billboard_level) && printMonthOptions.some(option => (readDurationPrice(row, option.dbColumn) ?? 0) > 0));
     if (!hasPrices) { toast.info('لا توجد أسعار أكبر من صفر لهذه الفئة ضمن المستويات المختارة'); return; }
     const w = window.open('', '_blank');
     if (!w) return;
 
     // تحديد مصدر الشعار المحدد
-    const logoToUse = printLogo || '';
-    w.document.write(buildPrintHtml(printCategory, logoToUse, printLevel, showLevelColumn, printTheme));
+    const logoToUse = printLogo === '/logofares.svg'
+      ? LOGO_FARES_BLACK_FALLBACK_SRC
+      : (printLogo === '/logofaresgold.svg'
+        ? LOGO_FARES_GOLD_FALLBACK_SRC
+        : (printLogo || ''));
+    w.document.write(buildPrintHtml(printCategory, logoToUse, printLevel, showLevelColumn, printTheme, printMonth, printYear));
     w.document.close();
     w.focus();
-    setTimeout(() => w.print(), 800);
+
   };
 
   // تصدير الأسعار لفئة معينة إلى Excel - يشمل جميع المستويات
   const exportCategoryToExcel = (cat: string, markupPercent: number = 0) => {
+    if (!selectedPrintLevels.length) { toast.info('اختر مستوى واحدًا على الأقل للتصدير'); return; }
     try {
       toast.info('جاري تحضير ملف Excel...');
       const cats = cat === PRIMARY_SENTINEL ? PRIMARY_CUSTOMERS : [cat];
@@ -1571,7 +1818,7 @@ export default function PricingList() {
       const allData: any[] = [];
 
       // تحديد المستويات المطلوبة
-      const targetLevels = printLevel === 'all' ? allLevels : [printLevel];
+      const targetLevels = resolvePrintLevels(printLevel, allLevels);
 
       targetLevels.forEach(level => {
         // الحصول على المقاسات المتوفرة لهذا المستوى
@@ -1583,7 +1830,7 @@ export default function PricingList() {
 
         if (levelSizes.length === 0) return;
 
-        MONTH_OPTIONS.forEach(monthOpt => {
+        printMonthOptions.forEach(monthOpt => {
           levelSizes.forEach(size => {
             // الحصول على size_id من sizesData
             const sizeInfo = sizesData.find(s => s.name === size);
@@ -1628,10 +1875,11 @@ export default function PricingList() {
 
       const now = new Date();
       const dateStr = now.toISOString().split('T')[0];
-      const catName = cat === PRIMARY_SENTINEL ? 'الأساسية' : cat;
+      const catName = cat === PRIMARY_SENTINEL ? 'عادي' : cat;
+      const catDisplayTitle = catName === 'شركات' ? 'فئة_الشركات' : `فئة_${catName}`;
       const markupSuffix = markupPercent > 0 ? `_زيادة${markupPercent}%` : '';
-      const levelSuffix = printLevel === 'all' ? 'جميع_المستويات' : printLevel;
-      const filename = `أسعار_${catName}_${levelSuffix}${markupSuffix}_${dateStr}.xlsx`;
+      const levelSuffix = printLevel === 'all' ? 'جميع_المستويات' : selectedPrintLevels.join('_');
+      const filename = `قائمة_أسعار_${catDisplayTitle}_${printMonth}_${printYear}_${levelSuffix}${markupSuffix}.xlsx`;
 
       XLSX.writeFile(wb, filename);
       toast.success(`تم تنزيل ملف Excel: ${filename}${markupPercent > 0 ? ` (مع زيادة ${markupPercent}%)` : ''}`);
@@ -1645,7 +1893,7 @@ export default function PricingList() {
   const previewPricesWithMarkup = useMemo(() => {
     if (priceMarkupPercent <= 0) return [];
 
-    const targetLevels = printLevel === 'all' ? allLevels : [printLevel];
+    const targetLevels = resolvePrintLevels(printLevel, allLevels);
     const preview: Array<{
       level: string;
       size: string;
@@ -1735,432 +1983,240 @@ export default function PricingList() {
   }
 
   return (
-    <div dir="rtl" className="mx-auto max-w-[1600px] space-y-6 p-3 sm:p-6 [&_button]:cursor-pointer [&_button]:transition-all [&_button]:duration-200">
-      <Card className="rounded-2xl border border-border bg-card shadow-sm">
-        <CardHeader className="space-y-6 border-b border-border bg-primary/5 p-4 sm:p-6">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-            <div>
-              <CardTitle className="text-2xl text-primary">إدارة الأسعار والمدد</CardTitle>
-              <p className="text-muted-foreground text-sm">
-                اختر المدة والمستوى، ثم اضبط أسعار المقاسات لكل فئة عملاء.
-                <span className="ml-2 text-xs text-primary/70">
-                  ({levels.length} مستوى، {categories.length} فئة، {allSizes.length} مقاس)
-                </span>
-              </p>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap xl:max-w-3xl">
-              {MONTH_OPTIONS.map(opt => (
-                <button
-                  key={`m-${opt.key}`}
-                  className={`px-3 py-1.5 rounded-lg text-sm border transition-all duration-200 ${selectedMonthKey === opt.key ? 'bg-primary text-primary-foreground border-primary shadow-lg' : 'bg-background text-foreground border-border hover:bg-muted'}`}
-                  onClick={() => setSelectedMonthKey(opt.key)}
-                >
-                  {opt.label}
-                </button>
-              ))}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  resetDurationForm();
-                  setNewDurationOrder(durations.length + 1);
-                  setAddDurationOpen(true);
-                }}
-                title="إضافة مدة جديدة"
-              >
-                <Plus className="h-4 w-4 ml-2" /> إضافة مدة
-              </Button>
-              {durations.length > 0 && (
-                <Select
-                  value=""
-                  onValueChange={(val) => {
-                    const duration = durations.find(d => d.id === val);
-                    if (duration) openEditDuration(duration);
-                  }}
-                >
-                  <SelectTrigger className="w-36">
-                    <SelectValue placeholder="تعديل المدد" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[...durations].filter(d => d.is_active).sort((a, b) => a.sort_order - b.sort_order).map(d => (
-                      <SelectItem key={d.id} value={d.id}>
-                        {d.name} ({d.days} يوم)
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              <div className="mx-2 h-6 w-px bg-border" />
-              <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={() => setPrintOpen(true)}>
-                <Printer className="h-4 w-4 ml-2" /> طباعة الأسعار
-              </Button>
+    <div dir="rtl" className="pricing-workspace mx-auto max-w-[1600px] space-y-6 p-3 sm:p-6 [&_button]:cursor-pointer [&_button]:transition-all [&_button]:duration-200">
+      <Card className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+        <CardHeader className="pricing-page-header p-5 sm:p-6 space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div><CardTitle className="text-2xl font-bold">قائمة الأسعار</CardTitle><p className="mt-1 text-sm text-muted-foreground">اختر الفئة والمستوى والمدة، ثم اضغط على السعر لتعديله.</p></div>
+            <div className="flex items-center gap-2.5 flex-wrap">
               <Button
                 variant="outline"
-                onClick={updateMissingSizeIds}
-                disabled={isUpdatingSizeIds}
-                title="مزامنة ارتباط الأسعار بالمقاسات"
+                onClick={() => printSizeCatalog(sizesData)}
+                className="cursor-pointer font-semibold border-border hover:border-primary/60 shadow-sm"
+                title="طباعة دليل مقاسات الطباعة المعتمدة للمساحات الإعلانية"
               >
-                {isUpdatingSizeIds ? (
-                  <span className="flex items-center gap-2">
-                    <span className="h-4 w-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                    جاري التحديث...
-                  </span>
-                ) : (
-                  'مزامنة المقاسات'
-                )}
+                <Printer className="h-4 w-4 ml-1.5 text-primary" />
+                <span>طباعة مقاسات الطباعة</span>
+              </Button>
+              <Button
+                onClick={() => { setPrintCategory(otherCustomer === PRIMARY_SENTINEL ? 'عادي' : otherCustomer); setPrintOpen(true); }}
+                className="cursor-pointer font-bold shadow-sm"
+              >
+                <Printer className="h-4 w-4 ml-1.5" />
+                <span>طباعة وتصدير</span>
               </Button>
             </div>
           </div>
-
-          {/* قسم اختيار وإدارة فئات التسعير */}
-          <div className="rounded-2xl border border-border/70 bg-gradient-to-b from-muted/30 to-muted/10 p-3.5 sm:p-4 space-y-3.5 shadow-sm">
-            {/* الصف العلوي: عنوان الفئة، الفئة النشطة، وإجراءات الإضافة */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/40 pb-3">
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <div className="flex items-center gap-2 text-primary font-bold text-sm sm:text-base">
-                  <Tag className="h-4 w-4" />
-                  <span>فئة العملاء:</span>
-                </div>
-
-                {/* شارة الفئة المحددة حالياً */}
-                {otherCustomer === PRIMARY_SENTINEL ? (
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary text-primary-foreground font-semibold text-xs shadow-sm">
-                    <Users className="h-3.5 w-3.5" />
-                    <span>الفئات الأساسية (عادي • مسوق • شركات)</span>
-                  </div>
-                ) : (
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/15 text-primary border border-primary/30 font-bold text-xs shadow-sm">
-                    <Users className="h-3.5 w-3.5" />
-                    <span>الفئة المعروضة: {otherCustomer}</span>
-                    <button
-                      type="button"
-                      onClick={() => setOtherCustomer(PRIMARY_SENTINEL)}
-                      className="hover:bg-primary/20 rounded-full p-0.5 transition-colors cursor-pointer"
-                      title="العودة للفئات الأساسية"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )}
-
-                {/* أزرار تعديل وحذف الفئة المخصصة المحددة */}
-                {otherCustomer !== PRIMARY_SENTINEL && otherCategories.includes(otherCustomer) && (
-                  <div className="flex items-center gap-1.5 mr-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground border border-border/60 hover:bg-muted"
-                      onClick={() => openEditCategory(otherCustomer)}
-                      title="تعديل اسم هذه الفئة"
-                    >
-                      <Edit2 className="h-3 w-3 ml-1" />
-                      تعديل الاسم
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-7 px-2.5 text-xs text-destructive hover:text-destructive hover:bg-destructive/10 border border-destructive/20"
-                      onClick={() => openDeleteCategory(otherCustomer)}
-                      title="حذف هذه الفئة"
-                    >
-                      <Trash2 className="h-3 w-3 ml-1" />
-                      حذف الفئة
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {/* أزرار الإضافة السريعة */}
-              <div className="flex items-center gap-2 shrink-0">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setAddCatOpen(true)}
-                  className="h-8 text-xs font-semibold border-primary/40 hover:border-primary hover:bg-primary/10 text-primary cursor-pointer"
-                >
-                  <Plus className="h-3.5 w-3.5 ml-1" />
-                  إضافة فئة عميل
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={() => setAddSizeOpen(true)}
-                  className="h-8 text-xs font-semibold cursor-pointer"
-                >
-                  <Plus className="h-3.5 w-3.5 ml-1" />
-                  إضافة مقاس
-                </Button>
-              </div>
-            </div>
-
-            {/* الصف السفلي: حقل البحث السريع ورقائق اختيار الفئات */}
-            <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
-              {/* حقل البحث السريع الفوري */}
-              <div className="relative w-full md:w-64 shrink-0">
-                <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                <Input
-                  type="text"
-                  aria-label="البحث عن فئة العميل" placeholder="ابحث عن فئة العميل..."
-                  value={categorySearchTerm}
-                  onChange={(e) => setCategorySearchTerm(e.target.value)}
-                  className="h-11 pr-8 pl-8 text-sm bg-background"
-                />
-                {categorySearchTerm && (
-                  <button
-                    type="button"
-                    onClick={() => setCategorySearchTerm('')}
-                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                    title="مسح البحث"
+          <div className="space-y-4">
+            <section aria-labelledby="pricing-category-heading" className="rounded-xl border border-border p-3 sm:p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 id="pricing-category-heading" className="text-sm font-bold flex items-center gap-2">
+                  <Users className="h-4 w-4 text-primary" />
+                  فئة العميل <span className="font-normal text-muted-foreground">· {otherCustomer}</span>
+                </h3>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCategoryOrderOpen(true)}
+                    className="gap-1.5 h-10 cursor-pointer text-xs font-semibold"
+                    title="تعديل ترتيب ظهور فئات العملاء"
                   >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
+                    <ArrowUpDown className="h-4 w-4 text-primary ml-1" />
+                    <span>ترتيب الفئات</span>
+                  </Button>
+                  <Input aria-label="البحث عن فئة العميل" placeholder="ابحث عن فئة..." value={categorySearchTerm} onChange={event => setCategorySearchTerm(event.target.value)} className="w-full sm:w-60 h-10" />
+                </div>
               </div>
-
-              {/* قائمة رقائق الفئات الأفقية */}
-              <div className="flex items-center gap-1.5 flex-wrap max-h-40 overflow-y-auto p-1 flex-1 min-w-0">
-                {/* الفئات الأساسية */}
-                <button
-                  type="button"
-                  onClick={() => setOtherCustomer(PRIMARY_SENTINEL)}
-                  className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-all duration-200 shrink-0 border flex items-center gap-1.5 cursor-pointer ${
-                    otherCustomer === PRIMARY_SENTINEL
-                      ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                      : 'bg-background hover:bg-muted text-foreground border-border'
-                  }`}
-                >
-                  <Users className="h-3.5 w-3.5" />
-                  <span>مقارنة الفئات الأساسية</span>
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded ${
-                    otherCustomer === PRIMARY_SENTINEL ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted text-muted-foreground'
-                  }`}>
-                    عادي / مسوق / شركات
-                  </span>
-                </button>
-
-                {/* الفئات المخصصة المفلترة بالبحث */}
-                {[...PRIMARY_CUSTOMERS, ...otherCategories]
-                  .filter(c => !categorySearchTerm.trim() || c.toLowerCase().includes(categorySearchTerm.trim().toLowerCase()))
-                  .map((c) => {
-                    const isSelected = otherCustomer === c;
-                    const column = MONTH_OPTIONS.find(option => option.key === selectedMonthKey)?.dbColumn;
-                    const pricesCount = pricingData.filter(p => p.billboard_level === selectedLevel && p.customer_category === c && column && (readDurationPrice(p, column) ?? 0) > 0).length;
-                    return (
-                      <button
-                        key={`cat-pill-${c}`}
-                        type="button"
-                        aria-pressed={otherCustomer === c}
-                        onClick={() => { setOtherCustomer(c); setPrintCategory(c); }}
-                        className={`group px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 shrink-0 border flex items-center gap-1.5 cursor-pointer ${
-                          isSelected
-                            ? 'bg-primary text-primary-foreground border-primary shadow-sm font-bold'
-                            : 'bg-background hover:bg-muted text-foreground border-border hover:border-primary/40'
-                        }`}
-                        title={`فئة: ${c} (${pricesCount} مقاسات مسعرة في المستوى ${selectedLevel})`}
-                      >
-                        <span>{c}</span>
-                        {pricesCount > 0 && (
-                          <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                            isSelected ? 'bg-primary-foreground/25 text-primary-foreground' : 'bg-primary/10 text-primary font-semibold'
-                          }`}>
-                            {pricesCount}
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-
-                {categorySearchTerm.trim() && [...PRIMARY_CUSTOMERS, ...otherCategories].filter(c => c.toLowerCase().includes(categorySearchTerm.trim().toLowerCase())).length === 0 && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground px-2 py-1 shrink-0">
-                    <span>لا توجد فئة باسم "{categorySearchTerm}"</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNewCatName(categorySearchTerm.trim());
-                        setAddCatOpen(true);
-                      }}
-                      className="text-primary hover:underline font-semibold cursor-pointer"
-                    >
-                      إضافتها الآن؟
-                    </button>
-                  </div>
-                )}
+              <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto" role="group" aria-label="فئات العملاء">
+                {orderedCategories.filter(c => c.includes(categorySearchTerm.trim())).map(c => <Button key={c} variant={otherCustomer === c ? 'default' : 'outline'} aria-pressed={otherCustomer === c} className="min-h-10 h-auto py-2" onClick={() => setOtherCustomer(c)}>{c}</Button>)}
+                {!orderedCategories.some(c => c.includes(categorySearchTerm.trim())) && <p className="text-sm text-muted-foreground">لا توجد فئة مطابقة للبحث.</p>}
               </div>
+            </section>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center gap-2" role="group" aria-label="مستوى اللوحات"><span className="text-sm font-bold ml-2">المستوى</span>{allLevels.map(code => <Button key={code} variant={selectedLevel === code ? 'default' : 'outline'} aria-pressed={selectedLevel === code} className="h-10" onClick={() => setSelectedLevel(code)}>{levels.find(l => l.level_code === code)?.level_name || code}<span className="mr-1 text-xs opacity-70">({code})</span></Button>)}</div>
+              <div className="flex items-center gap-2 w-full sm:w-auto"><MultiSelect options={allSizes.filter(Boolean).map(size => ({ label: size, value: size }))} value={sizeFilter} onChange={setSizeFilter} placeholder="تصفية المقاسات" className="w-full sm:w-60" />{sizeFilter.length > 0 && <Button variant="ghost" onClick={() => setSizeFilter([])} aria-label="إلغاء تصفية المقاسات"><X className="h-4 w-4" /></Button>}</div>
             </div>
+            <section className="rounded-xl bg-muted/30 border border-border p-3 flex flex-wrap items-center gap-2" aria-label="مدة الإيجار">
+              <span className="text-sm font-bold ml-2 flex items-center gap-2"><Calendar className="h-4 w-4 text-primary" />مدة الإيجار</span>
+              {MONTH_OPTIONS.map(option => <Button key={option.key} variant={selectedMonthKey === option.key ? 'default' : 'outline'} aria-pressed={selectedMonthKey === option.key} className="h-10 gap-2" onClick={() => setSelectedMonthKey(option.key)}>{option.label}<span className="text-xs opacity-70">{option.days} يوم</span></Button>)}
+            </section>
           </div>
         </CardHeader>
-        <CardContent className="space-y-5 p-4 sm:p-6">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-xl border border-primary/30 bg-primary/5 p-4"><p className="text-xs text-muted-foreground">المدة المحددة</p><p className="mt-1 text-lg font-bold">{selectedMonthKey}</p><p className="text-sm text-muted-foreground">{MONTH_OPTIONS.find(d => d.key === selectedMonthKey)?.days} يوم</p></div>
-            <div className="rounded-xl border border-border bg-muted/20 p-4"><p className="text-xs text-muted-foreground">مستوى التسعير</p><p className="mt-1 text-lg font-bold">{levels.find(l => l.level_code === selectedLevel)?.level_name || selectedLevel}</p><p className="text-sm text-muted-foreground">أسعار مستقلة لكل مدة ومقاس</p></div>
-            <div className="rounded-xl border border-border bg-muted/20 p-4"><p className="text-xs text-muted-foreground">تعديل الأسعار</p><p className="mt-1 text-lg font-bold">{sizesForLevel.length} مقاس</p><p className="text-sm text-muted-foreground">اضغط على السعر لتعديله؛ يُحفظ عند مغادرة الحقل</p></div>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-4 bg-muted/20 border border-border rounded-xl px-4 py-3">
-            <div className="flex items-center gap-3">
-              <span className="inline-flex items-center gap-2 bg-primary text-primary-foreground font-semibold rounded-lg px-3 py-1 shadow-lg">
-                مستوى {levels.find(l => l.level_code === selectedLevel)?.level_name || selectedLevel}
-              </span>
-              <span className="text-sm text-muted-foreground">
-                أسعار الأحجام حسب فئة العميل ({sizesForLevel.length} مقاس، {otherCategories.length} فئة إضافية)
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {allLevels.map((lvl, index) => {
-                const levelInfo = levels.find(l => l.level_code === lvl);
-                return (
-                  <div key={`lvl-${index}-${lvl}`} className="relative group">
-                    <button
-                      onClick={() => setSelectedLevel(lvl)}
-                      className={`px-3 py-1.5 rounded-lg text-sm border transition-all duration-200 ${lvl === selectedLevel ? 'bg-primary text-primary-foreground border-primary shadow-lg' : 'bg-background text-foreground border-border hover:bg-muted'}`}
-                      title={`${levelInfo?.level_name || lvl} (ترتيب: ${levelInfo?.sort_order || '-'})`}
-                    >
-                      {lvl}
-                      {levelInfo?.sort_order && (
-                        <span className="text-[10px] opacity-60 mr-1">({levelInfo.sort_order})</span>
-                      )}
-                    </button>
-                    {lvl === selectedLevel && levelInfo && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEditLevel(levelInfo);
-                        }}
-                        className="absolute -top-1 -right-1 bg-amber-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                        title="تعديل المستوى"
-                      >
-                        <Edit2 className="h-2.5 w-2.5" />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setNewLevelOrder(Math.max(...levels.map(l => l.sort_order), 0) + 1);
-                  setAddLevelOpen(true);
-                }}
-                title="إضافة مستوى جديد"
-                className="text-green-600 hover:text-green-700"
+        <CardContent className="p-4 sm:p-6 space-y-4">
+          <div className="flex flex-wrap justify-between items-center gap-3">
+            <p className="text-sm text-muted-foreground font-medium">
+              {sizesForLevel.length} مقاس متاح لفئة «{otherCustomer === PRIMARY_SENTINEL ? 'عادي' : otherCustomer}» في المستوى {selectedLevel} · الأسعار بالدينار الليبي
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button 
+                variant="default" 
+                size="sm" 
+                onClick={() => setAddSizeOpen(true)}
+                className="gap-1.5 h-9 font-bold cursor-pointer"
               >
                 <Plus className="h-4 w-4" />
+                <span>إضافة مقاس للفئة</span>
               </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  const levelInfo = levels.find(l => l.level_code === selectedLevel);
-                  if (levelInfo) {
-                    openEditLevel(levelInfo);
-                  }
-                }}
-                title="تعديل المستوى المحدد"
-                className="text-amber-500 hover:text-amber-700"
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setRelativeTarget({
+                  customer: otherCustomer === PRIMARY_SENTINEL ? 'عادي' : otherCustomer,
+                  level: selectedLevel,
+                })}
+                className="gap-1.5 h-9 cursor-pointer"
               >
-                <Edit2 className="h-4 w-4" />
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setDeletingLevel(selectedLevel);
-                  setDeleteLevelOpen(true);
-                }}
-                title="حذف المستوى"
-                className="text-red-500 hover:text-red-700"
-              >
-                <Minus className="h-4 w-4" />
+                <Percent className="h-4 w-4 ml-1" />
+                <span>{otherCustomer === 'شركات' ? 'تعديل أسعار المستوى بنسبة' : 'تعديل أسعار الفئة بنسبة'}</span>
               </Button>
             </div>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <MultiSelect
-              options={allSizes.map((s, index) => ({ label: s, value: s }))}
-              value={sizeFilter}
-              onChange={setSizeFilter}
-              placeholder="تصفية الأحجام"
-            />
-          </div>
-
-          <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-4" aria-live="polite">
-            <h2 className="text-lg font-bold text-foreground">{otherCustomer === PRIMARY_SENTINEL ? 'مقارنة أسعار: عادي، مسوق، شركات' : `أسعار فئة: ${otherCustomer}`}</h2>
-            <p className="mt-1 text-sm text-foreground">المدة: {selectedMonthKey} · المستوى: {levels.find(l => l.level_code === selectedLevel)?.level_name || selectedLevel} · العملة: الدينار الليبي</p>
-          </div>
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full min-w-[480px] text-sm text-right">
-              <thead>
-                <tr className="bg-muted/20 border-b border-border/30">
-                  <th scope="col" className="sticky right-0 z-20 w-44 min-w-36 border-l border-border bg-muted p-4 text-right text-lg font-bold text-foreground">المقاس</th>
-                  {(otherCustomer === PRIMARY_SENTINEL ? PRIMARY_CUSTOMERS : [otherCustomer]).map((c, index) => (
-                    <th key={`head-${index}-${c}`} className="p-4 text-base font-semibold text-foreground">{c}</th>
+          <div className="overflow-auto rounded-xl border border-border" role="region" aria-label="جدول الأسعار" tabIndex={0}>
+            <table className="w-full min-w-[700px] text-right text-sm">
+              <thead className="bg-muted">
+                <tr>
+                  {['المقاس', 'سعر الشركات', `سعر ${otherCustomer === PRIMARY_SENTINEL ? 'عادي' : otherCustomer}`, 'الفرق عن الشركات', 'الإجراءات'].map((title,i) => (
+                    <th key={i} className="p-4 font-bold border-b">{title}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {sizesForLevel.map((size, sizeIndex) => (
-                  <tr key={`size-${sizeIndex}-${size}`} className="border-b border-border/20 hover:bg-background/50">
-                    <th scope="row" className="sticky right-0 z-10 border-l border-border bg-card p-3 sm:p-4 text-right">
-                      <div className="flex items-center justify-between gap-3">
-                        <span dir="ltr" className="whitespace-nowrap text-2xl sm:text-3xl font-extrabold tracking-wide tabular-nums text-foreground">{size}</span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="text-muted-foreground hover:text-destructive p-1 h-8 w-8 shrink-0"
-                          onClick={() => {
-                            setDeletingSize(size);
-                            setDeleteSizeOpen(true);
-                          }}
-                          title="حذف المقاس من قائمة الأسعار"
-                        >
-                          <Trash2 className="h-3 w-3" />
+                {sizesForLevel.map(size => {
+                  const customer = otherCustomer === PRIMARY_SENTINEL ? 'عادي' : otherCustomer;
+                  const price = getVal(size, customer, selectedMonthKey);
+                  const base = getVal(size, 'شركات', selectedMonthKey);
+                  const diff = price != null && base != null && base > 0 ? price - base : null;
+                  const isEditing = editing?.size === size && editing.customer === customer && editing.month === selectedMonthKey;
+                  return (
+                    <tr key={size} className="border-b last:border-0 even:bg-muted/20 hover:bg-primary/5 transition-colors">
+                      <th scope="row" className="p-4 text-base font-bold"><bdi>{size}</bdi></th>
+                      <td className="p-4 tabular-nums">{base == null ? 'غير محدد' : base.toLocaleString('ar-LY')}</td>
+                      <td className="p-3">
+                        {isEditing ? (
+                          <Input 
+                            autoFocus 
+                            type="number" 
+                            min={0} 
+                            aria-label={`سعر ${size}`} 
+                            defaultValue={price ?? ''} 
+                            onBlur={event => { 
+                              const value = event.target.value.trim(); 
+                              void setVal(size, customer, selectedMonthKey, value === '' ? null : Number(value)); 
+                              setEditing(null); 
+                            }} 
+                            onKeyDown={event => { 
+                              if (event.key === 'Enter') event.currentTarget.blur(); 
+                              if (event.key === 'Escape') setEditing(null); 
+                            }} 
+                          />
+                        ) : (
+                          <button 
+                            className="inline-flex items-center gap-3 rounded-lg px-3 py-2 font-bold text-base hover:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary cursor-pointer" 
+                            onClick={() => setEditing({ size, customer, month: selectedMonthKey })} 
+                            aria-label={`تعديل سعر ${size} لفئة ${customer}`}
+                          >
+                            {price == null ? 'إضافة سعر' : price.toLocaleString('ar-LY')}
+                            <Edit2 className="h-3.5 w-3.5 text-muted-foreground" />
+                          </button>
+                        )}
+                      </td>
+                      <td className="p-4">
+                        {diff == null ? (
+                          <span className="text-muted-foreground">لا تتوفر مقارنة</span>
+                        ) : diff === 0 ? (
+                          <span className="text-muted-foreground">نفس السعر</span>
+                        ) : (
+                          <div className={diff < 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}>
+                            <span className="font-bold">{diff < 0 ? 'أقل' : 'أعلى'} {Math.abs(diff / base! * 100).toFixed(1)}%</span>
+                            <span className="block text-xs mt-1">بفارق {Math.abs(diff).toLocaleString('ar-LY')} د.ل</span>
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center gap-1.5 justify-start flex-wrap">
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => setRelativeTarget({ customer, size, level: selectedLevel })}
+                            className="h-8 text-xs font-semibold cursor-pointer"
+                          >
+                            نسبة / تصفير
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-2.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive border border-transparent hover:border-destructive/20 gap-1 rounded-lg cursor-pointer"
+                            onClick={() => {
+                              setDeletingSize(size);
+                              setDeleteSizeOpen(true);
+                            }}
+                            title={`حذف مقاس ${size} من فئة ${customer}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span>حذف من الفئة</span>
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {sizesForLevel.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="p-10 text-center text-muted-foreground">
+                      <div className="space-y-3">
+                        <p>لا توجد مقاسات مسجلة لفئة «{otherCustomer === PRIMARY_SENTINEL ? 'عادي' : otherCustomer}» في المستوى {selectedLevel}.</p>
+                        <Button variant="outline" size="sm" onClick={() => setAddSizeOpen(true)} className="gap-1.5 cursor-pointer">
+                          <Plus className="h-4 w-4" />
+                          <span>إضافة مقاس لهذه الفئة الآن</span>
                         </Button>
                       </div>
-                    </th>
-                    {(otherCustomer === PRIMARY_SENTINEL ? PRIMARY_CUSTOMERS : [otherCustomer]).map((c, customerIndex) => {
-                      const isEditing = editing && editing.size === size && editing.customer === c && editing.month === selectedMonthKey;
-                      const current = getVal(size, c, selectedMonthKey);
-                      return (
-                        <td key={`col-${sizeIndex}-${customerIndex}-${c}`} className="p-3">
-                          {isEditing ? (
-                            <input
-                              autoFocus
-                              aria-label={`سعر ${size} لفئة ${c} خلال ${selectedMonthKey}`}
-                              min={0}
-                              type="number"
-                              className="w-full min-w-28 h-16 rounded-xl border-2 border-primary px-4 py-3 bg-background text-2xl font-bold tabular-nums"
-                              defaultValue={current ?? ''}
-                              onBlur={(e) => {
-                                const v = e.target.value.trim();
-                                setVal(size, c, selectedMonthKey, v === '' ? null : Number(v));
-                                setEditing(null);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                                if (e.key === 'Escape') setEditing(null);
-                              }}
-                            />
-                          ) : (
-                            <button
-                              aria-label={`تعديل سعر ${size} لفئة ${c} لمدة ${selectedMonthKey}`} className="group flex min-h-16 w-full items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3 text-right text-foreground hover:border-primary hover:bg-primary/5 focus-visible:ring-2 focus-visible:ring-primary"
-                              onClick={() => setEditing({ size, customer: c, month: selectedMonthKey })}
-                            >
-                              <span className="text-xl sm:text-2xl font-bold tabular-nums">{current == null ? 'أضف سعرًا' : current.toLocaleString('ar-LY')}<span className="mr-2 text-sm font-medium text-muted-foreground">{current == null ? '' : 'د.ل'}</span></span>
-                              <Edit2 className="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-primary" />
-                            </button>
-                          )}
-                        </td>
-                      );
-                    })}
-
+                    </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>
+          <details className="rounded-xl border border-border">
+            <summary className="p-4 cursor-pointer font-semibold hover:bg-muted/50 transition-colors">إدارة الأسعار <span className="mr-2 font-normal text-xs text-muted-foreground">الفئات والمقاسات والمدد</span></summary>
+            <div className="border-t p-4 grid sm:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <p className="font-bold text-sm">فئات العملاء</p>
+                <Button variant="outline" className="w-full" onClick={() => setAddCatOpen(true)}>إضافة فئة</Button>
+                <Button variant="outline" className="w-full" onClick={() => setCategoryOrderOpen(true)}>ترتيب الفئات</Button>
+                <Button variant="ghost" className="w-full" onClick={() => openEditCategory(otherCustomer)}>تعديل الفئة المحددة</Button>
+              </div>
+              <div className="space-y-2"><p className="font-bold text-sm">المقاسات</p><Button variant="outline" className="w-full" onClick={() => setAddSizeOpen(true)}>إضافة مقاس للفئة</Button><Button variant="ghost" className="w-full" onClick={() => printSizeCatalog(sizesData)}>طباعة مقاسات الطباعة</Button><Select value="" onValueChange={size => { setDeletingSize(size); setDeleteSizeOpen(true); }}><SelectTrigger><SelectValue placeholder="حذف مقاس من الفئة" /></SelectTrigger><SelectContent>{sizesForLevel.map(size => <SelectItem key={size} value={size}>{size}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-2"><p className="font-bold text-sm">المدد والمستويات</p><Button variant="outline" className="w-full" onClick={() => { resetDurationForm(); setNewDurationOrder(durations.length + 1); setAddDurationOpen(true); }}>إضافة مدة</Button><Select value="" onValueChange={id => { const duration = durations.find(d => d.id === id); if (duration) openEditDuration(duration); }}><SelectTrigger><SelectValue placeholder="تعديل مدة" /></SelectTrigger><SelectContent>{durations.filter(d => d.is_active).map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent></Select><Button variant="ghost" className="w-full" onClick={() => setAddLevelOpen(true)}>إضافة مستوى</Button><Button variant="ghost" className="w-full" onClick={() => { const level = levels.find(l => l.level_code === selectedLevel); if (level) openEditLevel(level); }}>تعديل المستوى المحدد</Button></div>
+            </div>
+          </details>
         </CardContent>
       </Card>
+
+      {relativeTarget && (
+        <CompanyPriceEditor
+          target={relativeTarget}
+          categories={orderedCategories}
+          records={pricingData}
+          periods={MONTH_OPTIONS}
+          level={selectedLevel}
+          levels={allLevels.map(code => ({
+            code,
+            name: levels.find(l => l.level_code === code)?.level_name || code,
+          }))}
+          month={selectedMonthKey}
+          sizes={sizesData}
+          onClose={() => setRelativeTarget(null)}
+          onSaved={loadData}
+        />
+      )}
+
+      <CategoryOrderDialog
+        open={categoryOrderOpen}
+        onOpenChange={setCategoryOrderOpen}
+        categories={orderedCategories}
+        onSaveOrder={handleSaveCategoryOrder}
+      />
 
       {/* نافذة إضافة مستوى جديد */}
       <UIDialog.Dialog open={addLevelOpen} onOpenChange={setAddLevelOpen}>
@@ -2286,222 +2342,614 @@ export default function PricingList() {
 
       {/* نافذة حذف المقاس */}
       <UIDialog.Dialog open={deleteSizeOpen} onOpenChange={setDeleteSizeOpen}>
-        <UIDialog.DialogContent>
+        <UIDialog.DialogContent className="max-w-md rounded-2xl">
           <UIDialog.DialogHeader>
-            <UIDialog.DialogTitle>تأكيد حذف المقاس</UIDialog.DialogTitle>
+            <UIDialog.DialogTitle>
+              حذف المقاس من فئة «{otherCustomer === PRIMARY_SENTINEL ? 'عادي' : otherCustomer}»
+            </UIDialog.DialogTitle>
             <UIDialog.DialogDescription>
-              هذا الإجراء لا يمكن التراجع عنه
+              المستوى {selectedLevel} · الفئة: {otherCustomer === PRIMARY_SENTINEL ? 'عادي' : otherCustomer}
             </UIDialog.DialogDescription>
           </UIDialog.DialogHeader>
           <div className="py-4 space-y-3">
-            <p className="text-sm text-muted-foreground">
-              هل أنت متأكد من حذف المقاس <strong>"{deletingSize}"</strong> من قائمة الأسعار للمستوى <strong>"{selectedLevel}"</strong>؟
+            <p className="text-sm text-foreground">
+              هل أنت متأكد من حذف المقاس <strong>"{deletingSize}"</strong> من فئة <strong>"{otherCustomer === PRIMARY_SENTINEL ? 'عادي' : otherCustomer}"</strong> فقط للمستوى <strong>"{selectedLevel}"</strong>؟
             </p>
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
-              <p className="text-sm text-red-600 dark:text-red-400">
-  تحذير: سيتم حذف جميع الأسعار المرتبطة بهذا المقاس في هذا المستوى نهائياً ولا يمكن التراجع عن هذا الإجراء.
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
+              <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                ملاحظة: سيتم حذف هذا المقاس من فئة «{otherCustomer === PRIMARY_SENTINEL ? 'عادي' : otherCustomer}» فقط، ولن تتأثر باقي الفئات ولا أسعار الشركات أو اللوحات المنشأة.
               </p>
             </div>
           </div>
-          <UIDialog.DialogFooter>
-            <Button variant="outline" onClick={()=>setDeleteSizeOpen(false)}>إلغاء</Button>
-            <Button variant="destructive" onClick={deleteSize}>حذف نهائياً</Button>
+          <UIDialog.DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 justify-between">
+            <Button variant="outline" onClick={()=>setDeleteSizeOpen(false)} className="cursor-pointer">إلغاء</Button>
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                className="text-red-600 border-red-300 hover:bg-red-50 dark:hover:bg-red-950/20 text-xs cursor-pointer" 
+                onClick={() => deleteSize(true)}
+                title="حذف هذا المقاس من كل الفئات في هذا المستوى"
+              >
+                حذف من المستوى بالكامل
+              </Button>
+              <Button variant="destructive" onClick={() => deleteSize(false)} className="cursor-pointer">
+                حذف من فئة {otherCustomer === PRIMARY_SENTINEL ? 'عادي' : otherCustomer}
+              </Button>
+            </div>
           </UIDialog.DialogFooter>
         </UIDialog.DialogContent>
       </UIDialog.Dialog>
 
-      {/* نافذة الطباعة */}
+      {/* نافذة الطباعة المتطورة */}
       <UIDialog.Dialog open={printOpen} onOpenChange={setPrintOpen}>
-        <UIDialog.DialogContent className="max-w-lg">
-          <UIDialog.DialogHeader>
-            <UIDialog.DialogTitle>طباعة الأسعار</UIDialog.DialogTitle>
-            <UIDialog.DialogDescription>
-              اختر الفئة والمستوى وخيارات العرض
-            </UIDialog.DialogDescription>
-          </UIDialog.DialogHeader>
-          <div className="grid gap-4 max-h-[70vh] overflow-y-auto pr-1">
-            {/* وضع الطباعة */}
-            <div>
-              <label className="text-sm font-medium mb-2 block">وضع الطباعة</label>
-              <div className="flex gap-2">
-                <Button
-                  variant={printTheme === 'light' ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setPrintTheme('light')}
-                >
-  فاتح (مناسب للطباعة)
-                </Button>
-                <Button
-                  variant={printTheme === 'dark' ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setPrintTheme('dark')}
-                >
- غامق
-                </Button>
-              </div>
-            </div>
-
-            {/* اختيار الشعار */}
-            <div className="border-t border-border pt-4">
-              <label className="text-sm font-medium mb-2 block">الشعار</label>
-              <div className="grid grid-cols-4 gap-2">
-                {AVAILABLE_LOGOS.map((logo, index) => (
-                  <button
-                    key={`logo-${index}`}
-                    onClick={() => setPrintLogo(logo.src)}
-                    className={`flex flex-col items-center gap-1.5 p-2 rounded-lg border-2 transition-all ${
-                      printLogo === logo.src
-                        ? 'border-primary bg-primary/10 shadow-sm'
-                        : 'border-border bg-muted/30 hover:border-primary/50 hover:bg-muted/60'
-                    }`}
-                  >
-                    {logo.src ? (
-                      <img src={logo.src} alt={logo.label} className="h-8 w-auto object-contain" />
-                    ) : (
- <div className="h-8 flex items-center justify-center text-muted-foreground text-lg"></div>
+        <UIDialog.DialogContent dir="rtl" className="pricing-workspace pricing-print-dialog max-w-4xl max-h-[92vh] flex flex-col p-0 gap-0 overflow-hidden rounded-2xl border border-border/80 shadow-2xl bg-card">
+          {/* رأس النافذة الأنيق مع إمكانية حفظ واستعادة الإعدادات */}
+          <UIDialog.DialogHeader className="bg-gradient-to-l from-primary/10 via-primary/5 to-transparent px-6 py-5 border-b border-border/70 shrink-0">
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-xl bg-primary/15 border border-primary/30 flex items-center justify-center text-primary shadow-sm shrink-0">
+                  <Printer className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <UIDialog.DialogTitle className="text-xl font-bold text-foreground">
+                      تخصيص وطباعة قائمة الأسعار
+                    </UIDialog.DialogTitle>
+                    {hasSavedSettings && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25">
+                        <CheckCircle2 className="w-3 h-3" />
+                        إعدادات محفوظة
+                      </span>
                     )}
-                    <span className="text-[10px] text-muted-foreground leading-tight text-center">{logo.label}</span>
-                  </button>
-                ))}
+                  </div>
+                  <UIDialog.DialogDescription className="text-xs sm:text-sm text-muted-foreground mt-0.5">
+                    حدد فئة العميل والمستويات، ثم خصص مظهر القائمة وصدّرها أو اطبعها.
+                  </UIDialog.DialogDescription>
+                </div>
+              </div>
+
+              {/* أزرار الحفظ السريع واستعادة الإعدادات */}
+              <div className="flex items-center gap-2 self-start sm:self-center flex-wrap">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => savePrintSettings(true)}
+                  className="h-8 text-xs font-bold gap-1.5 border-primary/40 hover:bg-primary/10 hover:border-primary text-foreground cursor-pointer rounded-xl transition-all shadow-2xs"
+                  title="حفظ الخيارات الحالية كإعداداتك الافتراضية دائماً"
+                >
+                  <Save className="w-3.5 h-3.5 text-primary" />
+                  <span>حفظ الإعدادات</span>
+                </Button>
+
+                {hasSavedSettings && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={resetPrintSettings}
+                    className="h-8 text-xs font-medium gap-1 text-muted-foreground hover:text-foreground cursor-pointer rounded-xl"
+                    title="استعادة الإعدادات الأصلية للنظام"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">استعادة الافتراضي</span>
+                  </Button>
+                )}
               </div>
             </div>
 
-            {/* اختيار الفئة مع بحث */}
-            <div className="border-t border-border pt-4">
-              <label className="text-sm font-medium mb-2 block">الفئة السعرية</label>
-              <Input
-                type="text"
- placeholder=" ابحث عن الفئة..."
-                value={printCategorySearch}
-                onChange={(e) => setPrintCategorySearch(e.target.value)}
-                className="h-8 text-sm mb-2"
-              />
-              <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
-                {[...PRIMARY_CUSTOMERS, ...otherCategories]
-                  .filter(c => !printCategorySearch || c.includes(printCategorySearch))
-                  .map((c, index) => (
+            {/* شريط الملخص وخيار الحفظ التلقائي */}
+            <div className="mt-3 flex items-center justify-between gap-3 flex-wrap bg-background/80 backdrop-blur-sm border border-border/80 rounded-xl px-3.5 py-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-foreground">الفئة: <strong className="text-primary">{printCategory}</strong></span>
+                <span className="text-border">·</span>
+                <span>الشهر: <strong className="text-primary">{printMonth} {printYear}</strong></span>
+                <span className="text-border">·</span>
+                <span>المستوى: <strong className="text-foreground">{printLevelsLabel}</strong></span>
+                <span className="text-border">·</span>
+                <span>المظهر: <strong className={printTheme === 'light' ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-primary font-semibold'}>{printTheme === 'light' ? 'فاتح (ورقي / PDF)' : 'داكن (شاشات)'}</strong></span>
+                {priceMarkupPercent > 0 && (
+                  <>
+                    <span className="text-border">·</span>
+                    <span>الزيادة: <strong className="text-emerald-600 dark:text-emerald-400 font-bold">+{priceMarkupPercent}%</strong></span>
+                  </>
+                )}
+              </div>
+
+              <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-muted-foreground hover:text-foreground shrink-0 select-none">
+                <input
+                  type="checkbox"
+                  checked={autoSavePrintSettings}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setAutoSavePrintSettings(checked);
+                    if (checked) savePrintSettings(false);
+                  }}
+                  className="w-3.5 h-3.5 rounded border-border text-primary focus:ring-primary cursor-pointer accent-primary"
+                />
+                <span>حفظ التعديلات تلقائياً للاستخدام القادم</span>
+              </label>
+            </div>
+          </UIDialog.DialogHeader>
+
+          {/* جسم النافذة القابل للتمرير */}
+          <div className="print-dialog-body flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-5 space-y-5">
+            
+            {/* 2. اختيار الفئة السعرية */}
+            <div className="space-y-3 border-t border-border/70 pt-5">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                  <Tag className="w-4 h-4 text-primary" />
+                  الفئة السعرية للعميل
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">الفئة المحددة:</span>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-primary/15 text-primary border border-primary/30">
+                    {printCategory}
+                  </span>
+                </div>
+              </div>
+
+              {/* بطاقات الفئات السريعة الأكثر طلباً */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {['شركات', 'عادي', 'مسوق', 'البحباح'].map((catName) => {
+                  const isSelected = printCategory === catName;
+                  return (
                     <button
-                      key={`print-cat-${index}-${c}`}
-                      onClick={() => { setPrintCategory(c); setPrintCategorySearch(''); }}
-                      className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all border ${
-                        printCategory === c
-                          ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                          : 'bg-muted/50 text-foreground border-border hover:bg-muted'
+                      key={`quick-cat-${catName}`}
+                      type="button"
+                      onClick={() => { setPrintCategory(catName); setPrintCategorySearch(''); }}
+                      className={`flex items-center justify-between px-3 py-2 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
+                        isSelected
+                          ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                          : 'border-border/80 bg-muted/20 text-foreground hover:bg-muted/50 hover:border-primary/40'
                       }`}
                     >
-                      {c}
+                      <span>{catName}</span>
+                      {isSelected ? (
+                        <Check className="w-3.5 h-3.5 shrink-0" />
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground opacity-70">فئة رئيسية</span>
+                      )}
                     </button>
-                  ))}
+                  );
+                })}
+              </div>
+
+              {/* حقل البحث وشريط باقي الفئات */}
+              <div className="bg-muted/15 border border-border/60 rounded-xl p-3 space-y-2">
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="text"
+                    placeholder="ابحث بين جميع الفئات المسجلة..."
+                    value={printCategorySearch}
+                    onChange={(e) => setPrintCategorySearch(e.target.value)}
+                    className="h-8 text-xs pr-9 pl-8 bg-background border-border/80"
+                  />
+                  {printCategorySearch && (
+                    <button
+                      type="button"
+                      onClick={() => setPrintCategorySearch('')}
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pt-1">
+                  {orderedCategories
+                    .filter(c => !printCategorySearch || c.toLowerCase().includes(printCategorySearch.toLowerCase()))
+                    .map((c, index) => {
+                      const isSelected = printCategory === c;
+                      return (
+                        <button
+                          key={`print-cat-${index}-${c}`}
+                          type="button"
+                          onClick={() => { setPrintCategory(c); setPrintCategorySearch(''); }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all border cursor-pointer ${
+                            isSelected
+                              ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                              : 'bg-background text-foreground border-border/80 hover:bg-muted hover:border-primary/40'
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      );
+                    })}
+                </div>
               </div>
             </div>
 
-            {/* اختيار المستوى */}
-            <div className="border-t pt-4">
-              <label className="text-sm font-medium mb-2 block">المستوى</label>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant={printLevel === 'all' ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setPrintLevel('all')}
-                >
-                  جميع المستويات
-                </Button>
-                {allLevels.map((lvl, index) => {
-                  const levelInfo = levels.find(l => l.level_code === lvl);
+            {/* 3. شهر وتاريخ القائمة والاسم المقترح للحفظ */}
+            <div className="space-y-3 border-t border-border/70 pt-5">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                  <Calendar className="w-4 h-4 text-primary" />
+                  <span>شهر وتاريخ القائمة (الاسم المقترح للحفظ)</span>
+                </label>
+                <span className="text-xs text-muted-foreground">
+                  يُعتمد كاسم مقترح عند حفظ الملف بصيغة PDF وتوثيقه في تاريخ الإصدار أسفل الصفحة
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground">شهر القائمة</label>
+                  <select
+                    value={printMonth}
+                    onChange={e => setPrintMonth(e.target.value)}
+                    className="w-full h-10 px-3 rounded-xl border border-border bg-background text-sm font-medium focus:ring-2 focus:ring-primary focus:outline-none cursor-pointer"
+                  >
+                    {ARABIC_MONTH_NAMES.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-muted-foreground">السنة</label>
+                  <Input
+                    type="number"
+                    value={printYear}
+                    onChange={e => setPrintYear(parseInt(e.target.value) || new Date().getFullYear())}
+                    min={2020}
+                    max={2040}
+                    className="h-10 text-sm font-bold bg-background border-border"
+                  />
+                </div>
+              </div>
+
+              {/* معاينة شكل الترويسة واسم ملف الحفظ */}
+              <div className="p-3.5 rounded-xl bg-primary/5 border border-primary/20 space-y-2.5">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <span className="text-xs font-semibold text-muted-foreground">التاريخ الموثق أسفل الصفحة:</span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="inline-flex items-center text-xs font-semibold px-2.5 py-0.5 rounded-md bg-muted text-foreground border border-border">
+                      {new Date().toLocaleDateString('ar-LY')} (شهر {printMonth} {printYear})
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between flex-wrap gap-2 pt-2 border-t border-primary/10">
+                  <span className="text-xs font-semibold text-muted-foreground">الاسم المقترح لحفظ الملف (PDF):</span>
+                  <span className="text-xs font-mono font-bold text-foreground bg-background px-2.5 py-1 rounded-lg border border-border/80" dir="ltr">
+                    قائمة أسعار {printCategory === 'شركات' ? 'فئة الشركات' : `فئة ${printCategory}`} - {printMonth} {printYear}.pdf
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <section className="print-level-section space-y-3" aria-labelledby="print-level-title">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 id="print-level-title" className="font-bold flex items-center gap-2"><Layers className="h-4 w-4 text-primary" />مستويات اللوحات المطلوبة</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">حدد مستوى أو أكثر. ستُطبع المستويات المحددة فقط، وجميع المدد في صف واحد.</p>
+                </div>
+                <span className="rounded-lg bg-primary/10 px-3 py-1 text-sm font-bold">{selectedPrintLevels.length} من {allLevels.length}</span>
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => setPrintLevel('all')}>تحديد الكل</Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setPrintLevel([])}>إلغاء التحديد</Button>
+              </div>
+              <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-2">
+                {allLevels.map(code => {
+                  const info = levels.find(level => level.level_code === code);
+                  const selected = selectedPrintLevels.includes(code);
+                  const hasPrices = pricingData.some(row => row.billboard_level === code && row.customer_category === printCategory && printMonthOptions.some(option => (readDurationPrice(row, option.dbColumn) ?? 0) > 0));
                   return (
-                    <Button
-                      key={`print-level-${index}-${lvl}`}
-                      variant={printLevel === lvl ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setPrintLevel(lvl)}
+                    <label key={code} className={`flex items-center gap-3 rounded-xl border p-3 cursor-pointer transition-all duration-200 ${selected ? 'border-primary bg-primary/10' : 'border-border bg-background hover:border-primary/60'}`}>
+                      <input type="checkbox" checked={selected} onChange={() => togglePrintLevel(code)} className="h-5 w-5 shrink-0 accent-primary cursor-pointer" />
+                      <span className="flex-1"><span className="block text-sm font-bold">{info?.level_name || code}</span><span className="text-xs text-muted-foreground">{hasPrices ? 'توجد أسعار للطباعة' : 'لا توجد أسعار لهذه الفئة؛ لن تُطبع صفحة فارغة'}</span></span>
+                      <span className="font-bold text-sm" dir="ltr">{code}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              {!selectedPrintLevels.length && <p role="status" className="text-sm text-destructive">اختر مستوى واحدًا على الأقل لتفعيل الطباعة والتصدير.</p>}
+            </section>
+
+            <section className="space-y-3" aria-labelledby="print-durations-title">
+              <h3 id="print-durations-title" className="font-bold flex items-center gap-2"><Calendar className="h-4 w-4 text-primary" />المدد الظاهرة في الطباعة</h3>
+              <p className="text-sm text-muted-foreground">اختر المدد المطلوبة. مدتا 15 و45 يومًا مخفيتان افتراضيًا، وتظهر المدد المحددة في صف واحد.</p>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => setDurationVisibility(Object.fromEntries(MONTH_OPTIONS.map(option => [option.dbColumn, true])))}>إظهار الكل</Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setDurationVisibility({})}>المدد الافتراضية</Button>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {MONTH_OPTIONS.map(option => {
+                  const checked = durationVisibility[option.dbColumn] ?? ![15, 45].includes(option.days);
+                  return <label key={option.dbColumn} className={`flex items-center gap-2 rounded-xl border p-3 cursor-pointer ${checked ? 'border-primary bg-primary/10' : 'border-border'}`}>
+                    <input type="checkbox" checked={checked} onChange={event => setDurationVisibility(current => ({ ...current, [option.dbColumn]: event.target.checked }))} className="h-4 w-4 accent-primary cursor-pointer" />
+                    <span className="text-sm">{option.label}<span className="block text-xs text-muted-foreground">{option.days} يوم</span></span>
+                  </label>;
+                })}
+              </div>
+              {!printMonthOptions.length && <p role="status" className="text-sm text-destructive">اختر مدة واحدة على الأقل.</p>}
+            </section>
+
+            {/* 1. وضع ومظهر الطباعة */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                  <Palette className="w-4 h-4 text-primary" />
+                  وضع ومظهر الطباعة
+                </label>
+                <span className="text-xs text-muted-foreground">
+                  اختر النمط المناسب سواء للطباعة الورقية أو الاستعراض الرقمي
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* نمط فاتح */}
+                <button
+                  type="button"
+                  onClick={() => setPrintTheme('light')}
+                  className={`group relative flex flex-col gap-2 p-4 rounded-xl border-2 text-right transition-all cursor-pointer ${
+                    printTheme === 'light'
+                      ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/20'
+                      : 'border-border/80 bg-card hover:border-primary/40 hover:bg-muted/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between w-full">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500">
+                        <Sun className="w-4 h-4" />
+                      </div>
+                      <span className="font-semibold text-sm text-foreground">فاتح (مناسب للطباعة)</span>
+                    </div>
+                    {printTheme === 'light' ? (
+                      <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border border-muted-foreground/30" />
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed pr-9">
+                    خلفية بيضاء وحدود سوداء ولمسات ذهبية للطباعة على A4.
+                  </p>
+                  <div className="mt-1 flex items-center gap-2 pr-9">
+                    <span className="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                      موصى به للطباعة الورقية و PDF
+                    </span>
+                  </div>
+                </button>
+
+                {/* نمط داكن */}
+                <button
+                  type="button"
+                  onClick={() => setPrintTheme('dark')}
+                  className={`group relative flex flex-col gap-2 p-4 rounded-xl border-2 text-right transition-all cursor-pointer ${
+                    printTheme === 'dark'
+                      ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/20'
+                      : 'border-border/80 bg-card hover:border-primary/40 hover:bg-muted/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between w-full">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
+                        <Moon className="w-4 h-4" />
+                      </div>
+                      <span className="font-semibold text-sm text-foreground">داكن (للعرض الرقمي)</span>
+                    </div>
+                    {printTheme === 'dark' ? (
+                      <CheckCircle2 className="w-4 h-4 text-primary shrink-0" />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border border-muted-foreground/30" />
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed pr-9">
+                    خلفية داكنة ونصوص واضحة لعرض القائمة على الشاشة.
+                  </p>
+                  <div className="mt-1 flex items-center gap-2 pr-9">
+                    <span className="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-600 dark:text-indigo-400">
+                      مناسب للشاشات
+                    </span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* 4. اختيار الشعار */}
+            <div className="space-y-3 border-t border-border/70 pt-5">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-semibold flex items-center gap-2 text-foreground">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  شعار رأس القائمة
+                </label>
+                <span className="text-xs text-muted-foreground">
+                  يظهر الشعار في أعلى صفحة المطبوعة الرسمية
+                </span>
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                {AVAILABLE_LOGOS.map((logo, index) => {
+                  const isSelected = printLogo === logo.src;
+                  return (
+                    <button
+                      key={`logo-${index}`}
+                      type="button"
+                      onClick={() => setPrintLogo(logo.src)}
+                      className={`flex flex-col items-center justify-between p-2.5 rounded-xl border-2 transition-all cursor-pointer min-h-[76px] ${
+                        isSelected
+                          ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/20'
+                          : 'border-border/80 bg-muted/15 hover:border-primary/40 hover:bg-muted/40'
+                      }`}
                     >
-                      {levelInfo?.level_name || lvl}
-                    </Button>
+                      <div className="h-8 w-full flex items-center justify-center">
+                        {logo.src ? (
+                          <img src={logo.src} alt={logo.label} className="h-7 w-auto max-w-[80px] object-contain" />
+                        ) : (
+                          <div className="flex items-center justify-center text-muted-foreground">
+                            <EyeOff className="w-4 h-4" />
+                          </div>
+                        )}
+                      </div>
+                      <span className={`text-[11px] font-medium leading-tight text-center truncate w-full ${isSelected ? 'text-primary font-bold' : 'text-muted-foreground'}`}>
+                        {logo.label}
+                      </span>
+                    </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* خيارات العرض */}
-            <div className="border-t pt-4">
-              <label className="text-sm font-medium mb-2 block">خيارات العرض</label>
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showLevelColumn}
-                    onChange={(e) => setShowLevelColumn(e.target.checked)}
-                    className="w-4 h-4 rounded border-border"
-                  />
-                  <span className="text-sm">إظهار عمود المستوى</span>
-                </label>
-              </div>
-            </div>
-
-            {/* زيادة الأسعار */}
-            <div className="border-t pt-4">
-              <label className="text-sm font-medium mb-2 block">زيادة الأسعار (%)</label>
-              <div className="flex items-center gap-3">
-                <Input
-                  type="number"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={priceMarkupPercent}
-                  onChange={(e) => setPriceMarkupPercent(Number(e.target.value) || 0)}
-                  className="w-24"
-                  placeholder="0"
-                />
-                <span className="text-sm text-muted-foreground">النسبة المئوية للزيادة على الأسعار الأصلية</span>
-              </div>
-
-              {/* معاينة الأسعار مع الزيادة */}
-              {priceMarkupPercent > 0 && previewPricesWithMarkup.length > 0 && (
-                <div className="mt-3 bg-muted/30 rounded-lg p-3 border border-border/50">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-medium text-primary">معاينة الأسعار بعد الزيادة ({priceMarkupPercent}%)</span>
-                    <span className="text-xs text-muted-foreground">عينة من الأسعار</span>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-border/30">
-                          <th className="text-right py-1 px-2">المستوى</th>
-                          <th className="text-right py-1 px-2">المقاس</th>
-                          <th className="text-right py-1 px-2">الفترة</th>
-                          <th className="text-right py-1 px-2">السعر الأصلي</th>
-                          <th className="text-right py-1 px-2">السعر الجديد</th>
-                          <th className="text-right py-1 px-2 text-green-600">الزيادة</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {previewPricesWithMarkup.map((item, idx) => (
-                          <tr key={idx} className="border-b border-border/20">
-                            <td className="py-1 px-2">{item.level}</td>
-                            <td className="py-1 px-2">{item.size}</td>
-                            <td className="py-1 px-2">{item.period}</td>
-                            <td className="py-1 px-2 text-muted-foreground">{item.originalPrice.toLocaleString()}</td>
-                            <td className="py-1 px-2 font-semibold text-primary">{item.newPrice.toLocaleString()}</td>
-                            <td className="py-1 px-2 text-green-600 font-medium">+{item.increase.toLocaleString()}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+            {/* 5. خيارات العرض وهوامش الأسعار */}
+            <div className="space-y-4 border-t border-border/70 pt-5">
+              <div className="bg-muted/20 border border-border/70 rounded-xl p-4 space-y-4">
+                {/* إظهار عمود المستوى */}
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showLevelColumn}
+                      onChange={(e) => setShowLevelColumn(e.target.checked)}
+                      className="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer accent-amber-500"
+                    />
+                    <div>
+                      <span className="text-sm font-semibold text-foreground block">إظهار عمود المستوى في جدول الطباعة</span>
+                      <span className="text-xs text-muted-foreground block">مفيد عند طباعة كل المستويات معاً لتمييز تصنيف كل لوحة</span>
+                    </div>
+                  </label>
                 </div>
-              )}
+
+                {/* نسبة زيادة الأسعار */}
+                <div className="border-t border-border/60 pt-3 space-y-2.5">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <label className="text-sm font-semibold flex items-center gap-1.5 text-foreground">
+                      <Percent className="w-4 h-4 text-primary" />
+                      هامش الزيادة على الأسعار (%)
+                    </label>
+                    <span className="text-xs text-muted-foreground">
+                      تطبيق نسبة ربح إضافية تلقائياً على كل الأسعار المعروضة
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="relative w-28">
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={priceMarkupPercent}
+                        onChange={(e) => setPriceMarkupPercent(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+                        className="h-9 pr-3 pl-7 text-sm font-bold text-center border-border/80"
+                        placeholder="0"
+                      />
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">%</span>
+                    </div>
+
+                    {/* أزرار سريعة للنسب */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {[0, 5, 10, 15, 20, 25].map((pct) => (
+                        <button
+                          key={`pct-${pct}`}
+                          type="button"
+                          onClick={() => setPriceMarkupPercent(pct)}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border cursor-pointer ${
+                            priceMarkupPercent === pct
+                              ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+                              : 'bg-background text-foreground border-border/80 hover:bg-muted hover:border-primary/40'
+                          }`}
+                        >
+                          {pct === 0 ? 'الأصلي (0%)' : `+${pct}%`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* جدول معاينة عينة من الأسعار مع الزيادة */}
+                  {priceMarkupPercent > 0 && previewPricesWithMarkup.length > 0 && (
+                    <div className="mt-3 bg-card rounded-xl p-3.5 border border-primary/20 shadow-sm space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-primary">
+                            معاينة حية للأسعار بعد الزيادة ({priceMarkupPercent}%)
+                          </span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-semibold">
+                            زيادة فعالة
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-muted-foreground">عينة لأول مقاسات</span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-border/50 text-muted-foreground">
+                              <th className="text-right py-1.5 px-2 font-semibold">المستوى</th>
+                              <th className="text-right py-1.5 px-2 font-semibold">المقاس</th>
+                              <th className="text-right py-1.5 px-2 font-semibold">الفترة</th>
+                              <th className="text-right py-1.5 px-2 font-semibold">السعر الأصلي</th>
+                              <th className="text-right py-1.5 px-2 font-semibold text-primary">السعر الجديد</th>
+                              <th className="text-right py-1.5 px-2 font-semibold text-emerald-600 dark:text-emerald-400">الزيادة الصافية</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/30">
+                            {previewPricesWithMarkup.map((item, idx) => (
+                              <tr key={idx} className="hover:bg-muted/30 transition-colors">
+                                <td className="py-1.5 px-2 font-medium">{item.level}</td>
+                                <td className="py-1.5 px-2 font-semibold">{item.size}</td>
+                                <td className="py-1.5 px-2 text-muted-foreground">{item.period}</td>
+                                <td className="py-1.5 px-2 text-muted-foreground">{item.originalPrice.toLocaleString()} د.ل</td>
+                                <td className="py-1.5 px-2 font-bold text-primary">{item.newPrice.toLocaleString()} د.ل</td>
+                                <td className="py-1.5 px-2 text-emerald-600 dark:text-emerald-400 font-bold">+{item.increase.toLocaleString()} د.ل</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
+
           </div>
-          <UIDialog.DialogFooter className="flex gap-2">
-            <Button variant="outline" onClick={() => { setPrintOpen(false); setPriceMarkupPercent(0); }}>إلغاء</Button>
-            <Button variant="outline" onClick={() => exportCategoryToExcel(printCategory, priceMarkupPercent)}>
-              <Download className="h-4 w-4 ml-2" />
-              تحميل Excel {priceMarkupPercent > 0 && `(+${priceMarkupPercent}%)`}
-            </Button>
-            <Button onClick={handlePrint}>
-              <Printer className="h-4 w-4 ml-2" />
-              طباعة
-            </Button>
+
+          {/* تذييل النافذة والإجراءات مع حفظ التفضيلات */}
+          <UIDialog.DialogFooter className="px-6 py-4 border-t border-border/70 bg-muted/15 flex flex-col-reverse sm:flex-row items-center justify-between gap-3 shrink-0">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <Button
+                variant="outline"
+                onClick={() => setPrintOpen(false)}
+                className="cursor-pointer w-full sm:w-auto"
+              >
+                إغلاق
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => savePrintSettings(true)}
+                className="cursor-pointer gap-1.5 border-border hover:border-primary text-xs font-semibold text-foreground w-full sm:w-auto"
+                title="حفظ الإعدادات الحالية لتكون الخيارات الافتراضية دائماً"
+              >
+                <Save className="h-3.5 w-3.5 text-primary" />
+                <span>حفظ الإعدادات</span>
+              </Button>
+            </div>
+
+            <div className="flex items-center gap-2.5 w-full sm:w-auto">
+              <Button
+                variant="outline"
+                disabled={!selectedPrintLevels.length || !printMonthOptions.length}
+                onClick={() => {
+                  if (autoSavePrintSettings) savePrintSettings(false);
+                  exportCategoryToExcel(printCategory, priceMarkupPercent);
+                }}
+                className="cursor-pointer border-border hover:border-primary/50 flex-1 sm:flex-initial"
+              >
+                <FileSpreadsheet className="h-4 w-4 ml-2 text-emerald-600 dark:text-emerald-400" />
+                تصدير Excel {priceMarkupPercent > 0 && `(+${priceMarkupPercent}%)`}
+              </Button>
+              <Button
+                disabled={!selectedPrintLevels.length || !printMonthOptions.length}
+                onClick={() => {
+                  if (autoSavePrintSettings) savePrintSettings(false);
+                  handlePrint();
+                }}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground font-bold px-5 shadow-md cursor-pointer flex-1 sm:flex-initial"
+              >
+                <Printer className="h-4 w-4 ml-2" />
+                معاينة وطباعة القائمة
+              </Button>
+            </div>
           </UIDialog.DialogFooter>
         </UIDialog.DialogContent>
       </UIDialog.Dialog>
@@ -2580,9 +3028,15 @@ export default function PricingList() {
       <UIDialog.Dialog open={addSizeOpen} onOpenChange={setAddSizeOpen}>
         <UIDialog.DialogContent>
           <UIDialog.DialogHeader>
-            <UIDialog.DialogTitle>إضافة مقاس جديد</UIDialog.DialogTitle>
+            <UIDialog.DialogTitle>
+              {otherCustomer !== PRIMARY_SENTINEL 
+                ? `إضافة مقاس لفئة «${otherCustomer}»` 
+                : 'إضافة مقاس جديد'}
+            </UIDialog.DialogTitle>
             <UIDialog.DialogDescription>
-              اختر مقاس موجود أو أدخل مقاس جديد لإضافته للمستوى {selectedLevel}
+              {otherCustomer !== PRIMARY_SENTINEL 
+                ? `اختر مقاساً لإضافته وتسعيره لفئة «${otherCustomer}» في المستوى ${selectedLevel}`
+                : `اختر مقاس موجود أو أدخل مقاس جديد لإضافته للمستوى ${selectedLevel}`}
             </UIDialog.DialogDescription>
           </UIDialog.DialogHeader>
           <div className="expenses-dialog-form space-y-4">
@@ -2613,14 +3067,14 @@ export default function PricingList() {
             </div>
 
             <div>
-              <label className="expenses-form-label">أدخل مقاس جديد</label>
+              <label className="expenses-form-label">أدخل مقاس جديد (العرض × الارتفاع)</label>
               <Input
-                placeholder="مثال: 15x6, 9x4, إلخ..."
+                placeholder="مثال: 12x4, 8x3, إلخ..."
                 value={newSizeName}
                 onChange={e=>setNewSizeName(e.target.value)}
               />
               <p className="text-xs text-muted-foreground mt-1">
-                سيتم إضافة هذا المقاس الجديد لجميع المستويات في النظام
+                القاعدة القياسية المعتمدة: اكتب العرض أولاً ثم الارتفاع دائماً (مثال: 12x4 حيث 12 هو العرض و 4 هو الارتفاع).
               </p>
             </div>
           </div>

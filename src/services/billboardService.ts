@@ -22,6 +22,7 @@ const BILLBOARD_LIST_COLUMNS = `
   Municipality,
   Nearest_Landmark,
   Size,
+  print_size,
   Order_Size,
   size_id,
   Status,
@@ -236,10 +237,20 @@ function processBillboardFromSupabase(row: any, index: number): Billboard {
 
 export async function loadBillboards(): Promise<Billboard[]> {
   try {
-    const { data: rows, error: dbError } = await supabase
+    let { data: rows, error: dbError } = await supabase
       .from('billboards')
       .select(BILLBOARD_LIST_COLUMNS)
       .order('ID', { ascending: true });
+
+    // Keep the existing list usable while the additive schema migration is deployed.
+    if (dbError && ['42703', 'PGRST204'].includes(dbError.code) && dbError.message.includes('print_size')) {
+      const fallback = await supabase.from('billboards')
+        .select(BILLBOARD_LIST_COLUMNS.replace('  print_size,', ''))
+        .order('ID', { ascending: true });
+      rows = fallback.data;
+      dbError = fallback.error;
+    }
+
 
     if (!dbError && Array.isArray(rows) && rows.length > 0) {
       return rows.map((row: any, index: number) => processBillboardFromSupabase(row, index));

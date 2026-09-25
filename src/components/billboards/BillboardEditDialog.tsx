@@ -4,13 +4,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Upload, ClipboardPaste, Loader2, Image as ImageIcon, RefreshCw, Plus } from 'lucide-react';
+import { Upload, ClipboardPaste, Loader2, Image as ImageIcon, RefreshCw, Plus, Ruler } from 'lucide-react';
 import { BillboardImage } from '@/components/BillboardImage';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { uploadToImgbb } from '@/services/imgbbService';
 import { normalizeGoogleImageUrl } from '@/utils/imageUtils';
+import { calculatePrintMargins } from '@/utils/printMargins';
 import { 
   QuickAddSizeDialog, 
   QuickAddMunicipalityDialog, 
@@ -177,6 +178,9 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
         typeExists: billboardTypes.includes(billboardType)
       });
       
+      const matchedSizeObj = sizes.find(s => s.name === size || (bb.size_id && s.id === bb.size_id));
+      const initialPrintSize = bb.print_size || matchedSizeObj?.print_size || '';
+
       setEditForm({
         Billboard_Name: bb.Billboard_Name || bb.name || bb.billboard_name || bb.Name || '',
         City: bb.City || bb.city || bb.CITY || '',
@@ -186,6 +190,7 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
         GPS_Coordinates: bb.GPS_Coordinates || bb.gps_coordinates || bb.coords || bb.coordinates || bb.GPS || bb.lat_lng || '',
         Faces_Count: facesCount,
         Size: size,
+        print_size: initialPrintSize,
         Status: bb.Status || bb.status || 'available',
         Level: level,
         Contract_Number: bb.contractNumber || bb.Contract_Number || bb.contract_number || '',
@@ -390,6 +395,7 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
         Faces_Count: Faces_Count ? parseInt(String(Faces_Count)) : null,
         Size, 
         size_id: finalSizeId,
+        ...(editForm.print_size?.trim() || editing.print_size !== undefined ? { print_size: editForm.print_size?.trim() || null } : {}),
         Level, 
         Image_URL: finalImageUrl,
         image_name,
@@ -724,7 +730,8 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                     setEditForm((p: any) => ({ 
                       ...p, 
                       Size: v,
-                      size_id: selectedSize?.id || null
+                      size_id: selectedSize?.id || null,
+                      print_size: selectedSize?.print_size || p.print_size || ''
                     }));
                   }}>
                     <SelectTrigger className="text-sm bg-background border-border text-foreground h-9 flex-1">
@@ -761,6 +768,92 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                     <Plus className="h-4 w-4" />
                   </Button>
                 </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <Label htmlFor="editForm-print-size" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Ruler className="h-3.5 w-3.5 text-primary" />
+                    <span>مقاس الطباعة (متر)</span>
+                  </Label>
+                  <span className="text-[10px] text-muted-foreground">لمعرفة الهوامش بدقة</span>
+                </div>
+                <div className="flex gap-1.5 items-center">
+                  <Input 
+                    id="editForm-print-size" 
+                    dir="ltr" 
+                    value={editForm.print_size || ''} 
+                    onChange={e => setEditForm((p: any) => ({ ...p, print_size: e.target.value }))} 
+                    maxLength={100} 
+                    placeholder={sizes.find(s => s.name === editForm.Size)?.print_size || 'مثال: 12.20 × 4.20'} 
+                    className="text-sm bg-background border-border text-foreground h-9 font-mono flex-1"
+                  />
+                  {(() => {
+                    const currentDefault = sizes.find(s => s.name === editForm.Size)?.print_size;
+                    if (currentDefault && editForm.print_size && editForm.print_size !== currentDefault) {
+                      return (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditForm((p: any) => ({ ...p, print_size: currentDefault }))}
+                          className="text-[10px] h-9 px-2 text-primary hover:bg-primary/10 shrink-0"
+                          title="استعادة المقاس الافتراضي"
+                        >
+                          الافتراضي
+                        </Button>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+                {/* حساب هوامش الطباعة الدقيقة */}
+                {(() => {
+                  const matchedSize = sizes.find(s => s.name === editForm.Size || s.id === editForm.size_id);
+                  const effectivePrintSize = editForm.print_size?.trim() || matchedSize?.print_size;
+                  const marginCalc = calculatePrintMargins(
+                    effectivePrintSize,
+                    editForm.Size,
+                    matchedSize?.width,
+                    matchedSize?.height,
+                    sizes
+                  );
+                  if (!marginCalc.hasValidPrintSize) {
+                    return (
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        أدخل مقاس الطباعة لمعرفة هوامش الزيادة
+                      </p>
+                    );
+                  }
+                  return (
+                    <div className="mt-1.5 p-2 rounded-lg bg-amber-500/10 border border-amber-500/25 text-xs space-y-1">
+                      <div className="flex items-center justify-between text-amber-700 dark:text-amber-300 font-bold text-[11px]">
+                        <span>هوامش الطباعة المحسوبة:</span>
+                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-background/80 border border-amber-500/30">
+                          {marginCalc.printWidth} × {marginCalc.printHeight} م
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-foreground font-medium leading-tight">
+                        {marginCalc.marginWidthCm !== null && (
+                          <div>
+                            • العرض: <strong className="text-amber-600 dark:text-amber-400">{marginCalc.marginWidthCm > 0 ? `+${marginCalc.marginWidthCm}` : marginCalc.marginWidthCm} سم</strong>
+                            <span className="text-muted-foreground"> ({marginCalc.marginPerSideWidthCm! > 0 ? `+${marginCalc.marginPerSideWidthCm}` : marginCalc.marginPerSideWidthCm} سم لكل جانب)</span>
+                          </div>
+                        )}
+                        {marginCalc.marginHeightCm !== null && (
+                          <div>
+                            • الارتفاع: <strong className="text-amber-600 dark:text-amber-400">{marginCalc.marginHeightCm > 0 ? `+${marginCalc.marginHeightCm}` : marginCalc.marginHeightCm} سم</strong>
+                            <span className="text-muted-foreground"> ({marginCalc.marginPerSideHeightCm! > 0 ? `+${marginCalc.marginPerSideHeightCm}` : marginCalc.marginPerSideHeightCm} سم لكل جانب)</span>
+                          </div>
+                        )}
+                        {marginCalc.marginWidthCm === 0 && marginCalc.marginHeightCm === 0 && (
+                          <div className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                            مطابق للمقاس الإعلاني تماماً
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
               <div>
                 <Label className="text-xs text-muted-foreground mb-1.5 block">عدد الأوجه</Label>

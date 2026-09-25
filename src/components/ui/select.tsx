@@ -3,6 +3,7 @@ import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import './menu-surfaces.css';
 
 const Select = SelectPrimitive.Root;
 
@@ -17,14 +18,14 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-8.5 sm:h-10 w-full items-center justify-between rounded-md border border-input bg-background px-2.5 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+      "group flex h-11 w-full cursor-pointer items-center justify-between gap-3 rounded-lg border border-input bg-background px-3 py-2 text-sm font-medium text-foreground ring-offset-background transition-colors hover:border-primary/60 data-[placeholder]:text-muted-foreground data-[state=open]:border-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 [&>span]:text-start",
       className,
     )}
     {...props}
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-4 w-4 opacity-50" />
+      <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground motion-safe:transition-transform group-data-[state=open]:rotate-180" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
@@ -128,6 +129,7 @@ const SelectContent = React.forwardRef<
       <SelectPrimitive.Content
         ref={ref}
         className={cn(
+          "app-menu-surface max-w-[calc(100vw-1rem)] max-h-[min(24rem,var(--radix-select-content-available-height))]",
           "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
           position === "popper" &&
             "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
@@ -148,13 +150,14 @@ const SelectContent = React.forwardRef<
         }}
       >
         {showSearch && (
-          <div className="flex items-center border-b px-3 sticky top-0 bg-popover z-10">
-            <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-muted/40 px-3 focus-within:ring-1 focus-within:ring-inset focus-within:ring-primary/50">
+            <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
             <input
               ref={inputRef}
               placeholder="ابحث..."
+              aria-label="البحث في الخيارات"
               value={searchQuery}
-              className="flex h-9 w-full bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground"
+              className="flex h-11 min-w-0 w-full bg-transparent py-2 text-base text-foreground outline-none placeholder:text-muted-foreground"
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => {
                 // Stop all keyboard events from propagating to Select
@@ -169,13 +172,15 @@ const SelectContent = React.forwardRef<
             />
             {searchQuery && (
               <button
+                type="button"
+                aria-label="مسح البحث"
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   setSearchQuery("");
                   inputRef.current?.focus();
                 }}
-                className="p-0.5 rounded hover:bg-accent"
+                className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <X className="h-3 w-3 opacity-50" />
               </button>
@@ -186,7 +191,7 @@ const SelectContent = React.forwardRef<
         <SelectPrimitive.Viewport
           ref={viewportRef}
           className={cn(
-            "p-1",
+            "p-1.5",
             position === "popper" &&
               "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]",
           )}

@@ -1,0 +1,48 @@
+/* Scoped identity: white/charcoal surfaces, black text, and the reference's yellow gold. */
+.pricing-workspace {
+  --primary: 46 69% 49%;
+  --primary-foreground: 0 0% 9%;
+  --ring: 46 69% 49%;
+  --background: 0 0% 100%;
+  --card: 0 0% 100%;
+  --muted: 0 0% 96%;
+  --border: 0 0% 82%;
+}
+.dark .pricing-workspace {
+  --background: 0 0% 8%;
+  --card: 0 0% 10%;
+  --muted: 0 0% 15%;
+  --border: 0 0% 25%;
+}
+.pricing-page-header { border-top: 4px solid #d4ad27; border-radius: 1rem 1rem 0 0; }
+.pricing-page-title { margin-bottom: 12px; }
+.pricing-page-title span { background: linear-gradient(transparent 45%, #d4ad27 45%, #d4ad27 68%, transparent 68%); }
+.pricing-workspace [role='region'] table thead { background: hsl(var(--card)); border-bottom: 2px solid #d4ad27; }
+.pricing-workspace [role='region'] table thead th { background: hsl(var(--card)); }
+.pricing-workspace [role='region'] table tbody button { box-shadow: none; border-color: transparent; background: transparent; border-radius: 6px; }
+.pricing-workspace [role='region'] table tbody button:hover { border-color: #d4ad27; background: hsl(var(--primary) / .07); }
+.pricing-workspace button:focus-visible { outline: 2px solid #d4ad27; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .pricing-workspace * { transition: none !important; } }
+.pricing-print-dialog .print-dialog-body > section,
+.pricing-print-dialog .print-dialog-body > div {
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  padding: 16px;
+  background: hsl(var(--background));
+}
+.pricing-print-dialog .print-dialog-body { background: hsl(var(--muted) / .35); }
+.pricing-print-dialog button { cursor: pointer; transition: background-color .2s, border-color .2s; }
+.pricing-print-dialog button:disabled { cursor: not-allowed; }
+.pricing-print-dialog .print-level-section { border-color: #d4ad27 !important; }
+.pricing-print-dialog .print-dialog-body label + span { line-height: 1.6; }
+@media (max-width: 640px) {
+  .pricing-print-dialog .print-dialog-body > div > .flex.items-center.justify-between { align-items: flex-start; flex-direction: column; gap: 6px; }
+}
+.pricing-print-dialog { width: min(960px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); }
+.pricing-print-dialog > :first-child { flex-shrink: 0; padding-left: 44px; }
+.pricing-print-dialog > :last-child { flex-shrink: 0; }
+.pricing-print-dialog .print-dialog-body { overscroll-behavior: contain; }
+@media (max-width: 640px) {
+  .pricing-print-dialog > :first-child { max-height: 30dvh; overflow-y: auto; padding: 14px 16px 14px 42px; }
+  .pricing-print-dialog { height: calc(100dvh - 24px); }
+}

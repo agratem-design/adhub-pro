@@ -63,6 +63,7 @@ const ContractView = lazyRetry(() => import("./pages/ContractView"));
 const ContractExpensesPage = lazyRetry(() => import("./pages/ContractExpensesPage"));
 const EventsContracts = lazyRetry(() => import("./pages/EventsContracts"));
 const EventContractEdit = lazyRetry(() => import("./pages/EventContractEdit"));
+const EventPricingList = lazyRetry(() => import("./pages/EventPricingList"));
 const Billboards = lazyRetry(() => import("./pages/Billboards"));
 const BillboardCleanup = lazyRetry(() => import("./pages/BillboardCleanup"));
 const BillboardMaintenance = lazyRetry(() => import("./pages/BillboardMaintenance"));
@@ -166,6 +167,7 @@ const adminRoutes: { path: string; Component: React.LazyExoticComponent<any>; pe
   { path: "events-contracts", Component: EventsContracts, permission: "contracts" },
   { path: "events-contracts/new", Component: EventContractEdit, permission: "contracts" },
   { path: "events-contracts/edit/:id", Component: EventContractEdit, permission: "contracts" },
+  { path: "events-pricing", Component: EventPricingList, permission: "contracts" },
   { path: "customers", Component: Customers, permission: "customers" },
   { path: "customer-billing", Component: CustomerBilling, permission: "customer_billing" },
   { path: "customer-merge", Component: CustomerMerge, permission: "customer_merge" },

@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Save, X, Plus } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { calculatePrintMargins } from '@/utils/printMargins';
 
 interface QuickAddBaseProps {
   open: boolean;
@@ -16,7 +17,7 @@ interface QuickAddBaseProps {
 
 // 1. Add Size Dialog
 export const QuickAddSizeDialog: React.FC<QuickAddBaseProps> = ({ open, onOpenChange, onSuccess, onRefresh }) => {
-  const [form, setForm] = useState({ name: '', width: 0, height: 0, installation_price: 0, sort_order: 999, description: '' });
+  const [form, setForm] = useState({ name: '', print_size: '', width: 0, height: 0, installation_price: 0, sort_order: 999, description: '' });
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -45,6 +46,7 @@ export const QuickAddSizeDialog: React.FC<QuickAddBaseProps> = ({ open, onOpenCh
         .from('sizes')
         .insert({
           name: form.name.trim(),
+          print_size: form.print_size.trim() || null,
           width: form.width,
           height: form.height,
           installation_price: form.installation_price,
@@ -60,7 +62,7 @@ export const QuickAddSizeDialog: React.FC<QuickAddBaseProps> = ({ open, onOpenCh
       await onRefresh();
       onSuccess(form.name.trim());
       onOpenChange(false);
-      setForm({ name: '', width: 0, height: 0, installation_price: 0, sort_order: 999, description: '' });
+      setForm({ name: '', print_size: '', width: 0, height: 0, installation_price: 0, sort_order: 999, description: '' });
     } catch (err: any) {
       console.error('Error saving size:', err);
       toast.error(`فشل في حفظ المقاس: ${err.message || 'خطأ غير معروف'}`);
@@ -110,6 +112,29 @@ export const QuickAddSizeDialog: React.FC<QuickAddBaseProps> = ({ open, onOpenCh
                 className="mt-1 font-manrope text-right"
               />
             </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <Label className="text-xs">مقاس الطباعة (متر)</Label>
+              <span className="text-[10px] text-muted-foreground">لمعرفة هوامش الطباعة بدقة</span>
+            </div>
+            <Input
+              dir="ltr"
+              value={form.print_size}
+              onChange={(e) => setForm({ ...form, print_size: e.target.value })}
+              placeholder="مثال: 12.20 × 4.20"
+              className="mt-1 font-mono text-left"
+            />
+            {(() => {
+              const marginCalc = calculatePrintMargins(form.print_size, form.name, form.width, form.height);
+              if (!marginCalc.hasValidPrintSize) return null;
+              return (
+                <div className="mt-1.5 p-2 rounded-lg bg-amber-500/10 border border-amber-500/25 text-xs text-amber-700 dark:text-amber-300">
+                  <span className="font-bold">هوامش الطباعة: </span>
+                  <span>{marginCalc.summaryText}</span>
+                </div>
+              );
+            })()}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
