@@ -1,3 +1,4 @@
+import { buildFactorPricingPrint } from '@/utils/factorPricingPrint';
 import { useAuth } from '@/contexts/AuthContext';
 import { FactorValueEditor } from '@/components/pricing/FactorValueEditor';
 import './PricingFactors.css';
@@ -120,7 +121,10 @@ export default function PricingFactors() {
   const [loading, setLoading] = useState(true);
 
   // إظهار أو طي دليل النظام
-  const [showGuide, setShowGuide] = useState(true);
+  const [showGuide, setShowGuide] = useState(false);
+  const [activeTab, setActiveTab] = useState("preview");
+  const [printLevel, setPrintLevel] = useState("all");
+  const [printComparison, setPrintComparison] = useState(false);
 
   // طريقة عرض معاملات البلديات (جدول منظم أو بطاقات)
   const [munViewMode, setMunViewMode] = useState<'table' | 'cards'>('table');
@@ -146,7 +150,7 @@ export default function PricingFactors() {
 
   // حالات الطباعة المنظمة (مثل قائمة الأسعار الرسمية)
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
-  const [printType, setPrintType] = useState<'all' | 'base_prices' | 'municipalities' | 'single_city'>('all');
+  const [printType, setPrintType] = useState<'all' | 'base_prices' | 'municipalities' | 'single_city'>('single_city');
   const [printCity, setPrintCity] = useState<string>('زليتن');
   const [printCategory, setPrintCategory] = useState<string>('شركات');
   const [printComparisonSize, setPrintComparisonSize] = useState<string>('12x4');
@@ -213,19 +217,16 @@ export default function PricingFactors() {
   // السعر الأساسي للمقاس والمستوى المحدد للمقارنة
   const comparisonBasePrice = useMemo(() => {
     const bp = basePrices.find(b => b.size_name === comparisonSize && b.billboard_level === comparisonLevel)
-      || basePrices.find(b => b.size_name === comparisonSize)
-      || basePrices[0];
-    return bp?.full_year || 65000;
+;
+    return bp?.full_year ?? 0;
   }, [basePrices, comparisonSize, comparisonLevel]);
 
   // الحساب المباشر للآلة الحاسبة الذكية لجميع الفترات
   const liveCalcResult = useMemo(() => {
-    const bp = basePrices.find(b => b.size_name === calcSize && b.billboard_level === calcLevel) 
-      || basePrices.find(b => b.size_name === calcSize)
-      || basePrices[0];
+    const bp = basePrices.find(b => b.size_name === calcSize && b.billboard_level === calcLevel);
     
-    const mFactor = municipalityFactors.find(m => m.municipality_name === calcMunicipality)?.factor || 1.0;
-    const cFactor = categoryFactors.find(c => c.category_name === calcCategory)?.factor || 1.0;
+    const mFactor = municipalityFactors.find(m => m.municipality_name === calcMunicipality)?.factor ?? 1.0;
+    const cFactor = categoryFactors.find(c => c.category_name === calcCategory)?.factor ?? 1.0;
     const combinedMultiplier = Number((mFactor * cFactor).toFixed(4));
 
     const baseDaily = bp?.one_day || 0;
@@ -259,8 +260,8 @@ export default function PricingFactors() {
   const filteredPrices = useMemo(() => {
     const targetMun = previewMunicipality || 'زليتن';
     const targetCat = previewCategory || 'شركات';
-    const municipalityFactor = municipalityFactors.find(m => m.municipality_name === targetMun)?.factor || 1;
-    const categoryFactor = categoryFactors.find(c => c.category_name === targetCat)?.factor || 1;
+    const municipalityFactor = municipalityFactors.find(m => m.municipality_name === targetMun)?.factor ?? 1;
+    const categoryFactor = categoryFactors.find(c => c.category_name === targetCat)?.factor ?? 1;
     const multiplier = municipalityFactor * categoryFactor;
     
     return basePrices.map(bp => ({
@@ -274,8 +275,8 @@ export default function PricingFactors() {
     }));
   }, [basePrices, municipalityFactors, categoryFactors, previewMunicipality, previewCategory]);
 
-  const currentPreviewMunFactor = municipalityFactors.find(m => m.municipality_name === (previewMunicipality || 'زليتن'))?.factor || 1;
-  const currentPreviewCatFactor = categoryFactors.find(c => c.category_name === (previewCategory || 'شركات'))?.factor || 1;
+  const currentPreviewMunFactor = municipalityFactors.find(m => m.municipality_name === (previewMunicipality || 'زليتن'))?.factor ?? 1;
+  const currentPreviewCatFactor = categoryFactors.find(c => c.category_name === (previewCategory || 'شركات'))?.factor ?? 1;
 
   // حفظ معامل البلدية
   const saveMunicipalityFactor = async () => {
@@ -412,245 +413,16 @@ export default function PricingFactors() {
   };
 
   // إنشاء مستند الطباعة الاحترافي المنظم
-  const buildPrintDocumentHtml = () => {
-    const today = new Date().toLocaleDateString('ar-LY');
-    const compBase = basePrices.find(b => b.size_name === printComparisonSize && b.billboard_level === 'A')?.full_year || 65000;
-
-    // 1. جدول الأسعار الأساسية
-    const baseRows = basePrices.map(bp => `
-      <tr>
-        <td style="font-weight: 800; text-align: right; padding: 6px 8px;">${bp.size_name} (مستوى ${bp.billboard_level})</td>
-        <td style="text-align: center;">${Number(bp.one_month || 0).toLocaleString('ar-LY')} د.ل</td>
-        <td style="text-align: center;">${Number(bp.two_months || 0).toLocaleString('ar-LY')} د.ل</td>
-        <td style="text-align: center;">${Number(bp.three_months || 0).toLocaleString('ar-LY')} د.ل</td>
-        <td style="text-align: center;">${Number(bp.six_months || 0).toLocaleString('ar-LY')} د.ل</td>
-        <td style="text-align: center; font-weight: 800; color: #785b13; background: #fff8e6;">${Number(bp.full_year || 0).toLocaleString('ar-LY')} د.ل</td>
-        <td style="text-align: center; color: #666;">${Number(bp.one_day || 0).toLocaleString('ar-LY')} د.ل</td>
-      </tr>
-    `).join('');
-
-    // 2. جدول البلديات
-    const munRows = municipalityFactors.map(m => {
-      const pct = m.factor === 1 ? 'المعيار القياسي 1.00x' : m.factor > 1 ? `زيادة +${Math.round((m.factor - 1) * 100)}%` : `تخفيض -${Math.round((1 - m.factor) * 100)}%`;
-      const dynamicPrice = Math.round(compBase * m.factor).toLocaleString('ar-LY');
-      const isAnchor = m.municipality_name === 'زليتن';
-
-      return `
-        <tr ${isAnchor ? 'style="background: #fdf6e2; font-weight: bold;"' : ''}>
-          <td style="padding: 6px 8px; text-align: right;">${m.municipality_name} ${isAnchor ? '(معيار 45k)' : ''}</td>
-          <td style="text-align: center; font-weight: 800;">${m.factor}x</td>
-          <td style="text-align: center;">${pct}</td>
-          <td style="text-align: center; font-weight: 800; color: #785b13;">${dynamicPrice} د.ل</td>
-          <td style="text-align: right; color: #555;">${m.description || getTierName(m.factor)}</td>
-        </tr>
-      `;
-    }).join('');
-
-    // 3. جدول فئات العملاء
-    const catRows = categoryFactors.map(c => {
-      const discount = c.factor === 1 ? 'السعر الكامل 100%' : c.factor < 1 ? `خصم ${Math.round((1 - c.factor) * 100)}%` : `زيادة +${Math.round((c.factor - 1) * 100)}%`;
-      return `
-        <tr>
-          <td style="padding: 6px 8px; text-align: right; font-weight: 700;">${c.category_name}</td>
-          <td style="text-align: center; font-weight: 800;">${c.factor}x</td>
-          <td style="text-align: center;">${discount}</td>
-          <td style="text-align: right; color: #555;">${c.description || 'معامل فئة مخصص'}</td>
-        </tr>
-      `;
-    }).join('');
-
-    // 4. جدول مدينة محددة
-    const mFactorSingle = municipalityFactors.find(m => m.municipality_name === printCity)?.factor || 1;
-    const cFactorSingle = categoryFactors.find(c => c.category_name === printCategory)?.factor || 1;
-    const combinedSingle = Number((mFactorSingle * cFactorSingle).toFixed(4));
-
-    const singleCityRows = basePrices.map(bp => {
-      const p1m = Math.round((bp.one_month || 0) * combinedSingle).toLocaleString('ar-LY');
-      const p2m = Math.round((bp.two_months || 0) * combinedSingle).toLocaleString('ar-LY');
-      const p3m = Math.round((bp.three_months || 0) * combinedSingle).toLocaleString('ar-LY');
-      const p6m = Math.round((bp.six_months || 0) * combinedSingle).toLocaleString('ar-LY');
-      const p1y = Math.round((bp.full_year || 0) * combinedSingle).toLocaleString('ar-LY');
-      const p1d = Math.round((bp.one_day || 0) * combinedSingle).toLocaleString('ar-LY');
-
-      return `
-        <tr>
-          <td style="font-weight: 800; text-align: right; padding: 7px 8px;">${bp.size_name} (مستوى ${bp.billboard_level})</td>
-          <td style="text-align: center;">${p1m} د.ل</td>
-          <td style="text-align: center;">${p2m} د.ل</td>
-          <td style="text-align: center;">${p3m} د.ل</td>
-          <td style="text-align: center;">${p6m} د.ل</td>
-          <td style="text-align: center; font-weight: 800; color: #785b13; background: #fff8e6;">${p1y} د.ل</td>
-          <td style="text-align: center; color: #666;">${p1d} د.ل</td>
-        </tr>
-      `;
-    }).join('');
-
-    let contentHtml = '';
-
-    if (printType === 'all') {
-      contentHtml = `
-        <div class="section-title">1. الأسعار الأساسية المعتمدة لجميع المقاسات (المستوى A والمستوى B المرن)</div>
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 25%;">المقاس والمستوى</th>
-              <th>شهر واحد</th>
-              <th>شهرين</th>
-              <th>3 أشهر</th>
-              <th>6 أشهر</th>
-              <th style="background: #eedfad;">سنة كاملة</th>
-              <th>يومي</th>
-            </tr>
-          </thead>
-          <tbody>${baseRows}</tbody>
-        </table>
-
-        <div class="section-title" style="margin-top: 20px;">2. معاملات المدن والبلديات (${municipalityFactors.length} بلدية رسمية)</div>
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 25%;">المدينة / البلدية</th>
-              <th>المعامل</th>
-              <th>التأثير على السعر</th>
-              <th>سعر ${printComparisonSize} سنوي (استرشادي)</th>
-              <th>التصنيف والأهمية</th>
-            </tr>
-          </thead>
-          <tbody>${munRows}</tbody>
-        </table>
-
-        <div class="section-title" style="margin-top: 20px;">3. معاملات فئات العملاء والخصومات التجارية المعتمدة</div>
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 25%;">فئة العميل</th>
-              <th>المعامل</th>
-              <th>نسبة الاستحقاق / الخصم</th>
-              <th>الوصف التجاري</th>
-            </tr>
-          </thead>
-          <tbody>${catRows}</tbody>
-        </table>
-      `;
-    } else if (printType === 'base_prices') {
-      contentHtml = `
-        <div class="section-title">قائمة الأسعار الأساسية المعتمدة (المستوى A والمستوى B المرن)</div>
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 25%;">المقاس والمستوى</th>
-              <th>شهر واحد</th>
-              <th>شهرين</th>
-              <th>3 أشهر</th>
-              <th>6 أشهر</th>
-              <th style="background: #eedfad;">سنة كاملة</th>
-              <th>يومي</th>
-            </tr>
-          </thead>
-          <tbody>${baseRows}</tbody>
-        </table>
-      `;
-    } else if (printType === 'municipalities') {
-      contentHtml = `
-        <div class="section-title">جدول معاملات ونسب المدن والبلديات (${municipalityFactors.length} بلدية رسمية)</div>
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 25%;">المدينة / البلدية</th>
-              <th>المعامل</th>
-              <th>التأثير على السعر</th>
-              <th>سعر ${printComparisonSize} سنوي (استرشادي)</th>
-              <th>التصنيف والأهمية</th>
-            </tr>
-          </thead>
-          <tbody>${munRows}</tbody>
-        </table>
-      `;
-    } else if (printType === 'single_city') {
-      contentHtml = `
-        <div class="badge-bar">
-          <div>البلدية المحددة: <b>${printCity}</b> (معامل ${mFactorSingle}x)</div>
-          <div>فئة العميل: <b>${printCategory}</b> (معامل ${cFactorSingle}x)</div>
-          <div>المعامل المطبق: <b>${combinedSingle}x</b></div>
-        </div>
-        <div class="section-title">لائحة الأسعار المعتمدة لكافة المقاسات في بلدية ${printCity}</div>
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 25%;">المقاس والمستوى</th>
-              <th>شهر واحد</th>
-              <th>شهرين</th>
-              <th>3 أشهر</th>
-              <th>6 أشهر</th>
-              <th style="background: #eedfad;">سنة كاملة</th>
-              <th>يومي</th>
-            </tr>
-          </thead>
-          <tbody>${singleCityRows}</tbody>
-        </table>
-      `;
-    }
-
-    return `<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head>
-  <meta charset="UTF-8">
-  <title>وثيقة نظام المعاملات والتسعير الذكي - الفارس الذهبي</title>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: 'Cairo', sans-serif; background: #fff; color: #1a1a1a; padding: 12mm 15mm; line-height: 1.5; font-size: 10pt; }
-    .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #d6ac40; padding-bottom: 12px; margin-bottom: 16px; }
-    .title { font-size: 18pt; font-weight: 900; color: #785b13; }
-    .subtitle { font-size: 10.5pt; color: #555; margin-top: 3px; }
-    .section-title { font-size: 12.5pt; font-weight: 800; color: #785b13; margin: 16px 0 8px 0; border-right: 4px solid #d6ac40; padding-right: 8px; }
-    .formula-box, .badge-bar { background: #fdfaf3; border: 1px solid #e8dcbe; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; display: flex; justify-content: space-between; font-size: 9.5pt; }
-    table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 9.5pt; }
-    th { background: #f5efe1; color: #5a430c; font-weight: 800; padding: 7px 6px; border: 1px solid #dcd1ba; text-align: center; }
-    th:first-child { text-align: right; padding-right: 8px; }
-    td { padding: 6px 6px; border: 1px solid #e5e5e5; }
-    tr:nth-child(even) td { background: #fafafa; }
-    .footer { margin-top: 25px; border-top: 1px solid #eee; padding-top: 10px; font-size: 8.5pt; color: #777; display: flex; justify-content: space-between; }
-    @media print {
-      body { padding: 8mm; }
-    }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <div>
-      <div class="title">وثيقة نظام المعاملات والتسعير الذكي الرسمية</div>
-      <div class="subtitle">شركة الفارس الذهبي للدعاية والإعلان - طرابلس، ليبيا</div>
-    </div>
-    <div style="text-align: left;">
-      <div style="font-weight: 800; color: #d6ac40; font-size: 13pt;">الفارس الذهبي</div>
-      <div style="font-size: 8.5pt; color: #888;">تاريخ الإصدار: ${today}</div>
-    </div>
-  </div>
-
-  <div class="formula-box">
-    <div><b>معادلة التسعير المعتمدة:</b> السعر النهائي = السعر الأساسي × معامل المدينة × معامل فئة العميل</div>
-    <div><b>المرجع القياسي:</b> العاصمة طرابلس (1.00x) | معيار زليتن للوحة 12×4: 45,000 د.ل (0.70x)</div>
-  </div>
-
-  ${contentHtml}
-
-  <div class="footer">
-    <div>ملاحظة: كافة الأسعار بالدينار الليبي وتشمل المساحات المعتمدة وفق شروط التعاقد الرسمية.</div>
-    <div>شركة الفارس الذهبي للدعاية والإعلان - جميع الحقوق محفوظة</div>
-  </div>
-</body>
-</html>`;
-  };
-
   const handleExecutePrint = () => {
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(buildPrintDocumentHtml());
-    w.document.close();
-    w.focus();
-    setTimeout(() => w.print(), 500);
-    setPrintDialogOpen(false);
+    try {
+      const html = buildFactorPricingPrint({ type: printType, prices: basePrices, municipalities: municipalityFactors, categories: categoryFactors, city: printCity, category: printCategory, size: printComparisonSize, level: printLevel, showComparison: printComparison, origin: window.location.origin });
+      const preview = window.open('', '_blank');
+      if (!preview) { toast.error('اسمح بالنوافذ المنبثقة لفتح معاينة الطباعة'); return; }
+      preview.document.write(html);
+      preview.document.close();
+      preview.focus();
+      setPrintDialogOpen(false);
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'تعذر إنشاء المعاينة'); }
   };
 
   const handlePrintCitySheet = () => {
@@ -735,113 +507,43 @@ export default function PricingFactors() {
       {/* ========================================================
           2. COLLAPSIBLE SYSTEM EXPLAINER GUIDE (دليل توضيح النظام)
       ======================================================== */}
-      {showGuide && (
-        <Card className="border-primary/30 bg-primary/5 shadow-sm overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-          <CardHeader className="p-4 sm:p-5 pb-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-primary font-bold text-base">
-                <Sparkles className="h-5 w-5" />
-                كيف يعمل نظام التسعير بالمعاملات؟ (3 خطوات بسيطة ومباشرة)
-              </div>
-              <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary text-xs font-semibold">
-                دليل توضيحي
-              </Badge>
-            </div>
-            <CardDescription className="text-xs text-muted-foreground mt-1">
-              تم بناء هذا النظام لتحديد أسعار كافة اللوحات الإعلانية في مدن ليبيا تلقائياً بناءً على 3 ركائز رئيسية:
-            </CardDescription>
-          </CardHeader>
-
-          <CardContent className="p-4 sm:p-5 pt-2 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-              
-              {/* الخطوة 1: السعر الأساسي */}
-              <div className="rounded-xl border border-border bg-card p-4 space-y-2 text-right">
-                <div className="flex items-center gap-2">
-                  <div className="rounded-lg bg-primary/10 p-2 text-primary">
-                    <Building2 className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-primary block">الخطوة الأولى</span>
-                    <h2 className="text-sm font-bold text-foreground">السعر الأساسي (معيار العاصمة)</h2>
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  هو السعر القياسي المعتمد في العاصمة (طرابلس / سوق الجمعة) لكل مقاس، مقسم بمرونة بين <b>المستوى A (المميز)</b> و <b>المستوى B (المرن)</b>.
-                </p>
-                <div className="text-[11px] bg-muted/60 rounded px-2 py-1 text-foreground font-mono">
-                  12×4 مستوى A = 65,000 د.ل | مستوى B = 58,000 د.ل
-                </div>
-              </div>
-
-              {/* الخطوة 2: معامل المدينة */}
-              <div className="rounded-xl border border-border bg-card p-4 space-y-2 text-right">
-                <div className="flex items-center gap-2">
-                  <div className="rounded-lg bg-primary/10 p-2 text-primary">
-                    <MapPin className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-primary block">الخطوة الثانية</span>
-                    <h2 className="text-sm font-bold text-foreground">معامل المدينة (الكثافة والجغرافيا)</h2>
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  يحدد نسبة السعر في كل مدينة مقارنة بالعاصمة. مثلاً <b>زليتن (0.70x)</b> ينخفض سعر اللوحة 12×4 إلى <b>45,500 د.ل</b> (معيار 45k المعتمد).
-                </p>
-                <div className="text-[11px] bg-muted/60 rounded px-2 py-1 text-foreground font-mono">
-                  زليتن = 0.70x | طرابلس = 1.05x | مصراتة = 0.85x
-                </div>
-              </div>
-
-              {/* الخطوة 3: معامل فئة العميل */}
-              <div className="rounded-xl border border-border bg-card p-4 space-y-2 text-right">
-                <div className="flex items-center gap-2">
-                  <div className="rounded-lg bg-primary/10 p-2 text-primary">
-                    <Users className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-primary block">الخطوة الثالثة</span>
-                    <h2 className="text-sm font-bold text-foreground">فئة العميل (الخصم التجاري)</h2>
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  يحدد هل السعر كامل أو يحتوي على خصم خاص: <b>الشركات (1.00x - بدون خصم)</b>، أما <b>الوكالات الإعلانية (0.90x - خصم 10%)</b>.
-                </p>
-                <div className="text-[11px] bg-muted/60 rounded px-2 py-1 text-foreground font-mono">
-                  شركات = 1.00x | وكالات = 0.90x | البحباح = 0.75x
-                </div>
-              </div>
-
-            </div>
-
-            {/* شريط المعادلة التوضيحي البسيط */}
-            <div className="rounded-xl border border-primary/20 bg-background/80 p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-bold text-primary">المعادلة الإجمالية:</span>
-                <span className="bg-muted px-2 py-0.5 rounded font-mono text-foreground font-medium">السعر الأساسي</span>
-                <span>×</span>
-                <span className="bg-muted px-2 py-0.5 rounded font-mono text-foreground font-medium">معامل المدينة</span>
-                <span>×</span>
-                <span className="bg-muted px-2 py-0.5 rounded font-mono text-foreground font-medium">معامل الفئة</span>
-                <span>=</span>
-                <span className="bg-primary/20 text-primary font-bold px-2.5 py-0.5 rounded font-mono text-sm">السعر النهائي للوحة</span>
-              </div>
-              <div className="text-muted-foreground text-[11px]">
-                مثال عملي: لوحة 12×4 في زليتن للشركات = 65,000 د.ل × 0.70 × 1.00 = <b className="text-foreground">45,500 د.ل سنوياً</b>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {showGuide && <Card className="border-primary/30 bg-primary/5"><CardContent className="p-5 grid gap-4 md:grid-cols-3">
+        <div><h2 className="font-bold">1. السعر الأساسي</h2><p className="text-sm text-muted-foreground">حدد سعر كل مقاس ومستوى لكل مدة إيجار.</p></div>
+        <div><h2 className="font-bold">2. معامل المدينة</h2><p className="text-sm text-muted-foreground">المعامل 1 يحافظ على السعر، و0.8 يخفضه 20%، و1.2 يزيده 20%.</p></div>
+        <div><h2 className="font-bold">3. معامل العميل</h2><p className="text-sm text-muted-foreground">يُطبّق على سعر المدينة. يظهر السعر النهائي ومقارنته بالأساس في الحاسبة أدناه.</p></div>
+      </CardContent></Card>}
 
       {/* ========================================================
           3. INTERACTIVE QUICK PRICE CHECKER (حاسبة الأسعار السريعة)
       ======================================================== */}
-      <Card className="border-border/80 bg-card shadow-sm overflow-hidden text-right">
+      {/* ========================================================
+          4. MAIN TABS NAVIGATION (تبويبات الإدارة والعرض)
+      ======================================================== */}
+      <Tabs id="factor-sections" value={activeTab} onValueChange={value => { setActiveTab(value); setSearch(''); }} className="w-full">
+        <TabsList className="grid grid-cols-2 md:grid-cols-5 h-auto p-1.5 bg-muted/50 border border-border rounded-xl gap-1">
+          <TabsTrigger value="municipalities" className="cursor-pointer py-2.5 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground font-bold text-xs sm:text-sm">
+            <MapPin className="h-4 w-4 ml-1.5" />
+            معاملات المدن
+          </TabsTrigger>
+          <TabsTrigger value="base-prices" className="cursor-pointer py-2.5 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground font-bold text-xs sm:text-sm">
+            <LayoutGrid className="h-4 w-4 ml-1.5" />
+            الأسعار الأساسية
+          </TabsTrigger>
+          <TabsTrigger value="categories" className="cursor-pointer py-2.5 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground font-bold text-xs sm:text-sm">
+            <Users className="h-4 w-4 ml-1.5" />
+            معاملات العملاء
+          </TabsTrigger>
+          <TabsTrigger value="preview" className="cursor-pointer py-2.5 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground font-bold text-xs sm:text-sm">
+            <Eye className="h-4 w-4 ml-1.5" />
+            الأسعار والطباعة
+          </TabsTrigger>
+          <TabsTrigger value="calculator" className="py-3 gap-2"><Calculator className="h-4 w-4" />حاسبة السعر</TabsTrigger>
+        </TabsList>
+        <TabsContent value="calculator" className="mt-4">      <Card className="border-border/80 bg-card shadow-sm overflow-hidden text-right">
         <div className="bg-primary/5 border-b border-border/80 px-5 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2 font-bold text-sm text-primary">
             <SlidersHorizontal className="h-4 w-4" />
-            حاسبة الأسعار الفورية (اختر اللوحة والمدينة لرؤية السعر لجميع الفترات)
+            احسب سعر لوحة
           </div>
           <Badge variant="outline" className="border-primary/30 text-primary bg-primary/10 text-xs">
             معاينة حية ومباشرة
@@ -920,7 +622,7 @@ export default function PricingFactors() {
           </div>
 
           {/* لوحة عرض الأسعار لجميع الفترات (مرتبة بتدرج المدة من اليمين لليسار) */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-1">
+          {!liveCalcResult.basePrice ? <div className="rounded-xl border border-border bg-muted/30 p-5 text-center">لا يوجد سعر أساسي لهذا المقاس والمستوى. اختر مقاسًا آخر أو أضف السعر من تبويب الأسعار الأساسية.</div> : <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-1">
             
             {/* شهر واحد */}
             <div className="rounded-xl border border-border bg-muted/20 p-2.5 text-center flex flex-col justify-between">
@@ -981,7 +683,7 @@ export default function PricingFactors() {
             {/* سنة كاملة - مميزة */}
             <div className="rounded-xl border-2 border-primary/60 bg-primary/10 p-2.5 text-center flex flex-col justify-between shadow-sm">
               <div className="flex items-center justify-center gap-1">
-                <span className="text-[11px] font-bold text-primary">سنة كاملة (360 يوم)</span>
+                <span className="text-[11px] font-bold text-primary">سنة كاملة</span>
               </div>
               <div className="my-1">
                 <span className="text-lg font-black text-primary font-mono">
@@ -1010,6 +712,7 @@ export default function PricingFactors() {
 
           </div>
 
+          }
           {/* شريط التفسير البشري الواضح */}
           <div className="pt-2 border-t border-border/60 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
             <div>
@@ -1022,34 +725,13 @@ export default function PricingFactors() {
               </span>
             </div>
             <div className="text-[11px] text-primary font-medium">
-              تم تقسيم المستويات A و B بمرونة وذكاء
+              {liveCalcResult.basePrice ? 'النتائج حسب الأسعار الأساسية المحفوظة' : 'لا يوجد سعر أساسي لهذا المقاس والمستوى'}
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* ========================================================
-          4. MAIN TABS NAVIGATION (تبويبات الإدارة والعرض)
-      ======================================================== */}
-      <Tabs defaultValue="municipalities" className="w-full">
-        <TabsList className="grid grid-cols-2 md:grid-cols-4 h-auto p-1.5 bg-muted/50 border border-border rounded-xl gap-1">
-          <TabsTrigger value="municipalities" className="cursor-pointer py-2.5 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground font-bold text-xs sm:text-sm">
-            <MapPin className="h-4 w-4 ml-1.5" />
-            معاملات المدن والبلديات ({municipalityFactors.length})
-          </TabsTrigger>
-          <TabsTrigger value="base-prices" className="cursor-pointer py-2.5 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground font-bold text-xs sm:text-sm">
-            <LayoutGrid className="h-4 w-4 ml-1.5" />
-            الأسعار الأساسية (المستوى A و B)
-          </TabsTrigger>
-          <TabsTrigger value="categories" className="cursor-pointer py-2.5 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground font-bold text-xs sm:text-sm">
-            <Users className="h-4 w-4 ml-1.5" />
-            معاملات فئات العملاء ({categoryFactors.length})
-          </TabsTrigger>
-          <TabsTrigger value="preview" className="cursor-pointer py-2.5 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground font-bold text-xs sm:text-sm">
-            <Eye className="h-4 w-4 ml-1.5" />
-            لائحة أسعار أي مدينة (معاينة وطباعة)
-          </TabsTrigger>
-        </TabsList>
+</TabsContent>
 
         {/* ========================================================
             TAB 1: معاملات المدن والبلديات (مع خاصية تبديل المقاس المقارن بسهولة)
@@ -1064,7 +746,7 @@ export default function PricingFactors() {
                     معاملات البلديات والمدن الرسمية ({municipalityFactors.length} بلدية)
                   </CardTitle>
                   <CardDescription className="mt-1 text-xs">
-                    مبنية على معيار زليتن (0.70x = 45,000 د.ل للوحة 12×4) مقابل العاصمة طرابلس (1.00x = 65,000 د.ل).
+                    قارن تأثير كل مدينة على السعر الأساسي للمقاس والمستوى المحددين.
                   </CardDescription>
                 </div>
 
@@ -1383,7 +1065,7 @@ export default function PricingFactors() {
                       <TableHead className="text-center font-bold">شهرين (60 يوم)</TableHead>
                       <TableHead className="text-center font-bold">3 أشهر (90 يوم)</TableHead>
                       <TableHead className="text-center font-bold">6 أشهر (180 يوم)</TableHead>
-                      <TableHead className="text-center font-bold bg-primary/10 text-primary">سنة كاملة (360 يوم)</TableHead>
+                      <TableHead className="text-center font-bold bg-primary/10 text-primary">سنة كاملة</TableHead>
                       <TableHead className="text-center font-bold">يومي (1 يوم)</TableHead>
                       <TableHead className="text-center font-bold">إجراءات</TableHead>
                     </TableRow>
@@ -1543,7 +1225,7 @@ export default function PricingFactors() {
                 <div>
                   <CardTitle className="text-lg font-bold flex items-center gap-2">
                     <Eye className="h-5 w-5 text-primary" />
-                    لائحة الأسعار المعتمدة لأي مدينة (عرض وطباعة فورية)
+                    أسعار المدينة
                   </CardTitle>
                   <CardDescription className="mt-1 text-xs">
                     اختر المدينة والفئة لعرض جدول الأسعار النهائي لكافة المقاسات أو طباعته كعرض أسعار رسمي.
@@ -1639,12 +1321,12 @@ export default function PricingFactors() {
                             مستوى {bp.billboard_level}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-center font-mono font-medium">{bp.calculated_one_month.toLocaleString('ar-LY')} د.ل</TableCell>
-                        <TableCell className="text-center font-mono font-medium">{bp.calculated_two_months.toLocaleString('ar-LY')} د.ل</TableCell>
-                        <TableCell className="text-center font-mono font-medium">{bp.calculated_three_months.toLocaleString('ar-LY')} د.ل</TableCell>
-                        <TableCell className="text-center font-mono font-medium">{bp.calculated_six_months.toLocaleString('ar-LY')} د.ل</TableCell>
-                        <TableCell className="text-center font-mono font-black text-primary bg-primary/5">{bp.calculated_full_year.toLocaleString('ar-LY')} د.ل</TableCell>
-                        <TableCell className="text-center font-mono text-muted-foreground">{bp.calculated_one_day.toLocaleString('ar-LY')} د.ل</TableCell>
+                        <TableCell className="text-center font-mono font-medium">{bp.calculated_one_month.toLocaleString('ar-LY')} د.ل<div className="text-xs font-normal text-muted-foreground mt-1">الأساس {Number(bp.one_month || 0).toLocaleString('ar-LY')}</div></TableCell>
+                        <TableCell className="text-center font-mono font-medium">{bp.calculated_two_months.toLocaleString('ar-LY')} د.ل<div className="text-xs font-normal text-muted-foreground mt-1">الأساس {Number(bp.two_months || 0).toLocaleString('ar-LY')}</div></TableCell>
+                        <TableCell className="text-center font-mono font-medium">{bp.calculated_three_months.toLocaleString('ar-LY')} د.ل<div className="text-xs font-normal text-muted-foreground mt-1">الأساس {Number(bp.three_months || 0).toLocaleString('ar-LY')}</div></TableCell>
+                        <TableCell className="text-center font-mono font-medium">{bp.calculated_six_months.toLocaleString('ar-LY')} د.ل<div className="text-xs font-normal text-muted-foreground mt-1">الأساس {Number(bp.six_months || 0).toLocaleString('ar-LY')}</div></TableCell>
+                        <TableCell className="text-center font-mono font-black text-primary bg-primary/5">{bp.calculated_full_year.toLocaleString('ar-LY')} د.ل<div className="text-xs font-normal text-muted-foreground mt-1">الأساس {Number(bp.full_year || 0).toLocaleString('ar-LY')}</div></TableCell>
+                        <TableCell className="text-center font-mono text-muted-foreground">{bp.calculated_one_day.toLocaleString('ar-LY')} د.ل<div className="text-xs font-normal text-muted-foreground mt-1">الأساس {Number(bp.one_day || 0).toLocaleString('ar-LY')}</div></TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -1670,13 +1352,15 @@ export default function PricingFactors() {
           </DialogHeader>
 
           <div className="space-y-4 py-3 text-right">
+            {printType === 'single_city' && <label className="flex items-center gap-3 rounded-lg border p-3 cursor-pointer"><input type="checkbox" checked={printComparison} onChange={e => setPrintComparison(e.target.checked)} />إظهار السعر الأساسي للمقارنة في الطباعة</label>}
+            <div className="space-y-2"><Label>المستوى المطلوب</Label><Select value={printLevel} onValueChange={setPrintLevel}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">جميع المستويات</SelectItem>{priceLevels.map(level => <SelectItem key={level} value={level}>المستوى {level}</SelectItem>)}</SelectContent></Select></div>
             {/* نوع التقرير */}
             <div className="space-y-1.5">
               <Label className="text-xs font-bold text-foreground">نوع التقرير المطلوب طباعته:</Label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
                   { id: 'all', title: 'وثيقة شاملة للمنظومة بالكامل', desc: 'الأسعار الأساسية + كل البلديات + فئات العملاء' },
-                  { id: 'base_prices', title: 'جدول الأسعار الأساسية فقط', desc: 'المستوى A والمستوى B لكافة المقاسات' },
+                  { id: 'base_prices', title: 'جدول الأسعار الأساسية فقط', desc: 'الأسعار قبل تطبيق المعاملات لجميع المستويات' },
                   { id: 'municipalities', title: 'جدول معاملات ونسب البلديات', desc: `معاملات كافة البلديات (${municipalityFactors.length} بلدية)` },
                   { id: 'single_city', title: 'لائحة أسعار بلدية محددة', desc: 'جدول أسعار معتمد لمدينة وفئة معينة' },
                 ].map(opt => (
@@ -1757,7 +1441,7 @@ export default function PricingFactors() {
             <Button variant="outline" className="cursor-pointer" onClick={() => setPrintDialogOpen(false)}>إلغاء</Button>
             <Button className="bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer font-bold" onClick={handleExecutePrint}>
               <Printer className="h-4 w-4 ml-1.5" />
-              بدء الطباعة الآن
+              فتح معاينة الطباعة
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1877,7 +1561,7 @@ export default function PricingFactors() {
                 />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">سنة كاملة (360 يوم)</Label>
+                <Label className="text-xs">سنة كاملة</Label>
                 <Input
                   type="number"
                   value={editingBasePrice.full_year}

@@ -25,7 +25,7 @@ describe('print size catalog', () => {
       { name: 'سوسيت', print_size: '1.10 × 2.10', sort_order: 15 },
     ];
     const html = buildPrintSizeCatalog(sampleSizes, 'http://localhost');
-    expect(html.match(/<div class="page">/g)).toHaveLength(1);
+    expect(html.match(/<div class="page catalog-sheet"/g)).toHaveLength(1);
     expect(html).toContain('ورقة 1 من 1');
     expect(html).not.toContain('المقاسات الافتراضية للمساحات الإعلانية');
     expect(html).toContain('دليل مقاسات الطباعة المعتمدة');
@@ -51,7 +51,7 @@ describe('print size catalog', () => {
     expect(html.match(/class="size-card catalog-card"/g)).toHaveLength(2);
   });
 
-  it('centers the last card only when total count on page is odd', () => {
+  it('identifies the last card only when total count on page is odd', () => {
     const oddHtml = buildPrintSizeCatalog([{ name: '13x5' }, { name: '12x4' }, { name: '10x4' }], 'http://localhost');
     expect(oddHtml.match(/<section[^>]*data-last-odd="true"/g)).toHaveLength(1);
 
@@ -61,7 +61,7 @@ describe('print size catalog', () => {
 
   it('paginates when exceeding single page capacity (e.g. 25 sizes)', () => {
     const html = buildPrintSizeCatalog(Array.from({ length: 25 }, (_, i) => ({ name: String(i) })), 'http://localhost');
-    expect(html.match(/<div class="page">/g)).toHaveLength(2);
+    expect(html.match(/<div class="page catalog-sheet"/g)).toHaveLength(2);
     expect(html).toContain('ورقة 2 من 2');
   });
 
@@ -80,3 +80,4 @@ describe('print size catalog', () => {
     expect(html5).toContain('data-count="5"');
   });
 });
+

@@ -88,7 +88,7 @@ export default function Billboards() {
 
   // Collapsible states
   const [summaryOpen, setSummaryOpen] = useState(false);
- const [mapOpen, setMapOpen] = useState(true); // مفتوحة افتراضياً لعرض الخريطة الجديدة فوراً
+  const [mapOpen, setMapOpen] = useState(false);
 
   // Print filters
   const [printFiltersOpen, setPrintFiltersOpen] = useState(false);
