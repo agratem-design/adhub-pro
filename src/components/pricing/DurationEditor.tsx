@@ -1,8 +1,7 @@
-import { useId, useState, useEffect } from 'react';
-import { CalendarDays, Check, Layers, Sparkles, Clock } from 'lucide-react';
+import { useId, useState } from 'react';
+import { Sparkles } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Button } from '@/components/ui/button';
 
 type Unit = 'days' | 'months' | 'years';
 
@@ -13,7 +12,7 @@ interface Props {
   onChange: (value: { name: string; months: number; days: number }) => void;
 }
 
-// دالة تنظيف وتوحيد المدخلات الرقمية (تدعم الأرقام العربية والفواصل المختلفة)
+// دالة تنظيف وتوحيد المدخلات الرقمية لدعم الفواصل العربية والنقاط
 function normalizeArabicDecimal(val: string): string {
   if (!val) return '';
   const arabicDigits = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
@@ -23,7 +22,6 @@ function normalizeArabicDecimal(val: string): string {
   }
   // استبدال الفواصل العربية والإنجليزية بالنقطة العشرية
   cleaned = cleaned.replace(/[،,٫]/g, '.');
-  // الإبقاء فقط على الأرقام ونقطة عشرية واحدة
   const parts = cleaned.split('.');
   if (parts.length > 2) {
     cleaned = parts[0] + '.' + parts.slice(1).join('');
@@ -33,7 +31,7 @@ function normalizeArabicDecimal(val: string): string {
 
 // اقتراح اسم عربي فصيح للمدة بناء على الأشهر والأيام
 function suggestArabicName(months: number, days: number): string {
-  if (months === 0.5 || (months === 0 && days === 15)) return 'نصف شهر';
+  if (months === 0.5 || days === 15) return 'نصف شهر';
   if (months === 1 || days === 30) return 'شهر واحد';
   if (months === 1.5 || days === 45) return 'شهر ونصف';
   if (months === 2 || days === 60) return 'شهران';
@@ -76,151 +74,142 @@ function suggestArabicName(months: number, days: number): string {
   return '';
 }
 
+const PRESET_OPTIONS = [
+  { name: 'شهر ونصف', months: 1.5, days: 45 },
+  { name: 'شهران ونصف', months: 2.5, days: 75 },
+  { name: 'ثلاثة أشهر ونصف', months: 3.5, days: 105 },
+  { name: 'ستة أشهر ونصف', months: 6.5, days: 195 },
+  { name: 'ثمانية أشهر ونصف', months: 8.5, days: 255 },
+  { name: 'سنة ونصف', months: 18, days: 548 },
+  { name: 'سنتان', months: 24, days: 730 },
+];
+
 export function DurationEditor({ name, months, days, onChange }: Props) {
   const id = useId();
 
-  // تحديد الوحدة الافتراضية
+  // تحديد الوحدة الأولية
   const initialUnit: Unit = months >= 12 && months % 12 === 0 ? 'years' : months > 0 ? 'months' : 'days';
   const initialAmount = String(
     initialUnit === 'years' ? months / 12 : initialUnit === 'months' ? months : days || 30
   );
 
   const [unit, setUnit] = useState<Unit>(initialUnit);
-  const [amountStr, setAmountStr] = useState<string>(initialAmount);
-  const [inputMode, setInputMode] = useState<'months_days' | 'direct'>('months_days');
+  const [amount, setAmount] = useState<string>(initialAmount);
 
-  // حقول الأشهر + الأيام المنفصلة
-  const [splitMonths, setSplitMonths] = useState<string>(
-    String(months > 0 ? Math.floor(months) : Math.floor(days / 30))
-  );
-  const [splitDays, setSplitDays] = useState<string>(
-    String(days > 0 ? days % 30 : (months % 1) * 30 || 0)
-  );
+  // تحديث القيمة عند تغيير الحقل
+  const handleAmountChange = (raw: string) => {
+    const cleaned = normalizeArabicDecimal(raw);
+    setAmount(cleaned);
 
-  // تحديث القيم عند اختيار نموذج مسبق
-  const applyPreset = (label: string, mVal: number, totalDays: number) => {
-    setSplitMonths(String(Math.floor(mVal)));
-    setSplitDays(String(totalDays % 30));
-    setAmountStr(String(mVal));
-    setUnit('months');
-    onChange({
-      name: label,
-      months: mVal,
-      days: totalDays,
-    });
-  };
+    const num = parseFloat(cleaned);
+    if (!isNaN(num) && num > 0) {
+      let computedMonths = 0;
+      let computedDays = 0;
 
-  // تطبيق التعديل من طريقة [أشهر + أيام]
-  const handleSplitChange = (mText: string, dText: string) => {
-    const normM = normalizeArabicDecimal(mText);
-    const normD = normalizeArabicDecimal(dText);
-    setSplitMonths(normM);
-    setSplitDays(normD);
+      if (unit === 'years') {
+        computedMonths = num * 12;
+        computedDays = Math.round(num * 365);
+      } else if (unit === 'months') {
+        computedMonths = Number(num.toFixed(2));
+        computedDays = Math.round(num * 30);
+      } else {
+        computedDays = Math.round(num);
+        computedMonths = Number((num / 30).toFixed(2));
+      }
 
-    const mNum = parseFloat(normM) || 0;
-    const dNum = parseFloat(normD) || 0;
+      const autoName = suggestArabicName(computedMonths, computedDays);
+      const shouldUpdateName = !name || name === suggestArabicName(months, days);
 
-    // حساب الإجمالي
-    const totalDays = Math.round(mNum * 30 + dNum);
-    const computedMonths = Number((mNum + dNum / 30).toFixed(2));
-
-    const suggested = suggestArabicName(computedMonths, totalDays);
-    const finalName = (!name || suggestArabicName(months, days) === name) && suggested ? suggested : name;
-
-    setAmountStr(String(computedMonths));
-    setUnit('months');
-
-    onChange({
-      name: finalName,
-      months: computedMonths,
-      days: totalDays,
-    });
-  };
-
-  // تطبيق التعديل من طريقة [القيمة المباشرة والوحدة]
-  const handleDirectAmountChange = (valText: string, currentUnit: Unit) => {
-    const cleaned = normalizeArabicDecimal(valText);
-    setAmountStr(cleaned);
-    setUnit(currentUnit);
-
-    const quantity = parseFloat(cleaned) || 0;
-    let computedMonths = 0;
-    let computedDays = 0;
-
-    if (currentUnit === 'years') {
-      computedMonths = quantity * 12;
-      computedDays = Math.round(quantity * 365);
-    } else if (currentUnit === 'months') {
-      computedMonths = Number(quantity.toFixed(2));
-      computedDays = Math.round(quantity * 30);
+      onChange({
+        name: shouldUpdateName && autoName ? autoName : name,
+        months: computedMonths,
+        days: computedDays,
+      });
     } else {
-      computedDays = Math.round(quantity);
-      computedMonths = Number((quantity / 30).toFixed(2));
+      onChange({
+        name,
+        months: 0,
+        days: 0,
+      });
     }
+  };
 
-    const suggested = suggestArabicName(computedMonths, computedDays);
-    const finalName = (!name || suggestArabicName(months, days) === name) && suggested ? suggested : name;
+  // تغيير الوحدة (يوم / شهر / سنة)
+  const handleUnitChange = (nextUnit: Unit) => {
+    setUnit(nextUnit);
+    const num = parseFloat(amount);
+    if (!isNaN(num) && num > 0) {
+      let computedMonths = 0;
+      let computedDays = 0;
 
-    // مزامنة حقول الشهور والأيام
-    setSplitMonths(String(Math.floor(computedMonths)));
-    setSplitDays(String(computedDays % 30));
+      if (nextUnit === 'years') {
+        computedMonths = num * 12;
+        computedDays = Math.round(num * 365);
+      } else if (nextUnit === 'months') {
+        computedMonths = Number(num.toFixed(2));
+        computedDays = Math.round(num * 30);
+      } else {
+        computedDays = Math.round(num);
+        computedMonths = Number((num / 30).toFixed(2));
+      }
 
+      const autoName = suggestArabicName(computedMonths, computedDays);
+      const shouldUpdateName = !name || name === suggestArabicName(months, days);
+
+      onChange({
+        name: shouldUpdateName && autoName ? autoName : name,
+        months: computedMonths,
+        days: computedDays,
+      });
+    }
+  };
+
+  // اختيار نموذج سريع
+  const selectPreset = (preset: { name: string; months: number; days: number }) => {
+    setUnit('months');
+    setAmount(String(preset.months));
     onChange({
-      name: finalName,
-      months: computedMonths,
-      days: computedDays,
+      name: preset.name,
+      months: preset.months,
+      days: preset.days,
     });
   };
 
   const suggestedName = suggestArabicName(months, days);
-  const isValid = Number.isFinite(days) && days > 0 && Number.isFinite(months) && months >= 0;
 
   return (
-    <div dir="rtl" className="space-y-6 py-2">
-      {/* نماذج مسبقة شائعة وسريعة تشمل الكسور والأنصاف */}
-      <div className="space-y-2.5">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-bold text-foreground flex items-center gap-1.5">
-            <Sparkles className="h-4 w-4 text-amber-500" />
-            نماذج مدد وكسور شائعة (جاهزة بنقرة واحدة):
-          </p>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {[
-            { label: 'شهر ونصف', months: 1.5, days: 45 },
-            { label: 'شهران ونصف', months: 2.5, days: 75 },
-            { label: 'ثلاثة أشهر ونصف', months: 3.5, days: 105 },
-            { label: 'ستة أشهر ونصف', months: 6.5, days: 195 },
-            { label: 'ثمانية أشهر ونصف', months: 8.5, days: 255 },
-            { label: 'تسعة أشهر ونصف', months: 9.5, days: 285 },
-            { label: 'سنة ونصف', months: 18, days: 548 },
-            { label: 'سنتان', months: 24, days: 730 },
-          ].map((item) => {
-            const isSelected = days === item.days || (name && name.trim() === item.label);
+    <div dir="rtl" className="space-y-4 py-1">
+      {/* نماذج سريعة وبسيطة (Pills) بدون أي تداخل نصوص */}
+      <div className="space-y-1.5">
+        <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+          <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+          نماذج مدد شائعة (اختر مباشرة أو أدخل أدناه):
+        </span>
+        <div className="flex flex-wrap gap-1.5">
+          {PRESET_OPTIONS.map((p) => {
+            const isSelected = days === p.days && (name === p.name || months === p.months);
             return (
-              <Button
-                key={item.label}
+              <button
+                key={p.name}
                 type="button"
-                variant={isSelected ? 'default' : 'outline'}
-                onClick={() => applyPreset(item.label, item.months, item.days)}
-                className={`h-auto flex flex-col items-center justify-center p-2.5 rounded-xl text-center transition-all ${
+                onClick={() => selectPreset(p)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
                   isSelected
-                    ? 'shadow-sm ring-1 ring-primary'
-                    : 'hover:border-primary hover:bg-primary/5'
+                    ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                    : 'bg-background hover:bg-muted/70 border-border text-foreground'
                 }`}
               >
-                <span className="font-bold text-xs">{item.label}</span>
-                <span className="text-[11px] opacity-75 font-mono mt-0.5">{item.days} يوماً ({item.months} شهر)</span>
-              </Button>
+                {p.name} <span className="opacity-70 text-[10px]">({p.days} يوم)</span>
+              </button>
             );
           })}
         </div>
       </div>
 
-      {/* حقل اسم المدة مع اقتراح ذكي */}
-      <div className="space-y-2">
+      {/* حقل اسم المدة */}
+      <div className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <Label htmlFor={`${id}-name`} className="font-bold">اسم المدة</Label>
+          <Label htmlFor={`${id}-name`} className="text-sm font-bold">اسم المدة</Label>
           {suggestedName && suggestedName !== name && (
             <button
               type="button"
@@ -228,7 +217,7 @@ export function DurationEditor({ name, months, days, onChange }: Props) {
               className="text-xs text-primary font-semibold hover:underline flex items-center gap-1 cursor-pointer"
             >
               <Sparkles className="h-3 w-3" />
-              <span>استخدام الاسم المقترح: &quot;{suggestedName}&quot;</span>
+              <span>استخدام: {suggestedName}</span>
             </button>
           )}
         </div>
@@ -236,198 +225,86 @@ export function DurationEditor({ name, months, days, onChange }: Props) {
           id={`${id}-name`}
           value={name}
           onChange={(e) => onChange({ name: e.target.value, months, days })}
-          placeholder="مثال: ثمانية أشهر ونصف، شهر ونصف، 45 يوماً..."
-          className="h-12 rounded-xl text-base font-semibold"
+          placeholder="مثال: شهر ونصف، ثمانية أشهر ونصف..."
+          className="h-11 rounded-xl text-sm font-semibold"
           maxLength={80}
         />
-        <p className="text-xs text-muted-foreground">
-          يظهر هذا الاسم المعتمد في شاشات الأسعار، والعقود، والفواتير، والطباعة.
+        <p className="text-[11px] text-muted-foreground">
+          يظهر هذا الاسم في قوائم الأسعار والعقود والطباعة.
         </p>
       </div>
 
-      {/* تبديل طريقة الإدخال اليدوي */}
-      <div className="space-y-3 rounded-2xl border border-border/80 bg-muted/20 p-4">
-        <div className="flex items-center justify-between">
-          <Label className="text-sm font-bold flex items-center gap-1.5">
-            <Clock className="h-4 w-4 text-primary" />
-            كم تستمر هذه المدة؟
-          </Label>
-          <div className="flex rounded-lg border border-border p-0.5 bg-background text-xs">
-            <button
-              type="button"
-              onClick={() => setInputMode('months_days')}
-              className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
-                inputMode === 'months_days'
-                  ? 'bg-primary text-primary-foreground shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              بالأشهر والأيام (مفصّل)
-            </button>
-            <button
-              type="button"
-              onClick={() => setInputMode('direct')}
-              className={`px-3 py-1.5 rounded-md font-semibold transition-all ${
-                inputMode === 'direct'
-                  ? 'bg-primary text-primary-foreground shadow-xs'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              قيمة مباشرة (عشري)
-            </button>
+      {/* إدخال القيمة والوحدة (يقبل الكسور العشرية مثل 1.5 و 8.5 بكل سلاسة) */}
+      <div className="space-y-2">
+        <Label htmlFor={`${id}-amount`} className="text-sm font-bold">كم تستمر هذه المدة؟</Label>
+        <div className="flex items-center gap-2">
+          <div className="w-32 shrink-0">
+            <Input
+              id={`${id}-amount`}
+              type="text"
+              inputMode="decimal"
+              dir="ltr"
+              value={amount}
+              onChange={(e) => handleAmountChange(e.target.value)}
+              placeholder="1.5 أو 8.5"
+              className="h-11 rounded-xl text-center text-lg font-bold"
+            />
           </div>
-        </div>
 
-        {/* الطريقة الأولى: إدخال الأشهر والأيام مفصلاً (أسهل بكثير للمستخدمين) */}
-        {inputMode === 'months_days' && (
-          <div className="space-y-3 pt-1">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <span className="text-xs font-semibold text-muted-foreground">عدد الأشهر:</span>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="text"
-                    inputMode="decimal"
-                    dir="ltr"
-                    value={splitMonths}
-                    onChange={(e) => handleSplitChange(e.target.value, splitDays)}
-                    placeholder="مثال: 8 أو 1"
-                    className="h-12 rounded-xl text-center text-lg font-bold bg-background"
-                  />
-                  <span className="text-xs font-bold text-muted-foreground whitespace-nowrap">شهر</span>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <span className="text-xs font-semibold text-muted-foreground">أيام إضافية:</span>
-                <div className="flex items-center gap-2">
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    dir="ltr"
-                    value={splitDays}
-                    onChange={(e) => handleSplitChange(splitMonths, e.target.value)}
-                    placeholder="مثال: 15"
-                    className="h-12 rounded-xl text-center text-lg font-bold bg-background"
-                  />
-                  <span className="text-xs font-bold text-muted-foreground whitespace-nowrap">يوم</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap pt-1">
-              <span className="text-xs text-muted-foreground font-semibold">إضافة نصف شهر سريعة:</span>
-              <Button
+          <div
+            className="flex flex-1 rounded-xl border border-border bg-muted/40 p-1"
+            role="group"
+            aria-label="وحدة المدة"
+          >
+            {(
+              [
+                ['days', 'يوم'],
+                ['months', 'شهر'],
+                ['years', 'سنة'],
+              ] as const
+            ).map(([uKey, uLabel]) => (
+              <button
+                key={uKey}
                 type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => handleSplitChange(splitMonths, '15')}
-                className="h-8 text-xs rounded-lg gap-1 border-dashed"
+                aria-pressed={unit === uKey}
+                onClick={() => handleUnitChange(uKey)}
+                className={`flex-1 py-1.5 px-3 rounded-lg text-sm font-bold transition-all cursor-pointer ${
+                  unit === uKey
+                    ? 'bg-primary text-primary-foreground shadow-xs'
+                    : 'text-muted-foreground hover:bg-background hover:text-foreground'
+                }`}
               >
-                + 15 يوماً (نصف شهر)
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => handleSplitChange(splitMonths, '0')}
-                className="h-8 text-xs text-muted-foreground hover:text-foreground"
-              >
-                تصفير الأيام
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              💡 مثال: لكتابة <strong>شهر ونصف</strong> أدخل 1 شهر و 15 يوماً. لكتابة <strong>ثمانية أشهر ونصف</strong> أدخل 8 أشهر و 15 يوماً.
-            </p>
+                {uLabel}
+              </button>
+            ))}
           </div>
-        )}
-
-        {/* الطريقة الثانية: الإدخال المباشر بالقيمة العشرية والوحدة */}
-        {inputMode === 'direct' && (
-          <div className="space-y-3 pt-1">
-            <div className="flex items-center gap-3">
-              <div className="w-36">
-                <Input
-                  id={`${id}-amount`}
-                  type="text"
-                  inputMode="decimal"
-                  dir="ltr"
-                  value={amountStr}
-                  onChange={(e) => handleDirectAmountChange(e.target.value, unit)}
-                  placeholder="مثال: 1.5 أو 8.5"
-                  className="h-12 rounded-xl text-center text-lg font-bold bg-background"
-                />
-              </div>
-
-              <div
-                className="grid flex-1 grid-cols-3 gap-1 rounded-xl border border-border bg-background p-1"
-                role="group"
-                aria-label="وحدة المدة"
-              >
-                {(
-                  [
-                    ['days', 'يوم'],
-                    ['months', 'شهر'],
-                    ['years', 'سنة'],
-                  ] as const
-                ).map(([uKey, uLabel]) => (
-                  <button
-                    key={uKey}
-                    type="button"
-                    aria-pressed={unit === uKey}
-                    onClick={() => handleDirectAmountChange(amountStr, uKey)}
-                    className={`cursor-pointer rounded-lg px-3 py-2 text-sm font-bold whitespace-nowrap transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                      unit === uKey
-                        ? 'bg-primary text-primary-foreground shadow-xs'
-                        : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-                    }`}
-                  >
-                    {uLabel}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <p className="text-xs text-muted-foreground">
-              {unit === 'years'
-                ? 'تُحسب السنة 365 يوماً (أدخل 1.5 لسنة ونصف).'
-                : unit === 'months'
-                ? 'يُحسب الشهر 30 يوماً. يمكنك كتابة 1.5 لشهر ونصف، أو 8.5 لثمانية أشهر ونصف (تقبل الفاصلة والنقطة والأرقام العربية).'
-                : 'أدخل العدد الفعلي للأيام مباشرة (مثل 45 أو 255).'}
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* بطاقة ملخص المدة الحالية */}
-      <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm font-bold text-foreground">
-            <Check className="h-4 w-4 text-primary" />
-            <span>{name.trim() || suggestedName || 'ملخص المدة'}</span>
-          </div>
-          <span className="text-xs bg-primary/20 text-primary px-2.5 py-0.5 rounded-full font-bold">
-            {months} {months === 1 ? 'شهر' : months === 2 ? 'شهران' : 'أشهر'}
-          </span>
         </div>
-
-        <div className="flex items-baseline gap-2">
-          <span className="text-3xl font-black tabular-nums text-primary font-mono">
-            {isValid ? days.toLocaleString('ar-LY') : '0'}
-          </span>
-          <span className="text-sm font-bold text-muted-foreground">يوماً فعلياً في العقود والأسعار</span>
-        </div>
-
-        <p className="text-xs text-muted-foreground border-t border-primary/10 pt-2">
-          تُحسب هذه المدة تلقائياً في تواريخ بدء وانتهاء العقود، وفي حسابات أسعار اللوحات الشهرية واليومية.
+        <p className="text-[11px] text-muted-foreground">
+          {unit === 'months'
+            ? '💡 يمكنك كتابة أرقام عشرية بحرية مثل: 1.5 (شهر ونصف) أو 8.5 (ثمانية أشهر ونصف).'
+            : unit === 'years'
+            ? '💡 تُحسب السنة 365 يوماً (أدخل 1.5 لسنة ونصف أو 2 لسنتين).'
+            : '💡 أدخل عدد الأيام الفعلي مباشرة (مثل 45 أو 255 يوماً).'}
         </p>
       </div>
 
-      <div className="flex items-start gap-2 text-xs text-muted-foreground">
-        <Layers className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-        <p>
-          بعد حفظ هذه المدة، ستظهر تلقائياً كزر في شريط المدد بأعلى صفحة الأسعار وفي نماذج إنشاء وتعديل العقود، ويمكنك تحديد أسعارها لكل مقاس ومستوى.
-        </p>
+      {/* بطاقة ملخص المدة */}
+      <div className="rounded-xl border border-primary/25 bg-primary/5 p-3 flex items-center justify-between">
+        <div className="space-y-0.5">
+          <div className="text-[11px] font-semibold text-muted-foreground">ملخص المدة المعتمدة:</div>
+          <div className="text-sm font-bold text-foreground">
+            {name.trim() || suggestedName || 'يرجى إدخال المدة'}
+          </div>
+        </div>
+        <div className="text-left font-mono">
+          <div className="text-xl font-black text-primary leading-none">
+            {Number.isFinite(days) && days > 0 ? days.toLocaleString('ar-LY') : '0'}
+            <span className="text-xs font-normal text-muted-foreground mr-1">يوماً</span>
+          </div>
+          <div className="text-[10px] text-muted-foreground mt-0.5">
+            ({months} {months === 1 ? 'شهر' : 'أشهر'})
+          </div>
+        </div>
       </div>
     </div>
   );
