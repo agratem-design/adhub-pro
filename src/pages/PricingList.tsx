@@ -7,6 +7,8 @@ import { printablePricing } from '@/utils/printablePricing';
 import { DurationEditor } from '@/components/pricing/DurationEditor';
 import { useQueryClient } from '@tanstack/react-query';
 import { isCustomDuration, readDurationPrice } from '@/utils/pricingDuration';
+import { parsePriceInput, formatPriceWithCommas } from '@/utils/priceInputParser';
+import { PriceFormattedInput } from '@/components/pricing/PriceFormattedInput';
 import { createRequestId } from '@/lib/requestId';
 import { useMemo, useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -1546,11 +1548,17 @@ export default function PricingList() {
     return null;
   }, [showCompanyComparison, otherCustomer, comparisonBenchmark, sizesForLevel, selectedMonthKey, pricingData, selectedLevel]);
 
-  const setVal = async (size: string, customer: string, month: MonthKeyAll, value: number | null) => {
+  const setVal = async (size: string, customer: string, month: MonthKeyAll, rawValue: number | string | null) => {
     try {
       const monthOption = MONTH_OPTIONS.find(m => m.key === month);
       if (!monthOption) return;
-      if (value != null && (!Number.isFinite(value) || value < 0)) { toast.error('أدخل سعراً صحيحاً غير سالب'); return; }
+
+      const parsed = parsePriceInput(rawValue);
+      if (!parsed.isValid) {
+        toast.error('أدخل سعراً صحيحاً غير سالب');
+        return;
+      }
+      const value = parsed.value;
 
       // الحصول على size_id من sizesData
       const sizeInfo = sizesData.find(s => s.name === size);
@@ -2225,24 +2233,20 @@ export default function PricingList() {
                   return (
                     <tr key={size} className="border-b last:border-0 even:bg-muted/20 hover:bg-primary/5 transition-colors">
                       <th scope="row" className="p-4 text-base font-bold"><bdi>{size}</bdi></th>
-                      <td className="p-4 tabular-nums">{base == null ? 'غير محدد' : base.toLocaleString('ar-LY')}</td>
+                      <td className="p-4 tabular-nums">{base == null ? 'غير محدد' : formatPriceWithCommas(base)}</td>
                       <td className="p-3">
                         {isEditing ? (
-                          <Input 
+                          <PriceFormattedInput 
                             autoFocus 
-                            type="number" 
-                            min={0} 
+                            initialValue={price} 
                             aria-label={`سعر ${size}`} 
-                            defaultValue={price ?? ''} 
-                            onBlur={event => { 
-                              const value = event.target.value.trim(); 
-                              void setVal(size, customer, selectedMonthKey, value === '' ? null : Number(value)); 
+                            onCommit={(newVal) => {
+                              if (newVal !== price) {
+                                void setVal(size, customer, selectedMonthKey, newVal); 
+                              }
                               setEditing(null); 
-                            }} 
-                            onKeyDown={event => { 
-                              if (event.key === 'Enter') event.currentTarget.blur(); 
-                              if (event.key === 'Escape') setEditing(null); 
-                            }} 
+                            }}
+                            onCancel={() => setEditing(null)}
                           />
                         ) : (
                           <button 
@@ -2250,7 +2254,7 @@ export default function PricingList() {
                             onClick={() => setEditing({ size, customer, month: selectedMonthKey })} 
                             aria-label={`تعديل سعر ${size} لفئة ${customer}`}
                           >
-                            {price == null ? 'إضافة سعر' : price.toLocaleString('ar-LY')}
+                            {price == null ? 'إضافة سعر' : formatPriceWithCommas(price)}
                             <Edit2 className="h-3.5 w-3.5 text-muted-foreground" />
                           </button>
                         )}
