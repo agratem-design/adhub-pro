@@ -420,7 +420,7 @@ export const ExcelImportDialog: React.FC<ExcelImportDialogProps> = ({
             Faces_Count: row.Faces_Count ? parseInt(row.Faces_Count) : 1,
             Size: row.Size,
             size_id: sizeId,
-            Level: row.Level,
+            Level: (row.Size && (row.Size.includes('سوسيت') || row.Size.toLowerCase().includes('societ'))) ? 'B' : row.Level,
             billboard_type: row.billboard_type || null,
             Status: 'متاح',
             is_partnership: false

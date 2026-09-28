@@ -232,10 +232,12 @@ export const BillboardFormFields: React.FC<BillboardFormFieldsProps> = ({
                   }
                 } else {
                   const selectedSize = sizes.find(s => s.name === v);
+                  const isSousset = v && (v.includes('سوسيت') || v.toLowerCase().includes('societ'));
                   setForm((p: any) => ({ 
                     ...p, 
                     Size: v,
-                    print_size: selectedSize?.print_size || p.print_size || ''
+                    print_size: selectedSize?.print_size || p.print_size || '',
+                    ...(isSousset ? { Level: 'B' } : {})
                   }));
                 }
               }}

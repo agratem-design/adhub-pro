@@ -41,6 +41,8 @@ import { createPinSvgUrl } from '@/hooks/useMapMarkers';
 import MunicipalityPrintSettingsDialog from '@/components/municipality/MunicipalityPrintSettingsDialog';
 import { ExcelColumnMappingDialog, ColumnMapping } from '@/components/municipality/ExcelColumnMappingDialog';
 import { ImageUploadZone } from '@/components/ui/image-upload-zone';
+import { reorderMunicipalityItems, municipalityColor } from '@/utils/municipalityOrdering';
+import { parseCoordinateInput, formatCoordinateInput } from '@/utils/coordinateInput';
 
 import { Switch } from '@/components/ui/switch';
 import { calculateDistance } from '@/hooks/useMapNavigation';
@@ -334,13 +336,13 @@ const DimensionInput = ({
       <PopoverTrigger asChild>
         <button
           type="button"
-          className={`inline-flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black border border-indigo-500/20 bg-indigo-500/5 hover:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 transition-all hover:scale-105 shadow-xs cursor-pointer ${className}`}
+          className={`inline-flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black border border-primary/20 bg-primary/5 hover:bg-primary/10 text-primary transition-all hover:scale-105 shadow-xs cursor-pointer ${className}`}
         >
           <span className="flex items-center gap-1.5 font-mono">
-            <SlidersHorizontal className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+            <SlidersHorizontal className="h-3.5 w-3.5 text-primary shrink-0" />
             <span className="font-bold">{formattedDisplay}</span>
             {numericBadge && (
-              <span className="text-[10px] opacity-75 font-normal bg-indigo-500/10 px-1.5 py-0.5 rounded-md dir-ltr">
+              <span className="text-[10px] opacity-75 font-normal bg-primary/10 px-1.5 py-0.5 rounded-md dir-ltr">
                 ({numericBadge})
               </span>
             )}
@@ -351,9 +353,9 @@ const DimensionInput = ({
       <PopoverContent className="w-80 p-3.5 rounded-2xl border border-border bg-popover/98 backdrop-blur-xl shadow-2xl space-y-3 dir-rtl" align="center">
         <div className="flex items-center justify-between border-b border-border/10 pb-2">
           <span className="text-xs font-black text-foreground flex items-center gap-1.5">
-            <SlidersHorizontal className="h-3.5 w-3.5 text-indigo-500" /> اختيار المقاس
+            <SlidersHorizontal className="h-3.5 w-3.5 text-primary" /> اختيار المقاس
           </span>
-          <Badge className="bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 text-[10px] font-mono font-extrabold px-2 py-0.5">
+          <Badge className="bg-primary/15 text-primary text-[10px] font-mono font-extrabold px-2 py-0.5">
             {formattedDisplay} {numericBadge ? `(${numericBadge})` : ''}
           </Badge>
         </div>
@@ -374,13 +376,13 @@ const DimensionInput = ({
                   onClick={() => onChange(preset)}
                   className={`py-1.5 px-2.5 rounded-xl text-xs font-mono font-bold transition-all flex items-center justify-between border ${
                     isSelected
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                      ? 'bg-primary text-primary-foreground border-primary shadow-xs'
                       : 'bg-muted/40 border-border/15 text-foreground hover:bg-muted'
                   }`}
                 >
                   <span className="font-extrabold truncate max-w-[110px]">{preset}</span>
                   {pDimStr && (
-                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${isSelected ? 'text-indigo-100 bg-white/20' : 'text-muted-foreground bg-muted/60'}`}>
+                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${isSelected ? 'text-primary-foreground bg-primary-foreground/10' : 'text-muted-foreground bg-muted/60'}`}>
                       {pDimStr}
                     </span>
                   )}
@@ -395,7 +397,7 @@ const DimensionInput = ({
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[11px] font-bold">
               <span className="text-muted-foreground">الطول:</span>
-              <span className="font-mono text-indigo-600 dark:text-indigo-400">{numLength} م</span>
+              <span className="font-mono text-primary ">{numLength} م</span>
             </div>
             <Slider
               value={[numLength]}
@@ -410,7 +412,7 @@ const DimensionInput = ({
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[11px] font-bold">
               <span className="text-muted-foreground">العرض:</span>
-              <span className="font-mono text-indigo-600 dark:text-indigo-400">{numWidth} م</span>
+              <span className="font-mono text-primary ">{numWidth} م</span>
             </div>
             <Slider
               value={[numWidth]}
@@ -601,6 +603,46 @@ export default function MunicipalityBillboardOrganizer() {
   const [showCollectionsDialog, setShowCollectionsDialog] = useState(false);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [editingItem, setEditingItem] = useState<CollectionItem | null>(null);
+  const [editSequence, setEditSequence] = useState('');
+  const [isEditingSequence, setIsEditingSequence] = useState(false);
+  const [editCoordinates, setEditCoordinates] = useState('');
+  useEffect(() => {
+    setEditSequence(String(editingItem?.sequence_number ?? ''));
+    setIsEditingSequence(false);
+  }, [editingItem?.sequence_number]);
+  useEffect(() => {
+    setEditCoordinates(formatCoordinateInput(editingItem?.latitude, editingItem?.longitude));
+  }, [editingItem?.sequence_number, editingItem?.latitude, editingItem?.longitude]);
+  const [mapNumbering, setMapNumbering] = useState(false);
+  const [numberingDirection, setNumberingDirection] = useState<1 | -1>(1);
+  const [numberingStart, setNumberingStart] = useState('1');
+  const [numberingClicks, setNumberingClicks] = useState<number[]>([]);
+  const [mapMunicipality, setMapMunicipality] = useState('all');
+  const [colorByMunicipality, setColorByMunicipality] = useState(true);
+  // A draft is tied to the exact collection version on which clicking started.
+  useEffect(() => {
+    setNumberingClicks([]);
+    setMapNumbering(false);
+  }, [currentCollection.items]);
+  const numberingPreview = useMemo(() => {
+    if (!mapNumbering || numberingClicks.length === 0) return null;
+    try {
+      return reorderMunicipalityItems(currentCollection.items.map(item => ({ ...item, originalSequence: item.sequence_number })),
+        numberingClicks, Number(numberingStart), numberingDirection);
+    } catch { return null; }
+  }, [currentCollection.items, mapNumbering, numberingClicks, numberingStart, numberingDirection]);
+  const handleNumberingClick = useCallback((billboard: Billboard) => {
+    if ((billboard as any).isComparison || !currentCollection.items.some(item => item.sequence_number === billboard.ID)) {
+      toast.info('إعادة الترقيم متاحة للوحات المجموعة فقط');
+      return;
+    }
+    setNumberingClicks(previous => {
+      if (previous.includes(billboard.ID)) return previous;
+      const next = Number(numberingStart) + previous.length * numberingDirection;
+      if (!Number.isInteger(next) || next < 1 || next > currentCollection.items.length) return previous;
+      return [...previous, billboard.ID];
+    });
+  }, [currentCollection.items, numberingStart, numberingDirection]);
   const [showBatchImportDialog, setShowBatchImportDialog] = useState(false);
   const [batchImportFiles, setBatchImportFiles] = useState<File[]>([]);
   const [batchUnifiedSize, setBatchUnifiedSize] = useState<string>('');
@@ -1457,7 +1499,7 @@ export default function MunicipalityBillboardOrganizer() {
             let officialLat = item.latitude;
             let officialLng = item.longitude;
 
-            if (original.GPS_Coordinates) {
+            if (item.latitude === undefined && item.longitude === undefined && original.GPS_Coordinates) {
               const parts = original.GPS_Coordinates.split(',').map((c: string) => parseFloat(c.trim()));
               if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
                 officialLat = parts[0];
@@ -1634,7 +1676,7 @@ export default function MunicipalityBillboardOrganizer() {
             // Reconcile official name, landmark, and GPS with authoritative billboards table
             if (original.Billboard_Name) bName = original.Billboard_Name;
             if (original.Nearest_Landmark) nearestLandmark = original.Nearest_Landmark;
-            if (original.GPS_Coordinates) {
+            if (item.latitude === undefined && item.longitude === undefined && original.GPS_Coordinates) {
               const parts = original.GPS_Coordinates.split(',').map((c: string) => parseFloat(c.trim()));
               if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
                 lat = parts[0];
@@ -1687,7 +1729,7 @@ export default function MunicipalityBillboardOrganizer() {
         name: name,
         municipality_name: muni,
         description: desc,
-        items: loadedItems,
+        items: loadedItems.map((item, index) => ({ ...item, sequence_number: index + 1 })),
       });
       setCollectionName(name);
       setMunicipalityName(muni);
@@ -1705,6 +1747,10 @@ export default function MunicipalityBillboardOrganizer() {
   };
 
   const saveCollection = async () => {
+    if (mapNumbering && numberingClicks.length > 0) {
+      toast.info('طبّق دفعة الترقيم أو ألغها قبل حفظ المجموعة');
+      return;
+    }
     if (currentCollection.items.length === 0) {
       toast.error('أضف لوحات أولاً');
       return;
@@ -1747,10 +1793,13 @@ export default function MunicipalityBillboardOrganizer() {
       };
 
       if (collectionId) {
-        await supabase.from('municipality_collections').update(collectionPayload).eq('id', collectionId);
-        await supabase.from('municipality_collection_items').delete().eq('collection_id', collectionId);
+        const { error: updateError } = await supabase.from('municipality_collections').update(collectionPayload).eq('id', collectionId);
+        if (updateError) throw updateError;
+        const { error: deleteError } = await supabase.from('municipality_collection_items').delete().eq('collection_id', collectionId);
+        if (deleteError) throw deleteError;
       } else {
-        const { data } = await supabase.from('municipality_collections').insert(collectionPayload).select('id').single();
+        const { data, error } = await supabase.from('municipality_collections').insert(collectionPayload).select('id').single();
+        if (error) throw error;
         if (data) collectionId = data.id;
       }
 
@@ -1765,19 +1814,12 @@ export default function MunicipalityBillboardOrganizer() {
         let sizeToUse = item.size || '';
         let facesToUse = item.faces_count || 'وجهين';
 
-        // Strict verification: If linked to an official billboard, enforce official landmark & coordinates
+        // Preserve edited collection coordinates while reconciling linked descriptive data
         if (item.billboard_id && Array.isArray(allBillboards) && allBillboards.length > 0) {
           const original = allBillboards.find(b => String(b.ID) === String(item.billboard_id));
           if (original) {
             if (original.Billboard_Name) nameToUse = original.Billboard_Name;
             if (original.Nearest_Landmark) landmarkToUse = original.Nearest_Landmark;
-            if (original.GPS_Coordinates) {
-              const parts = original.GPS_Coordinates.split(',').map((c: string) => parseFloat(c.trim()));
-              if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-                latToUse = parts[0];
-                lngToUse = parts[1];
-              }
-            }
             if (original.Image_URL && !imgToUse) imgToUse = original.Image_URL;
             if (original.Size && !sizeToUse) sizeToUse = original.Size;
             if (original.Faces_Count && !item.faces_count) facesToUse = original.Faces_Count === 1 ? 'وجه' : 'وجهين';
@@ -1804,7 +1846,8 @@ export default function MunicipalityBillboardOrganizer() {
         };
       });
 
-      await supabase.from('municipality_collection_items').insert(itemsToInsert);
+      const { error: insertError } = await supabase.from('municipality_collection_items').insert(itemsToInsert);
+      if (insertError) throw insertError;
 
       setCurrentCollection(prev => ({ ...prev, id: collectionId, name: collectionName.trim() }));
       toast.success('تم الحفظ بنجاح');
@@ -2616,7 +2659,7 @@ export default function MunicipalityBillboardOrganizer() {
     setCurrentCollection(prev => {
       const items = [...prev.items].sort((a, b) => a.sequence_number - b.sequence_number);
       const idx = items.findIndex(i => i.sequence_number === seq);
-      if ((direction === 'up' && idx === 0) || (direction === 'down' && idx === items.length - 1)) return prev;
+      if (idx < 0 || (direction === 'up' && idx === 0) || (direction === 'down' && idx === items.length - 1)) return prev;
       const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
       [items[idx], items[swapIdx]] = [items[swapIdx], items[idx]];
       const reSequenced = items.map((item, i) => ({ ...item, sequence_number: i + 1 }));
@@ -2771,7 +2814,7 @@ export default function MunicipalityBillboardOrganizer() {
           Municipality: municipalityName,
           City: cityName || item.location_text || '',
           Nearest_Landmark: item.nearest_landmark || '',
-          GPS_Coordinates: item.latitude && item.longitude ? `${item.latitude},${item.longitude}` : null,
+          GPS_Coordinates: (item.latitude != null && item.longitude != null) ? `${item.latitude},${item.longitude}` : null,
           Image_URL: item.image_url || null,
           Status: 'متاح',
         } as any;
@@ -2831,32 +2874,41 @@ export default function MunicipalityBillboardOrganizer() {
   }, [currentCollection.items]);
 
   // Drag & Drop handlers
-  const handleDragStart = (seq: number) => {
+  const handleDragStart = (event: React.DragEvent, seq: number) => {
+    event.stopPropagation();
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(seq));
     dragItem.current = seq;
+    dragOverItem.current = null;
   };
 
   const handleDragEnter = (seq: number) => {
-    dragOverItem.current = seq;
+    if (dragItem.current !== null) dragOverItem.current = seq;
   };
 
   const handleDragEnd = () => {
-    if (dragItem.current === null || dragOverItem.current === null || dragItem.current === dragOverItem.current) {
-      dragItem.current = null;
-      dragOverItem.current = null;
-      return;
-    }
+    dragItem.current = null;
+    dragOverItem.current = null;
+  };
+
+  const handleDrop = (event: React.DragEvent, targetSequence: number) => {
+    if (dragItem.current === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const sourceSequence = dragItem.current;
+    handleDragEnd();
+    if (sourceSequence === targetSequence) return;
     setCurrentCollection(prev => {
       const items = [...prev.items].sort((a, b) => a.sequence_number - b.sequence_number);
-      const fromIdx = items.findIndex(i => i.sequence_number === dragItem.current);
-      const toIdx = items.findIndex(i => i.sequence_number === dragOverItem.current);
+      const fromIdx = items.findIndex(i => i.sequence_number === sourceSequence);
+      const toIdx = items.findIndex(i => i.sequence_number === targetSequence);
       if (fromIdx < 0 || toIdx < 0) return prev;
       const [removed] = items.splice(fromIdx, 1);
       items.splice(toIdx, 0, removed);
       const reSequenced = items.map((item, i) => ({ ...item, sequence_number: i + 1 }));
       return { ...prev, items: reSequenced };
     });
-    dragItem.current = null;
-    dragOverItem.current = null;
+    setSelectedItems(new Set());
   };
 
   // Replace one item with another from the system
@@ -3277,12 +3329,12 @@ export default function MunicipalityBillboardOrganizer() {
   // Convert items to Billboard format for map
   const mapBillboards: Billboard[] = useMemo(() => {
     const list = currentCollection.items
-      .filter(item => item.latitude && item.longitude)
+      .filter(item => item.latitude !== null && item.longitude !== null && Number.isFinite(item.latitude) && Number.isFinite(item.longitude))
       .map(item => {
         // Find matching database billboard by ID or spatially within 30m
         let dbB = allBillboards.find(ob => ob.ID === item.billboard_id);
         
-        if (!dbB && item.latitude && item.longitude) {
+        if (!dbB && (item.latitude != null && item.longitude != null)) {
           // Look for nearest database billboard in the same municipality (if selected) or generally within 30m
           const municipalityFilter = comparisonMunicipality && comparisonMunicipality !== 'none' ? comparisonMunicipality : null;
           let candidates = allBillboards;
@@ -3318,7 +3370,7 @@ export default function MunicipalityBillboardOrganizer() {
           GPS_Coordinates: `${item.latitude},${item.longitude}`,
           Status: item.item_type === 'existing' ? 'محجوز' : 'متاح',
           City: item.location_text,
-          Municipality: currentCollection.municipality_name || '',
+          Municipality: normalizeMuniName(item.municipality || municipalityName) || 'غير محددة',
           District: '',
           Nearest_Landmark: item.nearest_landmark,
           Image_URL: item.image_url || '',
@@ -3405,8 +3457,22 @@ export default function MunicipalityBillboardOrganizer() {
       });
     }
 
-    return list;
-  }, [currentCollection.items, showAddDialog, newItem, allBillboards, comparisonMunicipality]);
+    const previewNumbers = new Map(numberingPreview?.map(item => [item.originalSequence, item.sequence_number]) ?? []);
+    return list.map(b => ({
+      ...b,
+      sequence_number: previewNumbers.get(b.ID) ?? (b as any).sequence_number,
+      organizerColor: colorByMunicipality ? municipalityColor(b.Municipality || 'غير محددة') : undefined,
+    }));
+  }, [currentCollection.items, showAddDialog, newItem, allBillboards, comparisonMunicipality, municipalityName, numberingPreview, colorByMunicipality]);
+
+  const mapMunicipalities = useMemo(() => {
+    const counts = new Map<string, number>();
+    mapBillboards.forEach(b => counts.set(b.Municipality || 'غير محددة', (counts.get(b.Municipality || 'غير محددة') || 0) + 1));
+    return [...counts].sort(([a], [b]) => a.localeCompare(b, 'ar'));
+  }, [mapBillboards]);
+  useEffect(() => {
+    if (mapMunicipality !== 'all' && !mapMunicipalities.some(([name]) => name === mapMunicipality)) setMapMunicipality('all');
+  }, [mapMunicipalities, mapMunicipality]);
 
   const comparisonDifferenceCount = useMemo(() => {
     if (!comparisonMunicipality || comparisonMunicipality === 'none') return 0;
@@ -3598,7 +3664,7 @@ export default function MunicipalityBillboardOrganizer() {
       // Pre-generate Google Maps images using direct tile stitching (no API needed, never grays out)
       const mapImages = new Map<number, string>();
       if (printImageSource === 'map_pin' || printImageSource === 'map_only') {
-        const itemsWithCoords = printItems.filter(item => item.latitude && item.longitude);
+        const itemsWithCoords = printItems.filter(item => (item.latitude != null && item.longitude != null));
         if (itemsWithCoords.length > 0) {
           toast.info(`جاري تجهيز ${itemsWithCoords.length} خريطة...`);
           const { generateGoogleTilesMapDataUrl } = await import('@/utils/googleTilesMapGenerator');
@@ -3634,7 +3700,7 @@ export default function MunicipalityBillboardOrganizer() {
       const qrCodes = new Map<number, { content: string; dataUrl: string }>();
       await Promise.all(
         printItems.map(async (item) => {
-          const coords = item.latitude && item.longitude ? `${item.latitude},${item.longitude}` : '';
+          const coords = (item.latitude != null && item.longitude != null) ? `${item.latitude},${item.longitude}` : '';
           const qrContent = coords ? `https://www.google.com/maps?q=${encodeURIComponent(coords)}` : '';
           let qrDataUrl = '';
           if (qrContent) {
@@ -3876,7 +3942,7 @@ export default function MunicipalityBillboardOrganizer() {
         const qrInfo = qrCodes.get(item.sequence_number);
         const qrContent = qrInfo?.content || '';
         const qrDataUrl = qrInfo?.dataUrl || '';
-        const coords = item.latitude && item.longitude ? `${item.latitude},${item.longitude}` : '';
+        const coords = (item.latitude != null && item.longitude != null) ? `${item.latitude},${item.longitude}` : '';
 
         const hasDesign = item.design_face_a || item.design_face_b;
         const mainImage = item.image_url || '';
@@ -4294,10 +4360,10 @@ export default function MunicipalityBillboardOrganizer() {
   };
 
   return (
-    <div className="min-h-screen bg-background relative pb-20 selection:bg-indigo-500/30">
+    <div className="min-h-screen bg-background relative pb-20 selection:bg-primary/30">
       {/* Ambient decorative glows */}
-      <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-indigo-500/5 rounded-full blur-[140px] pointer-events-none" />
-      <div className="absolute top-1/3 left-1/4 w-[450px] h-[450px] bg-purple-500/5 rounded-full blur-[130px] pointer-events-none" />
+      <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-primary/5 rounded-full blur-[140px] pointer-events-none" />
+      <div className="absolute top-1/3 left-1/4 w-[450px] h-[450px] bg-primary/5 rounded-full blur-[130px] pointer-events-none" />
 
       {/* ─── Header ─── */}
       <div className="sticky top-0 z-40 w-full border-b border-border/10 bg-background/90 backdrop-blur-xl shadow-sm">
@@ -4305,7 +4371,7 @@ export default function MunicipalityBillboardOrganizer() {
           {/* Top row: title + save/new/open */}
           <div className="flex items-center justify-between py-3 gap-3">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl shadow-lg shadow-indigo-500/20 text-white">
+              <div className="p-2.5 bg-gradient-primary rounded-xl shadow-lg shadow-primary/20 text-primary-foreground">
                 <MapPin className="h-5 w-5" />
               </div>
               <div>
@@ -4314,8 +4380,8 @@ export default function MunicipalityBillboardOrganizer() {
               </div>
               {/* live counters */}
               <div className="hidden sm:flex items-center gap-2 mr-1">
-                <div className="flex items-center gap-1.5 bg-indigo-500/8 border border-indigo-500/15 rounded-lg px-2.5 py-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400">
-                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                <div className="flex items-center gap-1.5 bg-primary/8 border border-primary/15 rounded-lg px-2.5 py-1 text-xs font-semibold text-primary ">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
                   {currentCollection.items.length} لوحة
                 </div>
                 {currentCollection.items.length > 0 && (
@@ -4343,7 +4409,7 @@ export default function MunicipalityBillboardOrganizer() {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 rounded-lg text-xs gap-1.5 border-indigo-500/20 bg-indigo-500/8 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/15 font-medium"
+                className="h-8 rounded-lg text-xs gap-1.5 border-primary/20 bg-primary/8 text-primary hover:bg-primary/15 font-medium"
                 onClick={() => {
                   if (currentCollection.items.length === 0) {
                     toast.error('أضف لوحات أولاً لحفظ نسخة');
@@ -4370,7 +4436,7 @@ export default function MunicipalityBillboardOrganizer() {
               <Button size="sm" variant="outline" className="h-8 rounded-lg text-xs gap-1 border-border/20" onClick={() => setShowPrintSettings(true)}>
                 <Settings2 className="h-3.5 w-3.5" />
               </Button>
-              <Button size="sm" className="h-8 rounded-lg text-xs gap-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow shadow-indigo-600/20" onClick={() => { setPrintImageSource('map_pin'); setShowPrintDialog(true); }} disabled={currentCollection.items.length === 0}>
+              <Button size="sm" className="h-8 rounded-lg text-xs gap-1.5 bg-gradient-primary hover:opacity-90 text-primary-foreground shadow shadow-primary/20" onClick={() => { setPrintImageSource('map_pin'); setShowPrintDialog(true); }} disabled={currentCollection.items.length === 0}>
                 <Printer className="h-3.5 w-3.5" />
                 طباعة الكل
               </Button>
@@ -4382,10 +4448,10 @@ export default function MunicipalityBillboardOrganizer() {
       <div className="w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6 relative z-10">
         {/* Collection name & Binding (Municipality + City + Default Size) */}
         <Card className="border border-border/15 bg-gradient-to-br from-card/60 to-card/30 backdrop-blur-md rounded-2xl shadow-sm overflow-hidden relative group">
-          <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-indigo-500/40 via-purple-500/40 to-transparent opacity-70" />
+          <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-primary/40 via-primary/40 to-transparent opacity-70" />
           <CardHeader className="pb-3 pt-5">
             <CardTitle className="text-sm font-semibold flex items-center gap-2 text-muted-foreground">
-              <Settings2 className="h-4 w-4 text-indigo-500" />
+              <Settings2 className="h-4 w-4 text-primary" />
               تكوين المجموعة وربط البيانات
             </CardTitle>
           </CardHeader>
@@ -4397,13 +4463,13 @@ export default function MunicipalityBillboardOrganizer() {
                   value={collectionName}
                   onChange={e => setCollectionName(e.target.value)}
                   placeholder="مثال: قائمة يناير 2026"
-                  className="h-10 rounded-xl bg-background/50 border-border/15 focus-visible:ring-indigo-500 font-bold"
+                  className="h-10 rounded-xl bg-background/50 border-border/15 focus-visible:ring-primary font-bold"
                 />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground font-medium">البلدية المرتبطة *</Label>
                 <Select value={normalizeMuniName(municipalityName) || '__none__'} onValueChange={v => setMunicipalityName(v === '__none__' ? '' : normalizeMuniName(v))}>
-                  <SelectTrigger className="h-10 rounded-xl bg-background/50 border-border/15 focus:ring-indigo-500"><SelectValue placeholder="اختر البلدية" /></SelectTrigger>
+                  <SelectTrigger className="h-10 rounded-xl bg-background/50 border-border/15 focus:ring-primary"><SelectValue placeholder="اختر البلدية" /></SelectTrigger>
                   <SelectContent className="rounded-xl border-border/15 bg-popover/95 backdrop-blur-md">
                     <SelectItem value="__none__">— بدون —</SelectItem>
                     {municipalities.map(m => (
@@ -4415,7 +4481,7 @@ export default function MunicipalityBillboardOrganizer() {
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground font-medium">المدينة المرتبطة</Label>
                 <Select value={cityName || '__none__'} onValueChange={handleCityChange}>
-                  <SelectTrigger className="h-10 rounded-xl bg-background/50 border-border/15 focus:ring-indigo-500"><SelectValue placeholder="اختر المدينة" /></SelectTrigger>
+                  <SelectTrigger className="h-10 rounded-xl bg-background/50 border-border/15 focus:ring-primary"><SelectValue placeholder="اختر المدينة" /></SelectTrigger>
                   <SelectContent className="rounded-xl border-border/15 bg-popover/95 backdrop-blur-md">
                     <SelectItem value="__none__">— بدون —</SelectItem>
                     {cities.map(c => (
@@ -4427,7 +4493,7 @@ export default function MunicipalityBillboardOrganizer() {
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground font-medium">المقاس الافتراضي</Label>
                 <Select value={defaultSize || '__none__'} onValueChange={v => setDefaultSize(v === '__none__' ? '' : v)}>
-                  <SelectTrigger className="h-10 rounded-xl bg-background/50 border-border/15 focus:ring-indigo-500"><SelectValue placeholder="اختر مقاساً" /></SelectTrigger>
+                  <SelectTrigger className="h-10 rounded-xl bg-background/50 border-border/15 focus:ring-primary"><SelectValue placeholder="اختر مقاساً" /></SelectTrigger>
                   <SelectContent className="rounded-xl border-border/15 bg-popover/95 backdrop-blur-md">
                     <SelectItem value="__none__">— بدون —</SelectItem>
                     {dbSizes.map(s => (
@@ -4444,7 +4510,7 @@ export default function MunicipalityBillboardOrganizer() {
                 <div className="md:col-span-6 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                      <BookOpen className="h-3.5 w-3.5 text-indigo-500" />
+                      <BookOpen className="h-3.5 w-3.5 text-primary" />
                       <span>العنوان المطبوع في صفحة الغلاف</span>
                     </Label>
                     <span className="text-[10px] text-muted-foreground">
@@ -4455,7 +4521,7 @@ export default function MunicipalityBillboardOrganizer() {
                     value={coverTitle}
                     onChange={e => setCoverTitle(e.target.value)}
                     placeholder={`تلقائي: ${municipalityName || collectionName || 'اسم البلدية أو المجموعة'}`}
-                    className="h-10 rounded-xl bg-background/50 border-border/15 focus-visible:ring-indigo-500 font-bold"
+                    className="h-10 rounded-xl bg-background/50 border-border/15 focus-visible:ring-primary font-bold"
                   />
                 </div>
 
@@ -4465,7 +4531,7 @@ export default function MunicipalityBillboardOrganizer() {
                     value={coverPhrase}
                     onChange={e => setCoverPhrase(e.target.value)}
                     placeholder="مثال: لوحات (أو مواقع لوحات...)"
-                    className="h-10 rounded-xl bg-background/50 border-border/15 focus-visible:ring-indigo-500 font-medium"
+                    className="h-10 rounded-xl bg-background/50 border-border/15 focus-visible:ring-primary font-medium"
                   />
                 </div>
 
@@ -4488,14 +4554,14 @@ export default function MunicipalityBillboardOrganizer() {
                   <button
                     type="button"
                     onClick={() => setCoverTitle(prev => (prev ? prev + ' ' : '') + '{البلدية}')}
-                    className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-500 border border-indigo-500/20 transition-all"
+                    className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-all"
                   >
                     + {'{البلدية}'}
                   </button>
                   <button
                     type="button"
                     onClick={() => setCoverTitle(prev => (prev ? prev + ' ' : '') + '{المدينة}')}
-                    className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-500/10 hover:bg-purple-500/20 text-purple-500 border border-purple-500/20 transition-all"
+                    className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition-all"
                   >
                     + {'{المدينة}'}
                   </button>
@@ -4522,8 +4588,8 @@ export default function MunicipalityBillboardOrganizer() {
             {(municipalityName || cityName || defaultSize || coverTitle) && (
               <div className="flex items-center gap-2 flex-wrap mt-4 pt-3.5 border-t border-border/10">
                 <span className="text-[11px] text-muted-foreground">روابط البيانات النشطة:</span>
-                {municipalityName && <Badge variant="secondary" className="bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/10 gap-1 rounded-lg"><Building2 className="h-3 w-3" />{municipalityName}</Badge>}
-                {cityName && <Badge variant="secondary" className="bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/10 rounded-lg">{cityName}</Badge>}
+                {municipalityName && <Badge variant="secondary" className="bg-primary/10 text-primary border border-primary/10 gap-1 rounded-lg"><Building2 className="h-3 w-3" />{municipalityName}</Badge>}
+                {cityName && <Badge variant="secondary" className="bg-primary/10 text-primary border border-primary/10 rounded-lg">{cityName}</Badge>}
                 {defaultSize && <Badge variant="secondary" className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/10 rounded-lg">المقاس الافتراضي: {defaultSize}</Badge>}
                 {coverTitle && <Badge variant="secondary" className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/10 rounded-lg">عنوان الغلاف: {resolveCoverTitle(coverTitle, municipalityName, cityName, collectionName)}</Badge>}
               </div>
@@ -4658,8 +4724,8 @@ export default function MunicipalityBillboardOrganizer() {
 
           {/* Group: System import */}
           <div className="flex items-center gap-1.5">
-            <Button onClick={() => setShowImportDialog(true)} variant="outline" size="sm" className="h-9 rounded-xl border-border/15 bg-background/50 hover:bg-indigo-500/5 hover:border-indigo-500/20 gap-1.5 text-xs">
-              <Search className="h-3.5 w-3.5 text-indigo-500" />
+            <Button onClick={() => setShowImportDialog(true)} variant="outline" size="sm" className="h-9 rounded-xl border-border/15 bg-background/50 hover:bg-primary/5 hover:border-primary/20 gap-1.5 text-xs">
+              <Search className="h-3.5 w-3.5 text-primary" />
               جلب لوحات موجودة
             </Button>
             <Button
@@ -4678,7 +4744,7 @@ export default function MunicipalityBillboardOrganizer() {
               <span>جلب بلدية كاملة</span>
             </Button>
             <label className="cursor-pointer">
-              <span className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border/15 bg-background/50 text-xs font-medium hover:bg-indigo-500/5 hover:border-indigo-500/20 cursor-pointer transition-colors">
+              <span className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border/15 bg-background/50 text-xs font-medium hover:bg-primary/5 hover:border-primary/20 cursor-pointer transition-colors">
                 <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-500" />
                 Excel
               </span>
@@ -4718,7 +4784,7 @@ export default function MunicipalityBillboardOrganizer() {
                   </span>
                 </CardTitle>
                 {municipalityName && (
-                  <Badge variant="outline" className="text-[10px] bg-indigo-500/5 text-indigo-500 border-indigo-500/10">
+                  <Badge variant="outline" className="text-[10px] bg-primary/5 text-primary border-primary/10">
                     <Building2 className="h-3 w-3 ml-1" />
                     {municipalityName}
                   </Badge>
@@ -4756,7 +4822,7 @@ export default function MunicipalityBillboardOrganizer() {
                     value={searchItems}
                     onChange={e => setSearchItems(e.target.value)}
                     placeholder="بحث في القائمة..."
-                    className="h-8 w-44 text-xs pr-8.5 rounded-xl border-border/15 bg-background/50 focus-visible:ring-indigo-500"
+                    className="h-8 w-44 text-xs pr-8.5 rounded-xl border-border/15 bg-background/50 focus-visible:ring-primary"
                   />
                 </div>
                 
@@ -4776,7 +4842,7 @@ export default function MunicipalityBillboardOrganizer() {
             {/* Bulk actions */}
             {selectedItems.size > 0 && (
               <div className="flex items-center gap-3 flex-wrap mt-3.5 pt-3 border-t border-border/10">
-                <Badge className="bg-indigo-500 text-white rounded-lg px-2.5 py-0.5 text-xs font-semibold">
+                <Badge className="bg-primary text-primary-foreground rounded-lg px-2.5 py-0.5 text-xs font-semibold">
                   {selectedItems.size} محدد
                 </Badge>
                 
@@ -4831,7 +4897,7 @@ export default function MunicipalityBillboardOrganizer() {
                     setSelectedItems(new Set());
                     toast.success('تم تبديل الموقعين');
                   }}>
-                    <ArrowLeftRight className="h-3.5 w-3.5 text-indigo-500" />
+                    <ArrowLeftRight className="h-3.5 w-3.5 text-primary" />
                     تبديل المواقع
                   </Button>
                 )}
@@ -4840,7 +4906,7 @@ export default function MunicipalityBillboardOrganizer() {
                 <Button
                   size="sm"
                   variant="default"
-                  className="h-8 text-xs rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
+                  className="h-8 text-xs rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5"
                   onClick={convertSelectedToOfficialBillboards}
                   title="إنشاء لوحات رسمية في قائمة اللوحات وإسناد كود لكل واحدة"
                 >
@@ -4899,7 +4965,7 @@ export default function MunicipalityBillboardOrganizer() {
                 </div>
 
                 <Button size="sm" variant="outline" className="h-8 text-xs rounded-xl border-border/20 bg-card/45 gap-1.5" onClick={() => { setMoveSourceSeqs(Array.from(selectedItems).sort((a, b) => a - b)); setMoveTargetSeq(''); setMovePosition('above'); setShowMoveDialog(true); }}>
-                  <ArrowLeftRight className="h-3.5 w-3.5 text-indigo-500" />
+                  <ArrowLeftRight className="h-3.5 w-3.5 text-primary" />
                   نقل المحدد إلى رقم...
                 </Button>
 
@@ -4913,7 +4979,7 @@ export default function MunicipalityBillboardOrganizer() {
           <CardContent className="p-0">
             {currentCollection.items.length === 0 ? (
               <div className="text-center py-16 text-muted-foreground">
-                <MapPin className="h-14 w-14 mx-auto mb-3 opacity-20 text-indigo-500" />
+                <MapPin className="h-14 w-14 mx-auto mb-3 opacity-20 text-primary" />
                 <p className="text-sm">لا توجد لوحات في هذه المجموعة حتى الآن.</p>
                 <p className="text-xs text-muted-foreground mt-1">ابدأ بـ إضافة لوحة جديدة، أو جلب لوحات من النظام أو ملف Excel.</p>
               </div>
@@ -4951,15 +5017,18 @@ export default function MunicipalityBillboardOrganizer() {
                     {sortedItems.map(item => (
                       <tr
                         key={item.sequence_number}
-                        className={`border-b border-border/10 transition-all cursor-grab active:cursor-grabbing hover:bg-muted/10 ${selectedItems.has(item.sequence_number) ? 'bg-indigo-500/[0.03] hover:bg-indigo-500/[0.05]' : ''} ${dragItem.current === item.sequence_number ? 'opacity-40 scale-[0.99] border-dashed border-indigo-500/30' : ''}`}
-                        draggable
-                        onDragStart={() => handleDragStart(item.sequence_number)}
+                        className={`border-b border-border/10 transition-all hover:bg-muted/10 ${selectedItems.has(item.sequence_number) ? 'bg-primary/[0.03] hover:bg-primary/[0.05]' : ''} ${dragItem.current === item.sequence_number ? 'opacity-40 scale-[0.99] border-dashed border-primary/30' : ''}`}
                         onDragEnter={() => handleDragEnter(item.sequence_number)}
-                        onDragEnd={handleDragEnd}
-                        onDragOver={(e) => e.preventDefault()}
+                        onDragOver={(e) => { if (dragItem.current !== null) e.preventDefault(); }}
+                        onDrop={(e) => handleDrop(e, item.sequence_number)}
                       >
                         <td className="p-2 text-center text-muted-foreground">
-                          <GripVertical className="h-4 w-4 mx-auto opacity-40 hover:opacity-100 transition-opacity" />
+                          <button type="button" draggable
+                            aria-label={`اسحب لتغيير ترتيب اللوحة ${item.sequence_number}`} title="اسحب من هنا لتغيير الترتيب"
+                            onDragStart={(e) => handleDragStart(e, item.sequence_number)} onDragEnd={handleDragEnd}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-primary/10 hover:text-primary cursor-grab active:cursor-grabbing transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                            <GripVertical className="h-4 w-4" />
+                          </button>
                         </td>
                         <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
                           <Checkbox
@@ -4973,7 +5042,7 @@ export default function MunicipalityBillboardOrganizer() {
                             }}
                           />
                         </td>
-                        <td className="p-3 text-center font-bold text-indigo-500">{item.sequence_number}</td>
+                        <td className="p-3 text-center font-bold text-primary">{item.sequence_number}</td>
                         {/* Location / Billboard Name Cell with Pencil Quick Edit */}
                         {inlineEditingCell?.seq === item.sequence_number && inlineEditingCell?.field === 'location' ? (
                           <td className="p-2" onClick={(e) => e.stopPropagation()}>
@@ -4984,12 +5053,12 @@ export default function MunicipalityBillboardOrganizer() {
                               onKeyDown={(e) => { if (e.key === 'Enter') setInlineEditingCell(null); }}
                               onBlur={() => setInlineEditingCell(null)}
                               placeholder="اسم الموقع / الشارع..."
-                              className="h-8 text-xs font-semibold rounded-lg border-indigo-500/50 bg-background focus-visible:ring-indigo-500"
+                              className="h-8 text-xs font-semibold rounded-lg border-primary/50 bg-background focus-visible:ring-primary cursor-text select-text"
                             />
                           </td>
                         ) : (
                           <td
-                            className="p-3 group/cell cursor-pointer hover:bg-indigo-500/5 transition-colors"
+                            className="p-3 group/cell cursor-pointer hover:bg-primary/5 transition-colors"
                             onClick={(e) => { e.stopPropagation(); setInlineEditingCell({ seq: item.sequence_number, field: 'location' }); }}
                           >
                             <div className="flex items-center justify-between gap-2">
@@ -5004,7 +5073,7 @@ export default function MunicipalityBillboardOrganizer() {
                               </div>
                               <button
                                 type="button"
-                                className="opacity-0 group-hover/cell:opacity-100 p-1 text-muted-foreground hover:text-indigo-600 transition-all rounded-md hover:bg-indigo-500/10"
+                                className="opacity-0 group-hover/cell:opacity-100 p-1 text-muted-foreground hover:text-primary transition-all rounded-md hover:bg-primary/10"
                                 title="تعديل اسم الموقع"
                               >
                                 <Edit2 className="h-3.5 w-3.5" />
@@ -5023,19 +5092,19 @@ export default function MunicipalityBillboardOrganizer() {
                               onKeyDown={(e) => { if (e.key === 'Enter') setInlineEditingCell(null); }}
                               onBlur={() => setInlineEditingCell(null)}
                               placeholder="أقرب نقطة دالة..."
-                              className="h-8 text-xs rounded-lg border-indigo-500/50 bg-background focus-visible:ring-indigo-500"
+                              className="h-8 text-xs rounded-lg border-primary/50 bg-background focus-visible:ring-primary cursor-text select-text"
                             />
                           </td>
                         ) : (
                           <td
-                            className="p-3 group/cell cursor-pointer hover:bg-indigo-500/5 transition-colors"
+                            className="p-3 group/cell cursor-pointer hover:bg-primary/5 transition-colors"
                             onClick={(e) => { e.stopPropagation(); setInlineEditingCell({ seq: item.sequence_number, field: 'landmark' }); }}
                           >
                             <div className="flex items-center justify-between gap-2 text-xs">
                               <span className="text-muted-foreground">{item.nearest_landmark || '—'}</span>
                               <button
                                 type="button"
-                                className="opacity-0 group-hover/cell:opacity-100 p-1 text-muted-foreground hover:text-indigo-600 transition-all rounded-md hover:bg-indigo-500/10"
+                                className="opacity-0 group-hover/cell:opacity-100 p-1 text-muted-foreground hover:text-primary transition-all rounded-md hover:bg-primary/10"
                                 title="تعديل أقرب نقطة دالة"
                               >
                                 <Edit2 className="h-3.5 w-3.5" />
@@ -5065,7 +5134,7 @@ export default function MunicipalityBillboardOrganizer() {
                           </Select>
                         </td>
                         <td className="p-3 text-center text-[10px] font-mono text-muted-foreground" dir="ltr">
-                          {item.latitude && item.longitude ? `${item.latitude?.toFixed(6)}, ${item.longitude?.toFixed(6)}` : '—'}
+                          {(item.latitude != null && item.longitude != null) ? formatCoordinateInput(item.latitude, item.longitude) : '—'}
                         </td>
                         <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
                           <StatusQuickSelector
@@ -5118,10 +5187,10 @@ export default function MunicipalityBillboardOrganizer() {
                               <ArrowDown className="h-3.5 w-3.5" />
                             </Button>
                             <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-muted/80" onClick={() => handleReplace(item.sequence_number)} title="استبدال">
-                              <Replace className="h-3.5 w-3.5 text-indigo-500" />
+                              <Replace className="h-3.5 w-3.5 text-primary" />
                             </Button>
                             <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-muted/80" onClick={() => { setMoveSourceSeqs([item.sequence_number]); setMoveTargetSeq(''); setMovePosition('above'); setShowMoveDialog(true); }} title="نقل اللوحة">
-                              <ArrowLeftRight className="h-3.5 w-3.5 text-indigo-500" />
+                              <ArrowLeftRight className="h-3.5 w-3.5 text-primary" />
                             </Button>
                             <Button
                               variant="ghost"
@@ -5135,7 +5204,7 @@ export default function MunicipalityBillboardOrganizer() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className={`h-8 w-8 rounded-lg ${item.overlay_config?.show_image !== false ? 'hover:bg-blue-500/10 text-blue-500' : 'hover:bg-muted text-muted-foreground line-through opacity-40'}`}
+                              className={`h-8 w-8 rounded-lg ${item.overlay_config?.show_image !== false ? 'hover:bg-primary/10 text-primary' : 'hover:bg-muted text-muted-foreground line-through opacity-40'}`}
                               onClick={() => toggleItemPhoto(item.sequence_number)}
                               title={item.overlay_config?.show_image !== false ? 'صورة اللوحة: مفعلة (اضغط للإلغاء)' : 'صورة اللوحة: معطلة (اضغط للتفعيل)'}
                             >
@@ -5166,12 +5235,10 @@ export default function MunicipalityBillboardOrganizer() {
                   {sortedItems.map(item => (
                     <div
                       key={item.sequence_number}
-                      className={`relative overflow-hidden rounded-[20px] border border-border/15 bg-gradient-to-br from-card/65 to-card/35 backdrop-blur-md p-4 transition-all duration-300 hover:shadow-lg hover:scale-[1.015] hover:border-indigo-500/20 group flex flex-col justify-between min-h-[340px] select-none ${selectedItems.has(item.sequence_number) ? 'border-indigo-500/40 ring-1 ring-indigo-500/30 shadow-indigo-500/5 bg-indigo-500/[0.015]' : ''} ${dragItem.current === item.sequence_number ? 'opacity-40 scale-[0.98] border-dashed border-indigo-500/30' : ''}`}
-                      draggable
-                      onDragStart={() => handleDragStart(item.sequence_number)}
+                      className={`relative overflow-hidden rounded-[20px] border border-border/15 bg-gradient-to-br from-card/65 to-card/35 backdrop-blur-md p-4 transition-all duration-300 hover:shadow-lg hover:scale-[1.015] hover:border-primary/20 group flex flex-col justify-between min-h-[340px] ${selectedItems.has(item.sequence_number) ? 'border-primary/40 ring-1 ring-primary/30 shadow-primary/5 bg-primary/[0.015]' : ''} ${dragItem.current === item.sequence_number ? 'opacity-40 scale-[0.98] border-dashed border-primary/30' : ''}`}
                       onDragEnter={() => handleDragEnter(item.sequence_number)}
-                      onDragEnd={handleDragEnd}
-                      onDragOver={(e) => e.preventDefault()}
+                      onDragOver={(e) => { if (dragItem.current !== null) e.preventDefault(); }}
+                      onDrop={(e) => handleDrop(e, item.sequence_number)}
                     >
                       {/* Drag Grip & Checkbox top bar */}
                       <div className="flex items-center justify-between mb-3 shrink-0">
@@ -5187,20 +5254,23 @@ export default function MunicipalityBillboardOrganizer() {
                             }}
                             className="rounded-md border-border/20"
                           />
-                          <div className="flex items-center gap-1 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold px-2 py-0.5 rounded-lg text-xs">
+                          <div className="flex items-center gap-1 bg-primary/10 text-primary font-bold px-2 py-0.5 rounded-lg text-xs">
                             <span>#</span>
                             <span>{String(item.sequence_number).padStart(2, '0')}</span>
                           </div>
                         </div>
 
                         {/* Drag Handle */}
-                        <div className="cursor-grab active:cursor-grabbing p-1 rounded-lg hover:bg-muted/60 opacity-60 hover:opacity-100 transition-opacity">
+                        <button type="button" draggable
+                          aria-label={`اسحب لتغيير ترتيب اللوحة ${item.sequence_number}`} title="اسحب من هنا لتغيير الترتيب"
+                          onDragStart={(e) => handleDragStart(e, item.sequence_number)} onDragEnd={handleDragEnd}
+                          className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-primary/10 hover:text-primary cursor-grab active:cursor-grabbing transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                           <GripVertical className="h-4 w-4" />
-                        </div>
+                        </button>
                       </div>
 
                       {/* Image Preview / Placeholder */}
-                      <div className="relative rounded-xl overflow-hidden aspect-[16/10] bg-muted/40 border border-border/10 mb-3.5 group-hover:border-indigo-500/10 transition-colors" onClick={(e) => e.stopPropagation()}>
+                      <div className="relative rounded-xl overflow-hidden aspect-[16/10] bg-muted/40 border border-border/10 mb-3.5 group-hover:border-primary/10 transition-colors" onClick={(e) => e.stopPropagation()}>
                         {item.image_url ? (
                           <div className="relative w-full h-full cursor-pointer" onClick={() => setZoomImageModalUrl(item.image_url || null)}>
                             <img
@@ -5252,9 +5322,9 @@ export default function MunicipalityBillboardOrganizer() {
 
                         {/* Badges metadata */}
                         <div className="flex flex-wrap gap-1.5">
-                          {item.latitude && item.longitude && (
+                          {(item.latitude != null && item.longitude != null) && (
                             <Badge variant="outline" className="text-[9px] rounded-lg px-1.5 font-mono border-border/15 bg-background/40">
-                              {item.latitude?.toFixed(6)}, {item.longitude?.toFixed(6)}
+                              {formatCoordinateInput(item.latitude, item.longitude)}
                             </Badge>
                           )}
                         </div>
@@ -5280,7 +5350,7 @@ export default function MunicipalityBillboardOrganizer() {
                             onClick={() => toggleItemPhoto(item.sequence_number)}
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
                               (item.overlay_config?.show_image !== false)
-                                ? 'bg-blue-500/15 border-blue-500/30 text-blue-600 dark:text-blue-400 shadow-xs'
+                                ? 'bg-primary/15 border-primary/30 text-primary shadow-xs'
                                 : 'bg-muted/40 border-border/20 text-muted-foreground line-through opacity-60'
                             }`}
                             title="تفعيل/إلغاء صورة اللوحة في الطباعة"
@@ -5337,10 +5407,10 @@ export default function MunicipalityBillboardOrganizer() {
 
                         <div className="flex items-center gap-1">
                           <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg hover:bg-muted/80" onClick={() => handleReplace(item.sequence_number)} title="استبدال لوحة">
-                            <Replace className="h-3.5 w-3.5 text-indigo-500" />
+                            <Replace className="h-3.5 w-3.5 text-primary" />
                           </Button>
                           <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg hover:bg-muted/80" onClick={() => { setMoveSourceSeqs([item.sequence_number]); setMoveTargetSeq(''); setMovePosition('above'); setShowMoveDialog(true); }} title="نقل اللوحة">
-                            <ArrowLeftRight className="h-3.5 w-3.5 text-indigo-500" />
+                            <ArrowLeftRight className="h-3.5 w-3.5 text-primary" />
                           </Button>
                           <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg hover:bg-muted/80" onClick={() => setEditingItem(item)} title="تعديل البيانات">
                             <Edit2 className="h-3.5 w-3.5 text-slate-500" />
@@ -5368,7 +5438,7 @@ export default function MunicipalityBillboardOrganizer() {
           <CardHeader className="pb-3 pt-5 border-b border-border/10">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <CardTitle className="text-base font-bold flex items-center gap-2">
-                <MapPin className="h-4.5 w-4.5 text-indigo-500" />
+                <MapPin className="h-4.5 w-4.5 text-primary" />
                 <span>خريطة توزع اللوحات</span>
                 <span className="text-xs text-muted-foreground font-normal bg-muted px-2 py-0.5 rounded-md">
                   {mapBillboards.length} معرّفة الإحداثيات
@@ -5401,9 +5471,81 @@ export default function MunicipalityBillboardOrganizer() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            <div style={{ height: '780px' }} className="rounded-b-[20px] overflow-hidden relative">
+            <div className="rounded-b-[20px] overflow-hidden relative">
+              <div className="space-y-3 border-b border-border bg-card p-3 sm:p-4" dir="rtl">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Building2 className="h-4 w-4 text-primary" />
+                  <Button size="sm" variant={mapMunicipality === 'all' ? 'default' : 'outline'} className="cursor-pointer transition-all duration-200"
+                    onClick={() => setMapMunicipality('all')}>كل البلديات ({mapBillboards.length})</Button>
+                  {mapMunicipalities.map(([name, count]) => (
+                    <Button key={name} size="sm" variant={mapMunicipality === name ? 'default' : 'outline'}
+                      aria-pressed={mapMunicipality === name} className="gap-2 cursor-pointer transition-all duration-200"
+                      onClick={() => setMapMunicipality(name)}>
+                      {colorByMunicipality && <span className="h-3 w-3 rounded-full border border-white/60" style={{ backgroundColor: municipalityColor(name) }} />}
+                      {name} <span className="tabular-nums">{count}</span>
+                    </Button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Switch id="municipality-colors" checked={colorByMunicipality} onCheckedChange={setColorByMunicipality} className="cursor-pointer" />
+                    <Label htmlFor="municipality-colors" className="cursor-pointer text-xs">ألوان حسب البلدية (عند الإيقاف: حسب المقاس)</Label>
+                  </div>
+                  {!mapNumbering && <Button size="sm" className="gap-2 cursor-pointer transition-all duration-200"
+                    disabled={!currentCollection.items.length} onClick={() => {
+                      setNumberingClicks([]); setNumberingStart('1'); setNumberingDirection(1); setMapNumbering(true);
+                    }}><ArrowUpDown className="h-4 w-4" />إعادة الترقيم بالنقر</Button>}
+                </div>
+                {mapNumbering && <div className="space-y-3 rounded-xl border border-primary/40 bg-primary/5 p-3">
+                  <p className="text-sm font-semibold">انقر الدبابيس بالترتيب المطلوب؛ تظهر الأرقام الجديدة على الخريطة مباشرة.</p>
+                  <p className="text-xs text-muted-foreground">تتحرك بقية اللوحات تلقائياً، بما فيها المخفية بالتصفية أو بدون إحداثيات. أرقام لوحات المقارنة لا تتغير.</p>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="numbering-start" className="text-xs">ابدأ من رقم</Label>
+                      <Input id="numbering-start" type="number" min={1} max={currentCollection.items.length} step={1} dir="ltr"
+                        className="w-24" disabled={numberingClicks.length > 0} value={numberingStart} onChange={e => setNumberingStart(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">اتجاه الترقيم</Label>
+                      <Select value={String(numberingDirection)} disabled={numberingClicks.length > 0} onValueChange={v => {
+                        const direction = Number(v) as 1 | -1; setNumberingDirection(direction);
+                        setNumberingStart(String(direction === 1 ? 1 : currentCollection.items.length));
+                      }}>
+                        <SelectTrigger className="w-36 cursor-pointer" aria-label="اتجاه الترقيم"><SelectValue /></SelectTrigger>
+                        <SelectContent><SelectItem value="1">تصاعدي</SelectItem><SelectItem value="-1">تنازلي</SelectItem></SelectContent>
+                      </Select>
+                    </div>
+                    <Badge variant="outline" aria-live="polite" className="py-2">
+                      {numberingClicks.length} لوحة • {(() => {
+                        const next = Number(numberingStart) + numberingClicks.length * numberingDirection;
+                        return Number.isInteger(next) && next >= 1 && next <= currentCollection.items.length ? `التالي: ${next}` : 'اختر بداية صحيحة أو طبّق الدفعة';
+                      })()}
+                    </Badge>
+                    <Button size="sm" variant="outline" className="gap-1 cursor-pointer transition-all duration-200" disabled={!numberingClicks.length}
+                      onClick={() => setNumberingClicks(previous => previous.slice(0, -1))}><RotateCcw className="h-4 w-4" />تراجع عن آخر نقرة</Button>
+                    <Button size="sm" className="gap-1 cursor-pointer transition-all duration-200" disabled={!numberingPreview}
+                      onClick={() => {
+                        if (!numberingPreview) return;
+                        const items = reorderMunicipalityItems(currentCollection.items, numberingClicks, Number(numberingStart), numberingDirection);
+                        setCurrentCollection(previous => ({ ...previous, items })); setSelectedItems(new Set());
+                        setMapNumbering(false); setNumberingClicks([]);
+                        toast.success('تم تطبيق الترقيم دون تكرار. احفظ المجموعة لتثبيت التغييرات');
+                      }}><Check className="h-4 w-4" />تطبيق الدفعة</Button>
+                    <Button size="sm" variant="ghost" className="cursor-pointer transition-all duration-200"
+                      onClick={() => { setMapNumbering(false); setNumberingClicks([]); }}>إلغاء</Button>
+                  </div>
+                  {numberingClicks.length > 0 && <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto" aria-label="معاينة تسلسل النقر">
+                    {numberingClicks.map((sequence, index) => <Badge key={sequence} variant="secondary">
+                      لوحة {sequence} إلى {Number(numberingStart) + index * numberingDirection}
+                    </Badge>)}
+                  </div>}
+                </div>}
+              </div>
+              <div className="relative">
               <GoogleHomeMap
                 billboards={mapBillboards}
+                externalMunicipalityFilter={mapMunicipality === 'all' ? undefined : [mapMunicipality]}
+                directMarkerClick={mapNumbering ? handleNumberingClick : undefined}
                 onMapRightClick={(lat, lng) => {
                   setNewItem({
                     size: defaultSize || '',
@@ -5435,6 +5577,7 @@ export default function MunicipalityBillboardOrganizer() {
                   setSelectedItems(new Set());
                 }}
               />
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -5772,7 +5915,7 @@ export default function MunicipalityBillboardOrganizer() {
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
                 موقع اللوحة
-                {googleMapsUrlLoading && <span className="mr-auto text-[10px] text-indigo-500">جاري التعبئة...</span>}
+                {googleMapsUrlLoading && <span className="mr-auto text-[10px] text-primary">جاري التعبئة...</span>}
               </Label>
               <Input
                 value={newItem.location_text || ''}
@@ -5817,10 +5960,10 @@ export default function MunicipalityBillboardOrganizer() {
       <Dialog open={showAddDialog} onOpenChange={(open) => { if (!open) { setPhotoPreviewUrl(null); setPendingImageUrl(null); setPhotoImportState('idle'); setGoogleMapsUrl(''); setGoogleMapsUrlError(''); } setShowAddDialog(open); }}>
         <DialogContent className="max-w-lg border-border/10 rounded-3xl bg-background/98 backdrop-blur-xl shadow-2xl p-0 overflow-hidden">
           {/* Dialog header strip */}
-          <div className="px-6 pt-5 pb-4 border-b border-border/10 bg-gradient-to-r from-indigo-500/5 to-violet-500/5">
+          <div className="px-6 pt-5 pb-4 border-b border-border/10 bg-gradient-to-r from-primary/5 to-primary/5">
             <DialogTitle className="font-bold text-base flex items-center gap-2">
-              <div className="p-1.5 bg-indigo-500/10 rounded-lg">
-                <MapPin className="h-4 w-4 text-indigo-500" />
+              <div className="p-1.5 bg-primary/10 rounded-lg">
+                <MapPin className="h-4 w-4 text-primary" />
               </div>
               إضافة لوحة جديدة
             </DialogTitle>
@@ -5834,7 +5977,7 @@ export default function MunicipalityBillboardOrganizer() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                    <Camera className="h-3.5 w-3.5 text-violet-500" />
+                    <Camera className="h-3.5 w-3.5 text-primary" />
                     صورة ميدانية
                     <span className="text-[10px] font-normal text-muted-foreground/60">(اختر، اسحب، أو اضغط Ctrl+V للصق)</span>
                   </Label>
@@ -5843,7 +5986,7 @@ export default function MunicipalityBillboardOrganizer() {
                     variant="outline"
                     size="sm"
                     onClick={(e) => { e.stopPropagation(); handlePasteFromClipboard(); }}
-                    className="h-7 text-[11px] rounded-lg border-indigo-500/30 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 gap-1 font-semibold hover:bg-indigo-500/20"
+                    className="h-7 text-[11px] rounded-lg border-primary/30 bg-primary/10 text-primary gap-1 font-semibold hover:bg-primary/20"
                     title="لصق صورة مباشرة من الحافظة"
                   >
                     <Clipboard className="h-3 w-3" />
@@ -5858,7 +6001,7 @@ export default function MunicipalityBillboardOrganizer() {
                       ? 'border-emerald-500/40 bg-emerald-500/5'
                       : photoImportState === 'error'
                       ? 'border-destructive/40 bg-destructive/5'
-                      : 'border-border/25 bg-muted/20 hover:border-indigo-500/40 hover:bg-indigo-500/5'
+                      : 'border-border/25 bg-muted/20 hover:border-primary/40 hover:bg-primary/5'
                   }`}
                   onClick={() => photoDropRef.current?.click()}
                   onDragOver={e => { e.preventDefault(); }}
@@ -5933,7 +6076,7 @@ export default function MunicipalityBillboardOrganizer() {
                       {(photoImportState === 'compressing' || photoImportState === 'uploading' || photoImportState === 'geocoding') && (
                         <div className="absolute inset-x-0 top-0 h-1 bg-black/20">
                           <div
-                            className="h-full bg-indigo-400 transition-all duration-300 rounded-full"
+                            className="h-full bg-primary transition-all duration-300 rounded-full"
                             style={{ width: `${photoImportProgress}%` }}
                           />
                         </div>
@@ -5942,7 +6085,7 @@ export default function MunicipalityBillboardOrganizer() {
                   ) : (
                     /* Empty drop zone */
                     <div className="flex flex-col items-center justify-center gap-2 py-8 px-4">
-                      <div className="p-3 rounded-2xl bg-violet-500/10 text-violet-500">
+                      <div className="p-3 rounded-2xl bg-primary/10 text-primary">
                         <Camera className="h-6 w-6" />
                       </div>
                       <div className="text-center">
@@ -5958,7 +6101,7 @@ export default function MunicipalityBillboardOrganizer() {
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-muted-foreground flex items-center justify-between">
                   <span>المقاس (طول × عرض × ارتفاع) *</span>
-                  {defaultSize && <span className="text-[10px] text-indigo-500 font-normal">الافتراضي: {defaultSize}</span>}
+                  {defaultSize && <span className="text-[10px] text-primary font-normal">الافتراضي: {defaultSize}</span>}
                 </Label>
                 <div className="flex flex-col gap-2">
                   <Select value={dbSizes.includes(newItem.size || '') ? newItem.size : ''} onValueChange={v => setNewItem(p => ({ ...p, size: v }))}>
@@ -6001,7 +6144,7 @@ export default function MunicipalityBillboardOrganizer() {
               {/* ── Location text ── */}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
-                  <MapPin className="h-3 w-3 text-indigo-500" />
+                  <MapPin className="h-3 w-3 text-primary" />
                   موقع اللوحة
                   {photoImportState === 'done' && newItem.location_text && (
                     <span className="mr-auto text-[10px] text-emerald-500 font-normal flex items-center gap-1">
@@ -6042,7 +6185,7 @@ export default function MunicipalityBillboardOrganizer() {
                   رابط قوقل ماب
                   <span className="text-[10px] font-normal text-muted-foreground/60">(الصق الرابط لاستخراج الإحداثيات تلقائياً)</span>
                   {googleMapsUrlLoading && (
-                    <span className="mr-auto text-[10px] text-indigo-500 font-normal flex items-center gap-1">
+                    <span className="mr-auto text-[10px] text-primary font-normal flex items-center gap-1">
                       <Loader2 className="h-3 w-3 animate-spin" /> جاري التحديد...
                     </span>
                   )}
@@ -6118,7 +6261,7 @@ export default function MunicipalityBillboardOrganizer() {
             <Button
               onClick={addNewItem}
               disabled={photoImportState === 'compressing' || photoImportState === 'uploading' || photoImportState === 'geocoding'}
-              className="rounded-xl h-10 px-6 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-semibold shadow shadow-indigo-600/20 gap-2"
+              className="rounded-xl h-10 px-6 bg-gradient-primary hover:opacity-90 text-primary-foreground font-semibold shadow shadow-primary/20 gap-2"
             >
               {(photoImportState === 'compressing' || photoImportState === 'uploading' || photoImportState === 'geocoding') ? (
                 <><Loader2 className="h-4 w-4 animate-spin" /> جاري المعالجة...</>
@@ -6135,7 +6278,7 @@ export default function MunicipalityBillboardOrganizer() {
         <DialogContent className="max-w-2xl max-h-[85vh] border-border/15 rounded-3xl bg-background/98 backdrop-blur-md flex flex-col p-6">
           <DialogHeader className="shrink-0 pb-2 border-b border-border/10">
             <DialogTitle className="font-bold flex items-center gap-2">
-              <Building2 className="h-5 w-5 text-indigo-500" />
+              <Building2 className="h-5 w-5 text-primary" />
               <span>جلب لوحات من النظام</span>
             </DialogTitle>
             <DialogDescription className="sr-only">اختر اللوحات لجلبها من قاعدة بيانات النظام</DialogDescription>
@@ -6150,10 +6293,10 @@ export default function MunicipalityBillboardOrganizer() {
             {(municipalityName || cityName) && (
               <div className="flex items-center justify-between gap-3 p-3 bg-muted/40 border border-border/10 rounded-xl text-xs shrink-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <Filter className="h-3.5 w-3.5 text-indigo-500" />
+                  <Filter className="h-3.5 w-3.5 text-primary" />
                   <span className="font-medium text-muted-foreground">الفلترة النشطة:</span>
-                  {municipalityName && <Badge variant="outline" className="bg-indigo-500/5 text-indigo-500 border-indigo-500/10 rounded-lg">{municipalityName}</Badge>}
-                  {cityName && <Badge variant="outline" className="bg-purple-500/5 text-purple-500 border-purple-500/10 rounded-lg">{cityName}</Badge>}
+                  {municipalityName && <Badge variant="outline" className="bg-primary/5 text-primary border-primary/10 rounded-lg">{municipalityName}</Badge>}
+                  {cityName && <Badge variant="outline" className="bg-primary/5 text-primary border-primary/10 rounded-lg">{cityName}</Badge>}
                 </div>
                 <label className="flex items-center gap-2 cursor-pointer select-none">
                   <Checkbox checked={restrictImportToMunicipality} onCheckedChange={(c) => setRestrictImportToMunicipality(!!c)} className="rounded-md" />
@@ -6163,7 +6306,7 @@ export default function MunicipalityBillboardOrganizer() {
             )}
             
             <div className="text-xs text-muted-foreground flex items-center justify-between px-1 shrink-0">
-              <span>تم اختيار: <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{selectedBillboardIds.size}</strong> لوحة</span>
+              <span>تم اختيار: <strong className="text-primary font-bold">{selectedBillboardIds.size}</strong> لوحة</span>
               <span>يعرض أول 200 نتيجة مطابقة</span>
             </div>
 
@@ -6183,7 +6326,7 @@ export default function MunicipalityBillboardOrganizer() {
                   </thead>
                   <tbody>
                     {filteredImportBillboards.map(b => (
-                      <tr key={b.ID} className={`border-b border-border/10 hover:bg-muted/30 cursor-pointer transition-colors ${selectedBillboardIds.has(b.ID) ? 'bg-indigo-500/[0.02]' : ''}`} onClick={() => {
+                      <tr key={b.ID} className={`border-b border-border/10 hover:bg-muted/30 cursor-pointer transition-colors ${selectedBillboardIds.has(b.ID) ? 'bg-primary/[0.02]' : ''}`} onClick={() => {
                         setSelectedBillboardIds(prev => {
                           const n = new Set(prev);
                           if (n.has(b.ID)) n.delete(b.ID); else n.add(b.ID);
@@ -6207,7 +6350,7 @@ export default function MunicipalityBillboardOrganizer() {
                           <Badge variant={b.Status === 'متاح' ? 'default' : 'secondary'} className="rounded-lg">{b.Status || '—'}</Badge>
                         </td>
                         <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                          <Button size="icon" variant="ghost" className="h-8 w-8 text-indigo-500 rounded-lg hover:bg-indigo-500/10" title="إضافة سريعة تلقائية" onClick={() => quickAddBillboard(b)}>
+                          <Button size="icon" variant="ghost" className="h-8 w-8 text-primary rounded-lg hover:bg-primary/10" title="إضافة سريعة تلقائية" onClick={() => quickAddBillboard(b)}>
                             <Plus className="h-4 w-4" />
                           </Button>
                         </td>
@@ -6224,7 +6367,7 @@ export default function MunicipalityBillboardOrganizer() {
           
           <DialogFooter className="gap-2 shrink-0 border-t border-border/10 pt-4">
             <Button variant="outline" onClick={() => setShowImportDialog(false)} className="rounded-xl h-10">إلغاء</Button>
-            <Button onClick={importSelectedBillboards} disabled={selectedBillboardIds.size === 0} className="rounded-xl h-10 bg-indigo-600 hover:bg-indigo-700 text-white">
+            <Button onClick={importSelectedBillboards} disabled={selectedBillboardIds.size === 0} className="rounded-xl h-10 bg-primary hover:bg-primary/90 text-primary-foreground">
               جلب {selectedBillboardIds.size} لوحة محددة
             </Button>
           </DialogFooter>
@@ -6236,7 +6379,7 @@ export default function MunicipalityBillboardOrganizer() {
         <DialogContent className="max-w-2xl max-h-[85vh] border-border/15 rounded-3xl bg-background/98 backdrop-blur-md flex flex-col p-6">
           <DialogHeader className="shrink-0 pb-2 border-b border-border/10">
             <DialogTitle className="font-bold flex items-center gap-2">
-              <Replace className="h-5 w-5 text-indigo-500" />
+              <Replace className="h-5 w-5 text-primary" />
               <span>استبدال لوحة رقم {replaceTarget}</span>
             </DialogTitle>
             <DialogDescription className="sr-only">اختر لوحة بديلة من النظام لتنوب عن اللوحة الحالية</DialogDescription>
@@ -6262,7 +6405,7 @@ export default function MunicipalityBillboardOrganizer() {
                   </thead>
                   <tbody>
                     {filteredImportBillboards.map(b => (
-                      <tr key={b.ID} className={`border-b border-border/10 hover:bg-muted/30 cursor-pointer transition-colors ${selectedBillboardIds.has(b.ID) ? 'bg-indigo-500/[0.04]' : ''}`} onClick={() => {
+                      <tr key={b.ID} className={`border-b border-border/10 hover:bg-muted/30 cursor-pointer transition-colors ${selectedBillboardIds.has(b.ID) ? 'bg-primary/[0.04]' : ''}`} onClick={() => {
                         setSelectedBillboardIds(new Set([b.ID]));
                       }}>
                         <td className="p-3 text-center">
@@ -6287,7 +6430,7 @@ export default function MunicipalityBillboardOrganizer() {
           </div>
           <DialogFooter className="gap-2 shrink-0 border-t border-border/10 pt-4">
             <Button variant="outline" onClick={() => setShowReplaceDialog(false)} className="rounded-xl h-10">إلغاء</Button>
-            <Button onClick={confirmReplace} disabled={selectedBillboardIds.size !== 1} className="rounded-xl h-10 bg-indigo-600 hover:bg-indigo-700 text-white">
+            <Button onClick={confirmReplace} disabled={selectedBillboardIds.size !== 1} className="rounded-xl h-10 bg-primary hover:bg-primary/90 text-primary-foreground">
               تأكيد الاستبدال
             </Button>
           </DialogFooter>
@@ -6296,13 +6439,29 @@ export default function MunicipalityBillboardOrganizer() {
 
       {/* Edit item dialog */}
       <Dialog open={!!editingItem} onOpenChange={() => setEditingItem(null)}>
-        <DialogContent className="max-w-md border-border/15 rounded-3xl bg-background/98 backdrop-blur-md">
+        <DialogContent className="max-w-md max-h-[90dvh] overflow-y-auto border-border rounded-3xl bg-background" dir="rtl">
           <DialogHeader>
             <DialogTitle className="font-bold">تعديل لوحة رقم {editingItem?.sequence_number}</DialogTitle>
             <DialogDescription className="sr-only">تعديل بيانات اللوحة المحددة</DialogDescription>
           </DialogHeader>
           {editingItem && (
             <div className="space-y-4 py-2">
+              <div className="space-y-2 rounded-xl border border-primary/30 bg-primary/5 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="edit-sequence">رقم الترتيب الحالي</Label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl font-bold text-primary tabular-nums" dir="ltr">{editingItem.sequence_number}</span>
+                    <Button type="button" variant="ghost" size="icon" title="تعديل رقم الترتيب" aria-label="تعديل رقم الترتيب"
+                      className="cursor-pointer text-primary transition-all duration-200" onClick={() => setIsEditingSequence(true)}>
+                      <Edit2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                {isEditingSequence && <Input id="edit-sequence" type="number" min={1} max={currentCollection.items.length} step={1}
+                  autoFocus onFocus={event => event.target.select()} aria-label="رقم الترتيب الجديد"
+                  value={editSequence} onChange={event => setEditSequence(event.target.value)} dir="ltr" />}
+                <p className="text-xs text-muted-foreground">من 1 إلى {currentCollection.items.length}. تتحرك بقية اللوحات تلقائياً دون تكرار الأرقام.</p>
+              </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-muted-foreground">المقاس (طول × عرض × ارتفاع)</Label>
                 <div className="flex flex-col gap-2">
@@ -6334,7 +6493,7 @@ export default function MunicipalityBillboardOrganizer() {
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
-                    <Camera className="h-3.5 w-3.5 text-indigo-500" />
+                    <Camera className="h-3.5 w-3.5 text-primary" />
                     صورة اللوحة
                   </Label>
                   <Button
@@ -6342,7 +6501,7 @@ export default function MunicipalityBillboardOrganizer() {
                     variant="outline"
                     size="sm"
                     onClick={(e) => { e.stopPropagation(); handlePasteFromClipboard(); }}
-                    className="h-6 text-[10px] rounded-lg border-indigo-500/30 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 gap-1 font-semibold hover:bg-indigo-500/20"
+                    className="h-6 text-[10px] rounded-lg border-primary/30 bg-primary/10 text-primary gap-1 font-semibold hover:bg-primary/20"
                     title="لصق صورة مباشرة من الحافظة (Ctrl + V)"
                   >
                     <Clipboard className="h-3 w-3" />
@@ -6351,8 +6510,8 @@ export default function MunicipalityBillboardOrganizer() {
                 </div>
                 {/* Photo Upload / Status Progress Indicator */}
                 {(photoImportState === 'compressing' || photoImportState === 'uploading' || photoImportState === 'geocoding') && (
-                  <div className="bg-indigo-500/10 border border-indigo-500/30 rounded-xl p-2.5 space-y-1.5 animate-in fade-in duration-200">
-                    <div className="flex items-center justify-between text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                  <div className="bg-primary/10 border border-primary/30 rounded-xl p-2.5 space-y-1.5 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between text-xs font-semibold text-primary ">
                       <div className="flex items-center gap-1.5">
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         <span>
@@ -6363,9 +6522,9 @@ export default function MunicipalityBillboardOrganizer() {
                       </div>
                       <span className="font-mono">{photoImportProgress}%</span>
                     </div>
-                    <div className="w-full h-1.5 bg-indigo-500/20 rounded-full overflow-hidden">
+                    <div className="w-full h-1.5 bg-primary/20 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-indigo-500 transition-all duration-300 rounded-full"
+                        className="h-full bg-primary transition-all duration-300 rounded-full"
                         style={{ width: `${photoImportProgress}%` }}
                       />
                     </div>
@@ -6391,7 +6550,7 @@ export default function MunicipalityBillboardOrganizer() {
                         className="h-8 text-xs font-semibold gap-1 bg-white/90 text-black hover:bg-white shadow"
                         title="تكبير ومعاينة الصورة"
                       >
-                        <Maximize2 className="h-3.5 w-3.5 text-indigo-600" />
+                        <Maximize2 className="h-3.5 w-3.5 text-primary" />
                         تكبير
                       </Button>
                       <Button
@@ -6423,7 +6582,7 @@ export default function MunicipalityBillboardOrganizer() {
                     onDragOver={e => e.preventDefault()}
                     onDrop={e => { e.preventDefault(); if (e.dataTransfer.files) handleDropOrSelectFiles(e.dataTransfer.files); }}
                   >
-                    <Camera className="h-5 w-5 text-indigo-500" />
+                    <Camera className="h-5 w-5 text-primary" />
                     <span>اضغط لاختيار صورة، اسحب هنا، أو <strong>Ctrl + V</strong> للصق</span>
                   </div>
                 )}
@@ -6490,16 +6649,11 @@ export default function MunicipalityBillboardOrganizer() {
                 <Label className="text-xs font-semibold text-muted-foreground">الإحداثيات (Lat, Lng)</Label>
                 <Input
                   dir="ltr"
-                  value={editingItem.latitude && editingItem.longitude ? `${Number(editingItem.latitude.toFixed(6))}, ${Number(editingItem.longitude.toFixed(6))}` : ''}
-                  onChange={e => {
-                    const parts = e.target.value.split(',').map(c => c.trim());
-                    const parsedLat = parts[0] ? parseFloat(parts[0]) : null;
-                    const parsedLng = parts[1] ? parseFloat(parts[1]) : null;
-                    const lat = parsedLat !== null && !isNaN(parsedLat) ? Number(parsedLat.toFixed(6)) : null;
-                    const lng = parsedLng !== null && !isNaN(parsedLng) ? Number(parsedLng.toFixed(6)) : null;
-                    setEditingItem({ ...editingItem, latitude: lat, longitude: lng });
-                  }}
-                  placeholder="32.901753, 13.217222"
+                  value={editCoordinates}
+                  onChange={e => setEditCoordinates(e.target.value)}
+                  aria-label="الإحداثيات (Lat, Lng)"
+                  aria-invalid={parseCoordinateInput(editCoordinates) === null}
+                  placeholder="32.8688117,13.2556506"
                   className="font-mono text-sm rounded-xl border-border/15 bg-background/50 h-10"
                 />
               </div>
@@ -6515,12 +6669,24 @@ export default function MunicipalityBillboardOrganizer() {
                   return;
                 }
                 if (editingItem) {
-                  updateItem(editingItem.sequence_number, editingItem);
+                  const coordinates = parseCoordinateInput(editCoordinates);
+                  if (!coordinates) {
+                    toast.error('أدخل خط العرض وخط الطول مفصولين بفاصلة، مثل 32.8688117,13.2556506');
+                    return;
+                  }
+                  const target = Number(editSequence);
+                  if (!Number.isInteger(target) || target < 1 || target > currentCollection.items.length) {
+                    toast.error('أدخل رقم ترتيب صحيحاً ضمن نطاق المجموعة');
+                    return;
+                  }
+                  const updated = currentCollection.items.map(item => item.sequence_number === editingItem.sequence_number ? { ...editingItem, ...coordinates } : item);
+                  setCurrentCollection(prev => ({ ...prev, items: reorderMunicipalityItems(updated, [editingItem.sequence_number], target, 1) }));
+                  setSelectedItems(new Set());
                   setEditingItem(null);
-                  toast.success('تم تحديث بيانات اللوحة');
+                  toast.success('تم تحديث اللوحة وترتيبها. احفظ المجموعة لتثبيت التغييرات');
                 }
               }}
-              className="rounded-xl h-10 bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+              className="rounded-xl h-10 bg-primary hover:bg-primary/90 text-primary-foreground gap-2"
             >
               {(photoImportState === 'compressing' || photoImportState === 'uploading' || photoImportState === 'geocoding') ? (
                 <><Loader2 className="h-4 w-4 animate-spin" /> جاري المعالجة...</>
@@ -6538,7 +6704,7 @@ export default function MunicipalityBillboardOrganizer() {
           <div className="p-5 sm:p-6 border-b border-border/15 bg-card/60">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 rounded-xl shadow-sm">
+                <div className="p-2 bg-primary/10 text-primary border border-primary/20 rounded-xl shadow-sm">
                   <FolderOpen className="h-4 w-4" />
                 </div>
                 <div>
@@ -6560,7 +6726,7 @@ export default function MunicipalityBillboardOrganizer() {
                   value={collectionsSearchQuery}
                   onChange={(e) => setCollectionsSearchQuery(e.target.value)}
                   placeholder="بحث باسم القائمة أو البلدية أو المدينة..."
-                  className="pr-9 pl-8 h-9 text-xs rounded-xl bg-background/80 border-border/20 focus-visible:ring-indigo-500"
+                  className="pr-9 pl-8 h-9 text-xs rounded-xl bg-background/80 border-border/20 focus-visible:ring-primary"
                 />
                 {collectionsSearchQuery && (
                   <button
@@ -6595,7 +6761,7 @@ export default function MunicipalityBillboardOrganizer() {
                       key={c.id}
                       className={`flex items-center justify-between p-3 sm:p-3.5 border rounded-2xl transition-all group/item ${
                         isCurrent
-                          ? 'border-indigo-500/40 bg-indigo-500/5 shadow-sm'
+                          ? 'border-primary/40 bg-primary/5 shadow-sm'
                           : 'border-border/15 hover:border-border/40 hover:bg-muted/40'
                       }`}
                     >
@@ -6604,11 +6770,11 @@ export default function MunicipalityBillboardOrganizer() {
                         onClick={() => loadCollection(c.id)}
                       >
                         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                          <span className="font-semibold text-sm text-foreground group-hover/item:text-indigo-500 transition-colors truncate">
+                          <span className="font-semibold text-sm text-foreground group-hover/item:text-primary transition-colors truncate">
                             {c.name}
                           </span>
                           {isCurrent && (
-                            <Badge className="text-[10px] h-5 bg-indigo-500 text-white font-bold px-1.5">
+                            <Badge className="text-[10px] h-5 bg-primary text-primary-foreground font-bold px-1.5">
                               الحالية
                             </Badge>
                           )}
@@ -6633,7 +6799,7 @@ export default function MunicipalityBillboardOrganizer() {
                         <Button
                           variant="secondary"
                           size="sm"
-                          className="rounded-xl h-8 px-3 text-xs font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/15 hover:bg-indigo-500 hover:text-white transition-all gap-1"
+                          className="rounded-xl h-8 px-3 text-xs font-semibold bg-primary/10 text-primary border border-primary/15 hover:bg-primary hover:text-primary-foreground transition-all gap-1"
                           onClick={() => loadCollection(c.id)}
                           title="فتح وتحميل القائمة"
                         >
@@ -6754,8 +6920,8 @@ export default function MunicipalityBillboardOrganizer() {
       <Dialog open={showSaveAsCopyDialog} onOpenChange={setShowSaveAsCopyDialog}>
         <DialogContent className="max-w-md border-border/20 rounded-3xl bg-background/98 backdrop-blur-xl shadow-2xl">
           <DialogHeader>
-            <div className="flex items-center gap-2.5 text-indigo-500 mb-1">
-              <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
+            <div className="flex items-center gap-2.5 text-primary mb-1">
+              <div className="p-2 bg-primary/10 border border-primary/20 rounded-xl">
                 <Copy className="h-4 w-4" />
               </div>
               <DialogTitle className="font-bold text-base text-foreground">حفظ كنسخة جديدة</DialogTitle>
@@ -6772,7 +6938,7 @@ export default function MunicipalityBillboardOrganizer() {
                 value={saveAsCopyName}
                 onChange={(e) => setSaveAsCopyName(e.target.value)}
                 placeholder="أدخل اسم القائمة الجديدة..."
-                className="h-10 rounded-xl font-bold bg-background/60 border-border/20 focus-visible:ring-indigo-500"
+                className="h-10 rounded-xl font-bold bg-background/60 border-border/20 focus-visible:ring-primary"
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !isSavingAsCopy && saveAsCopyName.trim()) {
@@ -6798,7 +6964,7 @@ export default function MunicipalityBillboardOrganizer() {
             </Button>
             <Button
               size="sm"
-              className="rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 shadow-md shadow-indigo-600/20"
+              className="rounded-xl text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5 shadow-md shadow-primary/20"
               onClick={() => saveAsNewCollection(saveAsCopyName)}
               disabled={isSavingAsCopy || !saveAsCopyName.trim()}
             >
@@ -6931,7 +7097,7 @@ export default function MunicipalityBillboardOrganizer() {
                       }}
                       className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 ${
                         previewBlueprintMode === 'cover'
-                          ? 'bg-indigo-600 text-white shadow-sm'
+                          ? 'bg-primary text-primary-foreground shadow-sm'
                           : 'text-muted-foreground hover:text-foreground'
                       }`}
                     >
@@ -7118,7 +7284,7 @@ export default function MunicipalityBillboardOrganizer() {
                     }}
                     className={`px-2.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 border ${
                       printStudioTab === 'cover'
-                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                        ? 'bg-primary text-primary-foreground border-primary shadow-sm'
                         : 'bg-background hover:bg-muted/60 text-muted-foreground border-border/20'
                     }`}
                   >
@@ -7188,7 +7354,7 @@ export default function MunicipalityBillboardOrganizer() {
                       <div className="flex items-center justify-between">
                         <div className="space-y-0.5">
                           <Label htmlFor="cover_page_enabled_toggle" className="text-xs font-black text-foreground flex items-center gap-1.5">
-                            <BookOpen className="h-4 w-4 text-indigo-500" />
+                            <BookOpen className="h-4 w-4 text-primary" />
                             <span>تضمين صفحة الغلاف في مستند الطباعة</span>
                           </Label>
                           <div className="text-[10px] text-muted-foreground">
@@ -7263,8 +7429,8 @@ export default function MunicipalityBillboardOrganizer() {
                           </div>
 
                           {/* Live Cover Title Preview */}
-                          <div className="p-3 bg-indigo-500/5 border border-indigo-500/20 rounded-xl text-indigo-600 dark:text-indigo-400 font-bold flex items-center gap-2 text-xs">
-                            <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">معاينة الغلاف:</span>
+                          <div className="p-3 bg-primary/5 border border-primary/20 rounded-xl text-primary font-bold flex items-center gap-2 text-xs">
+                            <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">معاينة الغلاف:</span>
                             <span>"{coverPhrase || 'لوحات'} {resolveCoverTitle(coverTitle, municipalityName || 'الخمس', cityName, collectionName)}"</span>
                           </div>
                         </div>
@@ -8161,7 +8327,7 @@ export default function MunicipalityBillboardOrganizer() {
               const count = bulkStatusTarget === 'all' ? currentCollection.items.length : selectedItems.size;
               toast.success(`تم تحديث حالة ${count} لوحة إلى "${finalStatus}"`);
               setShowBulkStatusDialog(false);
-            }} className="rounded-xl h-10 bg-indigo-600 hover:bg-indigo-700 text-white">تطبيق الحالة الجديدة</Button>
+            }} className="rounded-xl h-10 bg-primary hover:bg-primary/90 text-primary-foreground">تطبيق الحالة الجديدة</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -8194,7 +8360,7 @@ export default function MunicipalityBillboardOrganizer() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <DialogDescription className="text-xs text-muted-foreground leading-relaxed">
-              تم بنجاح قراءة <strong className="text-indigo-600 dark:text-indigo-400 font-bold">{excelPendingItems.length}</strong> لوحة من الملف المرفوع. الرجاء تحديد اسم البلدية لربط القائمة المستوردة بها.
+              تم بنجاح قراءة <strong className="text-primary font-bold">{excelPendingItems.length}</strong> لوحة من الملف المرفوع. الرجاء تحديد اسم البلدية لربط القائمة المستوردة بها.
             </DialogDescription>
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-muted-foreground">اسم البلدية المرتبطة *</Label>
@@ -8209,7 +8375,7 @@ export default function MunicipalityBillboardOrganizer() {
           </div>
           <DialogFooter className="gap-2 mt-2">
             <Button variant="outline" onClick={() => { setShowExcelMunicipalityDialog(false); setExcelPendingItems([]); }} className="rounded-xl h-10">إلغاء</Button>
-            <Button onClick={confirmExcelImport} className="rounded-xl h-10 bg-indigo-600 hover:bg-indigo-700 text-white">
+            <Button onClick={confirmExcelImport} className="rounded-xl h-10 bg-primary hover:bg-primary/90 text-primary-foreground">
               تأكيد الاستيراد
             </Button>
           </DialogFooter>
@@ -8244,7 +8410,7 @@ export default function MunicipalityBillboardOrganizer() {
         <DialogContent className="max-w-md border-border/15 rounded-3xl bg-background/98 backdrop-blur-md">
           <DialogHeader>
             <DialogTitle className="font-bold flex items-center gap-2">
-              <ArrowLeftRight className="h-5 w-5 text-indigo-500" />
+              <ArrowLeftRight className="h-5 w-5 text-primary" />
               <span>نقل اللوحات في القائمة</span>
             </DialogTitle>
           </DialogHeader>
@@ -8264,7 +8430,7 @@ export default function MunicipalityBillboardOrganizer() {
                 value={moveTargetSeq}
                 onChange={(e) => setMoveTargetSeq(e.target.value ? Number(e.target.value) : '')}
                 placeholder="أدخل رقم اللوحة..."
-                className="h-10 rounded-xl bg-background/50 border-border/15 focus-visible:ring-indigo-500"
+                className="h-10 rounded-xl bg-background/50 border-border/15 focus-visible:ring-primary"
               />
             </div>
 
@@ -8297,7 +8463,7 @@ export default function MunicipalityBillboardOrganizer() {
             </Button>
             <Button
               size="sm"
-              className="h-9 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white"
+              className="h-9 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground"
               onClick={executeMoveBillboards}
             >
               تأكيد النقل
@@ -8347,7 +8513,7 @@ export default function MunicipalityBillboardOrganizer() {
                   href={zoomImageModalUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="h-8 px-2 flex items-center gap-1 text-xs text-indigo-300 hover:bg-white/10 rounded-lg transition-colors"
+                  className="h-8 px-2 flex items-center gap-1 text-xs text-primary hover:bg-white/10 rounded-lg transition-colors"
                   title="فتح الحجم الكامل في تبويب جديد"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />

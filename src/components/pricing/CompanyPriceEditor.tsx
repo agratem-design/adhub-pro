@@ -44,7 +44,8 @@ export function CompanyPriceEditor({
   const [customer, setCustomer] = useState(target.customer || 'شركات');
   const isCompany = customer === 'شركات';
 
-  const [targetLevel, setTargetLevel] = useState<string>(target.level || level || levels[0]?.code || 'A');
+  const isTargetSousset = target.size && (target.size.includes('سوسيت') || target.size.toLowerCase().includes('societ'));
+  const [targetLevel, setTargetLevel] = useState<string>(target.level || (isTargetSousset ? 'B' : (level || levels[0]?.code || 'A')));
   const [referenceLevel, setReferenceLevel] = useState<string>(() => {
     const curLevel = target.level || level;
     const others = levels.filter(l => l.code !== curLevel);

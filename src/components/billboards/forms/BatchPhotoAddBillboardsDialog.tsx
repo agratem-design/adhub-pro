@@ -483,7 +483,14 @@ export const BatchPhotoAddBillboardsDialog: React.FC<BatchPhotoAddBillboardsDial
 
   // Update a single photo item's field
   const updateItemField = (id: string, field: keyof PhotoItem, value: any) => {
-    setPhotoItems(prev => prev.map(item => (item.id === id ? { ...item, [field]: value } : item)));
+    setPhotoItems(prev => prev.map(item => {
+      if (item.id !== id) return item;
+      const updated = { ...item, [field]: value };
+      if (field === 'size' && value && (String(value).includes('سوسيت') || String(value).toLowerCase().includes('societ'))) {
+        updated.level = 'B';
+      }
+      return updated;
+    }));
   };
 
   // Update coordinates & trigger reverse geocoding
@@ -519,7 +526,13 @@ export const BatchPhotoAddBillboardsDialog: React.FC<BatchPhotoAddBillboardsDial
 
   // Bulk apply unified value to ALL photo items
   const applyUnifiedProperty = (field: keyof PhotoItem, value: any) => {
-    setPhotoItems(prev => prev.map(item => ({ ...item, [field]: value })));
+    setPhotoItems(prev => prev.map(item => {
+      const updated = { ...item, [field]: value };
+      if (field === 'size' && value && (String(value).includes('سوسيت') || String(value).toLowerCase().includes('societ'))) {
+        updated.level = 'B';
+      }
+      return updated;
+    }));
     toast.info(`تم تطبيق (${value}) على جميع اللوحات المحددة`);
   };
 
@@ -604,7 +617,7 @@ export const BatchPhotoAddBillboardsDialog: React.FC<BatchPhotoAddBillboardsDial
           GPS_Coordinates: gpsCoordsStr,
           Faces_Count: parseInt(item.facesCount) || 2,
           Size: item.size,
-          Level: item.level || 'A',
+          Level: (item.size && (item.size.includes('سوسيت') || item.size.toLowerCase().includes('societ'))) ? 'B' : (item.level || 'A'),
           Image_URL: publicUrl || undefined,
           image_name: fileName,
           billboard_type: item.billboardType || 'مضيئة',

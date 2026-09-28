@@ -1011,7 +1011,11 @@ export const BillboardAddDialog: React.FC<BillboardAddDialogProps> = ({
                 <div className="flex gap-1 items-center">
                   <Select 
                     value={addForm.Size || ''} 
-                    onValueChange={(v) => setAddForm((p: any) => ({ ...p, Size: v }))}
+                    onValueChange={(v) => setAddForm((p: any) => ({
+                      ...p,
+                      Size: v,
+                      ...(v && (v.includes('سوسيت') || v.toLowerCase().includes('societ')) ? { Level: 'B' } : {})
+                    }))}
                   >
                     <SelectTrigger className="text-sm h-9 flex-1">
                       <SelectValue placeholder="المقاس" />

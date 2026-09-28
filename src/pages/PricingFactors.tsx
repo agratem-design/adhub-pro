@@ -557,7 +557,10 @@ export default function PricingFactors() {
             {/* 1. المقاس */}
             <div className="space-y-1">
               <Label className="text-xs font-semibold text-muted-foreground">1. المقاس</Label>
-              <Select value={calcSize} onValueChange={setCalcSize}>
+              <Select value={calcSize} onValueChange={(val) => {
+                setCalcSize(val);
+                if (val === 'سوسيت' || val.includes('سوسيت')) setCalcLevel('B');
+              }}>
                 <SelectTrigger className="cursor-pointer h-9 text-xs">
                   <SelectValue placeholder="اختر المقاس" />
                 </SelectTrigger>
@@ -755,7 +758,10 @@ export default function PricingFactors() {
                   {/* أداة تبديل المقاس المقارن بسهولة */}
                   <div className="flex items-center gap-1.5 bg-muted/60 p-1 rounded-lg border border-border">
                     <span className="text-xs font-semibold text-muted-foreground mr-1">المقاس المقارن:</span>
-                    <Select value={comparisonSize} onValueChange={setComparisonSize}>
+                    <Select value={comparisonSize} onValueChange={(val) => {
+                      setComparisonSize(val);
+                      if (val === 'سوسيت' || val.includes('سوسيت')) setComparisonLevel('B');
+                    }}>
                       <SelectTrigger className="h-7 w-24 text-xs font-bold cursor-pointer bg-background">
                         <SelectValue />
                       </SelectTrigger>
@@ -1603,7 +1609,15 @@ export default function PricingFactors() {
                 <Label className="text-xs">المقاس</Label>
                 <Input
                   value={newBasePrice.size_name || ''}
-                  onChange={(e) => setNewBasePrice({...newBasePrice, size_name: e.target.value})}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const isSousset = val === 'سوسيت' || val.includes('سوسيت');
+                    setNewBasePrice(prev => ({
+                      ...prev,
+                      size_name: val,
+                      ...(isSousset ? { billboard_level: 'B' } : {})
+                    }));
+                  }}
                   placeholder="مثال: 4x3"
                 />
               </div>

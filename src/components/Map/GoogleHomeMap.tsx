@@ -32,6 +32,8 @@ import { Circle, Target } from 'lucide-react';
 interface GoogleHomeMapProps {
   billboards: Billboard[];
   onBillboardClick?: (billboard: Billboard) => void;
+  /** Direct marker workflow, without opening the details card or moving pins. */
+  directMarkerClick?: (billboard: Billboard) => void;
   onImageView?: (imageUrl: string) => void;
   className?: string;
   // External filter props for integration with parent page
@@ -62,6 +64,7 @@ const LIBYA_CENTER = { lat: 32.8872, lng: 13.1913 };
 export default function GoogleHomeMap({ 
   billboards, 
   onBillboardClick, 
+  directMarkerClick,
   onImageView, 
   className,
   externalSearchQuery,
@@ -127,6 +130,11 @@ export default function GoogleHomeMap({
 
   // Refs to avoid stale closures in Leaflet event listeners
   const onBillboardClickRef = useRef(onBillboardClick);
+  const directMarkerClickRef = useRef(directMarkerClick);
+  directMarkerClickRef.current = directMarkerClick;
+  useEffect(() => {
+    if (directMarkerClick) setSelectedBillboardForCard(null);
+  }, [directMarkerClick]);
   const toggleBillboardSelectionRef = useRef<((billboardId: number) => void) | null>(null);
 
   useEffect(() => {
@@ -1518,10 +1526,11 @@ export default function GoogleHomeMap({
         popupAnchor: [0, -pinData.anchorY]
       });
 
-      const marker = L.marker([coords.lat, coords.lng], { icon, draggable: isPinDragEnabled });
+      const marker = L.marker([coords.lat, coords.lng], { icon, draggable: isPinDragEnabled && !directMarkerClickRef.current });
 
       let pressTimer: any = null;
       marker.on('mousedown touchstart', () => {
+        if (directMarkerClickRef.current) return;
         pressTimer = setTimeout(() => {
           if (!isPinDragEnabled) {
             setIsPinDragEnabled(true);
@@ -1536,12 +1545,14 @@ export default function GoogleHomeMap({
 
       marker.on('click', (e) => {
         L.DomEvent.stopPropagation(e);
+        if (directMarkerClickRef.current) { directMarkerClickRef.current(b); return; }
         setSelectedBillboardForCard(b);
         if (onBillboardClick) onBillboardClick(b);
       });
 
       marker.on('dblclick', (e) => {
         L.DomEvent.stopPropagation(e);
+        if (directMarkerClickRef.current) return;
         if (!isMultiSelectModeRef.current) setIsMultiSelectMode(true);
         toggleBillboardSelection(billboardId);
       });
@@ -1607,7 +1618,7 @@ export default function GoogleHomeMap({
       hasFitBoundsRef.current = true;
       leafletMapInstanceRef.current.fitBounds(bounds, { padding: [60, 60], maxZoom: 13 });
     }
-  }, [filteredBillboards, mapProvider, onBillboardClick, createPinWithLabel, passedBillboardIds, tornSet, selectedBillboardForCard, zoomLevel, isPinDragEnabled]);
+  }, [filteredBillboards, mapProvider, onBillboardClick, directMarkerClick, createPinWithLabel, passedBillboardIds, tornSet, selectedBillboardForCard, zoomLevel, isPinDragEnabled]);
 
   // Leaflet: User/Live location markers
   useEffect(() => {
@@ -1972,6 +1983,7 @@ export default function GoogleHomeMap({
           if (coords) {
             marker.setPosition(coords);
             marker.setTitle((b as any).Billboard_Name || 'لوحة إعلانية');
+            marker.setDraggable(!directMarkerClickRef.current);
             
             const billboardId = Number(id) || 0;
             const isVisited = passedBillboardIds.has(billboardId);
@@ -2010,7 +2022,7 @@ export default function GoogleHomeMap({
           scaledSize: new google.maps.Size(pinData.width, pinData.height),
           anchor: new google.maps.Point(pinData.anchorX, pinData.anchorY)
         },
-        draggable: true,
+        draggable: !directMarkerClickRef.current,
         optimized: false
       });
 
@@ -2019,12 +2031,14 @@ export default function GoogleHomeMap({
 
       marker.addListener('click', () => {
         const currentB = marker.get('billboardData') || b;
+        if (directMarkerClickRef.current) { directMarkerClickRef.current(currentB); return; }
         if (googleInfoWindowRef.current) googleInfoWindowRef.current.close();
         setSelectedBillboardForCard(currentB);
         if (onBillboardClick) onBillboardClick(currentB);
       });
 
       marker.addListener('dblclick', () => {
+        if (directMarkerClickRef.current) return;
         const currentB = marker.get('billboardData') || b;
         if (!isMultiSelectModeRef.current) setIsMultiSelectMode(true);
         toggleBillboardSelection(billboardId);
@@ -2175,7 +2189,7 @@ export default function GoogleHomeMap({
         console.warn('Error fitting bounds:', error);
       }
     }
-  }, [filteredBillboards, onBillboardClick, createPinWithLabel, isMobile, isTracking, passedBillboardIds, selectedBillboardForCard]);
+  }, [filteredBillboards, onBillboardClick, directMarkerClick, createPinWithLabel, isMobile, isTracking, passedBillboardIds, selectedBillboardForCard]);
 
   // Update marker icons dynamically when zoom level or selection changes
   useEffect(() => {

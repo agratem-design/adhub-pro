@@ -175,7 +175,7 @@ export const BulkAddDialog: React.FC<BulkAddDialogProps> = ({
             Faces_Count: billboard.Faces_Count ? parseInt(billboard.Faces_Count) : 1,
             Size: billboard.Size,
             size_id: sizeId,
-            Level: billboard.Level,
+            Level: (billboard.Size && (billboard.Size.includes('سوسيت') || billboard.Size.toLowerCase().includes('societ'))) ? 'B' : billboard.Level,
             billboard_type: billboard.billboard_type || null,
             Status: 'متاح',
             is_partnership: false

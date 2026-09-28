@@ -79,7 +79,8 @@ export async function getPriceFor(
     const pricingData = await getAllPricing();
     const key = getMonthKey(months);
     const cs = canonSize(size);
-    const lvl = level || 'A';
+    const isSousset = cs.includes('سوسيت') || cs.toLowerCase().includes('societ');
+    const lvl = level || (isSousset ? 'B' : 'A');
 
     // البحث الدقيق: مقاس + مستوى + فئة عميل
     let row = pricingData.find(r => 
@@ -124,7 +125,8 @@ export async function getDailyPriceFor(
   try {
     const pricingData = await getAllPricing();
     const cs = canonSize(size);
-    const lvl = level || 'A';
+    const isSousset = cs.includes('سوسيت') || cs.toLowerCase().includes('societ');
+    const lvl = level || (isSousset ? 'B' : 'A');
 
     // البحث الدقيق
     let row = pricingData.find(r => 

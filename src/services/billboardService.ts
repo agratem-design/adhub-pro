@@ -120,7 +120,8 @@ function processBillboardFromSupabase(row: any, index: number): Billboard {
   const size = normalizeBillboardSize(rawSize);
   const sizeId = row['size_id'] ?? row['Size_ID'] ?? null;
   const coordinates = row['GPS_Coordinates'] ?? row['GPS'] ?? '';
-  const level = row['Level'] ?? row['Category_Level'] ?? 'A';
+  const isSousset = size.includes('سوسيت') || size.toLowerCase().includes('societ');
+  const level = isSousset ? (row['Level'] || 'B') : (row['Level'] ?? row['Category_Level'] ?? 'A');
   const status = normalizeStatus(row['Status']);
   const contractNumber = row['Contract_Number'] ?? '';
   const clientName = row['Customer_Name'] ?? '';
@@ -186,7 +187,7 @@ function processBillboardFromSupabase(row: any, index: number): Billboard {
     Size_ID: sizeId,
     Status: finalStatus,
     Price: String(price),
-    Level: String(row['Level'] || 'standard'),
+    Level: isSousset ? 'B' : String(row['Level'] || 'standard'),
     Image_URL: String(row['Image_URL'] || row['@IMAGE'] || ''),
     GPS_Coordinates: String(coordinates || ''),
     GPS_Link: gpsLink || '',
@@ -226,7 +227,7 @@ function processBillboardFromSupabase(row: any, index: number): Billboard {
     nearExpiry,
     remainingDays,
     adType: adType || undefined,
-    level: String(level),
+    level: isSousset ? 'B' : String(level),
     // Partnership data
     is_partnership: isPartnership,
     partner_companies: partnerCompanies,

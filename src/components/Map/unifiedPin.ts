@@ -90,7 +90,9 @@ export function createUnifiedPin(billboard: any, isSelected = false): UnifiedPin
 
   // Size color resolving - body of the pin represents size color (dynamic)
   const sizeStr = billboard?.Size || billboard?.size || ''
-  const sizeColor = getSizeColor(sizeStr);
+  const customColor = typeof billboard?.organizerColor === 'string' && /^#[0-9a-f]{6}$/i.test(billboard.organizerColor)
+    ? billboard.organizerColor : null;
+  const sizeColor = customColor ? { bg: customColor, border: '#ffffff', text: '#ffffff' } : getSizeColor(sizeStr);
   const start = isTemp ? '#6366f1' : sizeColor.bg; // Indigo body for temporary pin
   const end = isTemp ? '#4f46e5' : adjustColor(sizeColor.bg, -35);
 

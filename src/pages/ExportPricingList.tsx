@@ -554,7 +554,11 @@ export default function ExportPricingList() {
                   إضافة مقاس جديد
                 </Button>
               </div>
-              <Select value={newEntry.size} onValueChange={(value) => setNewEntry((prev) => ({ ...prev, size: value }))}>
+              <Select value={newEntry.size} onValueChange={(value) => setNewEntry((prev) => ({
+                ...prev,
+                size: value,
+                ...(value === 'سوسيت' || value.includes('سوسيت') ? { level: 'B' } : {})
+              }))}>
                 <SelectTrigger><SelectValue placeholder="اختر المقاس" /></SelectTrigger>
                 <SelectContent>
                   {sizes.map((size) => (

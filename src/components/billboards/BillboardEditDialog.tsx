@@ -727,11 +727,13 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                 <div className="flex gap-1 items-center">
                   <Select value={editForm.Size || ''} onValueChange={(v) => {
                     const selectedSize = sizes.find(s => s.name === v);
+                    const isSousset = v && (v.includes('سوسيت') || v.toLowerCase().includes('societ'));
                     setEditForm((p: any) => ({ 
                       ...p, 
                       Size: v,
                       size_id: selectedSize?.id || null,
-                      print_size: selectedSize?.print_size || p.print_size || ''
+                      print_size: selectedSize?.print_size || p.print_size || '',
+                      ...(isSousset ? { Level: 'B' } : {})
                     }));
                   }}>
                     <SelectTrigger className="text-sm bg-background border-border text-foreground h-9 flex-1">
