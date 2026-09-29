@@ -54,6 +54,7 @@ export function PrintAllContractBillboardsDialog({
   const [showDesignName, setShowDesignName] = useState(false);
   const [showInstallationDate, setShowInstallationDate] = useState(false);
   const [showInstalledImages, setShowInstalledImages] = useState(true);
+  const [hideAdType, setHideAdType] = useState(false);
   const [printType, setPrintType] = useState<'client' | 'installation'>('client');
   const [printMode, setPrintMode] = useState<'cards' | 'table'>('cards');
   const [loading, setLoading] = useState(false);
@@ -720,7 +721,17 @@ export function PrintAllContractBillboardsDialog({
       const effectiveInstalledB = showFaceB && hasInstalledB ? installedImageFaceB : null;
       
       const hasDesigns = effectiveDesignA || effectiveDesignB;
-      const imageHeight = includeDesigns && hasDesigns ? '80mm' : '140mm';
+      const isDesignsIncluded = Boolean(includeDesigns && hasDesigns);
+      const effectiveS = (!isDesignsIncluded && s.status_overrides?.['no-design'])
+        ? { ...s, ...s.status_overrides['no-design'] }
+        : s;
+
+      const allowedImageHeight = isDesignsIncluded
+        ? (effectiveS.installed_image_height || '80mm')
+        : `${Math.max(parseFloat(effectiveS.main_image_height || '140'), 140)}mm`;
+      const maxAllowedWidth = isDesignsIncluded
+        ? ((effectiveS.main_image_width && parseFloat(effectiveS.main_image_width) > 190) ? effectiveS.main_image_width : '190mm')
+        : '190mm';
       
       const municipalityDistrict = [municipality, district].filter(Boolean).join(' - ') || '—';
 
@@ -728,13 +739,10 @@ export function PrintAllContractBillboardsDialog({
       const installationDate = item.installation_date 
         ? new Date(item.installation_date).toLocaleDateString('ar-LY', { year: 'numeric', month: '2-digit', day: '2-digit' })
         : '';
-
-      // استخدام الإعدادات المخصصة من قاعدة البيانات
-      const s = customSettings;
       
       // ✅ لكل لوحة: استخدم رقم العقد الخاص بالمهمة المنبثقة منها (للمهام المجمعة من أكثر من عقد)
       const itemContractNumber = resolveItemContractNumber(item);
-      const itemAdType = resolveItemAdType(item, itemContractNumber);
+      const itemAdType = !hideAdType ? resolveItemAdType(item, itemContractNumber) : '';
       
       pages.push(`
         <div class="page">
@@ -776,27 +784,27 @@ export function PrintAllContractBillboardsDialog({
 
           <!-- صورة اللوحة أو صور التركيب -->
           ${showInstalledImages && effectiveInstalledA && effectiveInstalledB ? `
-            <div class="absolute-field installed-images-container" style="top: ${s.installed_images_top}; left: ${s.installed_images_left || '50%'}; transform: translateX(-50%); width: ${s.installed_images_width || '180mm'}; max-width: ${(s.main_image_width && parseFloat(s.main_image_width) > 190) ? s.main_image_width : (s.main_image_width || '190mm')}; display: flex; gap: ${s.installed_images_gap || '5mm'}; justify-content: center; align-items: flex-start;">
-              <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${s.installed_images_gap || '5mm'} / 2)); text-align: center; display: flex; flex-direction: column; align-items: center;">
-                <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 3mm;">التركيب - الوجه الأمامي</div>
-                <div class="installed-image-box" style="max-height: ${s.installed_image_height || '85mm'}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
-                  <img src="${effectiveInstalledA}" alt="التركيب - الوجه الأمامي" class="billboard-image installed-image" style="max-height: ${s.installed_image_height || '85mm'}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
+            <div class="absolute-field installed-images-container" style="top: ${effectiveS.installed_images_top}; left: ${effectiveS.installed_images_left || '50%'}; transform: translateX(-50%); width: ${effectiveS.installed_images_width || '180mm'}; max-width: ${maxAllowedWidth}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: flex; gap: ${effectiveS.installed_images_gap || '5mm'}; justify-content: center; align-items: center;">
+              <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${effectiveS.installed_images_gap || '5mm'} / 2)); height: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 2mm;">التركيب - الوجه الأمامي</div>
+                <div class="installed-image-box" style="height: 100%; max-height: ${allowedImageHeight}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
+                  <img src="${effectiveInstalledA}" alt="التركيب - الوجه الأمامي" class="billboard-image installed-image" style="max-height: ${allowedImageHeight}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
                 </div>
               </div>
-              <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${s.installed_images_gap || '5mm'} / 2)); text-align: center; display: flex; flex-direction: column; align-items: center;">
-                <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 3mm;">التركيب - الوجه الخلفي</div>
-                <div class="installed-image-box" style="max-height: ${s.installed_image_height || '85mm'}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
-                  <img src="${effectiveInstalledB}" alt="التركيب - الوجه الخلفي" class="billboard-image installed-image" style="max-height: ${s.installed_image_height || '85mm'}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
+              <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${effectiveS.installed_images_gap || '5mm'} / 2)); height: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 2mm;">التركيب - الوجه الخلفي</div>
+                <div class="installed-image-box" style="height: 100%; max-height: ${allowedImageHeight}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
+                  <img src="${effectiveInstalledB}" alt="التركيب - الوجه الخلفي" class="billboard-image installed-image" style="max-height: ${allowedImageHeight}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
                 </div>
               </div>
             </div>
           ` : showInstalledImages && effectiveInstalledA ? `
-            <div class="absolute-field image-container" style="top: ${s.main_image_top}; left: ${s.main_image_left || '50%'}; transform: translateX(-50%); max-width: ${(s.main_image_width && parseFloat(s.main_image_width) > 190) ? s.main_image_width : '190mm'}; max-height: ${includeDesigns && hasDesigns ? s.installed_image_height : s.main_image_height}; display: flex; justify-content: center; align-items: center;">
-              <img src="${effectiveInstalledA}" alt="صورة التركيب" class="billboard-image" style="max-height: ${includeDesigns && hasDesigns ? s.installed_image_height : s.main_image_height}; max-width: ${(s.main_image_width && parseFloat(s.main_image_width) > 190) ? s.main_image_width : '190mm'}; width: auto; height: auto; object-fit: contain; display: block;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
+            <div class="absolute-field image-container" style="top: ${effectiveS.main_image_top}; left: ${effectiveS.main_image_left || '50%'}; transform: translateX(-50%); width: 100%; max-width: ${maxAllowedWidth}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: flex; justify-content: center; align-items: center;">
+              <img src="${effectiveInstalledA}" alt="صورة التركيب" class="billboard-image" style="max-height: ${allowedImageHeight}; max-width: ${maxAllowedWidth}; width: auto; height: auto; object-fit: contain; display: block;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
             </div>
           ` : mainImage ? `
-            <div class="absolute-field image-container" style="top: ${s.main_image_top}; left: ${s.main_image_left || '50%'}; transform: translateX(-50%); max-width: ${(s.main_image_width && parseFloat(s.main_image_width) > 190) ? s.main_image_width : '190mm'}; max-height: ${includeDesigns && hasDesigns ? s.installed_image_height : s.main_image_height}; display: flex; justify-content: center; align-items: center;">
-              <img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" style="max-height: ${includeDesigns && hasDesigns ? s.installed_image_height : s.main_image_height}; max-width: ${(s.main_image_width && parseFloat(s.main_image_width) > 190) ? s.main_image_width : '190mm'}; width: auto; height: auto; object-fit: contain; display: block;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
+            <div class="absolute-field image-container" style="top: ${effectiveS.main_image_top}; left: ${effectiveS.main_image_left || '50%'}; transform: translateX(-50%); width: 100%; max-width: ${maxAllowedWidth}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: flex; justify-content: center; align-items: center;">
+              <img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" style="max-height: ${allowedImageHeight}; max-width: ${maxAllowedWidth}; width: auto; height: auto; object-fit: contain; display: block;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
             </div>
           ` : ''}
 
@@ -820,17 +828,17 @@ export function PrintAllContractBillboardsDialog({
           ` : ''}
 
           <!-- التصاميم -->
-          ${includeDesigns && hasDesigns ? `
+          ${isDesignsIncluded ? `
             <div class="absolute-field designs-section" style="top: ${s.designs_top}; left: ${s.designs_left}; width: ${s.designs_width}; display: flex; flex-wrap: nowrap; gap: ${s.designs_gap}; ${effectiveDesignA && !effectiveDesignB ? 'justify-content: center;' : ''}">
               ${effectiveDesignA ? `
                 <div class="design-item" ${!effectiveDesignB ? 'style="max-width: 60%;"' : ''}>
-                  <div class="design-label">${(showDesignName && designName) ? (effectiveDesignB ? `تصميم الوجه الأمامي - ${designName}` : designName) : (effectiveDesignB ? 'تصميم الوجه الأمامي' : 'التصميم')}</div>
+                  <div class="design-label">${(showDesignName && designName && !hideAdType) ? (effectiveDesignB ? `تصميم الوجه الأمامي - ${designName}` : designName) : (effectiveDesignB ? 'تصميم الوجه الأمامي' : 'التصميم')}</div>
                   <img src="${effectiveDesignA}" alt="${designName || 'التصميم'}" class="design-image" style="max-height: ${s.design_image_height}; max-width: 100%; width: auto; height: auto; object-fit: contain;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
                 </div>
               ` : ''}
               ${effectiveDesignB ? `
                 <div class="design-item" ${!effectiveDesignA ? 'style="max-width: 60%;"' : ''}>
-                  <div class="design-label">${(showDesignName && designName) ? (effectiveDesignA ? `تصميم الوجه الخلفي - ${designName}` : designName) : (effectiveDesignA ? 'تصميم الوجه الخلفي' : 'التصميم')}</div>
+                  <div class="design-label">${(showDesignName && designName && !hideAdType) ? (effectiveDesignA ? `تصميم الوجه الخلفي - ${designName}` : designName) : (effectiveDesignA ? 'تصميم الوجه الخلفي' : 'التصميم')}</div>
                   <img src="${effectiveDesignB}" alt="${designName || 'التصميم'}" class="design-image" style="max-height: ${s.design_image_height}; max-width: 100%; width: auto; height: auto; object-fit: contain;" onerror="this.onerror=null;this.src='/placeholder.svg'" />
                 </div>
               ` : ''}
@@ -2000,6 +2008,17 @@ export function PrintAllContractBillboardsDialog({
                 <Label htmlFor="showInstalledImages" className="cursor-pointer flex-1">إظهار صور التركيب الفعلية</Label>
               </div>
             )}
+
+            <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+              <Checkbox
+                id="hideAdType_printAll"
+                checked={hideAdType}
+                onCheckedChange={(c) => setHideAdType(!!c)}
+              />
+              <Label htmlFor="hideAdType_printAll" className="cursor-pointer flex-1">
+                إخفاء نوع الإعلان
+              </Label>
+            </div>
 
             <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
               <Checkbox

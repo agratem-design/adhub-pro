@@ -22,7 +22,10 @@ export const isLocalOrDesktopEnv = (): boolean => {
     hostname === '127.0.0.1' ||
     hostname === '0.0.0.0' ||
     hostname === '::1' ||
-    hostname.endsWith('.local')
+    hostname.endsWith('.local') ||
+    hostname.startsWith('192.168.') ||
+    hostname.startsWith('10.') ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)
   );
 };
 

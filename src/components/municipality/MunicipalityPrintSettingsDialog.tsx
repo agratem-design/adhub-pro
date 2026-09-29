@@ -150,6 +150,10 @@ const settingGroups: SettingGroup[] = [
         { value: 'true', label: 'نعم (ضرب المساحة في عدد الأوجه)' },
         { value: 'false', label: 'لا (حساب مساحة الوجه الواحد فقط)' },
       ]},
+      { key: 'hide_total_meters' as any, label: 'إخفاء إجمالي الأمتار من جدول اللوحات', type: 'select', options: [
+        { value: 'false', label: 'إظهار إجمالي الأمتار في الجدول (افتراضي)' },
+        { value: 'true', label: 'إخفاء إجمالي الأمتار من الجدول' },
+      ]},
       { key: 'show_size_dimension_labels', label: 'إظهار الكلمات فوق المقاس (طول، عرض، ارتفاع)', type: 'select', options: [
         { value: 'false', label: 'إخفاء الكلمات (معطّل افتراضياً)' },
         { value: 'true', label: 'إظهار الكلمات' },

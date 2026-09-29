@@ -840,6 +840,29 @@ export default function MunicipalityBillboardOrganizer() {
     }
   });
 
+  const [hideTotalMeters, setHideTotalMeters] = useState<boolean>(() => {
+    try {
+      const val = localStorage.getItem('hide_total_meters');
+      if (val !== null) return val === 'true';
+      const saved = localStorage.getItem('mun_organizer_defaults');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.hideTotalMeters !== undefined) return !!parsed.hideTotalMeters;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleHideTotalMeters = async (val: boolean) => {
+    setHideTotalMeters(val);
+    try {
+      localStorage.setItem('hide_total_meters', String(val));
+    } catch {}
+    await saveSettings({ hide_total_meters: val ? 'true' : 'false' });
+  };
+
   // 🆕 Header Title and Signatures Customization States
   const loadOrganizerDefault = <T,>(key: string, fallback: T): T => {
     try {
@@ -1058,6 +1081,7 @@ export default function MunicipalityBillboardOrganizer() {
           }
           if (sv.summaryRowsPerPage) setSummaryRowsPerPage(sv.summaryRowsPerPage);
           if (sv.signaturesFontSize) setSignaturesFontSize(sv.signaturesFontSize);
+          if (sv.hideTotalMeters !== undefined) setHideTotalMeters(sv.hideTotalMeters);
         }
       } catch (err) {
         console.error('Error fetching municipality organizer defaults from DB:', err);
@@ -1086,6 +1110,7 @@ export default function MunicipalityBillboardOrganizer() {
       showStatusInPrint,
       showHeightInPrint,
       printImageSource,
+      hideTotalMeters,
     };
 
     try {
@@ -1654,6 +1679,7 @@ export default function MunicipalityBillboardOrganizer() {
         }
         if (parsedConfig.showHeightInPrint !== undefined) setShowHeightInPrint(parsedConfig.showHeightInPrint);
         if (parsedConfig.printImageSource !== undefined) setPrintImageSource(parsedConfig.printImageSource);
+        if (parsedConfig.hideTotalMeters !== undefined) setHideTotalMeters(parsedConfig.hideTotalMeters);
       }
       
       const cleanMuni = cleanArabicName(muni);
@@ -1782,6 +1808,7 @@ export default function MunicipalityBillboardOrganizer() {
         showStatusInPrint,
         showHeightInPrint,
         printImageSource,
+        hideTotalMeters,
       };
 
       const collectionPayload: any = {
@@ -1894,6 +1921,7 @@ export default function MunicipalityBillboardOrganizer() {
         showStatusInPrint,
         showHeightInPrint,
         printImageSource,
+        hideTotalMeters,
       };
 
       const collectionPayload: any = {
@@ -3781,7 +3809,13 @@ export default function MunicipalityBillboardOrganizer() {
           const isSingleFaceMode = facesHidden && (localSingleVal !== null 
             ? localSingleVal === 'true' 
             : String((s as any).calc_meters_as_single_face) === 'true');
-          const showTotalMeters = !facesHidden || isSingleFaceMode;
+          
+          const localHideMeters = localStorage.getItem('hide_total_meters');
+          const isHideTotalMeters = hideTotalMeters || (localHideMeters !== null 
+            ? localHideMeters === 'true' 
+            : String((s as any).hide_total_meters) === 'true');
+
+          const showTotalMeters = !isHideTotalMeters;
 
           const totalAreaMeters = printItems.reduce((sum, item) => {
             const { length, width } = parseDimensions(item.size);
@@ -7250,6 +7284,12 @@ export default function MunicipalityBillboardOrganizer() {
                     <span className="text-[10px] text-muted-foreground">الموقعون المفعلون:</span>
                     <span className="font-extrabold text-foreground">{showSignatures ? signersList.filter(s => s.enabled).length : 0} موقعين</span>
                   </div>
+                  <div className="p-2 rounded-xl bg-muted/40 flex flex-col col-span-2">
+                    <span className="text-[10px] text-muted-foreground">إجمالي أمتار الجدول:</span>
+                    <span className={`font-extrabold ${hideTotalMeters ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                      {hideTotalMeters ? 'مخفي (معطّل من الطباعة)' : 'مُفعّل (يظهر في تذييل الجدول)'}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -7753,6 +7793,26 @@ export default function MunicipalityBillboardOrganizer() {
                       </div>
                     </div>
 
+                    {/* Total Meters in Table Option */}
+                    <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-3 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="hide_total_meters_sig_toggle" className="text-xs font-black text-foreground flex items-center gap-1.5 cursor-pointer">
+                            <SlidersHorizontal className="h-4 w-4 text-primary" />
+                            <span>إخفاء إجمالي الأمتار من الجدول</span>
+                          </Label>
+                          <div className="text-[10px] text-muted-foreground">
+                            إلغاء وإخفاء سطر إجمالي مساحة اللوحات (م²) من أسفل جدول ملخص اللوحات في الصفحة الأخيرة
+                          </div>
+                        </div>
+                        <Switch
+                          id="hide_total_meters_sig_toggle"
+                          checked={hideTotalMeters}
+                          onCheckedChange={handleToggleHideTotalMeters}
+                        />
+                      </div>
+                    </div>
+
                     {/* Signatures Master Section */}
                     <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-4 shadow-sm">
                       <div className="flex items-center justify-between border-b border-border/15 pb-3">
@@ -8092,9 +8152,9 @@ export default function MunicipalityBillboardOrganizer() {
                     </div>
 
                     {/* Switches Grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
                       <div className="flex items-center justify-between p-3.5 border border-border/20 rounded-2xl bg-card">
-                        <Label htmlFor="faces_count_show" className="text-xs font-bold text-foreground">عرض الأوجه</Label>
+                        <Label htmlFor="faces_count_show" className="text-xs font-bold text-foreground cursor-pointer">عرض الأوجه</Label>
                         <Switch 
                           id="faces_count_show" 
                           checked={customSettings.faces_count_show !== 'false'} 
@@ -8105,17 +8165,17 @@ export default function MunicipalityBillboardOrganizer() {
                       </div>
 
                       <div className="flex items-center justify-between p-3.5 border border-border/20 rounded-2xl bg-card">
-                        <Label htmlFor="show_status_in_print" className="text-xs font-bold text-foreground">عرض الحالة</Label>
+                        <Label htmlFor="show_status_in_print" className="text-xs font-bold text-foreground cursor-pointer">عرض الحالة</Label>
                         <Switch id="show_status_in_print" checked={showStatusInPrint} onCheckedChange={(v) => updateAndSaveStatusSetting('mun_show_status', v ? 'true' : 'false')} />
                       </div>
 
                       <div className="flex items-center justify-between p-3.5 border border-border/20 rounded-2xl bg-card">
-                        <Label htmlFor="show_height_in_print" className="text-xs font-bold text-foreground">عرض الارتفاع</Label>
+                        <Label htmlFor="show_height_in_print" className="text-xs font-bold text-foreground cursor-pointer">عرض الارتفاع</Label>
                         <Switch id="show_height_in_print" checked={showHeightInPrint} onCheckedChange={setShowHeightInPrint} />
                       </div>
 
                       <div className="flex items-center justify-between p-3.5 border border-border/20 rounded-2xl bg-card">
-                        <Label htmlFor="show_size_dimension_labels" className="text-xs font-bold text-foreground">كلمات المقاس (طول/عرض)</Label>
+                        <Label htmlFor="show_size_dimension_labels" className="text-xs font-bold text-foreground cursor-pointer">كلمات المقاس (طول/عرض)</Label>
                         <Switch 
                           id="show_size_dimension_labels" 
                           checked={customSettings.show_size_dimension_labels === 'true'} 
@@ -8124,9 +8184,20 @@ export default function MunicipalityBillboardOrganizer() {
                           }} 
                         />
                       </div>
+
+                      <div className="flex items-center justify-between p-3.5 border border-border/20 rounded-2xl bg-card">
+                        <Label htmlFor="hide_total_meters_layout_tab" className="text-xs font-bold text-foreground cursor-pointer">
+                          إخفاء إجمالي الأمتار
+                        </Label>
+                        <Switch 
+                          id="hide_total_meters_layout_tab" 
+                          checked={hideTotalMeters} 
+                          onCheckedChange={handleToggleHideTotalMeters} 
+                        />
+                      </div>
                     </div>
 
-                    {customSettings.faces_count_show === 'false' && (
+                    {customSettings.faces_count_show === 'false' && !hideTotalMeters && (
                       <div className="p-3.5 border border-amber-500/30 rounded-2xl bg-amber-500/10 flex items-center justify-between animate-in fade-in duration-200">
                         <div className="flex flex-col gap-0.5">
                           <Label htmlFor="calc_meters_as_single_face" className="text-xs font-bold text-amber-700 dark:text-amber-300">

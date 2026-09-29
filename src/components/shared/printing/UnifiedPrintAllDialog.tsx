@@ -284,6 +284,7 @@ export function UnifiedPrintAllDialog({
   const [showTeamInHeader, setShowTeamInHeader] = useState(false);
   const [hideCustomerName, setHideCustomerName] = useState(true);
   const [hideInstallDate, setHideInstallDate] = useState(true);
+  const [hideAdType, setHideAdType] = useState(false);
   const [printType, setPrintType] = useState<'client' | 'installation'>(
     contextType === 'installation' || contextType === 'removal' ? 'installation' : 'client'
   );
@@ -861,7 +862,7 @@ export function UnifiedPrintAllDialog({
     parts.push(taskTypeLabel);
     const rawAd = (adType || resolvedTaskAdType || taskName || '').trim();
     const cleanAd = rawAd.replace(/^نوع\s*الإعلان\s*:\s*/, '').trim();
-    if (cleanAd) {
+    if (!hideAdType && cleanAd) {
       parts.push(`نوع الإعلان: ${cleanAd}`);
     }
     return parts.join(' - ');
@@ -1037,7 +1038,7 @@ export function UnifiedPrintAllDialog({
         taskName ||
         ''
       ).trim();
-      const cleanAdType = rawItemAdType.replace(/^نوع\s*الإعلان\s*:\s*/, '').trim();
+      const cleanAdType = !hideAdType ? rawItemAdType.replace(/^نوع\s*الإعلان\s*:\s*/, '').trim() : '';
       const customerCompanyText = !hideCustomerName ? [customerName, companyName].filter(Boolean).join(' - ') : '';
       
       let contractInfoText = '';
@@ -1048,9 +1049,12 @@ export function UnifiedPrintAllDialog({
           contractInfoText = `تركيب رقم: ${itemContractNumber}`;
         }
       } else {
-        contractInfoText = itemContractNumber 
-          ? `${getContextLabel()} رقم: ${itemContractNumber}${customerCompanyText ? ' - الزبون: ' + customerCompanyText : ''}${cleanAdType ? ' - نوع الإعلان: ' + cleanAdType : ''}`
-          : (cleanAdType ? `${customerCompanyText ? 'الزبون: ' + customerCompanyText + ' - ' : ''}نوع الإعلان: ${cleanAdType}` : customerCompanyText ? `الزبون: ${customerCompanyText}` : '');
+        const parts = [
+          itemContractNumber ? `${getContextLabel()} رقم: ${itemContractNumber}` : '',
+          customerCompanyText ? `الزبون: ${customerCompanyText}` : '',
+          cleanAdType ? `نوع الإعلان: ${cleanAdType}` : ''
+        ].filter(Boolean);
+        contractInfoText = parts.join(' - ');
       }
 
       // تحديد الصورة الرئيسية والتراكب المفرغ إن وجد
@@ -1065,11 +1069,16 @@ export function UnifiedPrintAllDialog({
       const sizeCutoutUrl = sizeCutoutMap[sizeKey] || sizeCutoutMap[sizeKey.replace(/×/g, 'x').replace(/X/g, 'x')] || null;
       const activeCutout = isCutoutEnabled ? (ov?.cutout_image_url || sizeCutoutUrl || null) : null;
       
-      const allowedImageHeight = (includeDesigns && hasDesigns)
-        ? (s.installed_image_height || '85mm')
-        : (s.main_image_height || '140mm');
-      const maxAllowedWidth = (s.main_image_width && parseFloat(s.main_image_width) > 190)
-        ? s.main_image_width
+      const isDesignsIncluded = Boolean(includeDesigns && hasDesigns);
+      const effectiveS = (!isDesignsIncluded && s.status_overrides?.['no-design'])
+        ? { ...s, ...s.status_overrides['no-design'] }
+        : s;
+
+      const allowedImageHeight = isDesignsIncluded
+        ? (effectiveS.installed_image_height || '85mm')
+        : `${Math.max(parseFloat(effectiveS.main_image_height || '140'), 140)}mm`;
+      const maxAllowedWidth = isDesignsIncluded
+        ? ((effectiveS.main_image_width && parseFloat(effectiveS.main_image_width) > 190) ? effectiveS.main_image_width : '190mm')
         : '190mm';
 
       let imageSection = '';
@@ -1085,7 +1094,7 @@ export function UnifiedPrintAllDialog({
           const transformOrigin = isV2 ? 'bottom center' : 'center center';
           
           imageSection = `
-            <div class="overlay-container" style="position: relative; max-width: ${maxAllowedWidth}; max-height: ${allowedImageHeight}; display: inline-block; overflow: visible;">
+            <div class="overlay-container" style="position: relative; width: 100%; max-width: ${maxAllowedWidth}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: inline-flex; align-items: center; justify-content: center; overflow: visible;">
               <img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" style="max-height: ${allowedImageHeight}; max-width: ${maxAllowedWidth}; width: auto; height: auto; object-fit: contain; display: block;" />
               ${activeCutout ? `
                 <img src="${activeCutout}" class="overlay-cutout" data-x="${x}" data-y="${y}" data-scale="${scale}" data-rot="${rot}" data-anchor="${isV2 ? 'v2' : 'v1'}" style="
@@ -1110,12 +1119,12 @@ export function UnifiedPrintAllDialog({
       } else if (hasMainImage) {
         imageSection = `<img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" style="max-height: ${allowedImageHeight}; max-width: ${maxAllowedWidth}; width: auto; height: auto; object-fit: contain; display: block;" />`;
       } else if (showPinFallback) {
-        imageSection = `<div class="pin-fallback" style="width: ${s.main_image_width || '120mm'}; height: ${allowedImageHeight};">
+        imageSection = `<div class="pin-fallback" style="width: ${effectiveS.main_image_width || '120mm'}; height: ${allowedImageHeight};">
             <img src="${pinSvgDataUrl}" alt="دبوس اللوحة" style="width: 80px; height: auto; margin-bottom: 8px;" />
             <div style="font-size: 11px; color: #666; direction: ltr;">${coords || 'لا توجد إحداثيات'}</div>
           </div>`;
       } else {
-        imageSection = `<div class="pin-fallback" style="width: ${s.main_image_width || '120mm'}; height: ${allowedImageHeight};">
+        imageSection = `<div class="pin-fallback" style="width: ${effectiveS.main_image_width || '120mm'}; height: ${allowedImageHeight};">
             <div style="font-size: 13px; color: #999; direction: rtl;">لا توجد صورة</div>
             <div style="font-size: 11px; color: #666; direction: ltr; margin-top: 4px;">${coords || 'لا توجد إحداثيات'}</div>
           </div>`;
@@ -1171,22 +1180,22 @@ export function UnifiedPrintAllDialog({
           ` : ''}
 
           ${installedImageFaceA && installedImageFaceB ? `
-            <div class="absolute-field installed-images-container" style="top: ${s.installed_images_top}; left: ${s.installed_images_left || '50%'}; transform: translateX(-50%); width: ${s.installed_images_width || '180mm'}; max-width: ${maxAllowedWidth}; display: flex; gap: ${s.installed_images_gap || '5mm'}; justify-content: center; align-items: flex-start;">
-              <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${s.installed_images_gap || '5mm'} / 2)); text-align: center; display: flex; flex-direction: column; align-items: center;">
-                <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 3mm;">الوجه الأمامي</div>
-                <div class="installed-image-box" style="max-height: ${s.installed_image_height || '85mm'}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
-                  <img src="${installedImageFaceA}" alt="الوجه الأمامي" class="billboard-image installed-image" style="max-height: ${s.installed_image_height || '85mm'}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" />
+            <div class="absolute-field installed-images-container" style="top: ${effectiveS.installed_images_top}; left: ${effectiveS.installed_images_left || '50%'}; transform: translateX(-50%); width: ${effectiveS.installed_images_width || '180mm'}; max-width: ${maxAllowedWidth}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: flex; gap: ${effectiveS.installed_images_gap || '5mm'}; justify-content: center; align-items: center;">
+              <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${effectiveS.installed_images_gap || '5mm'} / 2)); height: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 2mm;">الوجه الأمامي</div>
+                <div class="installed-image-box" style="height: 100%; max-height: ${allowedImageHeight}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
+                  <img src="${installedImageFaceA}" alt="الوجه الأمامي" class="billboard-image installed-image" style="max-height: ${allowedImageHeight}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" />
                 </div>
               </div>
-              <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${s.installed_images_gap || '5mm'} / 2)); text-align: center; display: flex; flex-direction: column; align-items: center;">
-                <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 3mm;">الوجه الخلفي</div>
-                <div class="installed-image-box" style="max-height: ${s.installed_image_height || '85mm'}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
-                  <img src="${installedImageFaceB}" alt="الوجه الخلفي" class="billboard-image installed-image" style="max-height: ${s.installed_image_height || '85mm'}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" />
+              <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${effectiveS.installed_images_gap || '5mm'} / 2)); height: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 2mm;">الوجه الخلفي</div>
+                <div class="installed-image-box" style="height: 100%; max-height: ${allowedImageHeight}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
+                  <img src="${installedImageFaceB}" alt="الوجه الخلفي" class="billboard-image installed-image" style="max-height: ${allowedImageHeight}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" />
                 </div>
               </div>
             </div>
           ` : `
-            <div class="absolute-field image-container" style="top: ${s.main_image_top}; left: ${s.main_image_left || '50%'}; transform: translateX(-50%); max-width: ${maxAllowedWidth}; max-height: ${allowedImageHeight}; display: flex; align-items: center; justify-content: center;">
+            <div class="absolute-field image-container" style="top: ${effectiveS.main_image_top}; left: ${effectiveS.main_image_left || '50%'}; transform: translateX(-50%); width: 100%; max-width: ${maxAllowedWidth}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: flex; align-items: center; justify-content: center;">
               ${imageSection}
             </div>
           `}
@@ -1207,17 +1216,17 @@ export function UnifiedPrintAllDialog({
             </div>
           ` : ''}
 
-          ${includeDesigns && hasDesigns ? `
+          ${isDesignsIncluded ? `
             <div class="absolute-field designs-section" style="top: ${toCssLength(s.designs_top)}; left: ${s.designs_left}; width: ${s.designs_width}; display: flex; gap: ${s.designs_gap}; align-items: flex-start;">
               ${designFaceA ? `
                 <div class="design-item">
-                  <div class="design-label">${showDesignName && itemAdType ? itemAdType : 'تصميم الوجه الأمامي'}</div>
+                  <div class="design-label">${showDesignName && itemAdType && !hideAdType ? itemAdType : 'تصميم الوجه الأمامي'}</div>
                   <img src="${designFaceA}" alt="تصميم الوجه الأمامي" class="design-image" style="max-height: ${s.design_image_height};" />
                 </div>
               ` : ''}
               ${designFaceB ? `
                 <div class="design-item">
-                  <div class="design-label">${showDesignName && itemAdType ? itemAdType : 'تصميم الوجه الخلفي'}</div>
+                  <div class="design-label">${showDesignName && itemAdType && !hideAdType ? itemAdType : 'تصميم الوجه الخلفي'}</div>
                   <img src="${designFaceB}" alt="تصميم الوجه الخلفي" class="design-image" style="max-height: ${s.design_image_height};" />
                 </div>
               ` : ''}
@@ -1558,7 +1567,7 @@ export function UnifiedPrintAllDialog({
       : enabledColumns;
 
     const rawAdType = (adType || resolvedTaskAdType || taskName || '').trim();
-    const cleanAdType = rawAdType.replace(/^نوع\s*الإعلان\s*:\s*/, '').trim();
+    const cleanAdType = !hideAdType ? rawAdType.replace(/^نوع\s*الإعلان\s*:\s*/, '').trim() : '';
 
     const pages: string[] = [];
     const rowsPerPage = Math.min(s.rows_per_page || 11, 11);
@@ -1626,7 +1635,7 @@ export function UnifiedPrintAllDialog({
             case 'landmark':
               return `<td style="text-align: right; padding: 4px; font-size: 8px;">${billboard.Nearest_Landmark || '-'}</td>`;
             case 'contract_number':
-              const rawRowAd = (item.ad_type || dynDesign?.design_name || cleanAdType || itemAdType || '').trim();
+              const rawRowAd = !hideAdType ? (item.ad_type || dynDesign?.design_name || cleanAdType || itemAdType || '').trim() : '';
               const cleanRowAd = rawRowAd.replace(/^نوع\s*الإعلان\s*:\s*/, '').trim();
               return `<td style="font-size: 8px;">${showPreviousAd && tblPreviousAd ? `<span style="font-size:7px;color:#444;font-weight:700;">السابق: ${tblPreviousAd}</span><br/>` : ''}${contextType === 'installation' ? (cleanRowAd ? `نوع الإعلان: ${cleanRowAd}` : itemContractNumber) : `${itemContractNumber}${cleanRowAd ? '<br/><span style="font-size:7px;color:#666;">' + cleanRowAd + '</span>' : ''}`}</td>`;
             case 'installation_date':
@@ -2259,7 +2268,7 @@ export function UnifiedPrintAllDialog({
               )}
 
               {/* نوع الإعلان */}
-              {(adType || resolvedTaskAdType) && (
+              {!hideAdType && (adType || resolvedTaskAdType) && (
                 <Badge variant="secondary" className="bg-primary/10 text-primary border border-primary/25 font-bold text-xs flex items-center gap-1">
                   <Tag className="h-3 w-3" />
                   <span>نوع الإعلان: {(adType || resolvedTaskAdType).replace(/^نوع\s*الإعلان\s*:\s*/, '').trim()}</span>
@@ -2501,6 +2510,17 @@ export function UnifiedPrintAllDialog({
                 )}
               </>
             )}
+
+            <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
+              <Checkbox
+                id="hideAdType"
+                checked={hideAdType}
+                onCheckedChange={(c) => setHideAdType(!!c)}
+              />
+              <Label htmlFor="hideAdType" className="cursor-pointer flex-1">
+                إخفاء نوع الإعلان
+              </Label>
+            </div>
 
             <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
               <Checkbox

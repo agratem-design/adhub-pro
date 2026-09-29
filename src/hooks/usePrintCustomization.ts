@@ -175,6 +175,7 @@ export interface PrintCustomizationSettings {
   cover_background_url: string;
   calc_meters_by_faces: string;
   calc_meters_as_single_face?: string;
+  hide_total_meters?: string;
 
   // إعدادات مستقلة لكل حالة
   status_overrides?: StatusOverrides;
@@ -324,6 +325,7 @@ const defaultSettings: PrintCustomizationSettings = {
   cover_background_url: '',
   calc_meters_by_faces: 'false',
   calc_meters_as_single_face: 'false',
+  hide_total_meters: 'false',
 };
 
 export function usePrintCustomization(settingKey: string = 'default') {
@@ -335,12 +337,14 @@ export function usePrintCustomization(settingKey: string = 'default') {
         const parsed = JSON.parse(cached);
         const localDimLabels = localStorage.getItem('show_size_dimension_labels') || 'false';
         const localSingleFace = localStorage.getItem('calc_meters_as_single_face') || 'false';
+        const localHideTotalMeters = localStorage.getItem('hide_total_meters') || 'false';
         return { 
           ...defaultSettings, 
           ...parsed, 
           setting_key: settingKey,
           show_size_dimension_labels: localDimLabels,
-          calc_meters_as_single_face: localSingleFace
+          calc_meters_as_single_face: localSingleFace,
+          hide_total_meters: localHideTotalMeters
         };
       }
     } catch {}
@@ -383,15 +387,18 @@ export function usePrintCustomization(settingKey: string = 'default') {
         return;
       }
 
+      const localDimLabels = localStorage.getItem('show_size_dimension_labels') || 'false';
+      const localSingleFace = localStorage.getItem('calc_meters_as_single_face') || 'false';
+      const localHideTotalMeters = localStorage.getItem('hide_total_meters') || 'false';
+
       if (data) {
-        const localDimLabels = localStorage.getItem('show_size_dimension_labels') || 'false';
-        const localSingleFace = localStorage.getItem('calc_meters_as_single_face') || 'false';
         const mergedSettings = {
           ...defaultSettings,
           ...data,
           setting_key: settingKey,
           show_size_dimension_labels: localDimLabels,
           calc_meters_as_single_face: localSingleFace,
+          hide_total_meters: localHideTotalMeters,
           status_overrides: (data as any).status_overrides || undefined
         } as PrintCustomizationSettings;
         
@@ -400,13 +407,12 @@ export function usePrintCustomization(settingKey: string = 'default') {
           localStorage.setItem(`print_customization_${settingKey}`, JSON.stringify(mergedSettings));
         } catch {}
       } else {
-        const localDimLabels = localStorage.getItem('show_size_dimension_labels') || 'false';
-        const localSingleFace = localStorage.getItem('calc_meters_as_single_face') || 'false';
         setSettings(prev => ({ 
           ...prev, 
           setting_key: settingKey,
           show_size_dimension_labels: localDimLabels, 
-          calc_meters_as_single_face: localSingleFace 
+          calc_meters_as_single_face: localSingleFace,
+          hide_total_meters: localHideTotalMeters
         }));
       }
     } catch (error) {
@@ -434,6 +440,9 @@ export function usePrintCustomization(settingKey: string = 'default') {
       if (resolvedNewSettings.calc_meters_as_single_face !== undefined) {
         localStorage.setItem('calc_meters_as_single_face', String(resolvedNewSettings.calc_meters_as_single_face));
       }
+      if (resolvedNewSettings.hide_total_meters !== undefined) {
+        localStorage.setItem('hide_total_meters', String(resolvedNewSettings.hide_total_meters));
+      }
 
       // حفظ محلي فوري
       try {
@@ -447,6 +456,7 @@ export function usePrintCustomization(settingKey: string = 'default') {
         map_label_scale, 
         show_size_dimension_labels, 
         calc_meters_as_single_face, 
+        hide_total_meters,
         ...dbPayload 
       } = updatedSettings as any;
 

@@ -226,40 +226,45 @@ export function PrintPreview({
       `;
     }
 
-    const allowedImageHeight = (includeDesigns && hasDesigns)
-      ? (s.installed_image_height || '85mm')
-      : (s.main_image_height || '140mm');
-    const maxAllowedWidth = (s.main_image_width && parseFloat(s.main_image_width) > 190)
-      ? s.main_image_width
+    const isDesignsIncluded = Boolean(includeDesigns && hasDesigns);
+    const effectiveS = (!isDesignsIncluded && s.status_overrides?.['no-design'])
+      ? { ...s, ...s.status_overrides['no-design'] }
+      : s;
+
+    const allowedImageHeight = isDesignsIncluded
+      ? (effectiveS.installed_image_height || '85mm')
+      : `${Math.max(parseFloat(effectiveS.main_image_height || '140'), 140)}mm`;
+    const maxAllowedWidth = isDesignsIncluded
+      ? ((effectiveS.main_image_width && parseFloat(effectiveS.main_image_width) > 190) ? effectiveS.main_image_width : '190mm')
       : '190mm';
 
     // صور التركيب / صورة اللوحة
     if (effectiveInstalledA && effectiveInstalledB) {
       html += `
-        <div class="absolute-field installed-images-container" data-element-key="installedImages" style="top: ${s.installed_images_top}; left: ${s.installed_images_left || '50%'}; transform: translateX(-50%); width: ${s.installed_images_width || '180mm'}; max-width: ${maxAllowedWidth}; display: flex; gap: ${s.installed_images_gap || '5mm'}; justify-content: center; align-items: flex-start; ${hl('installedImages')}">
-          <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${s.installed_images_gap || '5mm'} / 2)); text-align: center; display: flex; flex-direction: column; align-items: center;">
-            <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 3mm;">التركيب - الوجه الأمامي</div>
-            <div class="installed-image-box" style="max-height: ${s.installed_image_height || '85mm'}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
-              <img src="${effectiveInstalledA}" alt="التركيب - الوجه الأمامي" class="billboard-image installed-image" style="max-height: ${s.installed_image_height || '85mm'}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" />
+        <div class="absolute-field installed-images-container" data-element-key="installedImages" style="top: ${effectiveS.installed_images_top}; left: ${effectiveS.installed_images_left || '50%'}; transform: translateX(-50%); width: ${effectiveS.installed_images_width || '180mm'}; max-width: ${maxAllowedWidth}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: flex; gap: ${effectiveS.installed_images_gap || '5mm'}; justify-content: center; align-items: center; ${hl('installedImages')}">
+          <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${effectiveS.installed_images_gap || '5mm'} / 2)); height: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+            <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 2mm;">التركيب - الوجه الأمامي</div>
+            <div class="installed-image-box" style="height: 100%; max-height: ${allowedImageHeight}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
+              <img src="${effectiveInstalledA}" alt="التركيب - الوجه الأمامي" class="billboard-image installed-image" style="max-height: ${allowedImageHeight}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" />
             </div>
           </div>
-          <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${s.installed_images_gap || '5mm'} / 2)); text-align: center; display: flex; flex-direction: column; align-items: center;">
-            <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 3mm;">التركيب - الوجه الخلفي</div>
-            <div class="installed-image-box" style="max-height: ${s.installed_image_height || '85mm'}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
-              <img src="${effectiveInstalledB}" alt="التركيب - الوجه الخلفي" class="billboard-image installed-image" style="max-height: ${s.installed_image_height || '85mm'}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" />
+          <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${effectiveS.installed_images_gap || '5mm'} / 2)); height: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+            <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 2mm;">التركيب - الوجه الخلفي</div>
+            <div class="installed-image-box" style="height: 100%; max-height: ${allowedImageHeight}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
+              <img src="${effectiveInstalledB}" alt="التركيب - الوجه الخلفي" class="billboard-image installed-image" style="max-height: ${allowedImageHeight}; max-width: 100%; width: auto; height: auto; object-fit: contain; display: block; margin: 0 auto; border: 2px solid #000; border-radius: 8px; box-sizing: border-box;" />
             </div>
           </div>
         </div>
       `;
     } else if (effectiveInstalledA) {
       html += `
-        <div class="absolute-field image-container" data-element-key="mainImage" style="top: ${s.main_image_top}; left: ${s.main_image_left || '50%'}; transform: translateX(-50%); max-width: ${maxAllowedWidth}; max-height: ${allowedImageHeight}; display: flex; justify-content: center; align-items: center; ${hl('mainImage')}">
+        <div class="absolute-field image-container" data-element-key="mainImage" style="top: ${effectiveS.main_image_top}; left: ${effectiveS.main_image_left || '50%'}; transform: translateX(-50%); width: 100%; max-width: ${maxAllowedWidth}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: flex; justify-content: center; align-items: center; ${hl('mainImage')}">
           <img src="${effectiveInstalledA}" alt="صورة التركيب" class="billboard-image" style="max-height: ${allowedImageHeight}; max-width: ${maxAllowedWidth}; width: auto; height: auto; object-fit: contain; display: block;" />
         </div>
       `;
     } else if (mainImage) {
       html += `
-        <div class="absolute-field image-container" data-element-key="mainImage" style="top: ${s.main_image_top}; left: ${s.main_image_left || '50%'}; transform: translateX(-50%); max-width: ${maxAllowedWidth}; max-height: ${allowedImageHeight}; display: flex; justify-content: center; align-items: center; ${hl('mainImage')}">
+        <div class="absolute-field image-container" data-element-key="mainImage" style="top: ${effectiveS.main_image_top}; left: ${effectiveS.main_image_left || '50%'}; transform: translateX(-50%); width: 100%; max-width: ${maxAllowedWidth}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: flex; justify-content: center; align-items: center; ${hl('mainImage')}">
           <img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" style="max-height: ${allowedImageHeight}; max-width: ${maxAllowedWidth}; width: auto; height: auto; object-fit: contain; display: block;" />
         </div>
       `;
@@ -289,7 +294,7 @@ export function PrintPreview({
     }
 
     // التصاميم
-    if (includeDesigns && hasDesigns) {
+    if (isDesignsIncluded) {
       html += `
         <div class="absolute-field designs-section" data-element-key="designs" style="top: ${s.designs_top}; left: ${s.designs_left}; width: ${s.designs_width}; display: flex; flex-direction: row; gap: ${s.designs_gap}; align-items: flex-start; justify-content: center; ${hl('designs')}">
           ${effectiveDesignA ? `

@@ -1298,7 +1298,7 @@ export default function OfferEdit() {
           Municipality: (b as any).Municipality || '',
           District: (b as any).District || '',
           Nearest_Landmark: (b as any).Nearest_Landmark || '',
-          Image_URL: (b as any).Image_URL || '',
+          Image_URL: ((b as any).Image_URL && !String((b as any).Image_URL).startsWith('data:')) ? (b as any).Image_URL : '',
           Faces_Count: (b as any).Faces_Count || 1,
           GPS_Coordinates: (b as any).GPS_Coordinates || '',
           price: calculateBillboardPrice(b),
@@ -1359,7 +1359,7 @@ export default function OfferEdit() {
 
       const offerData: any = {
         customer_name: customerName,
-        customer_id: customerId,
+        customer_id: customerId || null,
         start_date: startDate,
         end_date: endDate,
         duration_months: pricingMode === 'months' ? durationMonths : 0,
@@ -1398,6 +1398,11 @@ export default function OfferEdit() {
         level_discounts: Object.keys(levelDiscounts).length > 0 ? levelDiscounts : null,
       };
 
+      // حفظ نسخة احتياطية محلية قبل الإرسال لمنع فقدان البيانات
+      try {
+        localStorage.setItem('adhub_offer_draft_backup', JSON.stringify(offerData));
+      } catch {}
+
       if (isEditing) {
         const { error } = await supabase.from('offers').update(offerData).eq('id', offerId);
         if (error) throw error;
@@ -1408,10 +1413,19 @@ export default function OfferEdit() {
         toast.success('تم إنشاء العرض بنجاح');
       }
 
+      try {
+        localStorage.removeItem('adhub_offer_draft_backup');
+      } catch {}
+
       navigate('/admin/offers');
     } catch (e: any) {
-      console.error(e);
-      toast.error(e?.message || 'فشل حفظ العرض');
+      console.error('[OfferEdit save error]:', e);
+      const msg = String(e?.message || '');
+      if (msg.includes('Failed to fetch') || msg.includes('Network') || msg.includes('fetch')) {
+        toast.error('تعذر الاتصال بالخادم السحابي (انقطاع الإنترنت أو اعتراض من ملحق المتصفح مثل IDM). تم حفظ المسودة، يرجى إعادة المحاولة.');
+      } else {
+        toast.error(msg || 'فشل حفظ العرض');
+      }
     } finally {
       setSaving(false);
     }
