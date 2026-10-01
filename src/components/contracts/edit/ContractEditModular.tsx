@@ -1020,6 +1020,16 @@ export default function ContractEditModular() {
     setSingleFaceBillboards(prev => { const next = new Set(prev); next.delete(id); return next; });
   };
 
+  const removeMultipleSelected = (ids: string[]) => {
+    setSelected((prev) => prev.filter((x) => !ids.includes(x)));
+    setFriendBillboardCosts(prev => prev.filter(f => !ids.includes(f.billboardId)));
+    setSingleFaceBillboards(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => next.delete(id));
+      return next;
+    });
+  };
+
   const toggleSingleFace = (billboardId: string) => {
     const bb = billboards.find(b => String((b as any).ID) === String(billboardId));
     const orig = bb ? ((b as any).Faces_Count ?? (b as any).faces_count ?? (b as any).faces) : null;
@@ -1708,6 +1718,7 @@ export default function ContractEditModular() {
               selected={selected}
               billboards={billboards}
               onRemoveSelected={removeSelected}
+              onBulkRemove={removeMultipleSelected}
               calculateBillboardPrice={calculateBillboardPrice}
               installationDetails={stableInstallationDetails}
               pricingMode={pricingMode}

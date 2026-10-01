@@ -980,6 +980,16 @@ export default function OfferEdit() {
     setSingleFaceBillboards(prev => { const next = new Set(prev); next.delete(id); return next; });
   };
 
+  const removeMultipleSelected = (ids: string[]) => {
+    setSelected(prev => prev.filter(x => !ids.includes(x)));
+    setFriendBillboardCosts(prev => prev.filter(f => !ids.includes(f.billboardId)));
+    setSingleFaceBillboards(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => next.delete(id));
+      return next;
+    });
+  };
+
   const toggleSingleFace = (billboardId: string) => {
     const bb = billboards.find(b => String((b as any).ID) === String(billboardId));
     const orig = bb ? ((bb as any).Faces_Count ?? (bb as any).faces_count ?? (bb as any).faces) : null;
@@ -1608,6 +1618,7 @@ export default function OfferEdit() {
               selected={selected}
               billboards={billboards}
               onRemoveSelected={removeSelected}
+              onBulkRemove={removeMultipleSelected}
               calculateBillboardPrice={calculateBillboardPrice}
               installationDetails={installationDetails}
               pricingMode={pricingMode}

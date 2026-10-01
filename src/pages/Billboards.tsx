@@ -1941,6 +1941,7 @@ export default function Billboards() {
         onSetExcludeFriendlyAndHidden={setExcludeFriendlyAndHidden}
         selectAvailableOnly={selectAvailableOnly}
         onSetSelectAvailableOnly={setSelectAvailableOnly}
+        loadBillboards={loadBillboards}
       />
 
       {/* حوار اختيار اللوحة لمحرر التراكب والواقعية */}

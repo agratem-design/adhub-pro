@@ -1165,6 +1165,23 @@ export async function updateContract(contractId: string, updates: any) {
     }
   }
 
+  // Sync composite_tasks customer details when updated on the contract
+  if (contractId && (customerName !== undefined || payload.customer_id !== undefined)) {
+    const compUpdates: Record<string, unknown> = {};
+    if (customerName) compUpdates.customer_name = customerName;
+    if (payload.customer_id !== undefined) compUpdates.customer_id = payload.customer_id;
+    if (Object.keys(compUpdates).length > 0) {
+      try {
+        await supabase
+          .from('composite_tasks')
+          .update(compUpdates)
+          .eq('contract_id', Number(contractId));
+      } catch (syncErr) {
+        console.warn('Failed to sync composite_tasks with updated contract customer:', syncErr);
+      }
+    }
+  }
+
   return Array.isArray(data) ? data[0] : data;
 }
 

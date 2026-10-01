@@ -1021,25 +1021,25 @@ export function SelectedBillboardsCard({
                 <Button
                   variant={bulkSelectMode ? "default" : "outline"}
                   size="sm"
-                  className="h-7 text-xs gap-1"
+                  className="h-7 text-xs gap-1 font-bold"
                   onClick={() => {
                     setBulkSelectMode(!bulkSelectMode);
                     if (bulkSelectMode) deselectAll();
                   }}
                 >
                   <CheckSquare className="h-3.5 w-3.5" />
-                  {bulkSelectMode ? 'إلغاء التحديد' : 'تحديد متعدد'}
+                  {bulkSelectMode ? 'إلغاء التحديد' : 'تحديد متعدد للإزالة'}
                 </Button>
               )}
-              {bulkSelectMode && bulkSelectedIds.size > 0 && (
+              {bulkSelectedIds.size > 0 && (
                 <Button
                   variant="destructive"
                   size="sm"
-                  className="h-7 text-xs gap-1"
+                  className="h-7 text-xs gap-1.5 font-bold shadow-sm"
                   onClick={handleBulkRemove}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  حذف المحدد ({bulkSelectedIds.size})
+                  إزالة اللوحات المحددة ({bulkSelectedIds.size})
                 </Button>
               )}
             </div>
@@ -1286,13 +1286,21 @@ export function SelectedBillboardsCard({
                       </div>
                       
                       <div className="flex items-center gap-1 shrink-0">
-                        {/* Bulk Select Checkbox */}
-                        {bulkSelectMode && (
-                          <div className="flex items-center justify-center ml-1">
+                        {/* Bulk Select Checkbox: always accessible when more than 1 billboard */}
+                        {selected.length > 1 && (
+                          <div 
+                            className="flex items-center justify-center ml-1 cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!bulkSelectMode) setBulkSelectMode(true);
+                              toggleBulkSelect(billboardId);
+                            }}
+                            title={bulkSelectedIds.has(billboardId) ? "إلغاء تحديد اللوحة" : "تحديد اللوحة للإزالة المتعددة"}
+                          >
                             <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${
                               bulkSelectedIds.has(billboardId)
                                 ? 'bg-destructive border-destructive text-destructive-foreground scale-105'
-                                : 'bg-background border-muted-foreground/40 hover:border-destructive/50'
+                                : 'bg-background border-muted-foreground/40 hover:border-destructive/60'
                             }`}>
                               {bulkSelectedIds.has(billboardId) && <CheckSquare className="h-3 w-3" />}
                             </div>
@@ -1338,6 +1346,10 @@ export function SelectedBillboardsCard({
                           className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg p-0 text-destructive transition-all duration-200 hover:bg-destructive/10 hover:text-destructive"
                           onClick={(e) => {
                             e.stopPropagation();
+                            if (bulkSelectedIds.size > 1 && bulkSelectedIds.has(billboardId)) {
+                              handleBulkRemove();
+                              return;
+                            }
                             if (!computeCanDelete(b)) {
                               setDeletingBillboard(b);
                               setDeleteChoiceOpen(true);

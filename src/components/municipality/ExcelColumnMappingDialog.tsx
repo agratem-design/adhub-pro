@@ -11,11 +11,15 @@ import { MapPin, FileSpreadsheet } from 'lucide-react';
 
 export interface ColumnMapping {
   billboard_id: string;
+  company?: string;
   size: string;
   faces_count: string;
   location_text: string;
   nearest_landmark: string;
   billboard_name: string;
+  municipality?: string;
+  status?: string;
+  image_url?: string;
   // Coordinates
   coordsMode: 'combined' | 'separate';
   coords_combined: string;
@@ -33,11 +37,15 @@ interface ExcelColumnMappingDialogProps {
 
 const FIELD_LABELS: Record<string, string> = {
   billboard_id: 'معرف اللوحة / الكود',
+  company: 'الشركة',
   size: 'المقاس',
   faces_count: 'عدد الأوجه',
   location_text: 'موقع اللوحة',
   nearest_landmark: 'أقرب نقطة دالة',
   billboard_name: 'اسم اللوحة',
+  municipality: 'البلدية',
+  status: 'حالة اللوحة',
+  image_url: 'رابط الصورة',
 };
 
 const NONE_VALUE = '__none__';
@@ -56,14 +64,18 @@ function autoDetect(headers: string[]): Partial<ColumnMapping> {
   };
 
   mapping.billboard_id = find(['id', 'معرف', 'معرّف', 'كود', 'code', 'رقم اللوحة']);
+  mapping.company = find(['الشركة', 'شركة', 'company']);
   mapping.size = find(['مقاس', 'المقاس', 'size']);
-  mapping.faces_count = find(['أوجه', 'الاوجه', 'وجه', 'faces']);
-  mapping.location_text = find(['موقع اللوحة', 'الموقع', 'موقع', 'location']);
-  mapping.nearest_landmark = find(['نقطة دالة', 'landmark', 'أقرب']);
-  mapping.billboard_name = find(['اسم اللوحة', 'اسم', 'name', 'موقع اللوحة']);
+  mapping.faces_count = find(['أوجه', 'الاوجه', 'الأوجه', 'وجه', 'faces']);
+  mapping.location_text = find(['موقع اللوحة', 'الموقع / اسم اللوحة', 'الموقع', 'موقع', 'location']);
+  mapping.nearest_landmark = find(['أقرب نقطة دالة', 'نقطة دالة', 'landmark', 'أقرب']);
+  mapping.billboard_name = find(['اسم اللوحة', 'الموقع / اسم اللوحة', 'اسم', 'name', 'موقع اللوحة']);
+  mapping.municipality = find(['البلدية', 'بلدية', 'municipality']);
+  mapping.status = find(['حالة اللوحة', 'الحالة', 'حالة', 'status']);
+  mapping.image_url = find(['رابط الصورة', 'صورة اللوحة', 'الصورة', 'image']);
 
   // Detect coordinates mode
-  const combinedCol = find(['موقع القوقل', 'الاحداثيات', 'coordinates', 'احداثيات', 'gps']);
+  const combinedCol = find(['موقع القوقل', 'الإحداثيات', 'الاحداثيات', 'coordinates', 'احداثيات', 'gps']);
   const latCol = find(['خط العرض', 'latitude', 'lat', 'عرض']);
   const lngCol = find(['خط الطول', 'longitude', 'lng', 'lon', 'طول']);
 
@@ -93,11 +105,15 @@ export const ExcelColumnMappingDialog: React.FC<ExcelColumnMappingDialogProps> =
 
   const [mapping, setMapping] = useState<ColumnMapping>({
     billboard_id: detected.billboard_id || '',
+    company: detected.company || '',
     size: detected.size || '',
     faces_count: detected.faces_count || '',
     location_text: detected.location_text || '',
     nearest_landmark: detected.nearest_landmark || '',
     billboard_name: detected.billboard_name || '',
+    municipality: detected.municipality || '',
+    status: detected.status || '',
+    image_url: detected.image_url || '',
     coordsMode: detected.coordsMode || 'combined',
     coords_combined: detected.coords_combined || '',
     coords_lat: detected.coords_lat || '',
@@ -109,11 +125,15 @@ export const ExcelColumnMappingDialog: React.FC<ExcelColumnMappingDialogProps> =
     const d = autoDetect(headers);
     setMapping({
       billboard_id: d.billboard_id || '',
+      company: d.company || '',
       size: d.size || '',
       faces_count: d.faces_count || '',
       location_text: d.location_text || '',
       nearest_landmark: d.nearest_landmark || '',
       billboard_name: d.billboard_name || '',
+      municipality: d.municipality || '',
+      status: d.status || '',
+      image_url: d.image_url || '',
       coordsMode: d.coordsMode || 'combined',
       coords_combined: d.coords_combined || '',
       coords_lat: d.coords_lat || '',
@@ -196,11 +216,15 @@ export const ExcelColumnMappingDialog: React.FC<ExcelColumnMappingDialogProps> =
           <div className="space-y-3 border rounded-lg p-4 bg-muted/30">
             <Label className="text-sm font-semibold">ربط الأعمدة بالحقول</Label>
             {renderSelect('billboard_id', 'معرف اللوحة / الكود (للمطابقة مع النظام)')}
+            {renderSelect('company', 'الشركة')}
             {renderSelect('billboard_name', 'اسم اللوحة')}
             {renderSelect('size', 'المقاس')}
             {renderSelect('faces_count', 'عدد الأوجه')}
             {renderSelect('location_text', 'موقع اللوحة')}
             {renderSelect('nearest_landmark', 'نقطة دالة')}
+            {renderSelect('municipality', 'البلدية')}
+            {renderSelect('status', 'حالة اللوحة')}
+            {renderSelect('image_url', 'رابط الصورة')}
           </div>
 
           {/* Coordinates section */}

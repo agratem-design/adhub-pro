@@ -72,6 +72,8 @@ interface CollectionItem {
   municipality?: string;
   status?: string;
   overlay_config?: BillboardOverlayConfig;
+  company?: string | null;
+  company_name?: string | null;
 }
 
 interface Collection {
@@ -809,7 +811,7 @@ export default function MunicipalityBillboardOrganizer() {
   const [showGoogleMapsDialog, setShowGoogleMapsDialog] = useState(false);
   const [zoomImageModalUrl, setZoomImageModalUrl] = useState<string | null>(null);
   const [zoomScale, setZoomScale] = useState<number>(1);
-  const [inlineEditingCell, setInlineEditingCell] = useState<{ seq: number; field: 'location' | 'landmark' } | null>(null);
+  const [inlineEditingCell, setInlineEditingCell] = useState<{ seq: number; field: 'location' | 'landmark' | 'company' } | null>(null);
   const [searchItems, setSearchItems] = useState('');
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
   const [showReplaceDialog, setShowReplaceDialog] = useState(false);
@@ -824,6 +826,15 @@ export default function MunicipalityBillboardOrganizer() {
   const [showHeightInPrint, setShowHeightInPrint] = useState(() => {
     try {
       const val = localStorage.getItem('mun_show_height_in_print');
+      return val !== 'false';
+    } catch {
+      return true;
+    }
+  });
+
+  const [showCompanyColumn, setShowCompanyColumn] = useState<boolean>(() => {
+    try {
+      const val = localStorage.getItem('mun_show_company_col');
       return val !== 'false';
     } catch {
       return true;
@@ -862,6 +873,47 @@ export default function MunicipalityBillboardOrganizer() {
     } catch {}
     await saveSettings({ hide_total_meters: val ? 'true' : 'false' });
   };
+
+  const [showCompanyInPrint, setShowCompanyInPrint] = useState<boolean>(() => {
+    try {
+      const val = localStorage.getItem('mun_show_company_in_print');
+      if (val !== null) return val === 'true';
+      const saved = localStorage.getItem('mun_organizer_defaults');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.showCompanyInPrint !== undefined) return !!parsed.showCompanyInPrint;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleShowCompanyInPrint = async (val: boolean) => {
+    setShowCompanyInPrint(val);
+    try {
+      localStorage.setItem('mun_show_company_in_print', String(val));
+    } catch {}
+    await saveSettings({ show_company_in_print: val ? 'true' : 'false' });
+  };
+
+  const resolveItemCompany = useCallback((item: CollectionItem): string => {
+    if (item.company && item.company.trim()) return item.company.trim();
+    if ((item as any).company_name && (item as any).company_name.trim()) return (item as any).company_name.trim();
+    if (item.billboard_id) {
+      const b = allBillboards.find(x => x.ID === item.billboard_id);
+      if (b) {
+        if (b.Company && String(b.Company).trim()) return String(b.Company).trim();
+        if (b.company && String(b.company).trim()) return String(b.company).trim();
+        const compId = b.own_company_id || b.friend_company_id;
+        if (compId) {
+          const comp = allCompanies.find(c => c.id === compId);
+          if (comp?.name) return comp.name;
+        }
+      }
+    }
+    return '';
+  }, [allBillboards, allCompanies]);
 
   // 🆕 Header Title and Signatures Customization States
   const loadOrganizerDefault = <T,>(key: string, fallback: T): T => {
@@ -1082,6 +1134,7 @@ export default function MunicipalityBillboardOrganizer() {
           if (sv.summaryRowsPerPage) setSummaryRowsPerPage(sv.summaryRowsPerPage);
           if (sv.signaturesFontSize) setSignaturesFontSize(sv.signaturesFontSize);
           if (sv.hideTotalMeters !== undefined) setHideTotalMeters(sv.hideTotalMeters);
+          if (sv.showCompanyInPrint !== undefined) setShowCompanyInPrint(sv.showCompanyInPrint);
         }
       } catch (err) {
         console.error('Error fetching municipality organizer defaults from DB:', err);
@@ -1111,6 +1164,7 @@ export default function MunicipalityBillboardOrganizer() {
       showHeightInPrint,
       printImageSource,
       hideTotalMeters,
+      showCompanyInPrint,
     };
 
     try {
@@ -1175,6 +1229,7 @@ export default function MunicipalityBillboardOrganizer() {
         }
         if (parsed.signaturesFontSize !== undefined) setSignaturesFontSize(parsed.signaturesFontSize);
         if (parsed.summaryRowsPerPage !== undefined) setSummaryRowsPerPage(parsed.summaryRowsPerPage);
+        if (parsed.showCompanyInPrint !== undefined) setShowCompanyInPrint(parsed.showCompanyInPrint);
         toast.success(`تم استيراد إعدادات الغلاف والترويسة والتوقيعات من "${data.name}" بنجاح`);
       } else {
         toast.info('هذه القائمة لا تحتوي على تخصيصات ترويسة وتوقيعات محفوظة');
@@ -1680,6 +1735,7 @@ export default function MunicipalityBillboardOrganizer() {
         if (parsedConfig.showHeightInPrint !== undefined) setShowHeightInPrint(parsedConfig.showHeightInPrint);
         if (parsedConfig.printImageSource !== undefined) setPrintImageSource(parsedConfig.printImageSource);
         if (parsedConfig.hideTotalMeters !== undefined) setHideTotalMeters(parsedConfig.hideTotalMeters);
+        if (parsedConfig.showCompanyInPrint !== undefined) setShowCompanyInPrint(parsedConfig.showCompanyInPrint);
       }
       
       const cleanMuni = cleanArabicName(muni);
@@ -1696,8 +1752,9 @@ export default function MunicipalityBillboardOrganizer() {
         let bImage = item.image_url || null;
         let bStatus = item.status || 'تم التركيب';
         
+        let original: any = null;
         if (item.billboard_id && Array.isArray(allBillboards) && allBillboards.length > 0) {
-          const original = allBillboards.find(b => String(b.ID) === String(item.billboard_id));
+          original = allBillboards.find(b => String(b.ID) === String(item.billboard_id));
           if (original) {
             // Reconcile official name, landmark, and GPS with authoritative billboards table
             if (original.Billboard_Name) bName = original.Billboard_Name;
@@ -1728,6 +1785,15 @@ export default function MunicipalityBillboardOrganizer() {
             }
           }
         }
+
+        let resolvedCompany = item.company || null;
+        if (!resolvedCompany && original) {
+          resolvedCompany = original.Company || original.company || null;
+          if (!resolvedCompany && (original.own_company_id || original.friend_company_id)) {
+            const compId = original.own_company_id || original.friend_company_id;
+            resolvedCompany = allCompanies.find(c => c.id === compId)?.name || null;
+          }
+        }
         
         return {
           id: item.id,
@@ -1747,6 +1813,8 @@ export default function MunicipalityBillboardOrganizer() {
           municipality: muni || item.municipality || '',
           status: bStatus,
           overlay_config: item.overlay_config ?? undefined,
+          company: resolvedCompany,
+          company_name: resolvedCompany,
         };
       });
 
@@ -1809,6 +1877,7 @@ export default function MunicipalityBillboardOrganizer() {
         showHeightInPrint,
         printImageSource,
         hideTotalMeters,
+        showCompanyInPrint,
       };
 
       const collectionPayload: any = {
@@ -1922,6 +1991,7 @@ export default function MunicipalityBillboardOrganizer() {
         showHeightInPrint,
         printImageSource,
         hideTotalMeters,
+        showCompanyInPrint,
       };
 
       const collectionPayload: any = {
@@ -3037,6 +3107,8 @@ export default function MunicipalityBillboardOrganizer() {
       let dbMunicipality = '';
       let itemType: 'existing' | 'new' = 'new';
       let billboardId: number | null = null;
+      let company = mapping.company && row[mapping.company] ? String(row[mapping.company]).trim() : '';
+      let status = mapping.status && row[mapping.status] ? String(row[mapping.status]).trim() : '';
 
       if (matchedBillboard) {
         itemType = 'existing';
@@ -3050,6 +3122,18 @@ export default function MunicipalityBillboardOrganizer() {
         designFaceB = matchedBillboard.design_face_b || null;
         imageUrl = matchedBillboard.Image_URL || null;
         dbMunicipality = matchedBillboard.Municipality || '';
+        
+        if (!company) {
+          company = matchedBillboard.Company || matchedBillboard.company || '';
+          if (!company && (matchedBillboard.own_company_id || matchedBillboard.friend_company_id)) {
+            const compId = matchedBillboard.own_company_id || matchedBillboard.friend_company_id;
+            const cObj = allCompanies.find(c => c.id === compId);
+            if (cObj) company = cObj.name;
+          }
+        }
+        if (!status) {
+          status = getInitialBillboardStatus(matchedBillboard);
+        }
         
         if (matchedBillboard.GPS_Coordinates) {
           const parts = matchedBillboard.GPS_Coordinates.split(',').map((c: string) => parseFloat(c.trim()));
@@ -3086,6 +3170,11 @@ export default function MunicipalityBillboardOrganizer() {
         billboardName = mapping.billboard_name 
           ? String(row[mapping.billboard_name] || locationText || `لوحة ${startSeq + idx}`)
           : (locationText || `لوحة ${startSeq + idx}`);
+        dbMunicipality = mapping.municipality && row[mapping.municipality] ? String(row[mapping.municipality]).trim() : '';
+        imageUrl = mapping.image_url && row[mapping.image_url] ? String(row[mapping.image_url]).trim() : null;
+        if (!status) {
+          status = 'تم التركيب';
+        }
       }
 
       return {
@@ -3103,9 +3192,18 @@ export default function MunicipalityBillboardOrganizer() {
         design_face_b: designFaceB,
         image_url: imageUrl,
         municipality: dbMunicipality,
-        status: matchedBillboard ? getInitialBillboardStatus(matchedBillboard) : 'تم التركيب'
+        status: status || 'تم التركيب',
+        company: company || null,
+        company_name: company || null,
       };
     });
+
+    if (newItems.some(it => it.company)) {
+      setShowCompanyColumn(true);
+      try {
+        localStorage.setItem('mun_show_company_col', 'true');
+      } catch {}
+    }
 
     const activeMunicipality = municipalityName || currentCollection.municipality_name;
     if (activeMunicipality) {
@@ -3753,22 +3851,24 @@ export default function MunicipalityBillboardOrganizer() {
         
         // Total table width is 190mm (210mm A4 width - 20mm margins). Allocating exact column widths in mm:
         const showFacesCol = s.faces_count_show !== 'false';
+        const showCompanyCol = showCompanyInPrint;
         const indexWidth = 10;
         const facesWidth = showFacesCol ? 14 : 0;
         const sizeWidth = 20;
+        const companyWidth = showCompanyCol ? 22 : 0;
         const qrWidth = rowHeightVal; // Perfectly square width
         
-        const remainingWidth = 190 - (indexWidth + facesWidth + sizeWidth + qrWidth);
+        const remainingWidth = 190 - (indexWidth + facesWidth + sizeWidth + qrWidth + companyWidth);
         
         let locWidth: number, coordsWidth: number, statusWidth: number, landmarkWidth: number;
         if (showStatusInPrint) {
-          locWidth = 32;
-          coordsWidth = 38;
+          locWidth = showCompanyCol ? 26 : 32;
+          coordsWidth = showCompanyCol ? 32 : 38;
           statusWidth = 18;
           landmarkWidth = remainingWidth - (locWidth + coordsWidth + statusWidth);
         } else {
-          locWidth = 36;
-          coordsWidth = 42;
+          locWidth = showCompanyCol ? 30 : 36;
+          coordsWidth = showCompanyCol ? 36 : 42;
           landmarkWidth = remainingWidth - (locWidth + coordsWidth);
           statusWidth = 0;
         }
@@ -3790,6 +3890,7 @@ export default function MunicipalityBillboardOrganizer() {
                 <td class="loc">${it.nearest_landmark || '-'}</td>
                 <td class="num">${formatSizeForPrint(it.size, showHeightInPrint) || '-'}</td>
                 ${showFacesCol ? `<td class="num">${it.faces_count || '-'}</td>` : ''}
+                ${showCompanyCol ? `<td class="loc" style="text-align: center;">${resolveItemCompany(it) || '-'}</td>` : ''}
                 <td class="coords">${it.latitude && it.longitude ? `${it.latitude}, ${it.longitude}` : '-'}</td>
                 ${showStatusInPrint ? `<td class="num">${it.status || '-'}</td>` : ''}
                 <td class="qr-col-cell">
@@ -3803,7 +3904,7 @@ export default function MunicipalityBillboardOrganizer() {
             `;
           }).join('');
 
-          const totalColumnsCount = 6 + (showFacesCol ? 1 : 0) + (showStatusInPrint ? 1 : 0);
+          const totalColumnsCount = 6 + (showFacesCol ? 1 : 0) + (showStatusInPrint ? 1 : 0) + (showCompanyCol ? 1 : 0);
           const facesHidden = s.faces_count_show === 'false';
           const localSingleVal = localStorage.getItem('calc_meters_as_single_face');
           const isSingleFaceMode = facesHidden && (localSingleVal !== null 
@@ -3873,6 +3974,7 @@ export default function MunicipalityBillboardOrganizer() {
                     <th style="width:${landmarkWidth}mm;">أقرب نقطة</th>
                     <th style="width:${sizeWidth}mm;">المقاس</th>
                     ${showFacesCol ? `<th style="width:${facesWidth}mm;">الأوجه</th>` : ''}
+                    ${showCompanyCol ? `<th style="width:${companyWidth}mm;">الشركة</th>` : ''}
                     <th style="width:${coordsWidth}mm;">الإحداثيات</th>
                     ${showStatusInPrint ? `<th style="width:${statusWidth}mm;">الحالة</th>` : ''}
                     <th class="qr-col-cell" style="width:${qrWidth}mm !important;">QR</th>
@@ -4144,6 +4246,16 @@ export default function MunicipalityBillboardOrganizer() {
             ${statusFooter}
             ${statusCustom}
 
+            ${(() => {
+              const itemCompany = resolveItemCompany(item);
+              if (!showCompanyInPrint || !itemCompany) return '';
+              return `
+              <div class="absolute-field municipality-company" style="top: ${s.contract_number_top || '39.869mm'}; right: ${s.contract_number_right || '22mm'}; font-size: ${s.contract_number_font_size || '16px'}; font-weight: ${s.contract_number_font_weight || '500'}; color: ${s.contract_number_color || '#333333'}; text-align: ${s.contract_number_alignment || 'right'}; max-width: 65%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; ${s.contract_number_offset_x && s.contract_number_offset_x !== '0mm' ? `margin-right: ${s.contract_number_offset_x};` : ''} z-index: 5;">
+                <span style="font-weight: 700;">الشركة: </span>${itemCompany}
+              </div>
+              `;
+            })()}
+
             <div class="absolute-field" style="top: ${s.size_top}; left: ${s.size_left}; transform: translateX(-50%); width: 70mm; display: flex; align-items: center; justify-content: center; text-align: center; font-size: ${s.size_font_size}; font-weight: ${s.size_font_weight || '500'}; color: ${s.size_color}; z-index: 5; margin: 0; padding: 0;">
               ${generatePrintedSizeHtml(item.size, showHeightInPrint, (s as any).show_size_dimension_labels === 'true')}
             </div>
@@ -4342,9 +4454,11 @@ export default function MunicipalityBillboardOrganizer() {
     try {
       const items = [...currentCollection.items].sort((a, b) => a.sequence_number - b.sequence_number);
       const displayMunicipality = municipalityName || collectionName || 'لوحات البلدية';
+      const includeCompanyInExport = showCompanyColumn || showCompanyInPrint;
       const headers = [
         '#',
         'الموقع / اسم اللوحة',
+        ...(includeCompanyInExport ? ['الشركة'] : []),
         'البلدية',
         'أقرب نقطة دالة',
         'المقاس',
@@ -4356,6 +4470,7 @@ export default function MunicipalityBillboardOrganizer() {
       const rows = items.map(it => [
         it.sequence_number,
         it.location_text || it.billboard_name || '',
+        ...(includeCompanyInExport ? [resolveItemCompany(it) || ''] : []),
         it.municipality || '',
         it.nearest_landmark || '',
         formatSizeForPrint(it.size, showHeightInPrint) || '',
@@ -4370,6 +4485,7 @@ export default function MunicipalityBillboardOrganizer() {
       ws['!cols'] = [
         { wch: 5 },   // #
         { wch: 32 },  // location
+        ...(includeCompanyInExport ? [{ wch: 22 }] : []), // company
         { wch: 18 },  // municipality
         { wch: 32 },  // landmark
         { wch: 14 },  // size
@@ -4860,6 +4976,29 @@ export default function MunicipalityBillboardOrganizer() {
                   />
                 </div>
                 
+                {/* Toggle Company Column Button */}
+                <Button
+                  size="sm"
+                  variant={showCompanyColumn ? "secondary" : "outline"}
+                  className={`h-8 text-xs rounded-xl border-border/20 gap-1.5 transition-all ${
+                    showCompanyColumn
+                      ? 'bg-primary/10 text-primary border-primary/30 font-bold hover:bg-primary/15'
+                      : 'bg-card/45 text-muted-foreground hover:text-foreground hover:bg-accent'
+                  }`}
+                  onClick={() => {
+                    const nextVal = !showCompanyColumn;
+                    setShowCompanyColumn(nextVal);
+                    try {
+                      localStorage.setItem('mun_show_company_col', String(nextVal));
+                    } catch {}
+                    toast.info(nextVal ? 'تم إظهار عمود الشركة في الجدول' : 'تم إخفاء عمود الشركة من الجدول');
+                  }}
+                  title={showCompanyColumn ? "إخفاء عمود الشركة من الجدول" : "إظهار عمود الشركة في الجدول"}
+                >
+                  <Building2 className="h-3.5 w-3.5 text-primary" />
+                  <span>عمود الشركة: {showCompanyColumn ? 'ظاهر' : 'مخفي'}</span>
+                </Button>
+
                 <Button
                   size="sm"
                   variant="outline"
@@ -5038,6 +5177,9 @@ export default function MunicipalityBillboardOrganizer() {
                       </th>
                       <th className="p-3 text-center w-12 font-semibold">#</th>
                       <th className="p-3 text-right font-semibold">الموقع / اسم اللوحة</th>
+                      {showCompanyColumn && (
+                        <th className="p-3 text-center font-semibold min-w-[130px]">الشركة</th>
+                      )}
                       <th className="p-3 text-right font-semibold">أقرب نقطة دالة</th>
                       <th className="p-3 text-center w-[220px] font-semibold">المقاس</th>
                       <th className="p-3 text-center font-semibold">الأوجه</th>
@@ -5114,6 +5256,42 @@ export default function MunicipalityBillboardOrganizer() {
                               </button>
                             </div>
                           </td>
+                        )}
+
+                        {/* Company Cell with Quick Edit */}
+                        {showCompanyColumn && (
+                          inlineEditingCell?.seq === item.sequence_number && inlineEditingCell?.field === 'company' ? (
+                            <td className="p-2" onClick={(e) => e.stopPropagation()}>
+                              <Input
+                                autoFocus
+                                value={item.company || item.company_name || ''}
+                                onChange={(e) => updateItem(item.sequence_number, { company: e.target.value, company_name: e.target.value })}
+                                onKeyDown={(e) => { if (e.key === 'Enter') setInlineEditingCell(null); }}
+                                onBlur={() => setInlineEditingCell(null)}
+                                placeholder="اسم الشركة..."
+                                className="h-8 text-xs font-semibold rounded-lg border-primary/50 bg-background focus-visible:ring-primary cursor-text select-text"
+                              />
+                            </td>
+                          ) : (
+                            <td
+                              className="p-3 group/cell cursor-pointer hover:bg-primary/5 transition-colors text-center"
+                              onClick={(e) => { e.stopPropagation(); setInlineEditingCell({ seq: item.sequence_number, field: 'company' }); }}
+                              title="اضغط لتعديل الشركة"
+                            >
+                              <div className="flex items-center justify-center gap-1.5">
+                                <span className="font-semibold text-foreground/90 text-xs truncate max-w-[130px]" title={resolveItemCompany(item) || ''}>
+                                  {resolveItemCompany(item) || <span className="text-muted-foreground/50">—</span>}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="opacity-0 group-hover/cell:opacity-100 p-1 text-muted-foreground hover:text-primary transition-all rounded-md hover:bg-primary/10"
+                                  title="تعديل الشركة"
+                                >
+                                  <Edit2 className="h-3 w-3" />
+                                </button>
+                              </div>
+                            </td>
+                          )
                         )}
 
                         {/* Nearest Landmark Cell with Pencil Quick Edit */}
@@ -5356,6 +5534,12 @@ export default function MunicipalityBillboardOrganizer() {
 
                         {/* Badges metadata */}
                         <div className="flex flex-wrap gap-1.5">
+                          {showCompanyColumn && resolveItemCompany(item) && (
+                            <Badge variant="outline" className="text-[10px] rounded-lg px-1.5 border-primary/20 bg-primary/5 text-primary font-medium">
+                              <Building2 className="h-2.5 w-2.5 ml-1" />
+                              {resolveItemCompany(item)}
+                            </Badge>
+                          )}
                           {(item.latitude != null && item.longitude != null) && (
                             <Badge variant="outline" className="text-[9px] rounded-lg px-1.5 font-mono border-border/15 bg-background/40">
                               {formatCoordinateInput(item.latitude, item.longitude)}
@@ -6523,6 +6707,33 @@ export default function MunicipalityBillboardOrganizer() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
+                  <Building2 className="h-3.5 w-3.5 text-primary" />
+                  <span>الشركة (اختياري)</span>
+                </Label>
+                <div className="flex gap-2">
+                  <Select
+                    value={allCompanies.some(c => c.name === (editingItem.company || editingItem.company_name)) ? (editingItem.company || editingItem.company_name || '') : ''}
+                    onValueChange={v => setEditingItem({ ...editingItem, company: v, company_name: v })}
+                  >
+                    <SelectTrigger className="rounded-xl border-border/15 bg-background/50 h-10 flex-1">
+                      <SelectValue placeholder="اختر شركة..." />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl border-border/15 bg-popover/95 backdrop-blur-md">
+                      {allCompanies.map(c => (
+                        <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    value={editingItem.company || editingItem.company_name || ''}
+                    onChange={e => setEditingItem({ ...editingItem, company: e.target.value, company_name: e.target.value })}
+                    placeholder="أو اكتب اسم الشركة يدويًا"
+                    className="rounded-xl border-border/15 bg-background/50 h-10 flex-1 text-xs"
+                  />
+                </div>
+              </div>
               {/* Photo Zone */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
@@ -7249,6 +7460,12 @@ export default function MunicipalityBillboardOrganizer() {
                     {/* Bottom details block */}
                     <div className="flex justify-between items-end border-t border-slate-100 pt-2 text-[9px] font-medium text-slate-500">
                       <div className="space-y-0.5">
+                        {showCompanyInPrint && (
+                          <div className="text-[9px] font-bold text-slate-800 flex items-center gap-1">
+                            <span className="text-slate-400 font-normal">الشركة:</span>
+                            <span>{currentCollection.items[0] ? (resolveItemCompany(currentCollection.items[0]) || 'شركة الفارس الذهبي') : 'شركة الفارس الذهبي'}</span>
+                          </div>
+                        )}
                         <div>المقاس: 8 × 3 {showHeightInPrint ? '× 1.2' : ''}</div>
                         {customSettings.faces_count_show !== 'false' && <div>الأوجه: وجهين</div>}
                       </div>
@@ -7813,6 +8030,26 @@ export default function MunicipalityBillboardOrganizer() {
                       </div>
                     </div>
 
+                    {/* Show Company in Print Option */}
+                    <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-3 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="show_company_sig_toggle" className="text-xs font-black text-foreground flex items-center gap-1.5 cursor-pointer">
+                            <Building2 className="h-4 w-4 text-primary" />
+                            <span>إظهار عمود الشركة في الطباعة والملخص</span>
+                          </Label>
+                          <div className="text-[10px] text-muted-foreground">
+                            إضافة عمود الشركة إلى جدول ملخص اللوحات وظهور اسم الشركة أعلى المقاس في بطاقات اللوحات
+                          </div>
+                        </div>
+                        <Switch
+                          id="show_company_sig_toggle"
+                          checked={showCompanyInPrint}
+                          onCheckedChange={handleToggleShowCompanyInPrint}
+                        />
+                      </div>
+                    </div>
+
                     {/* Signatures Master Section */}
                     <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-4 shadow-sm">
                       <div className="flex items-center justify-between border-b border-border/15 pb-3">
@@ -8152,7 +8389,7 @@ export default function MunicipalityBillboardOrganizer() {
                     </div>
 
                     {/* Switches Grid */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
                       <div className="flex items-center justify-between p-3.5 border border-border/20 rounded-2xl bg-card">
                         <Label htmlFor="faces_count_show" className="text-xs font-bold text-foreground cursor-pointer">عرض الأوجه</Label>
                         <Switch 
@@ -8162,6 +8399,11 @@ export default function MunicipalityBillboardOrganizer() {
                             await saveSettings({ faces_count_show: v ? 'true' : 'false' });
                           }} 
                         />
+                      </div>
+
+                      <div className="flex items-center justify-between p-3.5 border border-border/20 rounded-2xl bg-card">
+                        <Label htmlFor="show_company_in_print_layout" className="text-xs font-bold text-foreground cursor-pointer">عرض الشركة</Label>
+                        <Switch id="show_company_in_print_layout" checked={showCompanyInPrint} onCheckedChange={handleToggleShowCompanyInPrint} />
                       </div>
 
                       <div className="flex items-center justify-between p-3.5 border border-border/20 rounded-2xl bg-card">

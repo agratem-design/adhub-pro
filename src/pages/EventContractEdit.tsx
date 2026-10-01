@@ -256,6 +256,14 @@ export default function EventContractEdit() {
     });
   };
 
+  const bulkRemove = (bids: string[]) => {
+    setSelected((prev) => {
+      const next = { ...prev };
+      bids.forEach((bid) => delete next[bid]);
+      return next;
+    });
+  };
+
   const updatePrice = (bid: string, p: number) => {
     setSelected((prev) => ({ ...prev, [bid]: { ...prev[bid], daily_price: p } }));
   };
@@ -461,6 +469,7 @@ export default function EventContractEdit() {
               selected={Object.keys(selected)}
               billboards={selectedBillboards}
               onRemoveSelected={remove}
+              onBulkRemove={bulkRemove}
               calculateBillboardPrice={(b) => selected[String(b.ID)]?.daily_price * days || 0}
               installationDetails={[]}
               pricingMode="days"

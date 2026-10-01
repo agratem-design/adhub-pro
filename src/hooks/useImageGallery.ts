@@ -120,10 +120,24 @@ export function useImageGallery() {
 
       // Fetch tasks
       const tasksRes = allTaskIds.length > 0
-        ? await supabase.from('installation_tasks').select('id, contract_id, status, team_id, installation_teams!installation_tasks_team_id_fkey(team_name)').in('id', allTaskIds)
+        ? await supabase.from('installation_tasks').select('id, contract_id, status, team_id').in('id', allTaskIds)
         : { data: [] };
 
-      const taskData = tasksRes.data || [];
+      const rawTaskData = tasksRes.data || [];
+      const teamIds = [...new Set(rawTaskData.map(t => t.team_id).filter(Boolean))];
+      const teamMap = new Map<string, string>();
+      if (teamIds.length > 0) {
+        const { data: teams } = await supabase.from('installation_teams').select('id, team_name').in('id', teamIds);
+        (teams || []).forEach(tm => {
+          if (tm.id && tm.team_name) teamMap.set(tm.id, tm.team_name);
+        });
+      }
+      const taskData = rawTaskData.map(t => ({
+        ...t,
+        installation_teams: t.team_id && teamMap.has(t.team_id)
+          ? { team_name: teamMap.get(t.team_id)! }
+          : null,
+      }));
       const contractIdsFromTasks = [...new Set(taskData.map(t => t.contract_id).filter(Boolean))] as number[];
 
       // Also fetch contracts that have design_data but NO installation tasks

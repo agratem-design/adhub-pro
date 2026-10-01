@@ -11,6 +11,7 @@ export type ContractAdTypeCandidate = {
   adType?: unknown;
   customerId?: unknown;
   customerName?: unknown;
+  company?: unknown;
   billboardIds?: unknown;
   contractDate?: unknown;
   includeInstallation?: boolean;
@@ -82,8 +83,14 @@ export const matchContractIdsForTaskBillboards = ({
   const matched = new Set<number>();
   if (directId) matched.add(directId);
 
-  const normTaskId = String(taskCustomerId || '').trim();
-  const normTaskName = normalizeCustomerName(taskCustomerName);
+  const directContract = directId
+    ? contracts.find(c => normalizeContractId(c.contractNumber ?? c.Contract_Number) === directId)
+    : undefined;
+  const directCustId = directContract ? String(directContract.customerId ?? directContract.customer_id ?? '').trim() : '';
+  const directCustName = directContract ? normalizeCustomerName(directContract.customerName ?? directContract['Customer Name']) : '';
+
+  const normTaskId = directCustId || String(taskCustomerId || '').trim();
+  const normTaskName = directCustName || normalizeCustomerName(taskCustomerName);
 
   // فلترة عقود نفس العميل فقط
   const customerContracts = contracts.filter(c => {
@@ -197,25 +204,75 @@ export const filterTaskContractIdsByCustomer = ({
     if (id) contractMap.set(id, contract);
   });
 
-  const normalizedTaskCustomerId = String(taskCustomerId || '').trim();
-  const normalizedTaskCustomerName = normalizeCustomerName(taskCustomerName);
+  // إذا كان العقد المباشر للمهمة معروفاً وموجوداً، فإن عميل هذا العقد هو المصدر الموثوق والحاسم للمهمة
+  const directContract = directId ? contractMap.get(directId) : undefined;
+  const authoritativeCustomerId = String(directContract?.customerId || taskCustomerId || '').trim();
+  const authoritativeCustomerName = normalizeCustomerName(directContract?.customerName) || normalizeCustomerName(taskCustomerName);
 
   return normalizedIds.filter(contractId => {
+    // العقد المباشر المخصص للمهمة مقبول دائماً ولا يتم استبعاده أبداً حتى لو تغيّر اسم العميل في العقد
+    if (contractId === directId) return true;
+
     const contract = contractMap.get(contractId);
-    if (!contract) return contractId === directId;
+    if (!contract) return false;
 
     const contractCustomerId = String(contract.customerId || '').trim();
-    if (normalizedTaskCustomerId && contractCustomerId) {
-      return normalizedTaskCustomerId === contractCustomerId;
+    if (authoritativeCustomerId && contractCustomerId) {
+      return authoritativeCustomerId === contractCustomerId;
     }
 
     const contractCustomerName = normalizeCustomerName(contract.customerName);
-    if (normalizedTaskCustomerName && contractCustomerName) {
-      return normalizedTaskCustomerName === contractCustomerName;
+    if (authoritativeCustomerName && contractCustomerName) {
+      return authoritativeCustomerName === contractCustomerName;
     }
 
-    return contractId === directId;
+    return false;
   });
+};
+
+/**
+ * يسترجع الاسم الموثوق للعميل والشركة والمعرف من العقد الحقيقي إذا تم تعديلها في العقد
+ */
+export const resolveTaskContractCustomerInfo = ({
+  directContractId,
+  taskCustomerId,
+  taskCustomerName,
+  taskCompanyName,
+  contracts,
+}: {
+  directContractId: unknown;
+  taskCustomerId?: unknown;
+  taskCustomerName?: unknown;
+  taskCompanyName?: unknown;
+  contracts: Array<{
+    Contract_Number?: unknown;
+    contractNumber?: unknown;
+    'Customer Name'?: unknown;
+    customerName?: unknown;
+    customer_id?: unknown;
+    customerId?: unknown;
+    Company?: unknown;
+    company?: unknown;
+  }>;
+}): {
+  customerName: string;
+  customerId: string;
+  companyName: string;
+} => {
+  const directId = normalizeContractId(directContractId);
+  const contract = directId
+    ? contracts.find(c => normalizeContractId(c.contractNumber ?? c.Contract_Number) === directId)
+    : undefined;
+
+  const resolvedCustomerName = String(contract?.customerName ?? contract?.['Customer Name'] ?? taskCustomerName ?? '').trim();
+  const resolvedCustomerId = String(contract?.customerId ?? contract?.customer_id ?? taskCustomerId ?? '').trim();
+  const resolvedCompanyName = String(contract?.company ?? contract?.Company ?? taskCompanyName ?? '').trim();
+
+  return {
+    customerName: resolvedCustomerName,
+    customerId: resolvedCustomerId,
+    companyName: resolvedCompanyName,
+  };
 };
 
 export const resolveTaskContractAdTypes = (params: {

@@ -196,10 +196,24 @@ export function TaskTotalCostSummary({
   const [cutoutCost, setCutoutCost] = useState<number>(0);
   const [savingTaskSettings, setSavingTaskSettings] = useState(false);
 
+  // Helper to extract clean UUID from taskId (handles bare UUID or composite keys like uuid-orig, uuid-re-1)
+  const extractCleanTaskId = (id: string): string | null => {
+    if (!id) return null;
+    const uuidMatch = id.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    if (uuidMatch) return uuidMatch[0];
+    const stripped = id.replace(/-(orig|re-\d+).*$/, '').trim();
+    return stripped || null;
+  };
+
+  const isUUID = (str: string): boolean => 
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+
   useEffect(() => {
     const fetchTaskSettings = async () => {
       if (!taskId) return;
-      const cleanId = taskId.split('-')[0];
+      const cleanId = extractCleanTaskId(taskId);
+      if (!cleanId || !isUUID(cleanId)) return;
+
       const { data: installTask } = await supabase
         .from('installation_tasks')
         .select('default_price_per_meter, print_task_id, cutout_task_id')
@@ -233,7 +247,11 @@ export function TaskTotalCostSummary({
   const handleSavePrintAndCutoutSettings = async (newPrintActive: boolean, newPrintPrice: number, newCutoutActive: boolean, newCutoutCost: number) => {
     try {
       setSavingTaskSettings(true);
-      const cleanId = taskId.split('-')[0];
+      const cleanId = extractCleanTaskId(taskId);
+      if (!cleanId || !isUUID(cleanId)) {
+        toast.error('معرف المهمة غير صالح');
+        return;
+      }
       
       await supabase
         .from('installation_tasks')

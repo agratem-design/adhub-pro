@@ -2426,6 +2426,7 @@ export default function OffersPage() {
                     selected={selected}
                     billboards={billboards}
                     onRemoveSelected={(id) => setSelected(prev => prev.filter(x => x !== id))}
+                    onBulkRemove={(ids) => setSelected(prev => prev.filter(x => !ids.includes(x)))}
                     calculateBillboardPrice={calculateBillboardPrice}
                     installationDetails={installationDetails}
                     pricingMode={pricingMode}

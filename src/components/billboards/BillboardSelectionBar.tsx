@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X, Printer, CheckSquare, Square, Trash2, Eye, EyeOff, ClipboardList, Table2 } from 'lucide-react';
+import { X, Printer, CheckSquare, Square, Trash2, Eye, EyeOff, ClipboardList, Table2, Unlink } from 'lucide-react';
 import { BillboardReportDialog } from './BillboardReportDialog';
 import { BillboardPrintWithSelection } from './BillboardPrintWithSelection';
+import { BulkRemoveFromContractDialog } from './BulkRemoveFromContractDialog';
 import { UnifiedPrintAllDialog, BillboardPrintItem } from '@/components/shared/printing/UnifiedPrintAllDialog';
 import { isBillboardAvailable } from '@/utils/contractUtils';
 
@@ -19,6 +20,7 @@ interface BillboardSelectionBarProps {
   onSetExcludeFriendlyAndHidden?: (val: boolean) => void;
   selectAvailableOnly?: boolean;
   onSetSelectAvailableOnly?: (val: boolean) => void;
+  loadBillboards?: () => Promise<void>;
 }
 
 export const BillboardSelectionBar: React.FC<BillboardSelectionBarProps> = ({
@@ -32,11 +34,13 @@ export const BillboardSelectionBar: React.FC<BillboardSelectionBarProps> = ({
   excludeFriendlyAndHidden = true,
   onSetExcludeFriendlyAndHidden = () => {},
   selectAvailableOnly = false,
-  onSetSelectAvailableOnly = () => {}
+  onSetSelectAvailableOnly = () => {},
+  loadBillboards
 }) => {
   const [printAllDialogOpen, setPrintAllDialogOpen] = useState(false);
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
   const [reportDialogOpen, setReportDialogOpen] = useState(false);
+  const [bulkRemoveDialogOpen, setBulkRemoveDialogOpen] = useState(false);
 
   const selectableCount = useMemo(() => {
     return filteredBillboards.filter((b: any) => {
@@ -77,6 +81,13 @@ export const BillboardSelectionBar: React.FC<BillboardSelectionBarProps> = ({
       map[id] = b;
     });
     return map;
+  }, [selectedBillboards]);
+
+  const contractedBillboards = useMemo(() => {
+    return selectedBillboards.filter(b => {
+      const cNum = b.Contract_Number ?? b.contractNumber ?? b.contract_number;
+      return Boolean(cNum && String(cNum) !== '0');
+    });
   }, [selectedBillboards]);
 
   if (selectedBillboards.length === 0) {
@@ -149,6 +160,18 @@ export const BillboardSelectionBar: React.FC<BillboardSelectionBarProps> = ({
           </div>
 
           <div className="w-px h-8 bg-white/30" />
+
+          {/* زر إزالة اللوحات المحددة من العقود */}
+          {contractedBillboards.length > 0 && (
+            <Button
+              onClick={() => setBulkRemoveDialogOpen(true)}
+              variant="outline"
+              className="bg-amber-500/20 text-amber-300 border-amber-500/40 hover:bg-amber-500/30 hover:text-white gap-2 font-bold shadow-lg cursor-pointer"
+            >
+              <Unlink className="h-4 w-4 text-amber-400" />
+              إزالة من العقد ({contractedBillboards.length})
+            </Button>
+          )}
 
           {/* زر طباعة الكل (نظام مهام التركيب الموحد) */}
           <Button
@@ -252,6 +275,16 @@ export const BillboardSelectionBar: React.FC<BillboardSelectionBarProps> = ({
         open={reportDialogOpen}
         onOpenChange={setReportDialogOpen}
         selectedBillboards={selectedBillboards}
+      />
+
+      <BulkRemoveFromContractDialog
+        open={bulkRemoveDialogOpen}
+        onOpenChange={setBulkRemoveDialogOpen}
+        billboards={contractedBillboards}
+        onSuccess={async () => {
+          onClearSelection();
+          if (loadBillboards) await loadBillboards();
+        }}
       />
     </>
   );

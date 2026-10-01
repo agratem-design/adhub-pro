@@ -40,6 +40,7 @@ import {
   matchContractIdsForTaskBillboards,
   normalizeContractId,
   resolveTaskContractAdTypes,
+  resolveTaskContractCustomerInfo,
 } from '@/lib/compositeTaskContractIdentity';
 import {
   Search,
@@ -2578,8 +2579,18 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       let installTasks: any[] = [];
       let taskDesignsData: any[] = [];
       let printTasksData: any[] = [];
+      const teamNameById = new Map<string, string>();
 
-      const promises: Promise<any>[] = [];
+      const promises: Promise<any>[] = [
+        supabase
+          .from('installation_teams')
+          .select('id, team_name')
+          .then(({ data }) => {
+            (data || []).forEach((tm: any) => {
+              if (tm.id && tm.team_name) teamNameById.set(tm.id, tm.team_name);
+            });
+          }),
+      ];
 
       // Fetch installation tasks to ensure contract links and items resolution
       const allContractIdsArray = Array.from(allContractIdsSet);
@@ -2595,7 +2606,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
                   (chunk) =>
                     supabase
                       .from('installation_tasks')
-                      .select('id, task_type, reinstallation_number, contract_id, status, team:installation_teams!installation_tasks_team_id_fkey(team_name)')
+                      .select('id, task_type, reinstallation_number, contract_id, status, team_id')
                       .in('id', chunk)
                 );
                 fetchedTasks.push(...byId);
@@ -2607,7 +2618,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
                   (chunk) =>
                     supabase
                       .from('installation_tasks')
-                      .select('id, task_type, reinstallation_number, contract_id, status, team:installation_teams!installation_tasks_team_id_fkey(team_name)')
+                      .select('id, task_type, reinstallation_number, contract_id, status, team_id')
                       .in('contract_id', chunk)
                 );
                 fetchedTasks.push(...byContract);
@@ -2699,7 +2710,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
             (chunk) =>
               supabase
                 .from('Contract')
-                .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price')
+                .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price, "Company"')
                 .in('customer_id', chunk)
           );
         } else {
@@ -2709,7 +2720,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
             (chunk) =>
               supabase
                 .from('Contract')
-                .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price')
+                .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price, "Company"')
                 .in('Customer Name', chunk)
           );
         }
@@ -2724,7 +2735,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           (chunk) =>
             supabase
               .from('Contract')
-              .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price')
+              .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price, "Company"')
               .in('Contract_Number', chunk)
         );
         const combinedContracts = [...(contractsData || []), ...customerContracts];
@@ -2744,6 +2755,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         adType: contract['Ad Type'] || contract.ad_type || '',
         customerId: contract.customer_id,
         customerName: contract['Customer Name'],
+        company: contract['Company'] || contract.Company || '',
         includeInstallation: isEnabledContractFlag(contract.include_installation_in_price),
         includePrint: isEnabledContractFlag(contract.include_print_in_billboard_price),
       }));
@@ -2764,7 +2776,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       const taskTypeByInstallTaskId = new Map<string, string>();
 
       installTasks.forEach((t: any) => { 
-        teamNameMap.set(t.id, t.team?.team_name || ''); 
+        teamNameMap.set(t.id, (t.team_id && teamNameById.get(t.team_id)) || t.team?.team_name || ''); 
         taskTypeByInstallTaskId.set(t.id, normalizeCompositeTaskType(t.task_type));
         reinstallMap.set(t.id, t.task_type === 'reinstallation' ? (t.reinstallation_number || 1) : null);
         const c = normalizeContractId(t.contract_id);
@@ -2919,6 +2931,32 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           contracts: contractCandidates,
         });
 
+        const customerInfo = resolveTaskContractCustomerInfo({
+          directContractId: task.contract_id || directC,
+          taskCustomerId: task.customer_id,
+          taskCustomerName: task.customer_name,
+          taskCompanyName: task.customer?.company || (task as any).companyName,
+          contracts,
+        });
+
+        if (
+          task.id &&
+          task.contract_id &&
+          customerInfo.customerName &&
+          task.customer_name !== customerInfo.customerName
+        ) {
+          supabase
+            .from('composite_tasks')
+            .update({
+              customer_name: customerInfo.customerName,
+              customer_id: customerInfo.customerId || task.customer_id,
+            })
+            .eq('id', task.id)
+            .then(({ error }) => {
+              if (error) console.warn('[composite-tasks] Self-heal customer failed:', error);
+            });
+        }
+
         const installationImages = task.installation_task_id
           ? installDesigns
               .filter((item: any) => item.task_id === task.installation_task_id)
@@ -2927,6 +2965,9 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           : [];
 
         extras[task.id] = {
+          customerName: customerInfo.customerName,
+          companyName: customerInfo.companyName,
+          customerId: customerInfo.customerId,
           designUrls: urls.slice(0, 4),
           installationImages: [...new Set(installationImages)],
           contractIds: candidateContractIds,
@@ -3006,6 +3047,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       reinstallationNumber: null, printerName: '', realInstallCost: 0,
       taskDesignCount: 0, installationItemCount: 0, assignedDesignCount: 0,
       installationImages: [], contractInclusion: { includeInstall: false, includePrint: false },
+      customerName: '', companyName: '', customerId: '',
     };
     const payments = taskPayments[task.id] || [];
     const totalPaid = payments.length > 0 
@@ -3026,9 +3068,14 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       ? extra.contractIds
       : [normalizeContractId(task.contract_id)].filter((id): id is number => id !== null);
     const normalizedTaskType = normalizeCompositeTaskType(task._taskType || task.task_type);
+    const resolvedCustomerName = extra.customerName || task.customer_name || 'غير محدد';
+    const resolvedCompanyName = extra.companyName || task.customer?.company || (task as any).companyName || '';
+    const resolvedCustomerId = extra.customerId || task.customer_id || '';
 
     return {
       ...task,
+      customer_name: resolvedCustomerName,
+      customer_id: resolvedCustomerId,
       task_type: normalizedTaskType,
       customer_installation_cost: realCustomerInstall,
       customer_total: customerTotal,
@@ -3044,7 +3091,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       adType: extra.adType || '',
       teamName: extra.teamName || '',
       printerName: extra.printerName || '',
-      companyName: task.customer?.company || (extra as any).companyName || '',
+      companyName: resolvedCompanyName,
       reinstallationNumber: normalizedTaskType === 'reinstallation'
         ? (task._reinstallationNumber ?? task.reinstallationNumber ?? extra.reinstallationNumber ?? 1)
         : null,
@@ -3058,7 +3105,9 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       _totalPaid: totalPaid,
       _paymentPercentage: paymentPercentage,
       _searchableText: normalizeForSearch([
+        resolvedCustomerName,
         task.customer_name,
+        resolvedCompanyName,
         task.customer?.company,
         (extra as any).companyName,
         task.customer?.name,

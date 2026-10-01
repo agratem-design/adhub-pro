@@ -158,6 +158,10 @@ const settingGroups: SettingGroup[] = [
         { value: 'false', label: 'إخفاء الكلمات (معطّل افتراضياً)' },
         { value: 'true', label: 'إظهار الكلمات' },
       ]},
+      { key: 'show_company_in_print' as any, label: 'إظهار اسم الشركة أعلى المقاس وفي جدول اللوحات', type: 'select', options: [
+        { value: 'false', label: 'إخفاء اسم الشركة (افتراضي)' },
+        { value: 'true', label: 'إظهار اسم الشركة (أعلى المقاس وفي الجدول)' },
+      ]},
     ],
   },
   {
@@ -549,6 +553,13 @@ export default function MunicipalityPrintSettingsDialog({
           ${statusBelow}
         </div>
  
+        <!-- الشركة أعلى المقاس -->
+        ${(s as any).show_company_in_print === 'true' ? `
+        <div style="position:absolute;top:${s.contract_number_top || '39.869mm'};right:${s.contract_number_right || '22mm'};font-size:${s.contract_number_font_size || '16px'};font-weight:${s.contract_number_font_weight || '500'};color:${s.contract_number_color || '#333333'};text-align:${s.contract_number_alignment || 'right'};max-width:65%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${s.contract_number_offset_x && s.contract_number_offset_x !== '0mm' ? `margin-right:${s.contract_number_offset_x};` : ''}z-index:5;">
+          <span style="font-weight:700;">الشركة: </span>${(sb as any)?.company || 'شركة الفارس الذهبي'}
+        </div>
+        ` : ''}
+
         <!-- المقاس -->
         <div style="position:absolute;top:${s.size_top};left:${s.size_left};transform:translateX(-50%);width:70mm;display:flex;align-items:center;justify-content:center;text-align:center;font-size:${s.size_font_size};font-weight:${s.size_font_weight || '500'};color:${s.size_color};z-index:5;margin:0;padding:0;">
           ${generatePrintedSizeHtml(sb.size, showHeightInPrint, (s as any).show_size_dimension_labels === 'true')}

@@ -160,13 +160,34 @@ export const InstallationTaskDetail: React.FC<Props> = ({
     const fetchSiblings = async () => {
       setLoadingSiblings(true);
       try {
-        const { data: tasksData, error } = await supabase
+        const { data: rawTasksData, error } = await supabase
           .from('installation_tasks')
-          .select('id, task_type, task_name, contract_id, composite_task_id, reinstallation_number, created_at, status, team_id, installation_teams!installation_tasks_team_id_fkey(team_name)')
+          .select('id, task_type, task_name, contract_id, composite_task_id, reinstallation_number, created_at, status, team_id')
           .in('contract_id', effectiveContractIds)
           .order('created_at', { ascending: true });
         
-        if (!error && tasksData && taskItems.length > 0) {
+        let tasksData: any[] = [];
+        if (!error && rawTasksData && rawTasksData.length > 0) {
+          const teamIds = [...new Set(rawTasksData.map(t => t.team_id).filter(Boolean))];
+          const teamMap = new Map<string, string>();
+          if (teamIds.length > 0) {
+            const { data: teams } = await supabase
+              .from('installation_teams')
+              .select('id, team_name')
+              .in('id', teamIds);
+            (teams || []).forEach(tm => {
+              if (tm.id && tm.team_name) teamMap.set(tm.id, tm.team_name);
+            });
+          }
+          tasksData = rawTasksData.map(t => ({
+            ...t,
+            installation_teams: t.team_id && teamMap.has(t.team_id)
+              ? { team_name: teamMap.get(t.team_id)! }
+              : null,
+          }));
+        }
+
+        if (!error && tasksData.length > 0 && taskItems.length > 0) {
           const currentBillboardIds = new Set(taskItems.map(i => i.billboard_id));
           const currentCompositeId = (task as any).composite_task_id;
 

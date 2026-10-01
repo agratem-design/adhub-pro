@@ -17,6 +17,19 @@ export async function saveContractEditAtomic(contractNumber: string, updates: Re
     if (error.code === 'PGRST202') throw new Error('يلزم تطبيق تحديث قاعدة البيانات الخاص بحفظ العقود قبل استخدام الحفظ الجديد.');
     throw new Error(error.message || error.code || 'فشل حفظ التعديلات');
   }
+  const custName = (updates['Customer Name'] ?? updates.customer_name) as string | undefined;
+  const custId = (updates.customer_id ?? updates.customerId) as string | undefined;
+  if (custName !== undefined || custId !== undefined) {
+    const compUpdates: Record<string, unknown> = {};
+    if (custName !== undefined) compUpdates.customer_name = custName;
+    if (custId !== undefined) compUpdates.customer_id = custId;
+    try {
+      await supabase.from('composite_tasks').update(compUpdates).eq('contract_id', Number(contractNumber));
+    } catch (e) {
+      console.warn('Failed to sync composite_tasks customer after atomic edit:', e);
+    }
+  }
+
   return data;
 }
 

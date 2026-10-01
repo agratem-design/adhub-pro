@@ -4,6 +4,7 @@ import {
   matchContractIdsForTaskBillboards,
   normalizeContractId,
   resolveTaskContractAdTypes,
+  resolveTaskContractCustomerInfo,
 } from '@/lib/compositeTaskContractIdentity';
 
 describe('Composite Tasks - normalizeContractId and Ad Type Logic', () => {
@@ -51,6 +52,26 @@ describe('Composite Tasks - normalizeContractId and Ad Type Logic', () => {
 
       expect(contractIds).toEqual([1254, 1255]);
     });
+
+    it('retains direct contract even if customer on contract was updated (Contract 1309 case)', () => {
+      // Contract 1309 was updated to "بريماتكس" while task still had snapshot "أحمد حسين الجدائمي"
+      const contractIds = filterTaskContractIdsByCustomer({
+        candidateContractIds: [1309, 1310, 999],
+        directContractId: 1309,
+        taskCustomerId: 'old-customer-ahmad',
+        taskCustomerName: 'أحمد حسين الجدائمي',
+        contracts: [
+          { contractNumber: 1309, customerId: 'new-customer-primatix', customerName: 'بريماتكس', adType: 'عطور' },
+          { contractNumber: 1310, customerId: 'new-customer-primatix', customerName: 'بريماتكس', adType: 'عطور' },
+          { contractNumber: 999, customerId: 'other-customer', customerName: 'شركة غير مرتبطة' },
+        ],
+      });
+
+      // Both 1309 and 1310 belong to the updated authoritative customer (بريماتكس), while 999 is filtered out
+      expect(contractIds).toContain(1309);
+      expect(contractIds).toContain(1310);
+      expect(contractIds).not.toContain(999);
+    });
   });
 
   describe('Historical multi-contract matching', () => {
@@ -87,6 +108,25 @@ describe('Composite Tasks - normalizeContractId and Ad Type Logic', () => {
   });
 
   describe('Ad Type Deduplication and Resolution', () => {
+    it('resolves ad type accurately even when contract customer was changed (Contract 1309)', () => {
+      const adTypes = resolveTaskContractAdTypes({
+        candidateContractIds: [1309],
+        directContractId: 1309,
+        taskCustomerId: 'old-cust-id',
+        taskCustomerName: 'أحمد حسين الجدائمي',
+        contracts: [
+          {
+            contractNumber: 1309,
+            adType: 'عطور بريماتكس',
+            customerId: 'new-cust-id',
+            customerName: 'بريماتكس',
+          },
+        ],
+      });
+
+      expect(adTypes).toEqual(['عطور بريماتكس']);
+    });
+
     it('does not leak the ad type of another customer through a shared billboard', () => {
       const adTypes = resolveTaskContractAdTypes({
         candidateContractIds: [1228, 1185],
@@ -150,6 +190,43 @@ describe('Composite Tasks - normalizeContractId and Ad Type Logic', () => {
         )
       );
       expect(valid).toEqual(['إعلان تجاري']);
+    });
+  });
+
+  describe('resolveTaskContractCustomerInfo', () => {
+    it('resolves updated customer name and company from authoritative contract', () => {
+      const info = resolveTaskContractCustomerInfo({
+        directContractId: 1309,
+        taskCustomerId: 'old-cust-1',
+        taskCustomerName: 'أحمد حسين الجدائمي',
+        taskCompanyName: 'مكتب الجدائمي',
+        contracts: [
+          {
+            Contract_Number: 1309,
+            'Customer Name': 'بريماتكس',
+            customer_id: 'new-cust-primatix',
+            Company: 'شركة بريماتكس التجارية',
+          },
+        ],
+      });
+
+      expect(info.customerName).toBe('بريماتكس');
+      expect(info.customerId).toBe('new-cust-primatix');
+      expect(info.companyName).toBe('شركة بريماتكس التجارية');
+    });
+
+    it('falls back gracefully to task snapshot if contract is not loaded', () => {
+      const info = resolveTaskContractCustomerInfo({
+        directContractId: 9999,
+        taskCustomerId: 'task-cust-id',
+        taskCustomerName: 'عميل المهمة',
+        taskCompanyName: 'شركة المهمة',
+        contracts: [],
+      });
+
+      expect(info.customerName).toBe('عميل المهمة');
+      expect(info.customerId).toBe('task-cust-id');
+      expect(info.companyName).toBe('شركة المهمة');
     });
   });
 

@@ -53,6 +53,7 @@ export interface CollectionItem {
   municipality?: string;
   status?: string;
   overlay_config?: any;
+  company?: string | null;
 }
 
 const normalizeMuni = (name: string | null | undefined): string => {
@@ -410,6 +411,7 @@ export const SmartMunicipalityImportDialog: React.FC<SmartMunicipalityImportDial
         image_url: b.Image_URL,
         municipality: selectedMunicipality,
         status: statusToUse,
+        company: b.Company || (b.own_company_id ? getCompanyName(b.own_company_id) : (b.friend_company_id ? getCompanyName(b.friend_company_id) : (selectedCompanyId !== 'all' && selectedCompanyId !== 'unassigned' ? getCompanyName(selectedCompanyId) : null))),
       };
     });
 
