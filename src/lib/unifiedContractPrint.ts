@@ -1382,7 +1382,7 @@ export async function generateUnifiedPrintHTML(options: UnifiedPrintOptions): Pr
       </style>
       <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
     </head>
-    <body>
+    <body data-keep-print-colors="true">
       <div class="print-page">
         ${firstPageHTML}
       </div>

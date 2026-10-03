@@ -2499,7 +2499,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
             }
           </style>
         </head>
-        <body>
+        <body data-keep-print-colors="true">
           <div id="loadingMessage" class="loading-message">جاري تحميل ${contractData.isOffer ? 'العرض' : 'العقد'}...</div>
           
           <div class="template-container first-page page">

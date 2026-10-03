@@ -11,7 +11,12 @@ describe('economical print surfaces', () => {
     expect(applyPrintInkSaver(result)).toBe(result);
     expect(PRINT_INK_SAVER_CSS).toContain('.receipt-summary-balance');
     expect(PRINT_INK_SAVER_CSS).toContain('color: #262626 !important');
-    expect(PRINT_INK_SAVER_CSS).toContain('html body table tfoot tr');
-    expect(PRINT_INK_SAVER_CSS).toContain('html body table tfoot td');
+    expect(PRINT_INK_SAVER_CSS).toContain('html body:not([data-keep-print-colors]) table tfoot tr');
+    expect(PRINT_INK_SAVER_CSS).toContain('html body:not([data-keep-print-colors]) table tfoot td');
+  });
+
+  it('leaves documents that keep their print colors (contracts) untouched', () => {
+    const input = '<html><head></head><body data-keep-print-colors="true"><table><tr><th style="background:#D4AF37">م</th></tr></table></body></html>';
+    expect(applyPrintInkSaver(input)).toBe(input);
   });
 });
