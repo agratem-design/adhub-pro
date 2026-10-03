@@ -35,6 +35,27 @@ function solidFillDataUri(fill: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
+function isColorLight(color: string): boolean {
+  if (!color || typeof color !== 'string') return true;
+  const c = color.trim().toLowerCase();
+  if (c === 'white' || c === '#fff' || c === '#ffffff' || c === '#f5f5f5') return true;
+  if (c === 'black' || c === '#000' || c === '#000000' || c === '#1a1a2e') return false;
+  const hex = c.replace('#', '');
+  if (hex.length === 3) {
+    const r = parseInt(hex[0] + hex[0], 16);
+    const g = parseInt(hex[1] + hex[1], 16);
+    const b = parseInt(hex[2] + hex[2], 16);
+    return (r * 299 + g * 587 + b * 114) / 1000 > 128;
+  }
+  if (hex.length === 6) {
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    return (r * 299 + g * 587 + b * 114) / 1000 > 128;
+  }
+  return true;
+}
+
 async function blobToDataUrl(blob: Blob): Promise<string> {
   return await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -398,7 +419,7 @@ function replaceVariables(
   const inclusionText = inclusionParts.join(' و');
   
   const days = contractData.durationDays || contractDetails.durationDays;
-  return replaceDurationVariable(text, contractData.duration, days)
+  let res = replaceDurationVariable(text, contractData.duration, days)
     .replace(/{startDate}/g, contractData.startDate)
     .replace(/{endDate}/g, contractData.endDate)
     .replace(/{customerName}/g, contractData.customerName)
@@ -407,11 +428,16 @@ function replaceVariables(
     .replace(/{currency}/g, currencyInfo.writtenName)
     .replace(/{billboardsCount}/g, String(billboardsCount))
     .replace(/{discount}/g, discountText)
- .replace(/{inclusionText}/g, inclusionText) // استبدال متغير شامل/غير شامل
+    .replace(/{inclusionText}/g, inclusionText) // استبدال متغير شامل/غير شامل
     // NOTE: paymentsHtml may contain <br> etc. We keep it as-is for wrapping,
     // but it MUST be escaped at render time inside SVG text.
-    .replace(/{payments}/g, paymentsHtml)
-    .replace(/\s{2,}/g, ' ')
+    .replace(/{payments}/g, paymentsHtml);
+
+  if (discountText && !text.includes('{discount}') && text.includes('{totalAmount}')) {
+    res = res.replace(contractDetails.finalTotal, `${contractDetails.finalTotal} (${discountText})`);
+  }
+
+  return res.replace(/\s{2,}/g, ' ')
     .replace(/\.\s*\./g, '.')
     .trim();
 }
@@ -452,7 +478,7 @@ function buildFirstPageSVG(options: UnifiedPrintOptions): { svg: string; svgHeig
     const heightPercent = goldLineSettings.heightPercent || 30;
     const insetPercent = (100 - heightPercent) / 2;
     const goldHighlight = goldLineSettings.visible !== false 
-      ? `<span style="position: absolute; inset: ${insetPercent}% 0 ${insetPercent}% 0; background-color: ${goldColor}; z-index: -1; border-radius: 2px; width: 100%;"></span>`
+      ? `<span style="position: absolute; inset: ${insetPercent}% 0 ${insetPercent}% 0; background-color: ${goldColor}; background-image: url('${solidFillDataUri(goldColor)}'); background-size: 100% 100%; background-repeat: no-repeat; z-index: -1; border-radius: 2px; width: 100%; -webkit-print-color-adjust: exact; print-color-adjust: exact;"></span>`
       : '';
 
     const titleSpan = `<span style="position: relative; display: inline-block; z-index: 1; margin-left: 6px;">
@@ -661,16 +687,21 @@ function buildTablePageHTML(
   
   // Header row - نفس المعاينة بالضبط
   const headerCells = visibleColumns.map(col => {
+    // نفس المعاينة تماماً (ContractTermsSettings): الألوان كما هي في الإعدادات
     const isHighlighted = (tblSettings.highlightedColumns || ['index']).includes(col.key);
-    const headerBg = isHighlighted ? (tblSettings.highlightedColumnBgColor || '#1a1a2e') : tblSettings.headerBgColor;
-    const headerFg = isHighlighted ? (tblSettings.highlightedColumnTextColor || '#ffffff') : tblSettings.headerTextColor;
+    const headerBg = isHighlighted
+      ? (tblSettings.highlightedColumnBgColor || '#1a1a2e')
+      : (tblSettings.headerBgColor || '#ffffff');
+    const headerFg = isHighlighted
+      ? (tblSettings.highlightedColumnTextColor || '#ffffff')
+      : (tblSettings.headerTextColor || (isColorLight(headerBg) ? '#000000' : '#ffffff'));
     
     // نفس المعاينة: fontSize بدون ضرب، استخدام solidFillDataUri لضمان طباعة الألوان
     return `
       <th style="
         width: ${col.width}%;
         padding: ${(col.padding ?? (cellPaddingPx || 2))}px;
-        border: ${borderWidthPx}px solid ${tblSettings.borderColor};
+        border: ${borderWidthPx}px solid ${tblSettings.borderColor || '#000000'};
         font-size: ${(col.headerFontSize || tblSettings.headerFontSize || 11)}px;
         font-weight: ${tblSettings.headerFontWeight || 'bold'};
         text-align: ${tblSettings.headerTextAlign || 'center'};
@@ -690,7 +721,7 @@ function buildTablePageHTML(
           z-index: 0;
           pointer-events: none;
         " />
-        <span style="position: relative; z-index: 1;">${col.label}</span>
+        <span style="position: relative; z-index: 1; color: ${headerFg}; font-weight: bold;">${col.label}</span>
       </th>
     `;
   }).join('');
@@ -918,7 +949,7 @@ function buildTablePageHTML(
           text-align: ${col.textAlign || tblSettings.cellTextAlign || 'center'};
           font-size: ${(col.fontSize || tblSettings.fontSize || 10)}px;
           font-weight: ${tblSettings.fontWeight || 'normal'};
-          ${cellBg ? `background-color: ${cellBg};` : ''}
+          background-color: ${cellBg || rowBgColor};
           color: ${cellTextColor};
           vertical-align: middle;
           line-height: ${lineHeight};
@@ -1243,9 +1274,6 @@ export async function generateUnifiedPrintHTML(options: UnifiedPrintOptions): Pr
           color-adjust: exact !important;
         }
 
-        th, td {
-          background-color: inherit !important;
-        }
 
         @media screen {
           body {

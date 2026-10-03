@@ -1,4 +1,5 @@
 import { PageSectionSettings } from '@/hooks/useContractTemplateSettings';
+import { solidFillDataUri } from '@/lib/contractTableRenderer';
 
 type TableTermSettings = NonNullable<PageSectionSettings['tableTerm']>;
 
@@ -39,9 +40,14 @@ export function buildTableTermHtml({ tableTerm, title, content, renderTarget = '
         top: ${goldTopPx}px;
         height: ${goldHeightPx}px;
         background-color: ${goldColor};
+        background-image: url('${solidFillDataUri(goldColor)}');
+        background-size: 100% 100%;
+        background-repeat: no-repeat;
         border-radius: 2px;
         z-index: 0;
         pointer-events: none;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
       "></span>`
     : '';
 

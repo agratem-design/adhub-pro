@@ -782,10 +782,15 @@ export async function getContractWithBillboards(contractId: string): Promise<any
       start_date: c.start_date ?? c['Contract Date'] ?? c.contract_date ?? '',
       end_date: c.end_date ?? c['End Date'] ?? '',
       rent_cost: typeof c.rent_cost === 'number' ? c.rent_cost : Number(c['Total Rent'] ?? 0),
+      'Total Rent': typeof c['Total Rent'] === 'number' ? c['Total Rent'] : Number(c['Total Rent'] ?? c.rent_cost ?? 0),
       installation_cost: typeof c.installation_cost === 'number' ? c.installation_cost : Number(c['Installation Cost'] ?? 0),
       // ✅ NEW: Add print_cost to getContractWithBillboards
       print_cost: typeof c.print_cost === 'number' ? c.print_cost : Number(c['Print Cost'] ?? 0),
       total_cost: typeof c.total_cost === 'number' ? c.total_cost : Number(c['Total'] ?? 0),
+      Total: typeof c.Total === 'number' ? c.Total : Number(c['Total'] ?? c.total_cost ?? 0),
+      Discount: typeof c.Discount === 'number' ? c.Discount : (typeof c.discount === 'number' ? c.discount : Number(c.Discount ?? c.discount ?? 0)),
+      discount: typeof c.discount === 'number' ? c.discount : (typeof c.Discount === 'number' ? c.Discount : Number(c.discount ?? c.Discount ?? 0)),
+      level_discounts: c.level_discounts || null,
       customer_category: c.customer_category ?? 'عادي',
       // إضافة بيانات اللوحات المحفوظة
       saved_billboards_data: c.billboards_data || c['billboards_data'],

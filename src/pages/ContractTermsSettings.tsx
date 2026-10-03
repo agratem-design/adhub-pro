@@ -442,7 +442,7 @@ const DEFAULT_TABLE_COLUMNS: TableColumnSettings[] = [
   { key: 'size', label: 'المقاس', visible: true, width: 7, fontSize: 26, headerFontSize: 28, padding: 2, lineHeight: 1.3 },
   { key: 'faces', label: 'الأوجه', visible: true, width: 7, fontSize: 26, headerFontSize: 28, padding: 2, lineHeight: 1.3 },
   { key: 'price', label: 'السعر', visible: true, width: 9, fontSize: 26, headerFontSize: 28, padding: 2, lineHeight: 1.3 },
-  { key: 'endDate', label: 'تاريخ الانتهاء', visible: false, width: 10, fontSize: 26, headerFontSize: 28, padding: 2, lineHeight: 1.3 },
+  { key: 'endDate', label: 'تاريخ الانتهاء', visible: true, width: 10, fontSize: 26, headerFontSize: 28, padding: 2, lineHeight: 1.3 },
   { key: 'durationDays', label: 'المدة (أيام)', visible: false, width: 8, fontSize: 26, headerFontSize: 28, padding: 2, lineHeight: 1.3 },
   { key: 'location', label: 'GPS', visible: true, width: 9, fontSize: 26, headerFontSize: 28, padding: 2, lineHeight: 1.3 },
 ];
@@ -455,8 +455,8 @@ const DEFAULT_TABLE_SETTINGS: TableSettings = {
   rowHeight: 12,
   headerRowHeight: 14,
   maxRows: 12,
-  headerBgColor: '#000000',
-  headerTextColor: '#ffffff',
+  headerBgColor: '#ffffff',
+  headerTextColor: '#000000',
   borderColor: '#000000',
   borderWidth: 1,
   alternateRowColor: '#f5f5f5',
@@ -467,9 +467,9 @@ const DEFAULT_TABLE_SETTINGS: TableSettings = {
   cellTextAlign: 'center',
   headerTextAlign: 'center',
   columns: DEFAULT_TABLE_COLUMNS,
-  highlightedColumns: ['index'],
-  highlightedColumnBgColor: '#1a1a2e',
-  highlightedColumnTextColor: '#ffffff',
+  highlightedColumns: [],
+  highlightedColumnBgColor: '#ffffff',
+  highlightedColumnTextColor: '#000000',
   cellTextColor: '#000000',
   cellPadding: 2,
   qrForegroundColor: '#000000',
@@ -1383,10 +1383,15 @@ export default function ContractTermsSettings() {
                       <img src="${tableBackgroundUrl}" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;" />
                       <div style="position: absolute; top: ${sectionSettings.tableSettings.topPosition * 3.779}px; left: ${(100 - (sectionSettings.tableSettings.tableWidth || 90)) / 2}%; width: ${sectionSettings.tableSettings.tableWidth || 90}%; z-index: 20;">
                         ${pageIndex === 0 && sectionSettings.tableTerm?.visible !== false ? `
-                          <div style="text-align: center; margin-bottom: ${sectionSettings.tableTerm?.marginBottom || 8}px; font-family: Doran, sans-serif; direction: rtl;">
+                          <div style="text-align: center; margin-bottom: ${sectionSettings.tableTerm?.marginBottom || 8}px; font-family: Doran, sans-serif; direction: rtl; position: relative; left: ${sectionSettings.tableTerm?.positionX ?? 0}px; top: ${sectionSettings.tableTerm?.positionY ?? 0}px;">
                             <h2 style="font-size: ${sectionSettings.tableTerm?.fontSize || 14}px; color: ${sectionSettings.tableTerm?.color || '#1a1a2e'}; margin: 0; display: inline-block;">
-                              <span style="font-weight: ${sectionSettings.tableTerm?.titleFontWeight || 'bold'};">${sectionSettings.tableTerm?.termTitle || 'البند الثامن:'}</span>
-                              <span style="font-weight: ${sectionSettings.tableTerm?.contentFontWeight || 'normal'};">${sectionSettings.tableTerm?.termContent || 'المواقع المتفق عليها بين الطرفين'}</span>
+                              <span style="font-weight: ${sectionSettings.tableTerm?.titleFontWeight || 'bold'}; position: relative; display: inline-block;">
+                                ${sectionSettings.tableTerm?.goldLine?.visible !== false ? `
+                                  <span style="position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); height: ${sectionSettings.tableTerm?.goldLine?.heightPercent || 30}%; background-color: ${sectionSettings.tableTerm?.goldLine?.color || '#D4AF37'}; background-image: url('${solidFillDataUri(sectionSettings.tableTerm?.goldLine?.color || '#D4AF37')}'); background-size: 100% 100%; border-radius: 2px; z-index: 0; pointer-events: none; -webkit-print-color-adjust: exact; print-color-adjust: exact;"></span>
+                                ` : ''}
+                                <span style="position: relative; z-index: 1;">${sectionSettings.tableTerm?.termTitle || 'البند الثامن:'}</span>
+                              </span>
+                              <span style="font-weight: ${sectionSettings.tableTerm?.contentFontWeight || 'normal'};"> ${sectionSettings.tableTerm?.termContent || 'المواقع المتفق عليها بين الطرفين'}</span>
                             </h2>
                           </div>
                         ` : ''}
@@ -1397,7 +1402,10 @@ export default function ContractTermsSettings() {
                                 const isHighlighted = (sectionSettings.tableSettings.highlightedColumns || ['index']).includes(col.key);
                                 const headerBg = isHighlighted ? (sectionSettings.tableSettings.highlightedColumnBgColor || '#1a1a2e') : sectionSettings.tableSettings.headerBgColor;
                                 const headerFg = isHighlighted ? (sectionSettings.tableSettings.highlightedColumnTextColor || '#ffffff') : sectionSettings.tableSettings.headerTextColor;
-                                return `<th style="width: ${col.width}%; background-color: ${headerBg}; color: ${headerFg}; padding: ${col.padding ?? sectionSettings.tableSettings.cellPadding ?? 2}px; border: ${sectionSettings.tableSettings.borderWidth ?? 1}px solid ${sectionSettings.tableSettings.borderColor}; font-size: ${col.headerFontSize ?? sectionSettings.tableSettings.headerFontSize ?? 11}px; font-weight: ${sectionSettings.tableSettings.headerFontWeight || 'bold'}; text-align: ${sectionSettings.tableSettings.headerTextAlign || 'center'}; vertical-align: middle;">${col.label}</th>`;
+                                return `<th style="width: ${col.width}%; background-color: ${headerBg}; color: ${headerFg}; padding: ${col.padding ?? sectionSettings.tableSettings.cellPadding ?? 2}px; border: ${sectionSettings.tableSettings.borderWidth ?? 1}px solid ${sectionSettings.tableSettings.borderColor}; font-size: ${col.headerFontSize ?? sectionSettings.tableSettings.headerFontSize ?? 11}px; font-weight: ${sectionSettings.tableSettings.headerFontWeight || 'bold'}; text-align: ${sectionSettings.tableSettings.headerTextAlign || 'center'}; vertical-align: middle; position: relative; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact;">
+                                  <img src="${solidFillDataUri(headerBg)}" alt="" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; pointer-events: none;" />
+                                  <span style="position: relative; z-index: 1; color: ${headerFg}; font-weight: bold;">${col.label}</span>
+                                </th>`;
                               }).join('')}
                             </tr>
                           </thead>
@@ -1408,7 +1416,10 @@ export default function ContractTermsSettings() {
                                   const isHighlighted = (sectionSettings.tableSettings.highlightedColumns || ['index']).includes(col.key);
                                   const cellBg = isHighlighted ? (sectionSettings.tableSettings.highlightedColumnBgColor || '#1a1a2e') : '';
                                   const cellColor = isHighlighted ? (sectionSettings.tableSettings.highlightedColumnTextColor || '#ffffff') : (sectionSettings.tableSettings.cellTextColor || '#000000');
-                                  return `<td style="border: ${sectionSettings.tableSettings.borderWidth ?? 1}px solid ${sectionSettings.tableSettings.borderColor}; padding: ${col.key === 'image' || col.key === 'location' ? 0 : (col.padding ?? sectionSettings.tableSettings.cellPadding ?? 2)}px; text-align: ${col.textAlign ?? (sectionSettings.tableSettings.cellTextAlign || 'center')}; font-size: ${col.fontSize ?? sectionSettings.tableSettings.fontSize ?? 10}px; background-color: ${cellBg}; color: ${cellColor}; vertical-align: middle;">${getCellValue(billboard, col, idx)}</td>`;
+                                  return `<td style="border: ${sectionSettings.tableSettings.borderWidth ?? 1}px solid ${sectionSettings.tableSettings.borderColor}; padding: ${col.key === 'image' || col.key === 'location' ? 0 : (col.padding ?? sectionSettings.tableSettings.cellPadding ?? 2)}px; text-align: ${col.textAlign ?? (sectionSettings.tableSettings.cellTextAlign || 'center')}; font-size: ${col.fontSize ?? sectionSettings.tableSettings.fontSize ?? 10}px; background-color: ${cellBg}; color: ${cellColor}; vertical-align: middle; position: relative;">
+                                    ${cellBg ? `<img src="${solidFillDataUri(cellBg)}" alt="" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; pointer-events: none;" />` : ''}
+                                    <span style="position: relative; z-index: 1;">${getCellValue(billboard, col, idx)}</span>
+                                  </td>`;
                                 }).join('')}
                               </tr>
                             `).join('')}
@@ -1860,7 +1871,18 @@ export default function ContractTermsSettings() {
                                 }}>
                                   <span style={{ position: 'relative', display: 'inline-block', zIndex: 1, marginLeft: '6px' }}>
                                     {sectionSettings.termsGoldLine?.visible !== false && (
-                                      <span style={{ position: 'absolute', inset: `${insetPercent}% 0 ${insetPercent}% 0`, backgroundColor: goldColor, zIndex: -1, borderRadius: '2px', width: '100%' }}></span>
+                                      <span style={{ 
+                                        position: 'absolute', 
+                                        inset: `${insetPercent}% 0 ${insetPercent}% 0`, 
+                                        backgroundColor: goldColor, 
+                                        backgroundImage: `url("${solidFillDataUri(goldColor)}")`,
+                                        backgroundSize: '100% 100%',
+                                        zIndex: -1, 
+                                        borderRadius: '2px', 
+                                        width: '100%',
+                                        WebkitPrintColorAdjust: 'exact',
+                                        printColorAdjust: 'exact',
+                                      }}></span>
                                     )}
                                     <span style={{ position: 'relative', zIndex: 2, fontWeight: titleWeight === 'bold' || titleWeight === '800' ? 800 : 700, padding: '0 4px' }}>
                                       {titleText}
@@ -1948,8 +1970,12 @@ export default function ContractTermsSettings() {
                                       transform: 'translateY(-50%)',
                                       height: `${sectionSettings.tableTerm?.goldLine?.heightPercent || 30}%`,
                                       backgroundColor: sectionSettings.tableTerm?.goldLine?.color || '#D4AF37',
+                                      backgroundImage: `url("${solidFillDataUri(sectionSettings.tableTerm?.goldLine?.color || '#D4AF37')}")`,
+                                      backgroundSize: '100% 100%',
                                       borderRadius: '2px',
                                       zIndex: 0,
+                                      WebkitPrintColorAdjust: 'exact',
+                                      printColorAdjust: 'exact',
                                     }}
                                   />
                                 )}

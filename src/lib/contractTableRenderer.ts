@@ -56,6 +56,27 @@ export interface RenderTableOptions {
   renderTarget?: 'preview' | 'pdf';
 }
 
+function isColorLight(color: string): boolean {
+  if (!color || typeof color !== 'string') return true;
+  const c = color.trim().toLowerCase();
+  if (c === 'white' || c === '#fff' || c === '#ffffff' || c === '#f5f5f5') return true;
+  if (c === 'black' || c === '#000' || c === '#000000' || c === '#1a1a2e') return false;
+  const hex = c.replace('#', '');
+  if (hex.length === 3) {
+    const r = parseInt(hex[0] + hex[0], 16);
+    const g = parseInt(hex[1] + hex[1], 16);
+    const b = parseInt(hex[2] + hex[2], 16);
+    return (r * 299 + g * 587 + b * 114) / 1000 > 128;
+  }
+  if (hex.length === 6) {
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    return (r * 299 + g * 587 + b * 114) / 1000 > 128;
+  }
+  return true;
+}
+
 /**
  * Generate header cell HTML with solidFillDataUri for guaranteed color printing
  */
@@ -65,12 +86,12 @@ function renderHeaderCell(
   borderWidthPx: string
 ): string {
   const isHighlighted = (tblSettings.highlightedColumns || ['index']).includes(col.key);
-  const headerBg = isHighlighted 
+  const headerBg = isHighlighted
     ? (tblSettings.highlightedColumnBgColor || '#1a1a2e')
-    : tblSettings.headerBgColor;
-  const headerFg = isHighlighted 
+    : (tblSettings.headerBgColor || '#ffffff');
+  const headerFg = isHighlighted
     ? (tblSettings.highlightedColumnTextColor || '#ffffff')
-    : tblSettings.headerTextColor;
+    : (tblSettings.headerTextColor || (isColorLight(headerBg) ? '#000000' : '#ffffff'));
 
   // Use column-specific padding and lineHeight if available
   const headerPadding = col.padding !== undefined ? col.padding : tblSettings.cellPadding;
@@ -82,7 +103,7 @@ function renderHeaderCell(
       background-color: ${headerBg};
       color: ${headerFg};
       padding: ${headerPadding}px;
-      border: ${borderWidthPx} solid ${tblSettings.borderColor};
+      border: ${borderWidthPx} solid ${tblSettings.borderColor || '#000000'};
       font-size: ${col.headerFontSize || tblSettings.headerFontSize}px;
       font-weight: ${tblSettings.headerFontWeight || 'bold'};
       text-align: ${tblSettings.headerTextAlign || 'center'};
@@ -100,7 +121,7 @@ function renderHeaderCell(
         z-index: 0;
         pointer-events: none;
       " />
-      <span style="position: relative; z-index: 1;">${col.label}</span>
+      <span style="position: relative; z-index: 1; color: ${headerFg}; font-weight: bold;">${col.label}</span>
     </th>
   `;
 }
@@ -474,8 +495,13 @@ function renderBillboardsTablePagePreviewLike(options: RenderTableOptions): stri
 
   const headerRow = visibleColumns.map((col) => {
     const isHighlighted = (tblSettings.highlightedColumns || ['index']).includes(col.key);
-    const headerBg = isHighlighted ? (tblSettings.highlightedColumnBgColor || '#1a1a2e') : tblSettings.headerBgColor;
-    const headerFg = isHighlighted ? (tblSettings.highlightedColumnTextColor || '#ffffff') : tblSettings.headerTextColor;
+    const headerBg = isHighlighted
+      ? (tblSettings.highlightedColumnBgColor || '#1a1a2e')
+      : (tblSettings.headerBgColor || '#ffffff');
+    const headerFg = isHighlighted
+      ? (tblSettings.highlightedColumnTextColor || '#ffffff')
+      : (tblSettings.headerTextColor || (isColorLight(headerBg) ? '#000000' : '#ffffff'));
+
     const headerPadding = col.padding !== undefined ? col.padding : (tblSettings.cellPadding || 2);
     const lineHeight = col.lineHeight !== undefined ? col.lineHeight : 1.3;
 
@@ -485,7 +511,7 @@ function renderBillboardsTablePagePreviewLike(options: RenderTableOptions): stri
         background-color: ${headerBg};
         color: ${headerFg};
         padding: ${headerPadding}px;
-        border: ${borderWidthPx} solid ${tblSettings.borderColor};
+        border: ${borderWidthPx} solid ${tblSettings.borderColor || '#000000'};
         font-size: ${(col.headerFontSize || tblSettings.headerFontSize || 11)}px;
         font-weight: ${(tblSettings.headerFontWeight || 'bold')};
         text-align: ${(tblSettings.headerTextAlign || 'center')};
@@ -503,7 +529,7 @@ function renderBillboardsTablePagePreviewLike(options: RenderTableOptions): stri
           z-index: 0;
           pointer-events: none;
         " />
-        <span style="position: relative; z-index: 1;">${col.label}</span>
+        <span style="position: relative; z-index: 1; color: ${headerFg}; font-weight: bold;">${col.label}</span>
       </th>
     `;
   }).join('');

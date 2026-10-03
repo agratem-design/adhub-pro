@@ -497,17 +497,53 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
     const currencyInfo = getCurrencyInfo();
     const contractAny = contract as any;
 
-    // البحث في جميع الحقول المحتملة للتخفيض
     let discountNum = 0;
 
-    // 1. حقل Discount المباشر (من حفظ العقد)
-    if (contractAny?.Discount !== undefined && contractAny?.Discount !== null) {
+    // 1. حقل Discount أو discount المباشر
+    if (contractAny?.Discount !== undefined && contractAny?.Discount !== null && Number(contractAny.Discount) > 0) {
       discountNum = Number(contractAny.Discount);
-    } else if (contractAny?.discount !== undefined && contractAny?.discount !== null) {
+    } else if (contractAny?.discount !== undefined && contractAny?.discount !== null && Number(contractAny.discount) > 0) {
       discountNum = Number(contractAny.discount);
+    } else if (contractAny?.discount_amount !== undefined && contractAny?.discount_amount !== null && Number(contractAny.discount_amount) > 0) {
+      discountNum = Number(contractAny.discount_amount);
     }
 
-    // 2. حساب التخفيض من level_discounts إذا كان موجوداً ولم يكن هناك تخفيض مباشر
+    // 2. حساب التخفيض من liveBillboardPrices أو contract.billboard_prices
+    if (discountNum === 0) {
+      const sourcePrices = (Array.isArray(liveBillboardPrices) && liveBillboardPrices.length > 0)
+        ? liveBillboardPrices
+        : contract?.billboard_prices;
+      if (sourcePrices) {
+        try {
+          const pricesData = typeof sourcePrices === 'string'
+            ? JSON.parse(sourcePrices)
+            : sourcePrices;
+          if (Array.isArray(pricesData)) {
+            let sumDiscounts = 0;
+            pricesData.forEach((item: any) => {
+              if (item.discountPerBillboard != null && Number(item.discountPerBillboard) > 0) {
+                sumDiscounts += Number(item.discountPerBillboard);
+              } else if (item.individualDiscountAmt != null && Number(item.individualDiscountAmt) > 0) {
+                sumDiscounts += Number(item.individualDiscountAmt);
+              } else {
+                const before = Number(item.priceBeforeDiscount ?? item.basePriceBeforeDiscount ?? item.baseRentalPrice ?? item.baseRental ?? 0);
+                const after = Number(item.priceAfterDiscount ?? item.totalForBoard ?? item.netRentalAfterDiscount ?? 0);
+                if (before > 0 && after > 0 && before > after) {
+                  sumDiscounts += (before - after);
+                }
+              }
+            });
+            if (sumDiscounts > 0) {
+              discountNum = sumDiscounts;
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to calculate discount from billboard_prices:', e);
+        }
+      }
+    }
+
+    // 3. حساب التخفيض من level_discounts إذا كان موجوداً ولم يكن هناك تخفيض مباشر
     if (discountNum === 0 && contractAny?.level_discounts && typeof contractAny.level_discounts === 'object') {
       const levelDiscounts = contractAny.level_discounts as Record<string, number>;
       const billboards = contract?.billboards || [];
@@ -516,25 +552,27 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         let totalDiscountAmount = 0;
 
         billboards.forEach((billboard: any) => {
-          const level = billboard.level || billboard.Level || billboard.billboard_level || '';
+          const level = billboard.level || billboard.Level || billboard.billboard_level || billboard.Category_Level || '';
           const discountPercent = levelDiscounts[level] || 0;
-          const billboardPrice = Number(billboard.price_after_discount || billboard.total_price || billboard.price || 0);
+          const billboardPrice = Number(billboard.price_after_discount || billboard.total_price || billboard.price || billboard.Price || 0);
 
           if (discountPercent > 0 && billboardPrice > 0) {
-            // إعادة حساب السعر الأصلي قبل الخصم
             const originalPrice = billboardPrice / (1 - discountPercent / 100);
-            totalDiscountAmount += originalPrice - billboardPrice;
+            totalDiscountAmount += (originalPrice - billboardPrice);
           }
         });
 
-        discountNum = totalDiscountAmount;
+        if (totalDiscountAmount > 0) {
+          discountNum = totalDiscountAmount;
+        }
       }
     }
 
-    // 3. حساب التخفيض من الفرق بين السعر الكلي والمجموع
+    // 4. حساب التخفيض من الفرق بين مجموع أسعار اللوحات وإجمالي إيجار العقد
     if (discountNum === 0 && contract?.billboards && contract.billboards.length > 0) {
       const billboardsTotal = contract.billboards.reduce((sum: number, b: any) => {
-        return sum + Number(b.total_price_before_discount || b.price_before_discount || 0);
+        const p = Number(b.total_price_before_discount || b.price_before_discount || b.Price || b.price || 0);
+        return sum + p;
       }, 0);
 
       const totalCost = Number(contract?.rent_cost || contract?.['Total Rent'] || (contractAny)?.Total || 0);
@@ -544,25 +582,9 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
       }
     }
 
-    // ✅ التحقق من أن الخصم ليس تكلفة الطباعة
-    const printCostEnabled = Boolean(
-      contractAny?.print_cost_enabled === true ||
-      contractAny?.print_cost_enabled === 1 ||
-      contractAny?.print_cost_enabled === 'true' ||
-      contractAny?.print_cost_enabled === '1'
-    );
-    const printCost = Number(contractAny?.print_cost ?? 0);
-
-    // إذا الخصم يساوي تكلفة الطباعة، لا نعتبره خصماً
-    if (printCostEnabled && printCost > 0 && !Number.isNaN(discountNum) && discountNum === printCost) {
-      return null;
-    }
-
-    if (discountNum === 0 || Number.isNaN(discountNum)) {
+    if (discountNum <= 0 || Number.isNaN(discountNum)) {
       return null; // No discount
     }
-
-    // لا نقرب - نحافظ على القيمة كما هي من قاعدة البيانات
 
     return {
       type: 'fixed',
@@ -806,6 +828,19 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
     return (b as any)._paused ? `${rent_end_date_base} (موقوفة)` : rent_end_date_base;
   };
 
+  // ✅ مقدار خصم اللوحة من بيانات العقد (بنفس أساس السعر المعروض)
+  const getItemDiscountAmount = (priceItem: any): number => {
+    if (!priceItem) return 0;
+    const direct = Number(priceItem.discountPerBillboard ?? 0);
+    if (Number.isFinite(direct) && direct > 0) return direct;
+    const indiv = Number(priceItem.individualDiscountAmt ?? 0);
+    if (Number.isFinite(indiv) && indiv > 0) return indiv;
+    const before = Number(priceItem.priceBeforeDiscount ?? priceItem.basePriceBeforeDiscount ?? priceItem.baseRentalPrice ?? priceItem.baseRental ?? 0);
+    const after = Number(priceItem.priceAfterDiscount ?? priceItem.netRentalAfterDiscount ?? 0);
+    if (before > 0 && after > 0 && before > after) return before - after;
+    return 0;
+  };
+
   // Helper to map and normalize a billboard for printing/PDF
   const mapBillboardForPrint = (b: any, billboardPrices: Record<string, any>): UnifiedBillboardData => {
     const id = String(b.ID ?? b.id ?? b.code ?? '');
@@ -845,14 +880,26 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
     let isEndDateCustom = false;
 
     try {
-      if (contract?.billboard_prices) {
-        const pricesData = typeof contract.billboard_prices === 'string'
-          ? JSON.parse(contract.billboard_prices)
-          : contract.billboard_prices;
+      const sourcePrices = (Array.isArray(liveBillboardPrices) && liveBillboardPrices.length > 0)
+        ? liveBillboardPrices
+        : contract?.billboard_prices;
+      if (sourcePrices) {
+        const pricesData = typeof sourcePrices === 'string'
+          ? JSON.parse(sourcePrices)
+          : sourcePrices;
         if (Array.isArray(pricesData)) {
-          const priceItem = pricesData.find((item: any) => String(item.billboardId || item.billboard_id || '') === id);
+          const priceItem = pricesData.find((item: any) => 
+            String(item.billboardId ?? item.billboard_id ?? item.ID ?? item.id ?? '') === id
+          );
           if (priceItem) {
-            origPriceNumResolved = Number(priceItem.priceBeforeDiscount ?? priceItem.basePriceBeforeDiscount ?? 0);
+            const itemDiscount = getItemDiscountAmount(priceItem);
+            const candidate = priceItem.priceBeforeDiscount ?? priceItem.basePriceBeforeDiscount ?? priceItem.baseRentalPrice ?? priceItem.baseRental ?? priceItem.originalPrice;
+            if (itemDiscount > 0 && priceNum > 0) {
+              // السعر المعروض قد يشمل الطباعة/التركيب، لذا نضيف الخصم عليه مباشرة
+              origPriceNumResolved = priceNum + itemDiscount;
+            } else if (candidate != null && Number(candidate) > 0) {
+              origPriceNumResolved = Number(candidate);
+            }
             if (priceItem.startDate) customStartDate = priceItem.startDate;
             if (priceItem.endDate) {
               customEndDate = priceItem.endDate;
@@ -874,7 +921,40 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
       const op = Number((b as any)._paused_original_price);
       if (Number.isFinite(op) && op > 0) origPriceNumResolved = op;
     }
-    if (origPriceNumResolved > 0 && origPriceNumResolved > priceNum) {
+
+    // Level discounts fallback
+    if ((origPriceNumResolved <= 0 || origPriceNumResolved <= priceNum) && contract?.level_discounts && typeof contract.level_discounts === 'object') {
+      const level = String(b.Level ?? b.level ?? b.Category_Level ?? b.category_level ?? '');
+      const pct = Number((contract.level_discounts as any)[level] || 0);
+      if (pct > 0 && pct < 100 && priceNum > 0) {
+        origPriceNumResolved = Math.round(priceNum / (1 - pct / 100));
+      }
+    }
+
+    // Contract-level proportional discount fallback (uniform across all billboards in the contract)
+    const discountInfo = getDiscountInfo();
+    const hasContractDiscount = !!(discountInfo && discountInfo.value > 0);
+    if ((origPriceNumResolved <= 0 || origPriceNumResolved <= priceNum) && hasContractDiscount && priceNum > 0) {
+      const rentCost = Number(contract?.['Total Rent'] ?? contract?.rent_cost ?? 0);
+      const totalCost = Number(contract?.Total ?? contract?.total_cost ?? 0);
+      const baseRent = rentCost > 0 ? rentCost : (totalCost > 0 ? totalCost : 0);
+      if (baseRent > 0) {
+        const discountRatio = (baseRent + discountInfo.value) / baseRent;
+        if (discountRatio > 1 && discountRatio < 10) {
+          origPriceNumResolved = Math.round(priceNum * discountRatio);
+        }
+      }
+    }
+
+    // Fallback to catalog price ONLY if contract actually has a discount
+    if (hasContractDiscount && (origPriceNumResolved <= 0 || origPriceNumResolved <= priceNum) && priceNum > 0) {
+      const catalogPrice = Number(b.Price ?? b.price ?? 0);
+      if (catalogPrice > priceNum) {
+        origPriceNumResolved = catalogPrice;
+      }
+    }
+
+    if (origPriceNumResolved > 0 && Math.round(origPriceNumResolved) > Math.round(priceNum)) {
       originalPrice = `${formatArabicNumber(origPriceNumResolved)} ${currencyInfo.symbol}`;
       hasDiscount = true;
     }
@@ -1822,15 +1902,25 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
 
         // الحصول على السعر قبل الخصم من بيانات العقد إن وجد
         let originalPriceBeforeDiscount: number | null = null;
+        let itemDiscountAmount = 0;
         try {
-          if (contract?.billboard_prices) {
-            const pricesData = typeof contract.billboard_prices === 'string'
-              ? JSON.parse(contract.billboard_prices)
-              : contract.billboard_prices;
+          const sourcePrices = (Array.isArray(liveBillboardPrices) && liveBillboardPrices.length > 0)
+            ? liveBillboardPrices
+            : contract?.billboard_prices;
+          if (sourcePrices) {
+            const pricesData = typeof sourcePrices === 'string'
+              ? JSON.parse(sourcePrices)
+              : sourcePrices;
             if (Array.isArray(pricesData)) {
-              const priceItem = pricesData.find((item: any) => String(item.billboardId) === id);
-              if (priceItem && priceItem.priceBeforeDiscount != null) {
-                originalPriceBeforeDiscount = Number(priceItem.priceBeforeDiscount);
+              const priceItem = pricesData.find((item: any) => 
+                String(item.billboardId ?? item.billboard_id ?? item.ID ?? item.id ?? '') === id
+              );
+              if (priceItem) {
+                itemDiscountAmount = getItemDiscountAmount(priceItem);
+                const candidate = priceItem.priceBeforeDiscount ?? priceItem.basePriceBeforeDiscount ?? priceItem.baseRentalPrice ?? priceItem.baseRental ?? priceItem.originalPrice;
+                if (candidate != null && Number(candidate) > 0) {
+                  originalPriceBeforeDiscount = Number(candidate);
+                }
               }
             }
           }
@@ -1845,21 +1935,63 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
 
         // Try to get price using different ID formats
         const historicalPrice = billboardPrices[id] ?? billboardPrices[Number(id)];
+        const num = Number(historicalPrice || 0);
+        // السعر المعروض قد يشمل الطباعة/التركيب، لذا نضيف الخصم عليه مباشرة
+        if (itemDiscountAmount > 0 && num > 0) {
+          originalPriceBeforeDiscount = num + itemDiscountAmount;
+        }
+
+        // Level discounts fallback
+        if ((originalPriceBeforeDiscount == null || originalPriceBeforeDiscount <= num) && contract?.level_discounts && typeof contract.level_discounts === 'object') {
+          const level = String(b.Level ?? b.level ?? b.Category_Level ?? b.category_level ?? '');
+          const pct = Number((contract.level_discounts as any)[level] || 0);
+          if (pct > 0 && pct < 100 && num > 0) {
+            originalPriceBeforeDiscount = Math.round(num / (1 - pct / 100));
+          }
+        }
+
+        // Contract-level proportional discount fallback (uniform across all billboards in the contract)
+        const hasContractDiscount = !!(discountInfo && discountInfo.value > 0);
+        if ((originalPriceBeforeDiscount == null || originalPriceBeforeDiscount <= num) && hasContractDiscount && num > 0) {
+          const rentCost = Number(contract?.['Total Rent'] ?? contract?.rent_cost ?? 0);
+          const totalCost = Number(contract?.Total ?? contract?.total_cost ?? 0);
+          const baseRent = rentCost > 0 ? rentCost : (totalCost > 0 ? totalCost : 0);
+          if (baseRent > 0) {
+            const discountRatio = (baseRent + discountInfo.value) / baseRent;
+            if (discountRatio > 1 && discountRatio < 10) {
+              originalPriceBeforeDiscount = Math.round(num * discountRatio);
+            }
+          }
+        }
+
+        // Fallback to catalog price ONLY if contract actually has a discount
+        if (hasContractDiscount && (originalPriceBeforeDiscount == null || originalPriceBeforeDiscount <= 0) && num > 0) {
+          const catalogPrice = Number(b.Price ?? b.price ?? 0);
+          if (catalogPrice > num) {
+            originalPriceBeforeDiscount = catalogPrice;
+          }
+        }
 
         if (historicalPrice !== undefined && historicalPrice !== null && String(historicalPrice) !== '') {
-          const num = Number(historicalPrice);
           if (!isNaN(num) && num > 0) {
-            // ✅ FIXED: إظهار السعر قبل الخصم فقط إذا كان مختلفاً عن السعر النهائي
-            if (originalPriceBeforeDiscount && originalPriceBeforeDiscount > 0 && originalPriceBeforeDiscount !== num) {
-              // السعر قبل الخصم مختلف عن السعر النهائي - اعرض كلاهما
-              price = `<span style="direction:ltr;display:inline-block;"><span class=\"num\">${formatArabicNumber(num)}</span> <span class=\"currency\">${currencyInfo.symbol}</span><br/><span class=\"original-price\" style=\"font-size:8px;\">(قبل الخصم: <span class=\"num\">${formatArabicNumber(originalPriceBeforeDiscount)}</span> <span class=\"currency\">${currencyInfo.symbol}</span>)</span></span>`;
+            // ✅ إظهار السعر قبل الخصم مع خط أحمر مثل طباعة العرض بالضبط
+            if (originalPriceBeforeDiscount && originalPriceBeforeDiscount > 0 && Math.round(originalPriceBeforeDiscount) > Math.round(num)) {
+              price = `
+                <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; line-height:1.15;">
+                  <span style="font-size:11px; color:#cc0000; text-decoration:line-through; text-decoration-color:#cc0000; font-weight:normal; opacity:0.9;">
+                    <span class="num">${formatArabicNumber(originalPriceBeforeDiscount)}</span> <span class="currency" style="color:#cc0000;">${currencyInfo.symbol}</span>
+                  </span>
+                  <span style="font-size:12px; font-weight:bold; color:#000000;">
+                    <span class="num">${formatArabicNumber(num)}</span> <span class="currency">${currencyInfo.symbol}</span>
+                  </span>
+                </div>
+              `;
             } else {
-              // السعر قبل الخصم مساوي للسعر النهائي أو غير موجود - اعرض السعر فقط
-              price = `<span style="direction:ltr;display:inline-block;"><span class=\"num\">${formatArabicNumber(num)}</span> <span class=\"currency\">${currencyInfo.symbol}</span></span>`;
+              price = `<span style="direction:ltr;display:inline-block;"><span class="num">${formatArabicNumber(num)}</span> <span class="currency">${currencyInfo.symbol}</span></span>`;
             }
             console.log(`✅ Using historical price for billboard ${id}: ${num} ${currencyInfo.symbol}`);
           } else {
-            price = `<span style="direction:ltr;display:inline-block;"><span class=\"num\">0</span> <span class=\"currency\">${currencyInfo.symbol}</span></span>`;
+            price = `<span style="direction:ltr;display:inline-block;"><span class="num">0</span> <span class="currency">${currencyInfo.symbol}</span></span>`;
             console.warn(`⚠️ Invalid historical price for billboard ${id}: ${historicalPrice}`);
           }
         } else {
@@ -2447,6 +2579,10 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
               .replace(/{billboardsCount}/g, String(sortedBillboards.length))
               .replace(/{inclusionText}/g, inclusionText)
               .replace(/{payments}/g, paymentsHtml);
+
+            if (discountText && !text.includes('{discount}') && text.includes('{totalAmount}')) {
+              result = result.replace(contractDetails.finalTotal, `${contractDetails.finalTotal} (${discountText})`);
+            }
 
             result = result.replace(/\s{2,}/g, ' ').replace(/\.\s*\./g, '.').trim();
             return result;
@@ -3633,6 +3769,15 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
                       <span className="text-sm">{currencyInfo.symbol}</span>
                     </div>
                   </div>
+                  {discountInfo && (
+                    <div className="flex-1 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 p-3 text-rose-700 dark:text-rose-300">
+                      <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">الخصم المطبق</p>
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-2xl font-bold" style={{ direction: 'ltr', display: 'inline-block' }}>{discountInfo.display}</span>
+                        <span className="text-sm">{currencyInfo.symbol}</span>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex-1 rounded-xl bg-card border p-3">
                     <p className="text-xs text-muted-foreground">المدة</p>
                     <p className="text-2xl font-bold">{contractDetails.duration}</p>

@@ -1990,6 +1990,12 @@ export default function ContractEditModular() {
         <ContractPDFDialog
           contract={{
             ...currentContract,
+            Discount: discountAmount,
+            discount: discountAmount,
+            Total: finalTotal,
+            total_cost: finalTotal,
+            rent_cost: rentalCostOnly,
+            'Total Rent': rentalCostOnly,
             billboard_prices: JSON.stringify(selectedBillboardPricingSnapshot),
           }}
           liveBillboardPrices={selectedBillboardPricingSnapshot}

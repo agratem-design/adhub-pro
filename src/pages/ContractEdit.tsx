@@ -4452,6 +4452,12 @@ export default function ContractEdit() {
           onOpenChange={setPdfOpen}
           contract={{
             ...(currentContract || {}),
+            Discount: discountAmount,
+            discount: discountAmount,
+            Total: finalTotal,
+            total_cost: finalTotal,
+            rent_cost: rentalCostOnly,
+            'Total Rent': rentalCostOnly,
             billboard_prices: JSON.stringify(withCompensation(selectedBillboardPricingSnapshot, compensationChoices, currentContract?.billboard_prices)),
           }}
           liveBillboardPrices={selectedBillboardPricingSnapshot as any[]}
