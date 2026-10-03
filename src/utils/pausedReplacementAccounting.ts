@@ -1,5 +1,14 @@
 import { money } from './contractEditMoney';
 
+/** A zero refund excludes a pure pause from the contract's financial totals. */
+export function purePauseContribution(fullPrice: number, refund: number): number {
+  return refund === 0 ? 0 : money(Math.max(0, fullPrice - refund));
+}
+
+export function isRetainedPause(row: { lifecycle_state?: string | null }): boolean {
+  return row.lifecycle_state !== 'cancelled';
+}
+
 /** Legacy replacements transferred a slice of the original budget, without
  * deducting a refund from the contract. Count only the budget left at each
  * historical node; the replacement is counted separately (and may itself pause).
@@ -19,5 +28,5 @@ export function historicalPauseContribution(row: {
       ? money(Math.max(0, fullPrice - replacementAllocation))
       : money(Number(row.consumed_amount ?? 0));
   }
-  return money(Math.max(0, fullPrice - refund));
+  return purePauseContribution(fullPrice, refund);
 }

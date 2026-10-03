@@ -1,3 +1,5 @@
+import { withRepeatedPrintHeader } from '@/lib/repeatedPrintHeader';
+import { applyPrintInkSaver } from '@/lib/printInkSaver';
 /**
  * printWindowHelper.ts
  * وحدة معالجة موحدة وشاملة للطباعة متوافقة 100% مع الهواتف الذكية (iOS Safari, Android Chrome) والحواسيب.
@@ -6,7 +8,7 @@
  * 1. منع حظر النوافذ المنبثقة (Popup Blocker) عبر فتح نافذة متزامنة أولاً بشاشة تحميل أنيقة.
  * 2. حقن شريط أدوات عائم وثابت (Floating Action Bar) أعلى الصفحة يحتوي على:
  *    - 🖨️ طباعة فورية (Print) مع تمرير اسم الملف المقترح الدقيق لـ Windows Microsoft Print to PDF.
- *    - 📥 حفظ كـ PDF أصلي فائق النقاء بجودة Google Chrome عبر printToPDF أو html2pdf.
+ *    - 📥 حفظ كـ PDF أصلي فائق النقاء بجودة Google Chrome عبر printToPDF أو browserPdf.
  *    - 📤 مشاركة (Share) عبر Web Share API (واتساب، بلوتوث، تطبيقات الطباعة).
  *    - ✕ إغلاق (Close).
  * 3. إزالة جميع أوامر الاستدعاء التلقائي المتسرعة لـ window.print() لمنع ظهور نافذة الطباعة فجأة قبل جاهزية المستخدم.
@@ -889,7 +891,7 @@ export function injectPrintActionBar(
 
   const injectedScript = `
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/dist/html-to-image.js"></script>
     <script>
       (function() {
         var docTitle = "${escapedTitle}";
@@ -916,14 +918,17 @@ export function injectPrintActionBar(
 
           // Fallback: If no explicit .page or [data-print-page] elements found, find the main document container
           if (pages.length === 0) {
-            var container = document.querySelector('.print-container, [data-invoice-print], main, .invoice-root, .printable-area');
+            var container = document.querySelector('.paper, .print-container, .measurements-container, [data-invoice-print], main, .invoice-root, .printable-area, .content') ||
+                            document.querySelector('body > div:not(.print-mobile-action-bar):not(#print-action-toolbar):not(.no-print)');
             if (container && !container.classList.contains('page-scale-wrapper') && !container.classList.contains('page-scaler')) {
               pages = [container];
+            } else if (document.body) {
+              pages = [document.body];
             }
           }
 
           if (onlyActive) {
-            return pages.filter(function(page) {
+            var active = pages.filter(function(page) {
               var scaler = page.parentElement;
               var wrapper = (scaler && scaler.classList.contains('page-scaler')) ? scaler.parentElement : null;
               var isHidden = page.classList.contains('page-hidden-by-selector') ||
@@ -931,9 +936,10 @@ export function injectPrintActionBar(
                              (wrapper && wrapper.classList.contains('page-hidden-by-selector'));
               return !isHidden;
             });
+            return active.length > 0 ? active : (pages.length > 0 ? pages : [document.body]);
           }
 
-          return pages;
+          return pages.length > 0 ? pages : [document.body];
         }
 
         var pageSelectionStates = [];
@@ -1259,9 +1265,7 @@ export function injectPrintActionBar(
             activePages = getPrintPages(true);
           }
           if (activePages.length === 0) {
-            alert('لا توجد صفحات محددة للطباعة');
-            isPrintInProgress = false;
-            return;
+            activePages = [document.body];
           }
 
           // Apply current page selection
@@ -1294,8 +1298,11 @@ export function injectPrintActionBar(
 
           var activePages = getPrintPages(true);
           if (activePages.length === 0) {
-            alert('لا توجد صفحات محددة للتصدير. يرجى تحديد صفحة واحدة على الأقل');
-            return;
+            window.__pageSelectAll();
+            activePages = getPrintPages(true);
+          }
+          if (activePages.length === 0) {
+            activePages = [document.body];
           }
 
           // Desktop App: Use Chromium Native Vector PDF Engine
@@ -1322,105 +1329,7 @@ export function injectPrintActionBar(
             return;
           }
 
-          if (progress) {
-            progress.style.display = 'flex';
-            var pSpan = progress.querySelector('span');
-            if (pSpan) pSpan.textContent = 'جاري معالجة الصفحات بدقة عالية عبر Canvas 2D لإنشاء ملف PDF...';
-          }
-          if (btnPdf) btnPdf.disabled = true;
-
-          try {
-            await waitForFontsAndImages();
-
-            var pages = getPrintPages(true);
-            if (pages.length === 0) {
-              throw new Error('لا توجد صفحات للتصدير');
-            }
-
-            var jsPDFClass = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
-            var html2canvasFunc = window.html2canvas || (window.opener && window.opener.html2canvas);
-
-            if (!jsPDFClass || !html2canvasFunc) {
-              throw new Error('مكتبات Canvas 2D غير محملة');
-            }
-
-            var isLandscapeDoc = document.body.classList.contains('print-landscape') || isLandscape;
-            var orientation = isLandscapeDoc ? 'landscape' : 'portrait';
-            var a4W = isLandscapeDoc ? 297 : 210;
-            var a4H = isLandscapeDoc ? 210 : 297;
-
-            // Target high-definition dimensions for A4 background (300 DPI: 2480 x 3508)
-            var printW = isLandscapeDoc ? 3508 : 2480;
-            var printH = isLandscapeDoc ? 2480 : 3508;
-
-            // Pre-rasterize SVG backgrounds to 300 DPI for ultra crisp Canvas 2D rendering
-            var allImgs = Array.from(document.querySelectorAll('img'));
-            await Promise.all(allImgs.map(function(img) {
-              if (!img.src || (img.src.indexOf('.svg') === -1 && img.src.indexOf('image/svg+xml') === -1 && img.src.indexOf('data:image/svg+xml') === -1)) {
-                return Promise.resolve();
-              }
-              return new Promise(function(resolve) {
-                var tempImg = new Image();
-                tempImg.crossOrigin = 'anonymous';
-                tempImg.onload = function() {
-                  try {
-                    var c = document.createElement('canvas');
-                    var isBg = (img.closest && img.closest('.background')) || img.classList.contains('background') || (img.parentElement && img.parentElement.classList.contains('background'));
-                    var targetW = isBg ? printW : Math.max((tempImg.naturalWidth || 800) * 3, 1600);
-                    var targetH = isBg ? printH : Math.max((tempImg.naturalHeight || 1100) * 3, 1600);
-                    c.width = targetW;
-                    c.height = targetH;
-                    var ctx = c.getContext('2d');
-                    if (ctx) {
-                      ctx.imageSmoothingEnabled = true;
-                      ctx.imageSmoothingQuality = 'high';
-                      ctx.drawImage(tempImg, 0, 0, targetW, targetH);
-                      img.src = c.toDataURL('image/png');
-                    }
-                  } catch(e) {}
-                  resolve();
-                };
-                tempImg.onerror = function() { resolve(); };
-                tempImg.src = img.src;
-              });
-            }));
-
-            var pdf = new jsPDFClass({ unit: 'mm', format: 'a4', orientation: orientation, compress: true });
-
-            for (var i = 0; i < pages.length; i++) {
-              var pageEl = pages[i];
-
-              // Canvas 2D rendering with high DPI scale (3.0 for 300 DPI print quality)
-              var canvas = await html2canvasFunc(pageEl, {
-                scale: 3.0,
-                useCORS: true,
-                allowTaint: false,
-                logging: false,
-                backgroundColor: '#ffffff',
-                foreignObjectRendering: false, // Pure Canvas 2D engine
-                imageTimeout: 25000,
-                scrollX: 0,
-                scrollY: 0,
-              });
-
-              var imgData = canvas.toDataURL('image/jpeg', 0.98);
-              if (i > 0) pdf.addPage('a4', orientation);
-              pdf.addImage(imgData, 'JPEG', 0, 0, a4W, a4H, undefined, 'SLOW');
-
-              // Free memory immediately
-              canvas.width = 1;
-              canvas.height = 1;
-            }
-
-            pdf.save(safeFileName + '.pdf');
-          } catch (err) {
-            console.error('Canvas 2D PDF export error:', err);
-            alert('حدث خطأ أثناء تصدير PDF، سيتم فتح نافذة الطباعة المباشرة.');
-            window.__triggerNativePrint();
-          } finally {
-            if (progress) progress.style.display = 'none';
-            if (btnPdf) btnPdf.disabled = false;
-          }
+          window.__triggerNativePrint();
         };
 
         // 3. Web Share Trigger
@@ -1440,7 +1349,7 @@ export function injectPrintActionBar(
   `;
 
   // 1. Strip all auto-print calls from incoming raw HTML
-  let processedHtml = html
+  let processedHtml = applyPrintInkSaver(html)
     .replace(/<script[^>]*>[\s\S]*?window\.print\(\)[\s\S]*?<\/script>/gi, '')
     .replace(/onload\s*=\s*["'][^"']*window\.print\(\)[^"']*["']/gi, '')
     .replace(/setTimeout\s*\([^)]*window\.print\(\)[^)]*\);?/gi, '');
@@ -1506,7 +1415,7 @@ export function injectPrintActionBar(
     processedHtml = `${processedHtml}${injectedScript}`;
   }
 
-  return processedHtml;
+  return withRepeatedPrintHeader(processedHtml);
 }
 
 export function writePrintWindow(

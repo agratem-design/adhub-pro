@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('desktopAPI', {
 
   // Native High-Quality PDF Export (Save as PDF like Google Chrome)
   saveAsPDF: (options) => ipcRenderer.invoke('desktop:save-as-pdf', options),
+  renderPdf: (options) => ipcRenderer.invoke('desktop:render-pdf', options),
 
   // Native Print Dialog
   printDocument: (options) => ipcRenderer.invoke('desktop:print-document', options),

@@ -1,8 +1,9 @@
+import { applyPrintInkSaver } from '@/lib/printInkSaver';
 // Reusable helper to generate a pixel-perfect PDF from an HTML string
-// Renders content at A4 width (794px ≈ 210mm at 96dpi) then converts via html2pdf
+// Renders content at A4 width (794px ≈ 210mm at 96dpi) then converts via browserPdf
 import DOMPurify from 'dompurify';
-import html2pdf from 'html2pdf.js';
-import html2canvas from 'html2canvas';
+import browserPdf from '@/lib/browserPdf';
+import browserCanvas from '@/lib/browserCanvas';
 import { jsPDF } from 'jspdf';
 
 export interface SavePdfOptions {
@@ -45,7 +46,7 @@ function getSafeCanvasScale(elWidth: number, elHeight: number, desiredScale: num
 }
 
 /**
- * CSS injected into the cloned DOM before html2canvas captures it.
+ * CSS injected into the cloned DOM before browserCanvas captures it.
  * Forces print-like behavior: exact color rendering, and neutralized responsive breakpoints.
  * NOTE: We do NOT force table-layout:fixed here — it distorts RTL receipt tables.
  */
@@ -72,13 +73,12 @@ const PRINT_OVERRIDE_CSS = `
   /* ★ Anti-clipping: prevent text cut-off in table cells and their children */
   td, th, td > div:not(.u-invoice-title):not(.u-invoice-info), td > span, td > p, th > div, th > span {
     overflow: visible !important;
-    word-break: break-word !important;
+    word-break: normal !important;
     text-overflow: clip !important;
   }
   /* ★ Images: prevent stretching — exclude logo which has explicit dimensions */
   img:not(.u-logo) {
     max-width: 100% !important;
-    height: auto !important;
     object-fit: contain !important;
   }
   /* ★ Totals and summary: prevent page break in the middle */
@@ -92,7 +92,7 @@ const PRINT_OVERRIDE_CSS = `
  * Core iframe-based renderer shared by both save and blob paths.
  * Writes the full HTML document into an offscreen iframe so that
  * html, body, @page rules, fonts, and RTL direction are all preserved.
- * Returns the iframe element and the target element for html2pdf.
+ * Returns the iframe element and the target element for browserPdf.
  */
 async function renderInIframe(html: string, waitMs: number): Promise<{ iframe: HTMLIFrameElement; targetElement: HTMLElement }> {
   const sanitizedHtml = DOMPurify.sanitize(html, {
@@ -148,7 +148,7 @@ async function renderInIframe(html: string, waitMs: number): Promise<{ iframe: H
   // Wait for custom fonts
   try { await (iframeDoc as any).fonts?.ready; } catch { }
 
-  // Convert SVG images to PNG for html2canvas compatibility
+  // Convert SVG images to PNG for browserCanvas compatibility
   const svgImages = Array.from(iframeDoc.querySelectorAll('img'));
   await Promise.all(
     svgImages.map(async (img) => {
@@ -183,7 +183,10 @@ async function renderInIframe(html: string, waitMs: number): Promise<{ iframe: H
         canvas.height = h * scale;
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(image, 0, 0, w * scale, h * scale);
+          const fit = Math.min(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight);
+          const drawWidth = image.naturalWidth * fit;
+          const drawHeight = image.naturalHeight * fit;
+          ctx.drawImage(image, (canvas.width - drawWidth) / 2, (canvas.height - drawHeight) / 2, drawWidth, drawHeight);
           img.src = canvas.toDataURL('image/png');
         }
         URL.revokeObjectURL(url);
@@ -197,7 +200,7 @@ async function renderInIframe(html: string, waitMs: number): Promise<{ iframe: H
 }
 
 /**
- * Build html2pdf options object for consistent rendering.
+ * Build browserPdf options object for consistent rendering.
  */
 function buildPdfOptions(opts: {
   filename: string;
@@ -208,7 +211,7 @@ function buildPdfOptions(opts: {
     margin: opts.marginMm,
     filename: opts.filename,
     image: { type: 'jpeg', quality: 0.98 },
-    html2canvas: {
+    canvas: {
       scale: 2,
       useCORS: true,
       allowTaint: true,
@@ -239,7 +242,7 @@ export async function saveHtmlAsPdf(html: string, filename: string, opts: SavePd
       ? (iframe.contentDocument!.querySelector(opts.rootSelector) as HTMLElement | null) || targetElement
       : targetElement;
 
-    await html2pdf()
+    await browserPdf()
       .from(target)
       .set(buildPdfOptions({
         filename: opts.filename ?? filename,
@@ -253,8 +256,8 @@ export async function saveHtmlAsPdf(html: string, filename: string, opts: SavePd
 }
 
 /**
- * ★ Capture PDF directly from a live iframe's DOM using html2canvas + jsPDF.
- * This preserves all CSS from the iframe's <head>, unlike html2pdf which clones
+ * ★ Capture PDF directly from a live iframe's DOM using browserCanvas + jsPDF.
+ * This preserves all CSS from the iframe's <head>, unlike browserPdf which clones
  * subtrees and loses class-based styles.
  */
 async function captureIframeAsPdfBlob(
@@ -267,7 +270,7 @@ async function captureIframeAsPdfBlob(
   }
 
   // Clone the full HTML from the preview iframe
-  const fullHtml = srcDoc.documentElement.outerHTML;
+  const fullHtml = applyPrintInkSaver(srcDoc.documentElement.outerHTML);
 
   // Check if this document contains contract pages with 2480x3508 design coordinates
   const isContractDocument = Boolean(
@@ -444,7 +447,7 @@ async function captureIframeAsPdfBlob(
         renderTarget.style.transform = 'none';
         renderTarget.style.zoom = '1';
 
-        const canvas = await html2canvas(renderTarget, {
+        const canvas = await browserCanvas(renderTarget, {
           scale: 2,
           useCORS: true,
           allowTaint: true,
@@ -481,7 +484,7 @@ async function captureIframeAsPdfBlob(
         const elHeight = rect.height || el.scrollHeight || 1123;
         const canvasScale = getSafeCanvasScale(elWidth, elHeight, 2.5);
 
-        const canvas = await html2canvas(el, {
+        const canvas = await browserCanvas(el, {
           scale: canvasScale,
           useCORS: true,
           allowTaint: true,
@@ -493,12 +496,10 @@ async function captureIframeAsPdfBlob(
         });
 
         const imgData = canvas.toDataURL('image/jpeg', 0.95);
-        if (margin[0] === 0 && margin[1] === 0 && margin[2] === 0 && margin[3] === 0) {
-          pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidthMm, pdfHeightMm);
-        } else {
+        {
           const contentWidthMm = pdfWidthMm - margin[1] - margin[3];
           const imgAspect = canvas.height / canvas.width;
-          const drawW = contentWidthMm;
+          const drawW = Math.min(contentWidthMm, (pdfHeightMm - margin[0] - margin[2]) / imgAspect);
           const drawH = drawW * imgAspect;
           pdf.addImage(imgData, 'JPEG', margin[3], margin[0], drawW, drawH);
         }
@@ -536,6 +537,11 @@ export async function iframeToPdfBlob(
   filename: string,
   opts: PdfBlobOptions = {}
 ): Promise<Blob> {
+  if (window.desktopAPI?.renderPdf) {
+    const doc = iframeEl?.contentDocument;
+    if (!doc) throw new Error('مستند المعاينة غير جاهز');
+    return htmlToPdfBlob(doc.documentElement.outerHTML, filename, opts);
+  }
   return captureIframeAsPdfBlob(iframeEl, {
     marginMm: opts.marginMm,
     landscape: opts.landscape,
@@ -544,7 +550,7 @@ export async function iframeToPdfBlob(
 
 /**
  * Rasterize all SVG <img> elements in a document to PNG data URLs.
- * This ensures html2canvas can render them properly without foreignObjectRendering.
+ * This ensures browserCanvas can render them properly without foreignObjectRendering.
  */
 async function rasterizeSvgImages(doc: Document): Promise<void> {
   const imgs = Array.from(doc.querySelectorAll('img'));
@@ -577,7 +583,10 @@ async function rasterizeSvgImages(doc: Document): Promise<void> {
         canvas.height = h * scale;
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(image, 0, 0, w * scale, h * scale);
+          const fit = Math.min(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight);
+          const drawWidth = image.naturalWidth * fit;
+          const drawHeight = image.naturalHeight * fit;
+          ctx.drawImage(image, (canvas.width - drawWidth) / 2, (canvas.height - drawHeight) / 2, drawWidth, drawHeight);
           img.src = canvas.toDataURL('image/png');
         }
         URL.revokeObjectURL(url);
@@ -603,10 +612,10 @@ async function rasterizeSvgImages(doc: Document): Promise<void> {
 }
 
 /**
- * ★ Save a full HTML document string as a downloaded PDF using html2canvas + jsPDF.
+ * ★ Save a full HTML document string as a downloaded PDF using browserCanvas + jsPDF.
  * This is the unified path for invoice PDF downloads — it renders in an offscreen
  * iframe at exact A4 width, rasterizes all images (including SVG), captures via
- * html2canvas WITHOUT foreignObjectRendering, and produces a multi-page PDF with
+ * browserCanvas WITHOUT foreignObjectRendering, and produces a multi-page PDF with
  * proper margins matching the print preview.
  */
 export async function saveHtmlDocAsPdf(
@@ -634,12 +643,22 @@ export async function saveHtmlDocAsPdf(
 /**
  * ★ Shared high-quality PDF engine used by both saveHtmlDocAsPdf and htmlToPdfBlob.
  * Renders in an offscreen iframe at exact A4 width, rasterizes all images (including SVG),
- * captures via html2canvas and produces a multi-page PDF.
+ * captures via browserCanvas and produces a multi-page PDF.
  */
 async function _htmlToHighQualityPdfBlob(
   html: string,
   opts: { marginMm: [number, number, number, number]; waitMs: number; landscape: boolean }
 ): Promise<Blob> {
+  html = applyPrintInkSaver(html);
+  if (window.desktopAPI?.renderPdf) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const base = doc.createElement('base');
+    base.href = document.baseURI;
+    doc.head.prepend(base);
+    const result = await window.desktopAPI.renderPdf({ html: '<!DOCTYPE html>' + doc.documentElement.outerHTML, landscape: opts.landscape });
+    const binary = atob(result.base64);
+    return new Blob([Uint8Array.from(binary, char => char.charCodeAt(0))], { type: 'application/pdf' });
+  }
   const margin = opts.marginMm;
   const waitMs = opts.waitMs;
   const isLandscape = opts.landscape;
@@ -792,7 +811,7 @@ async function _htmlToHighQualityPdfBlob(
         renderTarget.style.transform = 'none';
         renderTarget.style.zoom = '1';
 
-        const canvas = await html2canvas(renderTarget, {
+        const canvas = await browserCanvas(renderTarget, {
           scale: 2,
           useCORS: true,
           allowTaint: true,
@@ -835,7 +854,20 @@ async function _htmlToHighQualityPdfBlob(
     const canvasScale = getSafeCanvasScale(elWidth, targetRect.height || target.scrollHeight || 1123, 13.0);
     const noBreakZones: { top: number; bottom: number }[] = [];
     // Include [data-no-break], tfoot, and tfoot tr
-    const noBreakEls = target.querySelectorAll('[data-no-break], tfoot, tfoot tr');
+    const footerSource = target.querySelector<HTMLElement>('.u-footer');
+    const repeatedFooter = footerSource?.cloneNode(true) as HTMLElement | undefined;
+    if (footerSource) footerSource.style.display = 'none';
+    const pageNumberNodes = Array.from(target.querySelectorAll<HTMLElement>('.u-page-number, .page-number'));
+    pageNumberNodes.forEach(node => { node.style.display = 'none'; });
+    // Freeze the computed logo box before the DOM is cloned for export.
+    target.querySelectorAll<HTMLElement>('.u-logo').forEach(logo => {
+      const box = logo.getBoundingClientRect();
+      logo.style.width = box.width + 'px';
+      logo.style.height = box.height + 'px';
+      logo.style.flex = 'none';
+      logo.style.objectFit = 'contain';
+    });
+    const noBreakEls = target.querySelectorAll('[data-no-break], tfoot, tfoot tr, .receipt-attachments, .receipt-attachment-grid img');
     noBreakEls.forEach(el => {
       const r = (el as HTMLElement).getBoundingClientRect();
       noBreakZones.push({
@@ -845,7 +877,7 @@ async function _htmlToHighQualityPdfBlob(
     });
 
     // Capture the full content as one tall canvas at high resolution
-    const canvas = await html2canvas(target, {
+    const canvas = await browserCanvas(target, {
       scale: canvasScale,
       useCORS: true,
       allowTaint: true,
@@ -855,13 +887,32 @@ async function _htmlToHighQualityPdfBlob(
       windowWidth: elWidth,
       foreignObjectRendering: false,
     });
+    const actualScale = canvas.width / elWidth;
+    noBreakZones.forEach(zone => {
+      zone.top *= actualScale / canvasScale;
+      zone.bottom *= actualScale / canvasScale;
+    });
 
     // Build multi-page PDF by slicing the canvas
     const orientation = isLandscape ? 'landscape' : 'portrait';
     const pdfWidthMm = isLandscape ? 297 : 210;
     const pdfHeightMm = isLandscape ? 210 : 297;
     const contentWidthMm = pdfWidthMm - margin[1] - margin[3];
-    const contentHeightMm = pdfHeightMm - margin[0] - margin[2];
+    const footerSpace = repeatedFooter ? 24 : (pageNumberNodes.length ? 8 : 0);
+    const contentHeightMm = pdfHeightMm - margin[0] - margin[2] - footerSpace;
+    const sourceHeader = target.querySelector<HTMLElement>('.u-header, .measurements-header');
+    let repeatedHeader: HTMLCanvasElement | null = null;
+    let repeatedHeaderMm = 0;
+    if (sourceHeader) {
+      const compact = sourceHeader.cloneNode(true) as HTMLElement;
+      compact.style.cssText += ';width:' + elWidth + 'px;margin:0;padding:18px 12px 14px;min-height:88px;box-sizing:border-box;background:white';
+      compact.querySelectorAll('.u-company-name, .u-company-subtitle, .u-contact-info').forEach(el => el.remove());
+      compact.querySelectorAll<HTMLElement>('.u-logo').forEach(logo => { logo.style.height = '72px'; logo.style.width = 'auto'; });
+      iframeDoc.body.appendChild(compact);
+      repeatedHeader = await browserCanvas(compact, { width: elWidth, scale: 2 });
+      repeatedHeaderMm = repeatedHeader.height / repeatedHeader.width * contentWidthMm + 3;
+      compact.remove();
+    }
 
     // Calculate how many pixels of the canvas fit per page
     const mmPerPx = contentWidthMm / canvas.width;
@@ -870,8 +921,10 @@ async function _htmlToHighQualityPdfBlob(
     // Smart page breaking: compute page break points respecting data-no-break zones
     const pageBreaks: number[] = [0];
     let currentY = 0;
-    while (currentY + pageHeightPx < canvas.height) {
-      let breakAt = currentY + pageHeightPx;
+    while (currentY < canvas.height) {
+      const capacity = pageBreaks.length === 1 ? pageHeightPx : (contentHeightMm - repeatedHeaderMm) / mmPerPx;
+      if (currentY + capacity >= canvas.height) break;
+      let breakAt = currentY + capacity;
       const originalBreak = breakAt;
       // Check if this break cuts through a no-break zone
       for (const zone of noBreakZones) {
@@ -888,11 +941,7 @@ async function _htmlToHighQualityPdfBlob(
       currentY = breakAt;
     }
 
-    // Merge tiny last page: if remaining content is < 15% of page height, merge with previous
-    const remainingPx = canvas.height - pageBreaks[pageBreaks.length - 1];
-    if (pageBreaks.length > 1 && remainingPx > 0 && remainingPx < pageHeightPx * 0.15) {
-      pageBreaks.pop(); // remove last break, previous page will absorb it
-    }
+    // Keep the last page: absorbing it would exceed the printable height.
 
     const totalPages = pageBreaks.length;
     const pdf = new jsPDF({ orientation, unit: 'mm', format: 'a4', compress: true });
@@ -918,7 +967,31 @@ async function _htmlToHighQualityPdfBlob(
       const drawW = contentWidthMm;
       const drawH = srcH * mmPerPx;
 
-      pdf.addImage(imgData, 'JPEG', margin[3], margin[0], drawW, drawH);
+      const headerOffset = page > 0 ? repeatedHeaderMm : 0;
+      if (page > 0 && repeatedHeader) {
+        pdf.addImage(repeatedHeader.toDataURL('image/png'), 'PNG', margin[3], margin[0], contentWidthMm, repeatedHeaderMm - 3);
+      }
+      pdf.addImage(imgData, 'JPEG', margin[3], margin[0] + headerOffset, drawW, drawH);
+      if (repeatedFooter) {
+        const footer = repeatedFooter.cloneNode(true) as HTMLElement;
+        footer.style.cssText += ';display:flex;width:' + elWidth + 'px;margin:0;padding-top:8px;';
+        const number = footer.querySelector('.u-page-number-text, .page-number');
+        if (number) number.textContent = `صفحة ${page + 1} من ${totalPages}`;
+        footer.querySelectorAll<HTMLElement>('.u-page-number').forEach(el => { el.style.display = 'inline-block'; });
+        iframeDoc.body.appendChild(footer);
+        const footerCanvas = await browserCanvas(footer, { width: elWidth, scale: 2 });
+        const height = Math.min(footerSpace - 2, footerCanvas.height / footerCanvas.width * contentWidthMm);
+        pdf.addImage(footerCanvas.toDataURL('image/png'), 'PNG', margin[3], pdfHeightMm - margin[2] - height - 3, contentWidthMm, height);
+        footer.remove();
+      } else if (pageNumberNodes.length) {
+        const label = iframeDoc.createElement('div');
+        label.textContent = `صفحة ${page + 1} من ${totalPages}`;
+        label.style.cssText = 'width:240px;height:24px;font:12px Doran,Arial;direction:rtl;text-align:center;color:#666;background:white';
+        iframeDoc.body.appendChild(label);
+        const labelCanvas = await browserCanvas(label, { width: 240, height: 24, scale: 2 });
+        pdf.addImage(labelCanvas.toDataURL('image/png'), 'PNG', (pdfWidthMm - 60) / 2, pdfHeightMm - 7, 60, 6);
+        label.remove();
+      }
     }
 
     return pdf.output('blob');
@@ -929,7 +1002,7 @@ async function _htmlToHighQualityPdfBlob(
 
 /**
  * Convert HTML to a PDF Blob (for uploading to Drive, sending via WhatsApp, etc.)
- * ★ Uses the same high-quality html2canvas + jsPDF engine as saveHtmlDocAsPdf
+ * ★ Uses the same high-quality browserCanvas + jsPDF engine as saveHtmlDocAsPdf
  *   to ensure identical rendering quality across all PDF paths.
  */
 export async function htmlToPdfBlob(html: string, filename: string, opts: PdfBlobOptions = {}): Promise<Blob> {
@@ -957,5 +1030,8 @@ export async function iframeToPdfBlobOptimized(
   filename: string,
   opts: PdfBlobOptions = {}
 ): Promise<Blob> {
-  return iframeToPdfBlob(iframeEl, filename, opts);
+  const previewDoc = iframeEl?.contentDocument || iframeEl?.contentWindow?.document;
+  if (!previewDoc?.body) throw new Error('مستند المعاينة غير جاهز للتصدير');
+  await previewDoc.fonts?.ready;
+  return htmlToPdfBlob(previewDoc.documentElement.outerHTML, filename, opts);
 }

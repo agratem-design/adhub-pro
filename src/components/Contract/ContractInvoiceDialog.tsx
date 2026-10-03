@@ -587,7 +587,7 @@ export default function ContractInvoiceDialog({ open, onOpenChange, contract }: 
 
       // ======= 🎯 جزئية تحميل فاتورة العقد =======
       const jsPDF = (await import('jspdf')).jsPDF;
-      const html2canvas = (await import('html2canvas')).default;
+      const browserCanvas = (await import('@/lib/browserCanvas')).default;
 
       // ======= 🔧 إعداد عنصر الفاتورة =======
       const container = document.createElement('div');
@@ -614,7 +614,7 @@ export default function ContractInvoiceDialog({ open, onOpenChange, contract }: 
 
       const invoicePage = container.querySelector('body, .invoice-content, .page') as HTMLElement || container;
       
-      const canvas = await html2canvas(invoicePage, {
+      const canvas = await browserCanvas(invoicePage, {
         scale: 2,
         useCORS: true,
         allowTaint: true,

@@ -222,7 +222,7 @@ export default function AccountStatementDialog({ open, onOpenChange, customerId,
 
       // تصفية اللوحات الموقوفة للعقود التابعة لهذا العميل فقط
       const pausedList = (pausedRes.data || []).filter((pb: any) =>
-        contractNumbers.includes(Number(pb.contract_number))
+        pb.lifecycle_state !== 'cancelled' && contractNumbers.includes(Number(pb.contract_number))
       );
 
       // إثراء المهام المجمعة بأرقام إعادة التركيب والفرق المنفذة

@@ -187,10 +187,10 @@ export function groupReceiptTasks(items: DistributedContract[]): DistributedCont
 }
 
 // === MAIN PRINT FUNCTION ===
-export async function printUnifiedReceipt(
+export function buildUnifiedReceiptPrintOptions(
   settingsOrTheme: any,
   options: PrintUnifiedReceiptOptions
-): Promise<void> {
+): MeasurementsHTMLOptions {
   const { payment, customerData, currency, balanceInfo } = options;
   const distributedContracts = groupReceiptTasks(options.distributedContracts || []);
 
@@ -267,12 +267,12 @@ export async function printUnifiedReceipt(
   if (isDistributed && distributedContracts.length > 0) {
     // Distributed payment - show contracts/tasks/invoices + total + paid + remaining
     columns = [
-      { key: 'index', header: '#', width: '6%', align: 'center' },
-      { key: 'reference', header: 'المرجع', width: '18%', align: 'center' },
-      { key: 'description', header: 'البيان', width: '28%', align: 'right' },
-      { key: 'total', header: 'القيمة الإجمالية', width: '16%', align: 'center' },
-      { key: 'amount', header: 'المسدد', width: '16%', align: 'center' },
-      { key: 'remaining', header: 'المتبقي', width: '16%', align: 'center' },
+      { key: 'index', header: '#', width: '5%', align: 'center' },
+      { key: 'reference', header: 'المرجع', width: '16%', align: 'center' },
+      { key: 'description', header: 'البيان', width: '25%', align: 'right' },
+      { key: 'total', header: 'القيمة الإجمالية', width: '18%', align: 'center' },
+      { key: 'amount', header: 'المسدد', width: '18%', align: 'center' },
+      { key: 'remaining', header: 'المتبقي', width: '18%', align: 'center' },
     ];
 
     rows = distributedContracts.map((contract, index) => {
@@ -461,7 +461,15 @@ export async function printUnifiedReceipt(
     headerSwap: settingsOrTheme.header_swap ?? false,
   };
 
-  openMeasurementsPrintWindow(printOptions, `إيصال استلام: ${customerData.name} • ${receiptNumber}`, undefined, customerData.phone);
+  return printOptions;
+}
+
+export async function printUnifiedReceipt(
+  settingsOrTheme: any,
+  options: PrintUnifiedReceiptOptions
+): Promise<void> {
+  const printOptions = buildUnifiedReceiptPrintOptions(settingsOrTheme, options);
+  await openMeasurementsPrintWindow(printOptions, `إيصال استلام: ${options.customerData.name} • ${printOptions.documentData.documentNumber}`, undefined, options.customerData.phone);
   toast.success('تم فتح الإيصال للطباعة');
 }
 

@@ -186,15 +186,7 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
     ${styles.footerAlignment === 'right' ? 'margin-right:auto' : styles.footerAlignment === 'left' ? 'margin-left:auto' : ''}
   }
   @media print {
-    @page {
-      @bottom-center {
-        content: "صفحة " counter(page) " من " counter(pages);
-        font-family: 'Cairo', 'Manrope', sans-serif;
-        font-size: 10px;
-        color: #666;
-      }
-    }
-    .u-page-number { display: none !important; }
+    .u-page-number { display: inline-block !important; visibility: visible !important; }
   }
   `;
 }

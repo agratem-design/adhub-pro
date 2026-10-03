@@ -117,8 +117,8 @@ function buildItemsTable(t: ResolvedPrintStyles, data: QuoteData): string {
   `;
 }
 
-export async function generateQuoteHTML(data: QuoteData): Promise<string> {
-  const t = await resolveInvoiceStyles('contract', {
+export async function generateQuoteHTML(data: QuoteData, previewStyles?: ResolvedPrintStyles): Promise<string> {
+  const t = previewStyles ?? await resolveInvoiceStyles('offer', {
     titleAr: 'عقد استئجار مساحات إعلانية',
     titleEn: 'ADVERTISING LEASE CONTRACT',
   });

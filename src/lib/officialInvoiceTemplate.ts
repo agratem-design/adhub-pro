@@ -7,7 +7,7 @@ export const OFFICIAL_INVOICE_TEMPLATE = DOCUMENT_TYPES.PAYMENT_RECEIPT;
 export const REFERENCE_INVOICE_STYLE: Partial<PrintSettings> = {
   primary_color: '#000000', secondary_color: '#333333', accent_color: '#f0f0f0',
   header_bg_color: '#fffdf8', header_text_color: '#000000', header_style: 'classic',
-  header_swap: false, header_margin_bottom: 20,
+  header_swap: false, header_margin_bottom: 20, document_info_alignment: 'right',
   logo_path: '/logofares.svg', logo_size: 86, show_logo: true,
   show_company_name: false, show_company_subtitle: false,
   show_company_address: false, show_company_contact: false,
@@ -15,10 +15,10 @@ export const REFERENCE_INVOICE_STYLE: Partial<PrintSettings> = {
   invoice_title_ar_font_size: 22, invoice_title_en_font_size: 12,
   customer_text_color: '#000000', customer_section_bg_color: '#ffffff',
   customer_section_border_color: '#000000',
-  table_header_bg_color: '#000000', table_header_text_color: '#ffffff',
+  table_header_bg_color: '#ffffff', table_header_text_color: '#262626',
   table_border_color: '#e5e5e5', table_row_even_color: '#f0f0f0', table_row_odd_color: '#ffffff',
   table_text_color: '#000000', table_body_font_size: 11, table_header_font_size: 12,
-  summary_bg_color: '#000000', summary_text_color: '#ffffff', summary_border_color: '#000000',
+  summary_bg_color: '#ffffff', summary_text_color: '#262626', summary_border_color: '#000000',
   totals_box_bg_color: '#ffffff', totals_box_text_color: '#000000', totals_box_border_color: '#e5e5e5',
   footer_text: 'شكراً لتعاملكم معنا', footer_text_color: '#666666', footer_alignment: 'center',
   show_footer: true, show_page_number: true,
@@ -26,8 +26,9 @@ export const REFERENCE_INVOICE_STYLE: Partial<PrintSettings> = {
 };
 export const OFFICIAL_TEMPLATE_FIELDS = Object.keys(DEFAULT_PRINT_SETTINGS).filter(key =>
   /^(company_|show_company_|header_|footer_|logo_|page_margin_|invoice_title_|table_|summary_|totals_box_|customer_section_(bg|border)_)/.test(key) ||
-  ['show_logo', 'show_footer', 'show_page_number', 'show_tax_id', 'show_email', 'show_website',
+  ['border_radius', 'border_width', 'show_logo', 'show_footer', 'show_page_number', 'show_tax_id', 'show_email', 'show_website',
     'font_family', 'title_font_size', 'header_font_size', 'body_font_size',
+    'document_info_text_color', 'document_info_bg_color', 'document_info_alignment', 'document_info_margin_top',
     'primary_color', 'secondary_color', 'accent_color', 'customer_text_color', 'background_image', 'background_opacity',
     'background_pos_x', 'background_pos_y', 'background_scale', 'content_bottom_spacing'].includes(key)
 ) as (keyof PrintSettings)[];
@@ -42,8 +43,6 @@ export function applyOfficialInvoiceTemplate(
   document: Partial<PrintSettings>, official?: Partial<PrintSettings> | null,
 ): PrintSettings {
   const shared = officialTemplateFields(official || {});
-  // Older receipt settings used black as the header sentinel; the approved print rendered ivory.
-  if (shared.header_bg_color && /^#0{3,6}$/i.test(shared.header_bg_color)) shared.header_bg_color = '#fffdf8';
   return {
     ...DEFAULT_PRINT_SETTINGS,
     ...document,

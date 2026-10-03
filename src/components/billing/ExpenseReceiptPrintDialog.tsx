@@ -17,34 +17,18 @@ const formatArabicNumber = (num: number): string => {
   return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 };
 
-export default function ExpenseReceiptPrintDialog({ 
-  open, 
-  onOpenChange, 
-  expense 
-}: ExpenseReceiptPrintDialogProps) {
-  const [isGenerating, setIsGenerating] = useState(false);
 
-  const handlePrint = async () => {
-    if (!expense) {
-      toast.error('لا توجد بيانات للطباعة');
-      return;
-    }
-
-    setIsGenerating(true);
-    
-    try {
-      // جلب إعدادات القالب المحفوظة
-      const styles = await getMergedInvoiceStylesAsync('receipt');
+export function buildExpenseReceiptHTML(styles: Awaited<ReturnType<typeof getMergedInvoiceStylesAsync>>, expense: any, receiptNumber = expense.receipt_number || `EXP-${Date.now()}`): string {
       const baseUrl = window.location.origin;
       const logoUrl = styles.logoPath || '/logofaresgold.svg';
       const fullLogoUrl = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
 
       // No popup test needed
 
-      const receiptDate = expense.expense_date 
+      const receiptDate = expense.expense_date
         ? formatDateForPrint(expense.expense_date, styles.showHijriDate)
         : formatDateForPrint(new Date().toISOString(), styles.showHijriDate);
-      const receiptNumber = expense.receipt_number || `EXP-${Date.now()}`;
+
 
       const metaLinesHtml = `
         <div><strong>رقم الإيصال:</strong> ${receiptNumber}</div>
@@ -56,8 +40,8 @@ export default function ExpenseReceiptPrintDialog({
         styles,
         fullLogoUrl,
         metaLinesHtml,
-        titleAr: 'إيصال مصروفات',
-        titleEn: 'EXPENSE RECEIPT'
+        titleAr: styles.invoiceTitle || 'إيصال مصروفات',
+        titleEn: styles.invoiceTitleEn || 'EXPENSE RECEIPT'
       });
 
       const footerHtml = unifiedFooterHtml(styles, 'صفحة 1 من 1');
@@ -72,9 +56,9 @@ export default function ExpenseReceiptPrintDialog({
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;700&display=swap');
             @font-face { font-family: 'Manrope'; src: url('${baseUrl}/Manrope-Bold.otf') format('opentype'); font-weight: 700; }
-            
+
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            
+
             html, body {
               width: 210mm;
               height: 297mm;
@@ -87,7 +71,7 @@ export default function ExpenseReceiptPrintDialog({
               line-height: 1.3;
               overflow: hidden;
             }
-            
+
             .receipt-container {
               width: 210mm;
               min-height: 297mm;
@@ -95,9 +79,9 @@ export default function ExpenseReceiptPrintDialog({
               display: flex;
               flex-direction: column;
             }
-            
+
             ${unifiedHeaderFooterCss(styles)}
-            
+
             .expense-section {
               background: ${styles.primaryColor}10;
               padding: 18px;
@@ -105,7 +89,7 @@ export default function ExpenseReceiptPrintDialog({
               margin-bottom: 18px;
               border: 2px solid ${styles.primaryColor};
             }
-            
+
             .section-title {
               font-size: 16px;
               font-weight: bold;
@@ -113,33 +97,33 @@ export default function ExpenseReceiptPrintDialog({
               margin-bottom: 12px;
               text-align: center;
             }
-            
+
             .info-grid {
               display: grid;
               grid-template-columns: 1fr 1fr;
               gap: 15px;
             }
-            
+
             .info-box {
               background: white;
               padding: 8px;
               border-radius: 4px;
               border: ${styles.tableBorderWidth || 1}px ${styles.tableBorderStyle || 'solid'} ${styles.tableBorderColor};
             }
-            
+
             .info-label {
               font-size: 11px;
               color: ${styles.primaryColor};
               font-weight: bold;
               margin-bottom: 4px;
             }
-            
+
             .info-value {
               font-size: 12px;
               color: #333;
               font-weight: normal;
             }
-            
+
             .amount-section {
               background: ${styles.primaryColor};
               color: white;
@@ -148,10 +132,10 @@ export default function ExpenseReceiptPrintDialog({
               margin-bottom: 18px;
               text-align: center;
             }
-            
+
             .amount-label { font-size: 14px; margin-bottom: 8px; }
             .amount-value { font-size: 28px; font-weight: bold; }
-            
+
             .signatures {
               display: grid;
               grid-template-columns: 1fr 1fr;
@@ -159,18 +143,18 @@ export default function ExpenseReceiptPrintDialog({
               margin-top: 40px;
               padding-top: 20px;
             }
-            
+
             .signature-box { text-align: center; }
-            
+
             .signature-line {
               border-top: 2px solid ${styles.primaryColor};
               margin-top: 60px;
               padding-top: 10px;
               font-weight: bold;
             }
-            
+
             .content-area { flex: 1; }
-            
+
             @media print {
               html, body { width: 210mm !important; height: 297mm !important; margin: 0 !important; padding: 0 !important; }
               @page { size: A4 portrait; margin: 0 !important; }
@@ -180,13 +164,13 @@ export default function ExpenseReceiptPrintDialog({
         <body>
           <div class="receipt-container">
             ${headerHtml}
-            
+
             <div class="content-area">
               <div class="amount-section">
                 <div class="amount-label">المبلغ المستلم</div>
                 <div class="amount-value">${formatArabicNumber(expense.amount)} د.ل</div>
               </div>
-              
+
               <div class="expense-section">
                 <div class="section-title">تفاصيل مستحقات نسبة العقود</div>
                 <div class="info-grid">
@@ -220,7 +204,7 @@ export default function ExpenseReceiptPrintDialog({
                   ` : ''}
                 </div>
               </div>
-              
+
               <div class="signatures">
                 <div class="signature-box">
                   <div class="signature-line">
@@ -241,6 +225,30 @@ export default function ExpenseReceiptPrintDialog({
         </html>
       `;
 
+
+ return htmlContent;
+}
+
+export default function ExpenseReceiptPrintDialog({
+  open,
+  onOpenChange,
+  expense
+}: ExpenseReceiptPrintDialogProps) {
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const handlePrint = async () => {
+    if (!expense) {
+      toast.error('لا توجد بيانات للطباعة');
+      return;
+    }
+
+    setIsGenerating(true);
+
+    try {
+      // جلب إعدادات القالب المحفوظة
+      const styles = await getMergedInvoiceStylesAsync('expenses');
+      const receiptNumber = expense.receipt_number || `EXP-${Date.now()}`;
+      const htmlContent = buildExpenseReceiptHTML(styles, expense, receiptNumber);
       const { showPrintPreview } = await import('@/components/print/PrintPreviewDialog');
       showPrintPreview(htmlContent, `إيصال مصروف: ${expense.receiver_name || ''} • ${receiptNumber}`, 'billing-expenses');
       setIsGenerating(false);

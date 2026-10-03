@@ -1,3 +1,4 @@
+import { unifiedInvoiceBodyCss } from './unifiedInvoiceBody';
 import { readablePrintColor } from './printColorContrast';
 /**
  * Unified Invoice Base - القاعدة الموحدة لجميع الفواتير
@@ -125,9 +126,10 @@ export interface ResolvedPrintStyles {
  */
 export async function resolveInvoiceStyles(
   invoiceType: InvoiceTemplateType,
-  defaults?: { titleAr?: string; titleEn?: string }
+  defaults?: { titleAr?: string; titleEn?: string },
+  settingsOverride?: Record<string, any>
 ): Promise<ResolvedPrintStyles> {
-  const s = await fetchPrintSettingsForInvoice(invoiceType) || {};
+  const s = settingsOverride ?? await fetchPrintSettingsForInvoice(invoiceType) ?? {};
   const fontBaseUrl = typeof window !== 'undefined' ? window.location.origin : '';
 
   const primaryColor = s.primaryColor || '#000000';
@@ -212,7 +214,7 @@ export async function resolveInvoiceStyles(
     invoiceTitleAr: s.invoiceTitle || defaults?.titleAr || '',
     invoiceTitleEn: s.invoiceTitleEn || defaults?.titleEn || '',
 
-    footerText: s.footerText || 'شكراً لتعاملكم معنا',
+    footerText: s.footerText ?? 'شكراً لتعاملكم معنا',
     footerAlignment: s.footerAlignment || 'center',
     footerTextColor: s.footerTextColor || '#666666',
     footerBgColor: s.footerBgColor || 'transparent',
@@ -220,7 +222,7 @@ export async function resolveInvoiceStyles(
 
     bgImageUrl,
     bgStyle,
-    backgroundOpacity: s.backgroundOpacity || 10,
+    backgroundOpacity: s.backgroundOpacity ?? 10,
 
     companyName: s.companyName || '',
     companySubtitle: s.companySubtitle || '',
@@ -428,7 +430,7 @@ export function generateBaseCSS(t: ResolvedPrintStyles): string {
     .grand-total-row { background-color: ${t.totalBg} !important; }
     .grand-total-row td { color: ${t.totalText}; font-weight: bold; padding: 14px 12px; }
     .grand-total-row .totals-label { text-align: right; font-size: ${t.headerFontSize}px; }
-    .grand-total-row .totals-value { text-align: center; font-size: ${t.headerFontSize + 2}px; font-family: 'Manrope', sans-serif; }
+    .grand-total-row .totals-value { text-align: center; font-size: ${t.headerFontSize + 2}px; font-family: 'Manrope', sans-serif; white-space: nowrap; font-variant-numeric: tabular-nums; overflow: visible; }
 
     .notes-section {
       margin-top: 15px; padding: 12px 16px;
@@ -471,7 +473,7 @@ export function generateBaseCSS(t: ResolvedPrintStyles): string {
     @media print {
       @page {
         size: A4;
-        margin: 0;
+        margin: ${t.pageMarginTop || 10}mm ${t.pageMarginRight || 12}mm ${t.pageMarginBottom || 10}mm ${t.pageMarginLeft || 12}mm;
         @bottom-center {
           content: ${t.showFooter !== false && t.showPageNumber !== false ? '"صفحة " counter(page) " من " counter(pages)' : 'none'};
           font-family: 'Cairo', 'Manrope', sans-serif;
@@ -480,13 +482,21 @@ export function generateBaseCSS(t: ResolvedPrintStyles): string {
         }
       }
       * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-      html, body { background: #fff !important; }
-      .paper { margin: 0; padding: ${t.pageMarginTop}mm ${t.pageMarginRight}mm ${t.pageMarginBottom}mm ${t.pageMarginLeft}mm; border: none; box-shadow: none; }
+      html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+      .paper {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-height: auto !important;
+        border: none !important;
+        box-shadow: none !important;
+      }
       .items-table th { background-color: ${t.tableHeaderBg} !important; }
       .grand-total-row { background-color: ${t.totalBg} !important; }
-      .page-number, .u-page-number { display: none !important; }
+      .page-number, .u-page-number { display: ${t.showFooter !== false && t.showPageNumber !== false ? 'inline-block' : 'none'} !important; visibility: ${t.showFooter !== false && t.showPageNumber !== false ? 'visible' : 'hidden'} !important; }
     }
-    ${unifiedHeaderFooterCss(t as UnifiedPrintStyles)}
+    ${unifiedHeaderFooterCss({ ...t.raw, ...t } as UnifiedPrintStyles)}
   `;
 }
 
@@ -523,7 +533,7 @@ function buildCompanyInfo(t: ResolvedPrintStyles): string {
 export function generateHeaderHTML(t: ResolvedPrintStyles, metaHtml: string): string {
   if (!t.showHeader) return '';
   return unifiedHeaderHtml({
-    styles: t as UnifiedPrintStyles,
+    styles: { ...t.raw, ...t } as UnifiedPrintStyles,
     fullLogoUrl: t.fullLogoUrl,
     metaLinesHtml: metaHtml,
     titleAr: t.invoiceTitleAr,
@@ -562,7 +572,7 @@ export function generateCustomerHTML(t: ResolvedPrintStyles, opts: {
  * Generate footer HTML
  */
 export function generateFooterHTML(t: ResolvedPrintStyles): string {
-  return unifiedFooterHtml(t as UnifiedPrintStyles);
+  return unifiedFooterHtml({ ...t.raw, ...t } as UnifiedPrintStyles);
 }
 
 /**
@@ -680,6 +690,11 @@ export interface UnifiedPrintStyles {
   bodyFontSize?: number;
   titleFontSize?: number;
   // ✅ New unified properties
+  borderRadius?: number;
+  documentInfoTextColor?: string;
+  documentInfoBgColor?: string;
+  documentInfoAlignment?: AlignmentOption;
+  documentInfoMarginTop?: number;
   headerBgColor?: string;
   headerTextColor?: string;
   headerStyle?: string;
@@ -694,11 +709,11 @@ const legacyFlexJustify = (a?: string) => (a === 'center' ? 'center' : a === 'le
 export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
   const headerMarginBottom = styles.headerMarginBottom ?? 15;
   const footerPosition = styles.footerPosition ?? 15;
-  const pc = styles.primaryColor || '#D4AF37';
-  const sc = styles.secondaryColor || '#1a1a2e';
+  const pc = styles.primaryColor || '#000000';
+  const sc = styles.secondaryColor || '#333333';
   const logoSize = styles.logoSize ?? 200;
   const headerFontSize = styles.headerFontSize ?? 14;
-  const titleArFontSize = styles.invoiceTitleArFontSize ?? 22;
+  const titleArFontSize = styles.invoiceTitleArFontSize ?? 18;
   const titleEnFontSize = styles.invoiceTitleEnFontSize ?? 12;
   const headerBgColor = styles.headerBgColor || 'transparent';
   const headerTextColor = readablePrintColor(
@@ -707,7 +722,9 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
   );
   const logoContainerFlex = styles.logoContainerWidth ? `flex: 0 0 ${styles.logoContainerWidth};` : 'flex: 1;';
   const titleContainerFlex = styles.titleContainerWidth ? `flex: 0 0 ${styles.titleContainerWidth};` : 'flex: 1;';
-  const resolvedHeaderBg = headerBgColor === 'transparent' ? '#fffdf8' : headerBgColor;
+  const resolvedHeaderBg = headerBgColor;
+  const metaBg = styles.documentInfoBgColor || 'transparent';
+  const metaText = readablePrintColor(metaBg === 'transparent' ? (headerBgColor === 'transparent' ? '#ffffff' : headerBgColor) : metaBg, styles.documentInfoTextColor || headerTextColor);
   const resolvedLogoHeight = Math.min(200, Math.max(20, logoSize));
 
   return `
@@ -716,16 +733,16 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
     justify-content: space-between;
     align-items: center;
     margin-bottom: ${headerMarginBottom}px;
-    border: 1px solid #e8dfcc;
+    border: 1px solid ${styles.tableBorderColor || pc};
     border-top: 4px solid ${pc};
-    border-radius: 12px;
+    border-radius: ${styles.borderRadius ?? 12}px;
     padding: 12px 14px;
     direction: rtl;
     gap: 16px;
     background-color: ${resolvedHeaderBg} !important;
     background: ${resolvedHeaderBg} !important;
     color: ${headerTextColor};
-    box-shadow: 0 3px 12px rgba(66, 51, 16, 0.06);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.06);
     break-inside: avoid;
   }
   .u-invoice-info {
@@ -743,44 +760,51 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
     overflow-wrap: break-word;
     white-space: normal;
     max-width: 100%;
-    line-height: 1.3;
+    line-height: 1.5;
   }
   .u-invoice-subtitle {
     font-size: ${titleEnFontSize}px;
-    color: ${sc};
+    color: ${readablePrintColor(headerBgColor === 'transparent' ? '#ffffff' : headerBgColor, sc)};
     font-weight: bold;
     margin-bottom: 6px;
     direction: ltr;
-    text-align: left;
+    text-align: inherit;
     font-family: Manrope, sans-serif;
     letter-spacing: 2px;
     opacity: 0.75;
   }
   .u-invoice-details {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 3px 12px;
-    font-size: 9.5px;
-    color: #5f5b52;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    direction: rtl;
+    font-size: 10px;
+    color: ${metaText};
     line-height: 1.45;
-    margin-top: 4px;
+    margin-top: ${styles.documentInfoMarginTop ?? 4}px;
+    background: ${metaBg};
+    text-align: ${styles.documentInfoAlignment || 'right'};
     opacity: 1;
   }
   .u-invoice-details > div {
+    display: block;
+    width: 100%;
     min-width: 0;
-    padding-bottom: 2px;
-    border-bottom: 1px solid #eee7d8;
+    max-width: 100%;
+    text-align: inherit;
+    overflow-wrap: normal;
   }
   .u-invoice-details > div > span {
-    display: block;
-    color: #8a806d;
-    font-size: 8px;
-    margin-bottom: 1px;
+    display: inline;
+    color: ${metaText};
+    font-size: 10px;
+    margin-inline-end: 4px;
   }
   .u-invoice-details strong {
-    color: #211d15;
-    display: block;
-    font-size: 9.5px;
+    color: ${metaText};
+    display: inline;
+    font-size: 10px;
     font-weight: 700;
   }
   .u-company-side {
@@ -840,9 +864,10 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
         color: #666;
       }
     }
-    .u-page-number { display: none !important; }
+    .u-page-number { display: ${styles.showFooter !== false && styles.showPageNumber !== false ? 'inline-block' : 'none'} !important; visibility: ${styles.showFooter !== false && styles.showPageNumber !== false ? 'visible' : 'hidden'} !important; }
     .u-header { box-shadow: none !important; }
   }
+  ${unifiedInvoiceBodyCss(styles)}
   `;
 }
 
@@ -853,7 +878,12 @@ export function unifiedHeaderHtml(opts: {
   titleAr?: string;
   titleEn?: string;
 }) {
-  const { styles, fullLogoUrl, metaLinesHtml } = opts;
+  const { styles, fullLogoUrl, metaLinesHtml: rawMetaLinesHtml } = opts;
+  // Legacy generators send label/value lines separated by <br>; keep each
+  // pair together rather than making individual tokens independent grid cells.
+  const metaLinesHtml = /<div[\s>]/i.test(rawMetaLinesHtml)
+    ? rawMetaLinesHtml
+    : rawMetaLinesHtml.split(/<br\s*\/?\s*>/i).filter(line => line.trim()).map(line => `<div>${line}</div>`).join('');
   const titleEn = opts.titleEn || styles.invoiceTitleEn || '';
   const titleAr = opts.titleAr || styles.invoiceTitle || '';
   const showLogo = styles.showLogo !== false;
@@ -910,8 +940,7 @@ export function unifiedHeaderHtml(opts: {
   }
 
   // ===== 'classic' and 'modern' use two-column layout =====
-  const isModern = headerStyle === 'modern';
-  const swap = isModern ? !(styles.headerSwap === true) : (styles.headerSwap === true);
+  const swap = styles.headerSwap === true;
 
   const invoiceInfoBlock = `
     <div class="u-invoice-info">
@@ -922,8 +951,7 @@ export function unifiedHeaderHtml(opts: {
   `;
 
   // Determine company-side alignment based on swap
-  // swap=false (default): company on RIGHT in RTL → align-items:flex-end
-  // swap=true: company on LEFT in RTL → align-items:flex-start
+  // Default: logo at the physical left; swapped: logo at the physical right.
   const companyFlexAlign = swap ? 'align-items:flex-start;' : 'align-items:flex-end;';
 
   const companySideBlock = `
@@ -936,18 +964,18 @@ export function unifiedHeaderHtml(opts: {
   `;
 
   // RTL: first child = RIGHT visually
-  // Default (swap=false): company/logo RIGHT, title LEFT
-  // Swapped (swap=true): title RIGHT, company/logo LEFT
-  const firstContent = swap ? invoiceInfoBlock : companySideBlock;
-  const secondContent = swap ? companySideBlock : invoiceInfoBlock;
+  // Default (swap=false): title RIGHT, company/logo LEFT
+  // Swapped (swap=true): company/logo RIGHT, title LEFT
+  const firstContent = swap ? companySideBlock : invoiceInfoBlock;
+  const secondContent = swap ? invoiceInfoBlock : companySideBlock;
 
   // Alignment for text
-  const titleOnRight = swap;
+  const titleOnRight = !swap;
   const explicitAlign = styles.headerAlignment && styles.headerAlignment !== 'split' ? styles.headerAlignment : null;
   const titleAlign = `text-align:${explicitAlign || (titleOnRight ? 'right' : 'left')};`;
   const companyTextAlign = `text-align:${explicitAlign || (titleOnRight ? 'left' : 'right')};`;
 
-  const firstIsTitle = swap;
+  const firstIsTitle = !swap;
   const firstStyle = firstIsTitle ? titleAlign : companyTextAlign;
   const secondStyle = firstIsTitle ? companyTextAlign : titleAlign;
 
@@ -961,10 +989,29 @@ export function unifiedHeaderHtml(opts: {
 
 export function unifiedFooterHtml(styles: UnifiedPrintStyles, pageText = 'صفحة 1 من 1') {
   if (styles.showFooter === false) return '';
+  const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
+  const settings = styles as Record<string, any>;
+  const icon = (label: string) => {
+    const paths: Record<string, string> = {
+      'هاتف': '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7l.5 3a2 2 0 0 1-.6 1.7L7.7 9.7a16 16 0 0 0 6.6 6.6l1.3-1.3a2 2 0 0 1 1.7-.6l3 .5a2 2 0 0 1 1.7 2z"/>',
+      'العنوان': '<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0z"/><circle cx="12" cy="10" r="3"/>',
+      'البريد الإلكتروني': '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 5 9 7 9-7"/>',
+      'الموقع الإلكتروني': '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18z"/>',
+      'صفحة': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h5"/>',
+    };
+    return `<svg aria-hidden="true" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-inline-end:4px;">${paths[label]}</svg>`;
+  };
+  const contacts = [
+    { label: 'هاتف', value: settings.companyPhone || settings.company_phone },
+    { label: 'العنوان', value: settings.companyAddress || settings.company_address },
+    { label: 'البريد الإلكتروني', value: settings.companyEmail || settings.company_email },
+    { label: 'الموقع الإلكتروني', value: settings.companyWebsite || settings.company_website },
+  ].filter(item => String(item.value || '').trim());
   return `
-  <div class="u-footer">
-    <span>${styles.footerText || ''}</span>
-    ${styles.showPageNumber !== false ? `<span class="u-page-number">${pageText}</span>` : ''}
+  ${styles.footerText ? `<div class="u-closing-message" style="text-align:center;font-size:12px;line-height:1.8;padding:12px 0;color:#555;break-inside:avoid;">${escape(styles.footerText)}</div>` : ''}
+  <div class="u-footer" style="display:flex;justify-content:space-between;align-items:center;gap:12px;direction:rtl;padding:8px 12px 0;box-sizing:border-box;border-top:1px solid ${escape(styles.primaryColor || '#262626')};line-height:1.8;font-size:11px;">
+    <div class="u-footer-contacts" style="display:flex;flex-wrap:wrap;justify-content:flex-start;gap:8px;text-align:right;">${contacts.map(item => `<span class="u-footer-contact" style="display:inline-block;">${icon(item.label)}<bdi>${escape(item.value)}</bdi></span>`).join('<span aria-hidden="true" style="color:#aaa;"> | </span>')}</div>
+    ${styles.showPageNumber !== false ? `<span class="u-page-number" style="display:inline-block;margin:0;white-space:nowrap;">${icon('صفحة')}<span class="u-page-number-text">${escape(pageText)}</span></span>` : ''}
   </div>
   `;
 }

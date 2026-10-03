@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Printer, FileDown, Users, Check, FileText, Settings2, Table2, MessageCircle, Wrench, RefreshCw, Hash, Tag } from 'lucide-react';
 import QRCode from 'qrcode';
-import html2pdf from 'html2pdf.js';
+import browserPdf from '@/lib/browserPdf';
 import { supabase } from '@/integrations/supabase/client';
 import { BackgroundSelector } from '@/components/billboard-print/BackgroundSelector';
 import { PrintCustomizationDialog } from '@/components/print-customization';
@@ -2085,7 +2085,7 @@ export function UnifiedPrintAllDialog({
       if (pages.length === 0) throw new Error('لا توجد صفحات للتصدير');
 
       const { jsPDF } = await import('jspdf');
-      const html2canvas = (await import('html2canvas')).default;
+      const browserCanvas = (await import('@/lib/browserCanvas')).default;
 
       const orientation = isLandscape ? 'landscape' : 'portrait';
       const a4W = isLandscape ? 297 : 210;
@@ -2096,7 +2096,7 @@ export function UnifiedPrintAllDialog({
         const pageEl = pages[i];
         
         // Canvas 2D rendering with high DPI scale (3.0 for 300 DPI print quality)
-        const canvas = await html2canvas(pageEl, {
+        const canvas = await browserCanvas(pageEl, {
           scale: 3.0,
           useCORS: true,
           allowTaint: false,

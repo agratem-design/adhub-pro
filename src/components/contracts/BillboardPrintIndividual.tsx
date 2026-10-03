@@ -664,7 +664,7 @@ export const BillboardPrintIndividual: React.FC<BillboardPrintIndividualProps> =
 
       // تحميل المكتبات
       const jsPDF = (await import('jspdf')).jsPDF;
-      const html2canvas = (await import('html2canvas')).default;
+      const browserCanvas = (await import('@/lib/browserCanvas')).default;
       const QRCode = (await import('qrcode')).default;
 
       // تحميل الخلفية SVG
@@ -864,7 +864,7 @@ ${image ? `
         const pageElement = containers[i].querySelector('div > div') as HTMLElement;
         
         if (pageElement) {
-          const canvas = await html2canvas(pageElement, {
+          const canvas = await browserCanvas(pageElement, {
             scale: 2,
             useCORS: true,
             allowTaint: true,

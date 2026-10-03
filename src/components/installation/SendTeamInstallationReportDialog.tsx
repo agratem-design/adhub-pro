@@ -123,8 +123,8 @@ const generateTeamPdfBlob = async (
     </html>
   `;
 
-  // Use html2pdf.js to convert to PDF
-  const html2pdf = (await import('html2pdf.js')).default;
+  // Use browserPdf.js to convert to PDF
+  const browserPdf = (await import('@/lib/browserPdf')).default;
   const container = document.createElement('div');
   container.innerHTML = html;
   container.style.position = 'absolute';
@@ -133,12 +133,12 @@ const generateTeamPdfBlob = async (
   document.body.appendChild(container);
 
   try {
-    const pdfBlob: Blob = await html2pdf()
+    const pdfBlob: Blob = await browserPdf()
       .set({
         margin: [10, 10, 10, 10],
         filename: 'report.pdf',
         image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+        canvas: { scale: 2, useCORS: true, letterRendering: true },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
       })
       .from(container)

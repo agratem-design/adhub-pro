@@ -43,6 +43,8 @@ describe('official reference invoice stationery', () => {
     for (const type of ['sales_invoice', 'purchase_invoice', 'contract', 'print_invoice', 'receipt', 'composite_task'] as const) {
       const result = await fetchPrintSettingsForInvoice(type);
       expect(result?.logoSize).toBe(86);
+      expect(result?.headerBgColor).toBe(official.header_bg_color);
+      expect(result?.primaryColor).toBe(official.primary_color);
       expect(result?.companyName).toBe(official.company_name);
     }
     expect((await fetchPrintSettingsForInvoice('sales_invoice'))?.invoiceTitle).toBe('فاتورة مبيعات');
@@ -82,4 +84,54 @@ describe('official reference invoice stationery', () => {
       expect(unifiedHeaderHtml({ styles: { headerStyle }, fullLogoUrl: '', titleAr: 'فاتورة', metaLinesHtml: 'INV-42' })).toContain('INV-42');
     }
   });
+});
+
+
+describe('editable shared stationery', () => {
+  it('preserves an explicitly saved black header', () => {
+    const result = applyOfficialInvoiceTemplate({ document_type: DOCUMENT_TYPES.SALES_INVOICE }, { header_bg_color: '#000000' });
+    expect(result.header_bg_color).toBe('#000000');
+  });
+  it('applies saved metadata controls and borders to the real header renderer', async () => {
+    settingsRows.splice(0, settingsRows.length, { ...official, header_bg_color: '#262626', header_text_color: '#ffffff',
+      document_info_text_color: '#ffffff', document_info_bg_color: '#404040', document_info_alignment: 'left',
+      document_info_margin_top: 13, table_border_color: '#606060', border_radius: 5 });
+    clearPrintSettingsBridgeCache();
+    const styles = await resolveInvoiceStyles('sales_invoice');
+    const css = generateBaseCSS(styles);
+    expect(css).toContain('background-color: #262626');
+    expect(css).toContain('border: 1px solid #606060');
+    expect(css).toContain('border-radius: 5px');
+    expect(css).toContain('background: #404040');
+    expect(css).toContain('margin-top: 13px');
+    expect(css).toContain('text-align: left');
+  });
+  it('preserves zero opacity and an empty saved footer in actual invoices', async () => {
+    settingsRows.splice(0, settingsRows.length, { ...official, background_opacity: 0, footer_text: '' });
+    clearPrintSettingsBridgeCache();
+    const styles = await resolveInvoiceStyles('purchase_invoice');
+    expect(styles.backgroundOpacity).toBe(0);
+    expect(styles.footerText).toBe('');
+  });
+});
+
+it('places Arabic titles right and the logo left consistently in two-column headers', () => {
+  for (const headerStyle of ['classic', 'modern']) {
+    const normal = unifiedHeaderHtml({ styles: { headerStyle, headerSwap: false, showLogo: true }, fullLogoUrl: '/logo.svg', titleAr: 'إيصال استلام', metaLinesHtml: 'REF-1' });
+    const swapped = unifiedHeaderHtml({ styles: { headerStyle, headerSwap: true, showLogo: true }, fullLogoUrl: '/logo.svg', titleAr: 'إيصال استلام', metaLinesHtml: 'REF-1' });
+    expect(normal.indexOf('u-invoice-info')).toBeLessThan(normal.indexOf('u-company-side'));
+    expect(swapped.indexOf('u-company-side')).toBeLessThan(swapped.indexOf('u-invoice-info'));
+    expect(normal).toContain('text-align:right;');
+    expect(normal).toContain('align-items:flex-end;');
+  }
+});
+
+it('keeps invoice number and date together in right-aligned metadata rows', () => {
+  const html = unifiedHeaderHtml({ styles: { headerStyle: 'classic', headerSwap: false }, fullLogoUrl: '', titleAr: 'فاتورة', metaLinesHtml: 'رقم الفاتورة: <span class="num">INV-42</span><br/>التاريخ: <span class="num">2026-10-01</span>' });
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const rows = doc.querySelectorAll('.u-invoice-details > div');
+  expect(rows).toHaveLength(2);
+  expect(rows[0].textContent).toContain('رقم الفاتورة: INV-42');
+  expect(rows[1].textContent).toContain('التاريخ: 2026-10-01');
+  expect(unifiedHeaderFooterCss({ documentInfoAlignment: 'right' })).toContain('align-items: flex-start;');
 });

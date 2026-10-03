@@ -431,7 +431,8 @@ export default function ReceiptPrintDialog({ open, onOpenChange, payment, custom
             
             html, body {
               width: 210mm;
-              height: 297mm;
+              min-height: 297mm;
+              height: auto;
               font-family: ${styles.fontFamily || "'Noto Sans Arabic', Arial, sans-serif"};
               direction: rtl;
               text-align: right;
@@ -439,12 +440,14 @@ export default function ReceiptPrintDialog({ open, onOpenChange, payment, custom
               color: ${styles.customerSectionTextColor};
               font-size: ${styles.bodyFontSize}px;
               line-height: 1.2;
-              overflow: hidden;
+              overflow: visible;
             }
             
             .receipt-container {
               width: 210mm;
-              height: 297mm;
+              min-height: 297mm;
+              height: auto;
+              box-sizing: border-box;
               padding: ${styles.pageMarginTop}mm ${styles.pageMarginRight}mm ${styles.pageMarginBottom}mm ${styles.pageMarginLeft}mm;
               display: flex;
               flex-direction: column;
@@ -460,6 +463,7 @@ export default function ReceiptPrintDialog({ open, onOpenChange, payment, custom
             }
 
             ${unifiedHeaderFooterCss(receiptPrintStyles)}
+
             
             .receipt-info {
               text-align: left;
@@ -544,7 +548,7 @@ export default function ReceiptPrintDialog({ open, onOpenChange, payment, custom
             
             .payment-info {
               display: grid;
-              grid-template-columns: 1fr 1fr;
+              grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
               gap: 8px;
               font-size: ${styles.bodyFontSize}px;
             }
@@ -571,22 +575,32 @@ export default function ReceiptPrintDialog({ open, onOpenChange, payment, custom
               display: flex;
               justify-content: space-between;
               align-items: center;
-              padding: 10px;
+              gap: 16px;
+              padding: 14px;
               font-size: 16px;
               font-weight: bold;
               background: ${styles.totalBgColor};
               color: ${styles.totalTextColor};
-              padding: 12px;
-              border-radius: 0;
-              margin-top: 8px;
+              border: 1px solid ${styles.tableBorderColor};
+              margin-top: 10px;
+              break-inside: avoid;
             }
-            
+            .amount-row.balance-row { background: ${styles.customerSectionBgColor}; color: ${styles.customerSectionTextColor}; }
             .currency {
-              font-weight: bold;
-              color: #FFD700;
-              text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+              min-width: 0;
+              font-family: 'Manrope', 'Tajawal', sans-serif;
+              direction: ltr;
+              unicode-bidi: isolate;
+              text-align: left;
+              white-space: nowrap;
+              overflow: visible;
+              font-size: 20px;
+              line-height: 1.4;
+              color: inherit;
+              font-variant-numeric: tabular-nums;
             }
-            
+            .balance-status { display: block; margin-top: 4px; font-size: 12px; font-weight: normal; }
+            .payment-info > div { min-width: 0; overflow-wrap: anywhere; }
             .amount-words {
               margin-top: 8px;
               font-size: ${styles.bodyFontSize}px;
@@ -628,7 +642,8 @@ export default function ReceiptPrintDialog({ open, onOpenChange, payment, custom
             @media print {
               html, body {
                 width: 210mm !important;
-                height: 297mm !important;
+                min-height: 297mm !important;
+                height: auto !important;
                 margin: 0 !important;
                 padding: 0 !important;
                 overflow: visible !important;
@@ -639,7 +654,9 @@ export default function ReceiptPrintDialog({ open, onOpenChange, payment, custom
               
               .receipt-container {
                 width: 210mm !important;
-                height: 297mm !important;
+                min-height: 297mm !important;
+                height: auto !important;
+                box-sizing: border-box !important;
                 padding: 12mm !important;
               }
               
@@ -813,9 +830,12 @@ export default function ReceiptPrintDialog({ open, onOpenChange, payment, custom
               </div>
               
               ${balanceInfo ? `
-              <div class="amount-row" style="background: ${balanceInfo.remainingBalance > 0 ? '#7f1d1d' : '#065f46'}; margin-top: 15px;">
+              <div class="amount-row balance-row">
                 <span>المتبقي من إجمالي الديون:</span>
-                <span class="currency">${currencyInfo.symbol} ${formatArabicNumber(Math.abs(balanceInfo.remainingBalance))}${balanceInfo.remainingBalance < 0 ? ' (رصيد دائن)' : balanceInfo.remainingBalance === 0 ? ' (مسدد بالكامل)' : ''}</span>
+                <div style="text-align: left; display: flex; flex-direction: column; align-items: flex-end;">
+                  <span class="currency">${currencyInfo.symbol} ${formatArabicNumber(Math.abs(balanceInfo.remainingBalance))}</span>
+                  <span class="balance-status">${balanceInfo.remainingBalance < 0 ? 'رصيد دائن' : balanceInfo.remainingBalance === 0 ? 'مسدد بالكامل' : 'رصيد مستحق'}</span>
+                </div>
               </div>
               ` : ''}
               
@@ -877,10 +897,6 @@ export default function ReceiptPrintDialog({ open, onOpenChange, payment, custom
             <Receipt className="h-5 w-5" />
             طباعة إيصال الاستلام
           </UIDialog.DialogTitle>
-          <UIDialog.DialogClose className="absolute left-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-            <X className="h-4 w-4" />
-            <span className="sr-only">إغلاق</span>
-          </UIDialog.DialogClose>
         </UIDialog.DialogHeader>
         
         <div className="space-y-6">

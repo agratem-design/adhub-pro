@@ -12,6 +12,7 @@ import {
   Printer, Wrench, Clock, Repeat2, X as XIcon, MapPin,
 } from 'lucide-react';
 import { formatAmount } from '@/lib/formatUtils';
+import { purePauseContribution } from '@/utils/pausedReplacementAccounting';
 import { updatePausedBillboard, deletePausedBillboard, resumePausedBillboard } from '@/services/pausedBillboardsService';
 import {
   getReplacementByPausedId,
@@ -160,8 +161,8 @@ function PausedBillboardCardImpl({
   const effectiveRefund = !previewChanged ? item.effectiveRefund : deferredManualRefund === null
     ? previewRefundAuto
     : Math.min(rentalBase, Math.max(0, Number(deferredManualRefund)));
-  const effectiveConsumedRental = Math.max(0, rentalBase - effectiveRefund);
-  const effectiveConsumed = previewChanged ? effectiveConsumedRental + nonRefundable : item.consumed;
+  const effectiveConsumedRental = effectiveRefund === 0 && !item.hasReplacement ? 0 : Math.max(0, rentalBase - effectiveRefund);
+  const effectiveConsumed = previewChanged ? purePauseContribution(rentalBase + nonRefundable, effectiveRefund) : item.consumed;
 
   const dirty =
     pauseDate !== (raw.pause_date || '') ||

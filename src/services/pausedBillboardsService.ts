@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { supabase } from '@/integrations/supabase/client';
+import { isRetainedPause } from '@/utils/pausedReplacementAccounting';
 
 /**
  * Paused billboards service.
@@ -46,7 +47,7 @@ export async function listPausedBillboards(contractNumber: number): Promise<Paus
   // SELECT * works before and after the migration. Filter the optional lifecycle
   // in memory so legacy databases do not receive a failing query on every read.
   if (error) throw error;
-  return ((data || []) as unknown as PausedBillboard[]).filter(row => row.lifecycle_state !== 'cancelled');
+  return ((data || []) as unknown as PausedBillboard[]).filter(isRetainedPause);
 }
 
 /**

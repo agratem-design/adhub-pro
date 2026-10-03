@@ -296,7 +296,7 @@ export function buildCanonicalCustomerLedger(
 
     // البحث عن لوحات موقوفة لهذا العقد
     const contractPaused = pausedBillboards.filter(
-      (pb) => Number(pb.contract_number) === Number(cNum)
+      (pb) => pb.lifecycle_state !== 'cancelled' && Number(pb.contract_number) === Number(cNum)
     );
     const totalSuspensionRefund = contractPaused.reduce(
       (sum, pb) => sum + (Number(pb.refund_amount) || 0),

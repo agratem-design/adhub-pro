@@ -25,9 +25,9 @@ export function buildTableTermHtml({ tableTerm, title, content, renderTarget = '
   const showGold = tableTerm.goldLine?.visible !== false;
 
   const goldHeightPx = Math.max(2, Math.round(fontSize * (goldHeightPct / 100)));
-  // ارتفاع وسطر صريحان للـ span حتى يتعامل html2canvas مع الإحداثيات بدقة.
+  // ارتفاع وسطر صريحان للـ span حتى يتعامل browserCanvas مع الإحداثيات بدقة.
   const lineBoxPx = Math.round(fontSize * 1.2);
-   // إنزال إضافي يُطبّق فقط في تصدير PDF لأن html2canvas يرفع الخط قليلًا مقارنة بالمعاينة/طباعة المتصفح.
+   // إنزال إضافي يُطبّق فقط في تصدير PDF لأن browserCanvas يرفع الخط قليلًا مقارنة بالمعاينة/طباعة المتصفح.
    const opticalOffsetMultiplier = renderTarget === 'pdf' ? 0.58 : 0.32;
    const opticalOffsetPx = Math.round(fontSize * opticalOffsetMultiplier);
   const goldTopPx = Math.round(lineBoxPx / 2 - goldHeightPx / 2 + opticalOffsetPx);

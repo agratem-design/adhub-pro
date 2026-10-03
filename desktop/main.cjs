@@ -431,6 +431,25 @@ ipcMain.handle('desktop:get-app-info', async () => {
 });
 
 // Native Save-As-PDF (like Google Chrome PDF Export)
+ipcMain.handle('desktop:render-pdf', async (event, options = {}) => {
+  if (typeof options.html !== 'string' || options.html.length > 30_000_000) throw new Error('Invalid PDF document');
+  const pdfWindow = new BrowserWindow({ show: false, width: 794, height: 1123,
+    webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  pdfWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  try {
+    const html = options.html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '').replace(/\son\w+\s*=\s*("[^"]*"|'[^']*')/gi, '');
+    await pdfWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    await pdfWindow.webContents.executeJavaScript(`Promise.race([
+      Promise.all([document.fonts.ready, ...Array.from(document.images).map(img => img.complete ? Promise.resolve() : new Promise(resolve => { img.onload = resolve; img.onerror = resolve; }))]),
+      new Promise(resolve => setTimeout(resolve, 15000))
+    ])`);
+    const pdf = await pdfWindow.webContents.printToPDF({ printBackground: true,
+      landscape: !!options.landscape, pageSize: 'A4', preferCSSPageSize: true,
+      margins: { top: 0, bottom: 0, left: 0, right: 0 } });
+    return { base64: pdf.toString('base64') };
+  } finally { pdfWindow.destroy(); }
+});
+
 ipcMain.handle('desktop:save-as-pdf', async (event, options = {}) => {
   const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
   if (!win) return { success: false, error: 'نافذة غير موجودة' };

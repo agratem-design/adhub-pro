@@ -29,6 +29,7 @@ export interface DesktopSavePdfOptions {
 
 export interface DesktopAPI {
   isDesktop: boolean;
+  renderPdf?: (options: { html: string; landscape?: boolean }) => Promise<{ base64: string }>;
   onBackupStatus: (callback: (progress: DesktopBackupProgress) => void) => () => void;
   triggerBackup: () => Promise<{ success: boolean; error?: string; [key: string]: any }>;
   openBackupsFolder: () => Promise<{ success: boolean; path: string }>;

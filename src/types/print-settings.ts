@@ -306,7 +306,7 @@ export const DEFAULT_PRINT_SETTINGS: Omit<PrintSettings, 'document_type'> = {
   // ✅ إعدادات قسم معلومات المستند
   document_info_text_color: '#000000',
   document_info_bg_color: 'transparent',
-  document_info_alignment: 'left',
+  document_info_alignment: 'right',
   document_info_margin_top: 0,
   
   // قسم العميل

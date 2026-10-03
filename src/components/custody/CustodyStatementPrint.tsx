@@ -70,8 +70,8 @@ export function CustodyStatementPrint({ accountId }: CustodyStatementPrintProps)
   );
 }
 
-async function generateStatementHTML(account: any, transactions: any[], expenses: any[]): Promise<string> {
-  const styles = await getMergedInvoiceStylesAsync('custody');
+export async function generateStatementHTML(account: any, transactions: any[], expenses: any[], previewStyles?: Awaited<ReturnType<typeof getMergedInvoiceStylesAsync>>): Promise<string> {
+  const styles = previewStyles ?? await getMergedInvoiceStylesAsync('custody');
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const logoUrl = styles.logoPath || '/logofaresgold.svg';
   const fullLogoUrl = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;

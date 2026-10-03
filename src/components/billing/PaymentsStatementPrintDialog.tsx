@@ -264,18 +264,27 @@ export function PaymentsStatementPrintDialog({
     try {
       const config = createMeasurementsConfigFromSettings(printSettings);
       config.header.title.text = 'كشف الدفعات والإيصالات';
+      // A wide statement needs its own readable layout, independent of receipt sizing.
+      config.page.direction = 'rtl';
+      config.page.width = '297mm';
+      config.page.minHeight = '210mm';
+      config.page.fontFamily = "'Tajawal', 'Manrope', sans-serif";
+      config.table.body.fontSize = '12px';
+      config.table.body.padding = '9px 6px';
+      config.table.header.fontSize = '12px';
+      config.table.header.padding = '10px 6px';
 
       const columns: PrintColumn[] = [
         { key: 'index', header: '#', width: '3%', align: 'center' },
         { key: 'date', header: 'التاريخ', width: '8%', align: 'center' },
-        { key: 'customer_name', header: 'العميل', width: '12%', align: 'right' },
+        { key: 'customer_name', header: 'العميل', width: '15%', align: 'right' },
         { key: 'type', header: 'النوع', width: '8%', align: 'center' },
         { key: 'ad_type', header: 'نوع الإعلان', width: '8%', align: 'center' },
         { key: 'amount', header: 'المبلغ', width: '10%', align: 'center' },
         { key: 'contract', header: 'العقد', width: '6%', align: 'center' },
         { key: 'method', header: 'الطريقة', width: '8%', align: 'center' },
         { key: 'remaining', header: 'المتبقي', width: '9%', align: 'center' },
-        { key: 'notes', header: 'البيان والتفاصيل', width: '28%', align: 'right' },
+        { key: 'notes', header: 'البيان والتفاصيل', width: '25%', align: 'right' },
       ];
 
       // ✅ إنشاء صفوف تتضمن الدفعات المجمعة والتوزيعات
@@ -305,10 +314,10 @@ export function PaymentsStatementPrintDialog({
             display: inline-block;
             padding: 3px 8px;
             border-radius: 4px;
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 700;
-            background: #f3e8ff;
-            color: #7c3aed;
+            background: var(--financial-muted-bg);
+            color: var(--financial-text);
           ">مجمعة (${group.distributions.length})</span>`;
           
           if (custodyInfo) {
@@ -317,12 +326,12 @@ export function PaymentsStatementPrintDialog({
               margin-top: 3px;
               padding: 2px 6px;
               border-radius: 3px;
-              font-size: 9px;
+              font-size: 12px;
               font-weight: 600;
-              background: #fef3c7;
-              color: #92400e;
-              border: 1px solid #fbbf24;
- ">️ عهدة - ${custodyInfo.employee_name}</span>`;
+              background: var(--financial-muted-bg);
+              color: var(--financial-border);
+              border: 1px solid var(--financial-border);
+ ">عهدة - ${custodyInfo.employee_name}</span>`;
           }
           
           rows.push({
@@ -331,50 +340,35 @@ export function PaymentsStatementPrintDialog({
             customer_name: `<strong>${group.customerName}</strong>`,
             type: groupTypeHtml,
             ad_type: adTypes.length > 0 ? adTypes.slice(0, 2).join('، ') : '—',
-            amount: `<span style="font-weight: 800; color: #7c3aed; font-size: 12px;">${fmtAmt(group.totalAmount)} د.ل</span>`,
+            amount: `<span style="font-weight: 800; color: var(--financial-text); font-size: 12px;">${fmtAmt(group.totalAmount)} د.ل</span>`,
             contract: contractsList.length > 0 ? contractsList.slice(0, 2).map(c => `#${c}`).join('، ') : '—',
             method: group.distributions[0]?.method || '—',
-            remaining: `<span style="color: ${(group.distributions[0]?.remaining_debt || 0) > 0 ? '#dc2626' : '#059669'}; font-weight: 600;">${fmtAmt(group.distributions[0]?.remaining_debt || 0)} د.ل</span>`,
-            notes: '—',
+            remaining: `<span style="color: var(--financial-text); font-weight: 600;">${fmtAmt(group.distributions[0]?.remaining_debt || 0)} د.ل</span>`,
+            notes: custodyInfo
+              ? `<strong>عهدة لدى: ${custodyInfo.employee_name}</strong><br/>مبلغ العهدة: ${fmtAmt(custodyInfo.initial_amount)} د.ل<br/>رصيد العهدة: ${fmtAmt(custodyInfo.current_balance)} د.ل`
+              : 'دفعة مجمعة — تفاصيل التوزيع أدناه',
             _isGroupHeader: true,
           });
 
-          // ✅ معلومات العهدة إن وجدت
-          if (custodyInfo) {
-            rows.push({
-              index: '',
-              date: '',
- customer_name: `<span style="color: #92400e; font-size: 10px; padding-right: 20px;"> المبلغ: ${fmtAmt(custodyInfo.initial_amount)} د.ل | المتبقي: <strong style="color: ${custodyInfo.current_balance > 0 ? '#dc2626' : '#059669'}">${fmtAmt(custodyInfo.current_balance)} د.ل</strong></span>`,
-              type: '',
-              ad_type: '',
-              amount: '',
-              contract: '',
-              method: '',
-              remaining: '',
-              notes: '',
-              _isSubRow: true,
-            });
-          }
-
           // ✅ صفوف التوزيعات
-          group.distributions.forEach((dist) => {
+          group.distributions.forEach((dist, distributionIndex) => {
             rows.push({
-              index: '↳',
-              date: `<span style="color: #6b7280; font-size: 10px;">${new Date(dist.paid_at).toLocaleDateString('ar-LY')}</span>`,
-              customer_name: '',
+              index: `${index}.${distributionIndex + 1}`,
+              date: `<span style="color: var(--financial-text); font-size: 12px;">${new Date(dist.paid_at).toLocaleDateString('ar-LY')}</span>`,
+              customer_name: `<span class="distribution-label">توزيع من الدفعة ${index}</span>`,
               type: `<span style="
                 display: inline-block;
                 padding: 2px 6px;
                 border-radius: 3px;
-                font-size: 9px;
+                font-size: 12px;
                 font-weight: 600;
-                background: ${isCredit(dist.entry_type) ? '#d1fae5' : '#fee2e2'};
-                color: ${isCredit(dist.entry_type) ? '#065f46' : '#991b1b'};
+                background: var(--financial-muted-bg);
+                color: var(--financial-text);
               ">${getEntryTypeLabel(dist.entry_type)}</span>`,
-              ad_type: `<span style="font-size: 9px; color: #6b7280;">${dist.ad_type || '—'}</span>`,
-              amount: `<span style="font-size: 11px;">${fmtAmt(Number(dist.amount) || 0)} د.ل</span>`,
-              contract: dist.contract_number ? `<span style="font-size: 10px; color: #3b82f6;">#${dist.contract_number}</span>` : '—',
-              method: `<span style="font-size: 10px; color: #6b7280;">${dist.method || '—'}</span>`,
+              ad_type: `<span style="font-size: 12px; color: var(--financial-text);">${dist.ad_type || '—'}</span>`,
+              amount: `<span style="font-size: 12px;">${fmtAmt(Number(dist.amount) || 0)} د.ل</span>`,
+              contract: dist.contract_number ? `<span style="font-size: 12px; color: var(--financial-border);">#${dist.contract_number}</span>` : '—',
+              method: `<span style="font-size: 12px; color: var(--financial-text);">${dist.method || '—'}</span>`,
               remaining: '—',
               notes: buildPaymentDetails(dist) || '—',
               _isSubRow: true,
@@ -393,16 +387,16 @@ export function PaymentsStatementPrintDialog({
               display: inline-block;
               padding: 3px 8px;
               border-radius: 4px;
-              font-size: 10px;
+              font-size: 12px;
               font-weight: 600;
-              background: ${isCredit(payment.entry_type) ? '#d1fae5' : '#fee2e2'};
-              color: ${isCredit(payment.entry_type) ? '#065f46' : '#991b1b'};
+              background: var(--financial-muted-bg);
+              color: var(--financial-text);
             ">${getEntryTypeLabel(payment.entry_type)}</span>`,
             ad_type: payment.ad_type || '—',
-            amount: `<span style="font-weight: 700; color: ${isCredit(payment.entry_type) ? '#059669' : '#dc2626'}">${fmtAmt(Number(payment.amount) || 0)} د.ل</span>`,
+            amount: `<span style="font-weight: 700; color: var(--financial-text)">${fmtAmt(Number(payment.amount) || 0)} د.ل</span>`,
             contract: payment.contract_number ? `#${payment.contract_number}` : '—',
             method: payment.method || '—',
-            remaining: `<span style="color: ${(payment.remaining_debt || 0) > 0 ? '#dc2626' : '#059669'}; font-weight: 600;">${fmtAmt(payment.remaining_debt || 0)} د.ل</span>`,
+            remaining: `<span style="color: var(--financial-text); font-weight: 600;">${fmtAmt(payment.remaining_debt || 0)} د.ل</span>`,
             notes: paymentDetails || '—',
           });
         }
@@ -415,10 +409,11 @@ export function PaymentsStatementPrintDialog({
         { label: 'إجمالي الصادرات', value: `${fmtAmt(totalDebits)}`, unit: 'د.ل' },
       ];
 
-      const additionalInfo = [];
-      if (startDate || endDate) {
-        additionalInfo.push({ label: 'الفترة', value: formatDateRange() });
-      }
+      const additionalInfo = [
+        { label: 'الفترة', value: formatDateRange() },
+        { label: 'ترتيب المعاملات', value: sortAscending ? 'الأقدم أولاً' : 'الأحدث أولاً' },
+      ];
+
 
       const printOptions: MeasurementsHTMLOptions = {
         config,
@@ -428,6 +423,30 @@ export function PaymentsStatementPrintDialog({
           date: new Date().toLocaleDateString('ar-LY'),
           additionalInfo,
         },
+        customHeaderHtml: `<style>
+          :root {
+            --financial-text: ${config.table.body.textColor};
+            --financial-border: ${config.table.border.color};
+            --financial-muted-bg: ${config.partyInfo.backgroundColor};
+            --financial-accent: ${config.header.title.color};
+          }
+
+          .measurements-container { width: 297mm; min-height: 210mm; }
+          .measurements-table { font-family: 'Tajawal', sans-serif; line-height: 1.6; }
+          .measurements-table td { vertical-align: top; overflow-wrap: anywhere; }
+          .measurements-table td:nth-child(2),
+          .measurements-table td:nth-child(6),
+          .measurements-table td:nth-child(9) { white-space: nowrap; font-variant-numeric: tabular-nums; }
+          .measurements-table .payment-group td { background: var(--financial-muted-bg); border-top: 2px solid var(--financial-border); font-weight: 700; }
+          .measurements-table .payment-distribution td { background: var(--financial-muted-bg); }
+          .distribution-label { color: var(--financial-text); font-size: 11px; }
+          .measurements-table thead { display: table-header-group; }
+          .measurements-table tr { break-inside: avoid; }
+          @media print {
+            @page { size: A4 landscape; margin: 10mm; }
+            .measurements-container { width: 100%; min-height: auto; padding: 0; }
+          }
+        </style>`,
         columns,
         rows,
         statisticsCards,

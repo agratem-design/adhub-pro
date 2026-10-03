@@ -138,7 +138,7 @@ const SETTINGS_KEY = 'print_design_settings';
 const SIZES_INVOICE_KEY = 'sizes_invoice_settings';
 
 const DEFAULT_SIZES_INVOICE_SETTINGS = {
-  title: 'كشف المقاسات',
+  title: 'كشف مقاسات الطباعة',
   subtitle: 'SIZES STATEMENT',
   showSingleFaceSeparately: true,
   showAreaPerFace: true,
@@ -1519,7 +1519,7 @@ const PrintDesign = () => {
                         <Input
                           value={sizesInvoiceTitle}
                           onChange={(e) => setSizesInvoiceTitle(e.target.value)}
-                          placeholder="كشف المقاسات"
+                          placeholder="كشف مقاسات الطباعة"
                         />
                       </div>
                       <div className="space-y-2">

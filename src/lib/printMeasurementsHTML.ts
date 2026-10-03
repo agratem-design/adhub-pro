@@ -1,4 +1,5 @@
 import { unifiedHeaderHtml, unifiedFooterHtml, unifiedHeaderFooterCss } from './unifiedInvoiceBase';
+import { PRINT_INK_SAVER_CSS } from './printInkSaver';
 /**
  * Generate Measurements-Style HTML for Print
  * توليد HTML بنمط المقاسات للطباعة
@@ -191,14 +192,15 @@ const generateTable = (
       return `<td style="text-align: ${col.align || 'center'};">${displayValue}</td>`;
     }).join('');
     
-    return `<tr class="${idx % 2 === 0 ? 'even-row' : 'odd-row'}">${cells}</tr>`;
+    const groupClass = row._isGroupHeader ? ' payment-group' : row._isSubRow ? ' payment-distribution' : '';
+    return `<tr class="${idx % 2 === 0 ? 'even-row' : 'odd-row'}${groupClass}">${cells}</tr>`;
   }).join('');
 
   // Generate totals rows (inside tbody, after data rows)
   let totalsHTML = '';
   if (config.totals.enabled && totals && totals.length > 0) {
-    // Use 2 columns for value to give it more space when there are many columns
-    const valueColSpan = colCount > 8 ? 3 : 1;
+    // Give totals value ample space for large numbers (5+ digits)
+    const valueColSpan = colCount >= 6 ? 3 : colCount >= 4 ? 2 : 1;
     const labelColSpan = colCount - valueColSpan;
     
     totalsHTML = totals.map((item, idx) => {
@@ -296,7 +298,7 @@ export const generateMeasurementsCSS = (config: PrintConfig): string => {
       background: #ffffff;
       position: relative;
       box-sizing: border-box;
-      overflow: hidden;
+      overflow: visible;
     }
     
     .measurements-container > .u-footer { margin-top: 12px; padding-top: 10px; }
@@ -359,7 +361,8 @@ export const generateMeasurementsCSS = (config: PrintConfig): string => {
       line-height: 1.8;
       direction: rtl;
       text-align: right;
-      white-space: nowrap;
+      white-space: normal;
+      overflow-wrap: break-word;
     }
     
     .measurements-header-company {
@@ -420,21 +423,25 @@ export const generateMeasurementsCSS = (config: PrintConfig): string => {
     
     .measurements-stats-cards {
       display: flex;
-      gap: 20px;
-      flex-wrap: nowrap;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
     
     .measurements-stat-card {
       text-align: center;
       white-space: nowrap;
+      min-width: 0;
     }
     
     .measurements-stat-value {
-      font-size: ${header.title.fontSize};
+      font-size: clamp(16px, 20px, ${header.title.fontSize});
       font-weight: bold;
       color: #000000;
       font-family: 'Manrope', sans-serif;
+      font-variant-numeric: tabular-nums;
       white-space: nowrap;
+      overflow: visible;
     }
     
     .measurements-stat-label {
@@ -524,7 +531,11 @@ export const generateMeasurementsCSS = (config: PrintConfig): string => {
       text-align: center;
       font-size: ${totals.valueFontSize};
       font-family: 'Manrope', sans-serif;
+      font-variant-numeric: tabular-nums;
       white-space: nowrap;
+      overflow: visible !important;
+      direction: ltr;
+      unicode-bidi: isolate;
     }
     
     /* Notes Section */
@@ -588,8 +599,8 @@ export const generateMeasurementsCSS = (config: PrintConfig): string => {
     /* Print Media */
     @media print {
       @page { 
-        size: A4; 
-        margin: 10mm;
+        size: ${parseFloat(page.width) > 210 ? 'A4 landscape' : 'A4'};
+        margin: ${page.padding.top || '12mm'} ${page.padding.right || '12mm'} ${page.padding.bottom || '12mm'} ${page.padding.left || '12mm'};
       }
       
       * { 
@@ -600,17 +611,21 @@ export const generateMeasurementsCSS = (config: PrintConfig): string => {
       
       html, body { 
         background: #ffffff !important; 
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        padding: 0;
+        width: 100% !important;
+        height: auto !important;
+        min-height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
       }
       
       .measurements-container {
-        width: 100%;
-        min-height: auto;
-        padding: 5mm;
-        box-sizing: border-box;
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-height: auto !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        box-sizing: border-box !important;
       }
       
       .measurements-table thead tr {
@@ -682,7 +697,7 @@ export const generateMeasurementsHTML = (options: MeasurementsHTMLOptions): stri
     ...(documentData.date ? [{ label: 'التاريخ', value: documentData.date }] : []),
     ...(documentData.documentNumber ? [{ label: documentData.documentNumberLabel || 'رقم المستند', value: documentData.documentNumber }] : []),
     ...(documentData.additionalInfo || []),
-  ].map(info => `<div><span>${info.label}</span><strong>${info.value}</strong></div>`).join('');
+  ].map(info => `<div class="u-meta-row"><span>${info.label}:</span><strong><bdi>${info.value}</bdi></strong></div>`).join('');
   const headerHTML = styles ? (config.header.enabled ? unifiedHeaderHtml({
     styles: { ...styles, headerSwap: headerSwap ?? styles.headerSwap },
     fullLogoUrl: config.header.logo.url,
@@ -694,7 +709,11 @@ export const generateMeasurementsHTML = (options: MeasurementsHTMLOptions): stri
   const paymentDetailsHTML = generatePaymentDetailsTable(config, paymentDetailsTable);
   const tableHTML = generateTable(config, columns, rows, totals, totalsTitle);
   const notesHTML = generateNotes(config, notes);
-  const footerHTML = styles ? unifiedFooterHtml(styles) : generateFooter(config);
+  const footerHTML = styles ? unifiedFooterHtml({
+    ...styles,
+    companyPhone: styles.companyPhone || config.companyInfo.phone,
+    companyAddress: styles.companyAddress || config.companyInfo.address,
+  }) : generateFooter(config);
 
   return `
     <!DOCTYPE html>
@@ -702,10 +721,10 @@ export const generateMeasurementsHTML = (options: MeasurementsHTMLOptions): stri
     <head>
       <meta charset="UTF-8">
       <title>${documentData.title || 'طباعة'}</title>
-      <style>${css}</style>
+      <style>${css}${PRINT_INK_SAVER_CSS}</style>
     </head>
     <body>
-      <div class="measurements-container">
+      <div class="measurements-container paper">
         ${headerHTML}
         ${partyHTML}
         ${customHeaderHtml || ''}

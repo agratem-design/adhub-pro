@@ -108,6 +108,14 @@ export function mapPrintSettingsToInvoiceStyles(ps: any): Record<string, any> {
   result.showWebsite = ps.show_website ?? false;
 
   // ألوان
+  result.documentInfoTextColor = ps.document_info_text_color;
+  result.documentInfoBgColor = ps.document_info_bg_color;
+  result.documentInfoAlignment = ps.document_info_alignment;
+  result.documentInfoMarginTop = ps.document_info_margin_top;
+  result.borderRadius = ps.border_radius;
+  result.showDocumentNumber = ps.show_document_number ?? true;
+  result.showDocumentDate = ps.show_document_date ?? true;
+  result.dateFormat = ps.date_format;
   result.primaryColor = ps.primary_color || '#D4AF37';
   result.secondaryColor = ps.secondary_color || '#1a1a2e';
   result.accentColor = ps.accent_color || '#f0e6d2';
@@ -191,9 +199,9 @@ export function mapPrintSettingsToInvoiceStyles(ps: any): Record<string, any> {
   // ✅ تبديل نصفي الهيدر - يعتمد على header_swap أو logo_position
   if (ps.header_swap !== null && ps.header_swap !== undefined) {
     result.headerSwap = ps.header_swap;
-  } else if (ps.logo_position === 'left') {
-    // logo_position=left في RTL يعني الشعار يسار والعنوان يمين = headerSwap=true
-    result.headerSwap = true;
+  } else if (ps.logo_position === 'left' || ps.logo_position === 'right') {
+    // Left logo is the standard Arabic header placement.
+    result.headerSwap = ps.logo_position === 'right';
   }
   // ✅ نمط الهيدر (header_style)
   result.headerStyle = ps.header_style || 'classic';

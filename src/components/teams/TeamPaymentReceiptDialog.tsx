@@ -28,40 +28,23 @@ interface TeamPaymentReceiptDialogProps {
 // ✅ دالة تنسيق الأرقام العربية
 const formatArabicNumber = (num: number): string => {
   if (isNaN(num) || num === null || num === undefined) return '0';
-  
+
   const numStr = num.toString();
   const parts = numStr.split('.');
   const integerPart = parts[0];
   const decimalPart = parts[1];
-  
+
   const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  
+
   if (decimalPart) {
     return `${formattedInteger}.${decimalPart}`;
   }
-  
+
   return formattedInteger;
 };
 
-export default function TeamPaymentReceiptDialog({ 
-  open, 
-  onOpenChange, 
-  payment, 
-  teamName 
-}: TeamPaymentReceiptDialogProps) {
-  const [isGenerating, setIsGenerating] = useState(false);
 
-  const handlePrintReceipt = async () => {
-    if (!payment) {
-      toast.error('لا توجد بيانات دفعة للطباعة');
-      return;
-    }
-
-    setIsGenerating(true);
-    
-    try {
-      // جلب إعدادات القالب المحفوظة
-      const styles = await getMergedInvoiceStylesAsync('receipt');
+export function buildTeamReceiptHTML(styles: Awaited<ReturnType<typeof getMergedInvoiceStylesAsync>>, payment: TeamPaymentReceiptDialogProps["payment"], teamName: string, receiptNumber = `TEAM-${Date.now()}`): string {
       const baseUrl = window.location.origin;
       const logoUrl = styles.logoPath || '/logofaresgold.svg';
       const fullLogoUrl = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
@@ -69,13 +52,13 @@ export default function TeamPaymentReceiptDialog({
       // No popup test needed
 
       const receiptDate = formatDateForPrint(new Date().toISOString(), styles.showHijriDate);
-      const receiptNumber = `TEAM-${Date.now()}`;
-      
-      const paymentDate = payment.paid_at 
+
+
+      const paymentDate = payment.paid_at
         ? formatDateForPrint(payment.paid_at, styles.showHijriDate)
         : receiptDate;
 
-      const billboardsTable = payment.billboards && payment.billboards.length > 0 
+      const billboardsTable = payment.billboards && payment.billboards.length > 0
         ? `
           <table class="billboards-table">
             <thead>
@@ -112,8 +95,8 @@ export default function TeamPaymentReceiptDialog({
         styles,
         fullLogoUrl,
         metaLinesHtml,
-        titleAr: 'إيصال فريق',
-        titleEn: 'TEAM PAYMENT'
+        titleAr: styles.invoiceTitle || 'إيصال فريق',
+        titleEn: styles.invoiceTitleEn || 'TEAM PAYMENT'
       });
 
       const footerHtml = unifiedFooterHtml(styles, 'صفحة 1 من 1');
@@ -128,9 +111,9 @@ export default function TeamPaymentReceiptDialog({
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;700&display=swap');
             @font-face { font-family: 'Manrope'; src: url('${baseUrl}/Manrope-Bold.otf') format('opentype'); font-weight: 700; }
-            
+
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            
+
             html, body {
               width: 210mm;
               height: 297mm;
@@ -143,7 +126,7 @@ export default function TeamPaymentReceiptDialog({
               line-height: 1.3;
               overflow: hidden;
             }
-            
+
             .receipt-container {
               width: 210mm;
               min-height: 297mm;
@@ -151,30 +134,30 @@ export default function TeamPaymentReceiptDialog({
               display: flex;
               flex-direction: column;
             }
-            
+
             ${unifiedHeaderFooterCss(styles)}
-            
+
             .team-info {
               background: ${styles.primaryColor}10;
               padding: 15px;
               margin-bottom: 18px;
               border-right: 4px solid ${styles.primaryColor};
             }
-            
+
             .team-title {
               font-size: 14px;
               font-weight: bold;
               margin-bottom: 8px;
               color: ${styles.primaryColor};
             }
-            
+
             .team-details {
               font-size: 14px;
               line-height: 1.5;
               font-weight: bold;
               color: ${styles.secondaryColor};
             }
-            
+
             .payment-details {
               background: ${styles.primaryColor}08;
               padding: 18px;
@@ -182,7 +165,7 @@ export default function TeamPaymentReceiptDialog({
               margin-bottom: 18px;
               border: 2px solid ${styles.primaryColor};
             }
-            
+
             .payment-title {
               font-size: 16px;
               font-weight: bold;
@@ -190,53 +173,53 @@ export default function TeamPaymentReceiptDialog({
               color: ${styles.primaryColor};
               text-align: center;
             }
-            
+
             .payment-info {
               display: grid;
               grid-template-columns: 1fr 1fr;
               gap: 12px;
               font-size: 12px;
             }
-            
+
             .payment-info div {
               padding: 8px;
               background: white;
               border-radius: 4px;
               border: ${styles.tableBorderWidth || 1}px ${styles.tableBorderStyle || 'solid'} ${styles.tableBorderColor};
             }
-            
+
             .payment-info strong {
               color: ${styles.primaryColor};
               font-weight: bold;
             }
-            
+
             .billboards-table {
               width: 100%;
               border-collapse: collapse;
               margin: 15px 0;
               font-size: 11px;
             }
-            
+
             .billboards-table th, .billboards-table td {
               border: ${styles.tableBorderWidth || 1}px ${styles.tableBorderStyle || 'solid'} ${styles.tableBorderColor};
               padding: 8px;
               text-align: center;
             }
-            
+
             .billboards-table th {
               background: ${styles.primaryColor}15;
               font-weight: bold;
               color: ${styles.primaryColor};
             }
-            
+
             .billboards-table tr:nth-child(even) { background: #f9fafb; }
-            
+
             .amount-section {
               margin-top: 18px;
               border-top: 2px solid ${styles.primaryColor};
               padding-top: 15px;
             }
-            
+
             .amount-row {
               display: flex;
               justify-content: space-between;
@@ -248,9 +231,9 @@ export default function TeamPaymentReceiptDialog({
               padding: 18px;
               margin-top: 12px;
             }
-            
-            .currency { font-weight: bold; color: #FFD700; text-shadow: 1px 1px 2px rgba(0,0,0,0.3); }
-            
+
+            .currency { font-weight: bold; color: ${styles.totalTextColor}; }
+
             .amount-words {
               margin-top: 12px;
               font-size: 12px;
@@ -258,30 +241,30 @@ export default function TeamPaymentReceiptDialog({
               text-align: center;
               font-style: italic;
             }
-            
+
             .signature-section {
               margin-top: 25px;
               display: flex;
               justify-content: space-between;
               align-items: flex-end;
             }
-            
+
             .signature-box {
               text-align: center;
               border-top: 2px solid ${styles.primaryColor};
               padding-top: 8px;
               min-width: 120px;
             }
-            
+
             .signature-name {
               margin-top: 8px;
               font-size: 12px;
               color: ${styles.customerSectionTextColor};
               font-weight: normal;
             }
-            
+
             .content-area { flex: 1; }
-            
+
             @media print {
               html, body { width: 210mm !important; height: 297mm !important; margin: 0 !important; padding: 0 !important; }
               @page { size: A4 portrait; margin: 0 !important; }
@@ -291,13 +274,13 @@ export default function TeamPaymentReceiptDialog({
         <body>
           <div class="receipt-container">
             ${headerHtml}
-            
+
             <div class="content-area">
               <div class="team-info">
                 <div class="team-title">بيانات الفرقة</div>
                 <div class="team-details">${teamName}</div>
               </div>
-              
+
               <div class="payment-details">
                 <div class="payment-title">تفاصيل السداد</div>
                 <div class="payment-info">
@@ -316,21 +299,21 @@ export default function TeamPaymentReceiptDialog({
                   </div>
                   ` : ''}
                 </div>
-                
+
                 ${billboardsTable}
               </div>
-              
+
               <div class="amount-section">
                 <div class="amount-row">
                   <span>المبلغ المدفوع:</span>
                   <span class="currency">د.ل ${formatArabicNumber(payment.amount || 0)}</span>
                 </div>
-                
+
                 <div class="amount-words">
                   المبلغ بالكلمات: ${numberToArabicWords(payment.amount || 0)} دينار ليبي
                 </div>
               </div>
-              
+
               <div class="signature-section">
                 <div class="signature-box">
                   <div>توقيع المستلم (الفرقة)</div>
@@ -349,6 +332,31 @@ export default function TeamPaymentReceiptDialog({
         </html>
       `;
 
+
+ return htmlContent;
+}
+
+export default function TeamPaymentReceiptDialog({
+  open,
+  onOpenChange,
+  payment,
+  teamName
+}: TeamPaymentReceiptDialogProps) {
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const handlePrintReceipt = async () => {
+    if (!payment) {
+      toast.error('لا توجد بيانات دفعة للطباعة');
+      return;
+    }
+
+    setIsGenerating(true);
+
+    try {
+      // جلب إعدادات القالب المحفوظة
+      const styles = await getMergedInvoiceStylesAsync('team_payment');
+      const receiptNumber = `TEAM-${Date.now()}`;
+      const htmlContent = buildTeamReceiptHTML(styles, payment, teamName, receiptNumber);
       const { showPrintPreview } = await import('@/components/print/PrintPreviewDialog');
       showPrintPreview(htmlContent, `إيصال_سداد_${teamName}_${receiptNumber}`, 'billing-receipts');
 
@@ -377,7 +385,7 @@ export default function TeamPaymentReceiptDialog({
             <span className="sr-only">إغلاق</span>
           </UIDialog.DialogClose>
         </UIDialog.DialogHeader>
-        
+
         <div className="space-y-6">
           {isGenerating ? (
             <div className="text-center py-8">
@@ -393,7 +401,7 @@ export default function TeamPaymentReceiptDialog({
                   <p><strong>الفرقة:</strong> {teamName}</p>
                   <p><strong>المبلغ:</strong> {formatArabicNumber(payment?.amount || 0)} د.ل</p>
                   <p><strong>طريقة الدفع:</strong> {payment?.method || 'نقدي'}</p>
-                  <p><strong>تاريخ السداد:</strong> {payment?.paid_at 
+                  <p><strong>تاريخ السداد:</strong> {payment?.paid_at
                     ? new Date(payment.paid_at).toLocaleDateString('ar-LY')
                     : new Date().toLocaleDateString('ar-LY')}</p>
                   {payment?.billboards && payment.billboards.length > 0 && (
@@ -404,14 +412,14 @@ export default function TeamPaymentReceiptDialog({
 
               {/* أزرار العمليات */}
               <div className="flex gap-2 justify-end">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => onOpenChange(false)}
                   className="border-primary/30 hover:bg-primary/10"
                 >
                   إغلاق
                 </Button>
-                <Button 
+                <Button
                   onClick={handlePrintReceipt}
                   className="bg-gradient-to-r from-primary to-primary-glow hover:from-primary-glow hover:to-primary text-primary-foreground shadow-lg hover:shadow-xl transition-all duration-300"
                   disabled={isGenerating}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { historicalPauseContribution } from '@/utils/pausedReplacementAccounting';
+import { historicalPauseContribution, purePauseContribution, isRetainedPause } from '@/utils/pausedReplacementAccounting';
 
 describe('historical replacement budget accounting', () => {
   const legacy = { deducted_from_contract: false, refund_amount: 0, price_snapshot: null };
@@ -26,5 +26,13 @@ describe('historical replacement budget accounting', () => {
   it('handles an explicit zero allocation and pure pauses', () => {
     expect(historicalPauseContribution(legacy, 6000, 0, 0)).toBe(6000);
     expect(historicalPauseContribution(legacy, 18000, 12000)).toBe(6000);
+  });
+  it('excludes pure pauses with zero refund, including old stored consumed amounts', () => {
+    expect(historicalPauseContribution({ consumed_amount: 6000 }, 6000, 0)).toBe(0);
+    expect(purePauseContribution(6500, 0)).toBe(0);
+    expect(purePauseContribution(6500, 2500)).toBe(4000);
+  });
+  it('excludes deleted pauses while retaining legacy and resumed history', () => {
+    expect([{ lifecycle_state: 'cancelled' }, { lifecycle_state: 'paused' }, { lifecycle_state: 'resumed' }, {}].filter(isRetainedPause)).toHaveLength(3);
   });
 });

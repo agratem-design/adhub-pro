@@ -5,7 +5,7 @@ import * as UIDialog from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { Printer, X, Download, Eye, Send } from 'lucide-react';
-import html2pdf from 'html2pdf.js';
+import browserPdf from '@/lib/browserPdf';
 import { useSendWhatsApp } from '@/hooks/useSendWhatsApp';
 import { useContractTemplateSettings, DEFAULT_SECTION_SETTINGS } from '@/hooks/useContractTemplateSettings';
 import { ContractPDFPreview } from '@/components/contracts/ContractPDFPreview';
@@ -1125,10 +1125,11 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
     try {
       const cn = (contract as any)?.Contract_Number ?? (contract as any)?.['Contract Number'];
       if (cn) {
-        const { data: paused } = await supabase
+        const { data: pausedData } = await supabase
           .from('paused_billboards' as any)
           .select('*')
           .eq('contract_number', Number(cn));
+        const paused = (pausedData || []).filter((p: any) => p.lifecycle_state !== 'cancelled');
         if (Array.isArray(paused) && paused.length > 0) {
           // Fetch replacements for this contract
           const { data: replacements } = await supabase
@@ -1244,7 +1245,9 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
               : (originalBeforeDiscount > 0 ? originalBeforeDiscount : (fullPriceVal > 0 ? fullPriceVal : netRent));
 
             let pausedPrice = 0;
-            if (repl && replAlloc > 0 && fullTargetPrice > 0) {
+            if (!repl && Number(p.manual_refund ?? p.refund_amount ?? 0) === 0) {
+              pausedPrice = 0;
+            } else if (repl && replAlloc > 0 && fullTargetPrice > 0) {
               // ✅ Complementary price: pausedPrice + replAlloc === fullTargetPrice
               pausedPrice = Math.max(0, fullTargetPrice - replAlloc);
             } else if (Number.isFinite(consumed) && consumed > 0) {
@@ -1259,7 +1262,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
             const pausedRowProps: any = {
               _paused: true,
               _pause_date: p.pause_date,
-              _paused_price: pausedPrice > 0 ? pausedPrice : undefined,
+              _paused_price: pausedPrice,
               _paused_original_price: originalBeforeDiscount > 0 ? originalBeforeDiscount : undefined,
               _paused_net_price: netAfterContractDiscount > 0 ? netAfterContractDiscount : undefined,
               // Override end date with pause date so it shows in the end-date column
@@ -1460,7 +1463,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
     billboardsToShow.forEach((b: any) => {
       if (!b?._paused) return;
       const price = Number(b._paused_price);
-      if (!Number.isFinite(price) || price <= 0) return;
+      if (!Number.isFinite(price) || price < 0) return;
       const id = String(b.ID ?? b.id ?? '');
       if (!id) return;
       const normalized = smartRoundPrintPrice(price);
@@ -1699,11 +1702,11 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         margin: [10, 10, 10, 10] as [number, number, number, number],
         filename: `${fileName}.pdf`,
         image: { type: 'jpeg' as 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff', foreignObjectRendering: true },
+        canvas: { scale: 2, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff', foreignObjectRendering: true },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as 'portrait', compress: true }
       };
 
-      await html2pdf().set(opt).from(iframeDoc.body).save();
+      await browserPdf().set(opt).from(iframeDoc.body).save();
       document.body.removeChild(iframe);
       toast.success('تم تحميل ملف PDF للفاتورة بنجاح!');
     } catch (error) {
@@ -2755,7 +2758,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
       });
 
       // ======= فتح نافذة طباعة جديدة =======
-      // ======= تحويل HTML إلى PDF تلقائياً باستخدام html2canvas + jsPDF =======
+      // ======= تحويل HTML إلى PDF تلقائياً باستخدام browserCanvas + jsPDF =======
       const DESIGN_W_PX = 2480;
       const DESIGN_H_PX = 3508;
 
@@ -2855,7 +2858,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         }
 
         const { jsPDF: JSPDF } = await import('jspdf');
-        const html2canvas = (await import('html2canvas')).default;
+        const browserCanvas = (await import('@/lib/browserCanvas')).default;
 
         const pdf = new JSPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
         const A4_W_MM = 210;
@@ -2872,7 +2875,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           renderTarget.style.transform = 'none';
           renderTarget.style.zoom = '1';
 
-          const canvas = await html2canvas(renderTarget, {
+          const canvas = await browserCanvas(renderTarget, {
             scale: 2,
             useCORS: true,
             allowTaint: true,
@@ -3044,7 +3047,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
 
       // تحويل HTML إلى PDF ورفعه إلى Google Drive — التقاط كل صفحة منفصلة
       const iframe = document.createElement('iframe');
-      // العرض يطابق دقة التصميم الأصلية (2480px) حتى يعمل html2canvas بدون تصغير
+      // العرض يطابق دقة التصميم الأصلية (2480px) حتى يعمل browserCanvas بدون تصغير
       const DESIGN_W_PX = 2480;
       const DESIGN_H_PX = 3508;
       iframe.style.cssText = `position:fixed;left:-9999px;top:0;width:${DESIGN_W_PX}px;height:auto;border:none;visibility:hidden;`;
@@ -3147,9 +3150,9 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           throw new Error('لم يتم العثور على صفحات العقد داخل القالب');
         }
 
-        // Use html2canvas for each page separately, then stitch into jsPDF
+        // Use browserCanvas for each page separately, then stitch into jsPDF
         const { jsPDF: JSPDF } = await import('jspdf');
-        const html2canvas = (await import('html2canvas')).default;
+        const browserCanvas = (await import('@/lib/browserCanvas')).default;
 
         const pdf = new JSPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
         const A4_W_MM = 210;
@@ -3166,7 +3169,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           renderTarget.style.transform = 'none';
           renderTarget.style.zoom = '1';
 
-          const canvas = await html2canvas(renderTarget, {
+          const canvas = await browserCanvas(renderTarget, {
             scale: 2,
             useCORS: true,
             allowTaint: true,
@@ -3354,7 +3357,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         if (pageElements.length === 0) throw new Error('لم يتم العثور على صفحات العقد');
 
         const { jsPDF: JSPDF } = await import('jspdf');
-        const html2canvas = (await import('html2canvas')).default;
+        const browserCanvas = (await import('@/lib/browserCanvas')).default;
         const pdf = new JSPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
         const A4_W_MM = 210, A4_H_MM = 297;
 
@@ -3368,7 +3371,7 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           renderTarget.style.transform = 'none';
           renderTarget.style.zoom = '1';
 
-          const canvas = await html2canvas(renderTarget, { scale: 2, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff', foreignObjectRendering: false, width: DESIGN_W_PX, height: DESIGN_H_PX, windowWidth: DESIGN_W_PX, windowHeight: DESIGN_H_PX });
+          const canvas = await browserCanvas(renderTarget, { scale: 2, useCORS: true, allowTaint: true, logging: false, backgroundColor: '#ffffff', foreignObjectRendering: false, width: DESIGN_W_PX, height: DESIGN_H_PX, windowWidth: DESIGN_W_PX, windowHeight: DESIGN_H_PX });
           const imgData = canvas.toDataURL('image/jpeg', 0.98);
           if (i > 0) pdf.addPage();
           pdf.addImage(imgData, 'JPEG', 0, 0, A4_W_MM, A4_H_MM);

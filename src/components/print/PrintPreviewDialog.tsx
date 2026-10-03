@@ -1,4 +1,6 @@
+import { withRepeatedPrintHeader } from '@/lib/repeatedPrintHeader';
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { applyPrintInkSaver } from '@/lib/printInkSaver';
 import { replaceImageUrlsInHtml } from '@/utils/offlineImageInterceptor';
 import { getDSFallbackScript } from '@/utils/printDSFallbackScript';
 import {
@@ -16,7 +18,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Printer, X, Download, Maximize2, Minimize2, Stamp, FileText, Loader2, CloudUpload, MessageCircle, Send, Ruler } from 'lucide-react';
-import { iframeToPdfBlob } from '@/utils/pdfHelpers';
+import { iframeToPdfBlobOptimized } from '@/utils/pdfHelpers';
 import { downloadPdfBlob, uploadPdfBlobToDrive, uploadPdfBlobAndSendWhatsApp } from '@/utils/pdfDriveWhatsApp';
 import { preparePrintWindow, writePrintWindow, formatCleanDisplayTitle, formatWindowsSafeFileName } from '@/utils/printWindowHelper';
 import { toast } from 'sonner';
@@ -34,7 +36,7 @@ export const PRINT_PREVIEW_EVENT = 'app:print-preview';
 // Helper to trigger print preview from anywhere
 export function showPrintPreview(html: string, title?: string, driveFolder?: string, phone?: string) {
   window.dispatchEvent(
-    new CustomEvent(PRINT_PREVIEW_EVENT, { detail: { html, title, driveFolder, phone } })
+    new CustomEvent(PRINT_PREVIEW_EVENT, { detail: { html: applyPrintInkSaver(html), title, driveFolder, phone } })
   );
 }
 
@@ -84,6 +86,13 @@ export function PrintPreviewDialog() {
     processed = processed.replace('</head>', getDSFallbackScript() + '<style>html, body { overflow-y: visible !important; height: auto !important; }</style></head>');
     if (!showSig) {
       processed = processed.replace('</head>', '<style>.signature-stamp-section { display: none !important; }</style></head>');
+    } else {
+      if (!processed.includes('class="signature-stamp-section"')) {
+        const signature = '<section class="signature-stamp-section" style="display:flex;justify-content:space-between;gap:24px;padding:16px 8px;break-inside:avoid;color:#262626"><div style="width:40%;text-align:center">الختم<div style="height:40px;border-bottom:1px solid #999"></div></div><div style="width:40%;text-align:center">التوقيع<div style="height:40px;border-bottom:1px solid #999"></div></div></section>';
+        const footer = /<div\b[^>]*class="[^"]*(?:u-footer|measurements-footer)[^"]*"/i;
+        processed = footer.test(processed) ? processed.replace(footer, match => signature + match) : processed.replace('</body>', signature + '</body>');
+      }
+      processed = processed.replace('</head>', '<style>.signature-stamp-section { display: flex !important; justify-content:space-between; visibility:visible !important; }</style></head>');
     }
     if (showMeters) {
       processed = processed.replace('</head>', '<style>.total-meters-row { display: table-row !important; }</style></head>');
@@ -94,7 +103,7 @@ export function PrintPreviewDialog() {
     if (hidNotes) {
       processed = processed.replace('</head>', '<style>.invoice-rental-notes { display: none !important; }</style></head>');
     }
-    return processed;
+    return withRepeatedPrintHeader(processed);
   }, []);
 
   const handleIframeLoad = useCallback(() => {
@@ -201,7 +210,7 @@ export function PrintPreviewDialog() {
       job?.html?.includes('class="landscape"') ||
       job?.html?.includes('data-orientation="landscape"')
     );
-    const pdfBlob = await iframeToPdfBlob(iframeRef.current, fileName, {
+    const pdfBlob = await iframeToPdfBlobOptimized(iframeRef.current, fileName, {
       marginMm: [0, 0, 0, 0],
       landscape: isLandscape,
     });
@@ -209,18 +218,12 @@ export function PrintPreviewDialog() {
   };
 
   const handleDownloadPdf = async () => {
-    if (!iframeRef.current && !job?.html) return;
     setIsPdfLoading(true);
     try {
       const { pdfBlob, fileName } = await getUnifiedPdfBlob();
       downloadPdfBlob(pdfBlob, fileName);
-      toast.success('تم تحميل PDF بنجاح');
-    } catch (err) {
-      console.error('PDF generation failed:', err);
-      toast.error('فشل تحميل PDF');
-    } finally {
-      setIsPdfLoading(false);
-    }
+    } catch (error) { toast.error('تعذر إنشاء ملف PDF'); console.error(error); }
+    finally { setIsPdfLoading(false); }
   };
 
   const handleSavePdf = handleDownloadPdf;
@@ -282,6 +285,7 @@ export function PrintPreviewDialog() {
   return (
     <Dialog open={open} onOpenChange={(v) => !v && handleClose()}>
       <DialogContent
+        hideCloseButton
         className={`p-0 gap-0 overflow-hidden flex flex-col [&>button]:hidden ${fullscreen
           ? 'max-w-[100vw] w-[100vw] h-[100dvh] max-h-[100dvh] rounded-none'
           : 'max-w-5xl w-full h-[100dvh] max-h-[100dvh] sm:h-[95vh] sm:max-h-[95vh]'
@@ -322,7 +326,7 @@ export function PrintPreviewDialog() {
                 disabled={isPdfLoading}
               >
                 {isPdfLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4 text-emerald-500" />}
-                <span className="hidden sm:inline">تحميل PDF</span>
+                <span className="hidden sm:inline">حفظ PDF</span>
               </Button>
 
               <Button 

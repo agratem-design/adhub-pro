@@ -150,7 +150,7 @@ async function generateReceiptHTML(account: CustodyAccount, baseUrl: string): Pr
       padding: 18px;
       margin-top: 12px;
     }
-    .currency { font-weight: bold; color: #FFD700; text-shadow: 1px 1px 2px rgba(0,0,0,0.3); }
+    .currency { font-weight: bold; color: ${styles.totalTextColor}; }
     .amount-words { margin-top: 12px; font-size: ${styles.bodyFontSize}px; color: #666; text-align: center; font-style: italic; }
     
     .acknowledgment {

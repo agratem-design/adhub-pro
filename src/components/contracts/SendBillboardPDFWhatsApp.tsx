@@ -307,15 +307,15 @@ export const SendBillboardPDFWhatsApp: React.FC<SendBillboardPDFWhatsAppProps> =
   };
 
   const htmlToPDF = async (html: string): Promise<Blob> => {
-    // Use html2pdf library
-    const html2pdf = (await import('html2pdf.js')).default;
+    // Use browserPdf library
+    const browserPdf = (await import('@/lib/browserPdf')).default;
 
     return new Promise((resolve, reject) => {
       const opt = {
         margin: [10, 10, 10, 10] as [number, number, number, number],
         filename: `عقد_${contractNumber}_لوحات.pdf`,
         image: { type: 'jpeg' as const, quality: 0.98 },
-        html2canvas: {
+        canvas: {
           scale: 2,
           useCORS: true,
           allowTaint: true,
@@ -340,7 +340,7 @@ export const SendBillboardPDFWhatsApp: React.FC<SendBillboardPDFWhatsAppProps> =
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] as any },
       };
 
-      html2pdf()
+      browserPdf()
         .set(opt)
         .from(html)
         .outputPdf('blob')

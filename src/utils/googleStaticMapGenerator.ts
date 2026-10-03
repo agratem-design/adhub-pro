@@ -1,10 +1,10 @@
 /**
  * Google Maps Static Image Generator
- * Renders an offscreen Google Map, waits for tiles, then captures to canvas via html2canvas
+ * Renders an offscreen Google Map, waits for tiles, then captures to canvas via browserCanvas
  */
 
 import { loadGoogleMapsKeyless } from '@/lib/loadExternalScript';
-import html2canvas from 'html2canvas';
+import browserCanvas from '@/lib/browserCanvas';
 
 export interface GoogleStaticMapOptions {
   lat: number;
@@ -74,7 +74,7 @@ export async function generateGoogleStaticMapDataUrl(options: GoogleStaticMapOpt
         if (captured) return;
         captured = true;
         try {
-          const canvas = await html2canvas(container, {
+          const canvas = await browserCanvas(container, {
             useCORS: true,
             allowTaint: true,
             width,

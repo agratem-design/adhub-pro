@@ -954,7 +954,7 @@ function generateSummarySection(task: CompositeTaskWithDetails, details: any, in
   `;
 }
 
-function generateInvoiceHTML(task: CompositeTaskWithDetails, details: any, showDetails: boolean = true, logoDataUri: string = '', displayMode: 'detailed' | 'summary' = 'detailed', styles?: PrintStyles, mergedStyles?: any): string {
+export function generateInvoiceHTML(task: CompositeTaskWithDetails, details: any, showDetails: boolean = true, logoDataUri: string = '', displayMode: 'detailed' | 'summary' = 'detailed', styles?: PrintStyles, mergedStyles?: any): string {
   const pc = styles?.primaryColor || '#D4AF37';
   const thBg = styles?.tableHeaderBgColor || styles?.primaryColor || '#D4AF37';
   const thColor = styles?.tableHeaderTextColor || '#ffffff';
@@ -1244,7 +1244,7 @@ function generateInvoiceHTML(task: CompositeTaskWithDetails, details: any, showD
           ? group.designs.map((d: any) => `
               <div style="margin-bottom: 3px; position: relative;">
                 <img src="${d.image}" style="width: 100%; height: 45px; object-fit: contain; display: block; border: 1px solid #ddd; border-radius: 3px;" onerror="this.style.display='none'" />
-                <span style="position: absolute; bottom: 1px; right: 1px; background: rgba(0,0,0,0.6); color: white; font-size: 6px; padding: 1px 3px; border-radius: 2px;">${d.face}</span>
+                <span class="invoice-print-label" style="display:block;margin-top:3px;">${d.face}</span>
               </div>
             `).join('')
           : '<div style="text-align: center; color: #999; font-size: 8px;">-</div>';
@@ -1296,7 +1296,7 @@ function generateInvoiceHTML(task: CompositeTaskWithDetails, details: any, showD
           ? group.designs.map((d: any) => `
               <div style="margin-bottom: 3px; position: relative;">
                 <img src="${d.image}" style="width: 100%; height: 40px; object-fit: contain; display: block; border: 1px solid #ddd; border-radius: 3px;" onerror="this.style.display='none'" />
-                <span style="position: absolute; bottom: 1px; right: 1px; background: rgba(0,0,0,0.6); color: white; font-size: 6px; padding: 1px 3px; border-radius: 2px;">${d.face}</span>
+                <span class="invoice-print-label" style="display:block;margin-top:3px;">${d.face}</span>
               </div>
             `).join('')
           : '<div style="text-align: center; color: #999; font-size: 8px;">-</div>';

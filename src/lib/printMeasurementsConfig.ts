@@ -71,7 +71,7 @@ export const createMeasurementsConfigFromSettings = (settings: Partial<PrintSett
 
   // Title
   config.header.title.enabled = true;
-  config.header.title.text = settings.document_title_ar || 'كشف حساب';
+  config.header.title.text = settings.document_title_ar || (settings.document_type === 'measurements_invoice' ? 'كشف مقاسات الطباعة' : 'كشف حساب');
   config.header.title.fontSize = `${settings.title_font_size || 22}px`;
   config.header.title.fontWeight = 'bold';
   config.header.title.color = primaryColor;

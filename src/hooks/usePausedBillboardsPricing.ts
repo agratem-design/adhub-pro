@@ -1,8 +1,8 @@
 // @ts-nocheck
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { listPausedBillboards, PausedBillboard } from '@/services/pausedBillboardsService';
-import { historicalPauseContribution } from '@/utils/pausedReplacementAccounting';
+import { historicalPauseContribution, purePauseContribution } from '@/utils/pausedReplacementAccounting';
 import { calculateDaysBetween } from '@/utils/contractBillboardCalculations';
 
 export interface PausedItemWithPricing {
@@ -113,8 +113,10 @@ export function usePausedBillboardsPricing(
   const [replacementsByPausedId, setReplacementsByPausedId] = useState<Record<string, { allocated: number; replacementId: number; replacementName?: string }>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const fetchVersion = useRef(0);
 
   const fetchPausedData = useCallback(async () => {
+    const version = ++fetchVersion.current;
     if (!contractNumber) {
       setRows([]);
       setBillboardsMap({});
@@ -132,6 +134,7 @@ export function usePausedBillboardsPricing(
           .eq('contract_number', Number(contractNumber)),
       ]);
 
+      if (version !== fetchVersion.current) return;
       if (replacements.error) throw replacements.error;
       const replMap: Record<string, { allocated: number; replacementId: number; replacementName?: string }> = {};
       for (const r of (replacements.data || []) as any[]) {
@@ -150,6 +153,7 @@ export function usePausedBillboardsPricing(
           .from('billboards')
           .select('ID, Billboard_Name, City, District, Nearest_Landmark, Size, Price, Level, Image_URL, Status, Contract_Number')
           .in('ID', bbIds);
+        if (version !== fetchVersion.current) return;
         const map: Record<number, any> = {};
         (bbs || []).forEach((b: any) => { map[b.ID] = b; });
         setBillboardsMap(map);
@@ -157,10 +161,11 @@ export function usePausedBillboardsPricing(
         setBillboardsMap({});
       }
     } catch (e) {
+      if (version !== fetchVersion.current) return;
       console.error('Error fetching paused billboards pricing:', e);
       setError('تعذر تحميل سجل الإيقافات؛ لا يمكن اعتماد الإجمالي حتى يكتمل التحميل');
     } finally {
-      setLoading(false);
+      if (version === fetchVersion.current) setLoading(false);
     }
   }, [contractNumber]);
 
@@ -171,7 +176,10 @@ export function usePausedBillboardsPricing(
       if (!cn || Number(cn) === Number(contractNumber)) fetchPausedData();
     };
     window.addEventListener('paused-billboards-changed', handler);
-    return () => window.removeEventListener('paused-billboards-changed', handler);
+    return () => {
+      ++fetchVersion.current;
+      window.removeEventListener('paused-billboards-changed', handler);
+    };
   }, [fetchPausedData, contractNumber]);
 
   const refetch = fetchPausedData;
@@ -322,8 +330,8 @@ export function usePausedBillboardsPricing(
       // إذا كانت مستبدلة: Refund = 0، واللوحة لا تفرض أي خصم إيقاف
       const refund = hasReplacement ? 0 : baseRefund;
       const effectiveRefund = hasReplacement ? 0 : baseRefund;
-      const consumedRental = hasReplacement ? rentalBase : Math.max(0, rentalBase - refund);
-      const consumed = consumedRental + nonRefundable;
+      const consumed = hasReplacement ? rentalBase + nonRefundable : purePauseContribution(rentalBase + nonRefundable, refund);
+      const consumedRental = Math.max(0, consumed - nonRefundable);
 
       // الفرق المالي للاستبدال
       const replacementDifference = hasReplacement ? Math.round(allocatedForReplacement - (rentalBase - consumedRentalAuto)) : 0;
@@ -372,24 +380,26 @@ export function usePausedBillboardsPricing(
   const totals = useMemo<PausedTotals>(() => {
     const purePaused = items.filter((i) => !i.hasReplacement);
     const replaced = items.filter((i) => i.hasReplacement);
+    const financialItems = items.filter((i) => i.hasReplacement || i.refund !== 0);
+    const financialPurePaused = financialItems.filter((i) => !i.hasReplacement);
 
     return {
       count: items.length,
       purePausedCount: purePaused.length,
       replacedCount: replaced.length,
-      fullSum: items.reduce((s, i) => s + i.fullPrice, 0),
+      fullSum: financialItems.reduce((s, i) => s + i.fullPrice, 0),
       consumedSum: items.reduce((s, i) => s + i.consumed, 0),
       // ✅ RefundSum يشمل فقط اللوحات الموقوفة بدون استبدال
       refundSum: purePaused.reduce((s, i) => s + i.refund, 0),
       effectiveRefundSum: purePaused.reduce((s, i) => s + (i.effectiveRefund || 0), 0),
       replacementDifferencesSum: replaced.reduce((s, i) => s + (i.replacementDifference || 0), 0),
       allocatedSum: replaced.reduce((s, i) => s + (i.allocatedForReplacement || 0), 0),
-      printSum: items.reduce((s, i) => s + (i.printCost || 0), 0),
-      installSum: items.reduce((s, i) => s + (i.installPrice || 0), 0),
-      baseRentalSum: purePaused.reduce((s, i) => s + (i.baseRental || 0), 0),
-      discountSum: items.reduce((s, i) => s + (i.discountApplied || 0), 0),
-      includedPrintSum: purePaused.reduce((s, i) => s + (i.includedPrintCost || 0), 0),
-      includedInstallSum: purePaused.reduce((s, i) => s + (i.includedInstallCost || 0), 0),
+      printSum: financialItems.reduce((s, i) => s + (i.printCost || 0), 0),
+      installSum: financialItems.reduce((s, i) => s + (i.installPrice || 0), 0),
+      baseRentalSum: financialPurePaused.reduce((s, i) => s + (i.baseRental || 0), 0),
+      discountSum: financialItems.reduce((s, i) => s + (i.discountApplied || 0), 0),
+      includedPrintSum: financialPurePaused.reduce((s, i) => s + (i.includedPrintCost || 0), 0),
+      includedInstallSum: financialPurePaused.reduce((s, i) => s + (i.includedInstallCost || 0), 0),
     };
   }, [items]);
 

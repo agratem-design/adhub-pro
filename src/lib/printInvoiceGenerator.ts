@@ -171,10 +171,10 @@ function generateTablePrinterMode(t: ResolvedPrintStyles, data: PrintInvoiceData
   `;
 }
 
-export async function generatePrintInvoiceHTML(data: PrintInvoiceData): Promise<string> {
+export async function generatePrintInvoiceHTML(data: PrintInvoiceData, previewStyles?: ResolvedPrintStyles): Promise<string> {
   const showPrices = !data.printerForDisplay;
   
-  const t = await resolveInvoiceStyles('print_invoice', {
+  const t = previewStyles ?? await resolveInvoiceStyles('print_invoice', {
     titleAr: showPrices ? 'فاتورة طباعة' : 'أمر طباعة',
     titleEn: showPrices ? 'PRINT INVOICE' : 'PRINT ORDER',
   });

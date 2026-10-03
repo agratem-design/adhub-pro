@@ -170,9 +170,9 @@ export const DOCUMENT_TYPE_INFO: Record<DocumentType, DocumentTypeInfo> = {
   },
   [DOCUMENT_TYPES.MEASUREMENTS_INVOICE]: {
     id: DOCUMENT_TYPES.MEASUREMENTS_INVOICE,
-    nameAr: 'فاتورة المقاسات',
-    nameEn: 'Measurements Invoice',
-    description: 'فاتورة مقاسات اللوحات من العقود',
+    nameAr: 'كشف مقاسات الطباعة',
+    nameEn: 'Sizes Statement',
+    description: 'كشف مقاسات الطباعة واللوحات من العقود',
     category: 'operations',
     icon: 'Ruler',
   },

@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import html2pdf from 'html2pdf.js';
+import browserPdf from '@/lib/browserPdf';
 import { cleanStatementNote } from '@/lib/printUtils';
 import {
   Dialog,
@@ -131,11 +131,11 @@ export function SendAccountStatementDialog({
     iframeDoc.open(); iframeDoc.write(htmlContent); iframeDoc.close();
     await new Promise(r => setTimeout(r, 1500));
 
-    const pdfBlob: Blob = await html2pdf().set({
+    const pdfBlob: Blob = await browserPdf().set({
       margin: [10, 10, 10, 10] as [number, number, number, number],
       filename: `كشف_حساب_${custName}.pdf`,
       image: { type: 'jpeg' as const, quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' },
+      canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff' },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const }
     }).from(iframeDoc.body).output('blob');
     document.body.removeChild(iframe);

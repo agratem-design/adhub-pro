@@ -222,11 +222,11 @@ function generateDetailedStatementRows(
 /**
  * المولد الموحد لطباعة كشف الحساب
  */
-export async function generateAccountStatementHTML(data: AccountStatementData): Promise<string> {
+export async function generateAccountStatementHTML(data: AccountStatementData, previewStyles?: ResolvedPrintStyles): Promise<string> {
   const mode = data.mode || 'simple';
   const isSimple = mode === 'simple';
 
-  const t = await resolveInvoiceStyles('account_statement', {
+  const t = previewStyles ?? await resolveInvoiceStyles('account_statement', {
     titleAr: isSimple ? 'كشف حساب' : 'كشف حساب تفصيلي',
     titleEn: isSimple ? 'CUSTOMER STATEMENT' : 'DETAILED CUSTOMER STATEMENT',
   });

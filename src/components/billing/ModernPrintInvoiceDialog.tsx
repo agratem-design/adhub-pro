@@ -34,7 +34,7 @@ import {
 import { generateModernPrintInvoiceHTML } from './InvoiceTemplates';
 import { SendInvoiceWhatsApp } from './SendInvoiceWhatsApp';
 import { usePrintInvoicePrint } from './PrintInvoicePrint';
-import html2pdf from 'html2pdf.js';
+import browserPdf from '@/lib/browserPdf';
 
 interface PrintItem {
   size: string;
@@ -943,7 +943,7 @@ export default function ModernPrintInvoiceDialog({
         margin: [10, 10, 10, 10],
         filename: `${fileName}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: {
+        canvas: {
           scale: 2,
           useCORS: true,
           logging: false,
@@ -960,7 +960,7 @@ export default function ModernPrintInvoiceDialog({
       };
 
       // توليد وتحميل PDF
-      await html2pdf().set(opt).from(tempDiv).save();
+      await browserPdf().set(opt).from(tempDiv).save();
 
       // تنظيف
       document.body.removeChild(tempDiv);

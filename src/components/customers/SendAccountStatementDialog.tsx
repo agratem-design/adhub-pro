@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { InlinePhoneEditor } from '@/components/shared/InlinePhoneEditor';
-import html2pdf from 'html2pdf.js';
+import browserPdf from '@/lib/browserPdf';
 import { cleanStatementNote } from '@/lib/printUtils';
 import {
   Dialog,
@@ -1058,7 +1058,7 @@ export function SendAccountStatementDialog({
       margin: [10, 10, 10, 10] as [number, number, number, number],
       filename: `كشف_حساب_${customer.name}.pdf`,
       image: { type: 'jpeg' as const, quality: 0.98 },
-      html2canvas: {
+      canvas: {
         scale: 2,
         useCORS: true,
         logging: false,
@@ -1075,7 +1075,7 @@ export function SendAccountStatementDialog({
     };
 
     return new Promise((resolve, reject) => {
-      html2pdf()
+      browserPdf()
         .set(opt)
         .from(htmlContent)
         .output('dataurlstring')

@@ -1,4 +1,10 @@
-import { RentalCompensationAlert, withCompensation, type CompensationChoices } from '@/components/contracts/RentalCompensationAlert';
+import {
+  RentalCompensationDialog,
+  withCompensation,
+  getEligibleCompensationRows,
+  isContractDateExpired,
+  type CompensationChoices,
+} from '@/components/contracts/RentalCompensationAlert';
 import { usePricingDurations } from '@/hooks/usePricingDurations';
 import { durationPrice, durationName, durationEnd } from '@/utils/pricingDuration';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -19,7 +25,7 @@ import { ContractPDFDialog } from '@/components/Contract';
 import { getBillboardDimensions } from '@/lib/billboardDimensions';
 import type { Billboard } from '@/types';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, DollarSign, Settings, Wrench, FileText, List, Map as MapIcon, Trash2, Calculator, PauseCircle, AlertTriangle, Layers, Filter, ChevronDown, Plus } from 'lucide-react';
+import { RefreshCw, DollarSign, Settings, Wrench, FileText, List, Map as MapIcon, Trash2, Calculator, PauseCircle, AlertTriangle, AlertCircle, Layers, Filter, ChevronDown, Plus } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -130,6 +136,7 @@ export default function ContractEdit() {
   const [swapDialogMode, setSwapDialogMode] = useState<'swap' | 'move'>('swap');
   const [borrowDialogOpen, setBorrowDialogOpen] = useState(false);
   const [pausedFromContractOpen, setPausedFromContractOpen] = useState(false);
+  const [compensationDialogOpen, setCompensationDialogOpen] = useState(false);
   const [swapBillboard, setSwapBillboard] = useState<{ id: string; name: string; size: string; imageUrl: string; landmark: string } | null>(null);
   const [maintenanceConfirmOpen, setMaintenanceConfirmOpen] = useState(false);
   const [pendingMaintenanceBillboard, setPendingMaintenanceBillboard] = useState<Billboard | null>(null);
@@ -323,6 +330,23 @@ export default function ContractEdit() {
   const [endDate, setEndDate] = useState('');
   const [use30DayMonth, setUse30DayMonth] = useState<boolean>(true); // حساب الشهر = 30 يوم
   const [billboardCustomDates, setBillboardCustomDates] = useState<Record<string, { startDate: string; endDate: string; startDateReason: string }>>({});
+  
+  const isExpiredContract = useMemo(() => {
+    return isContractDateExpired(endDate, currentContract?.status || currentContract?.Status);
+  }, [endDate, currentContract?.status, currentContract?.Status]);
+
+  const compensationRows = useMemo(() => {
+    if (isExpiredContract) return [];
+    return getEligibleCompensationRows({
+      billboards: billboards.filter(b => selected.includes(String(b.ID))),
+      startDate,
+      endDate,
+      contractNumber,
+      contractStatus: currentContract?.status || currentContract?.Status,
+      isExpired: isExpiredContract,
+      savedPrices: currentContract?.billboard_prices,
+    });
+  }, [isExpiredContract, billboards, selected, startDate, endDate, contractNumber, currentContract]);
   
   // Auto-calculate end date for a custom start date based on contract duration
   const calculateEndDateForCustomStart = (
@@ -3247,7 +3271,6 @@ export default function ContractEdit() {
     <div onClickCapture={guardOperationalAction} className="min-h-screen bg-muted/20 text-foreground p-3 md:p-4" dir="rtl">
       <div className="max-w-[1440px] mx-auto space-y-3">
         <div className="sticky top-0 z-30 space-y-2 bg-background/95 pb-2 backdrop-blur">
-        <RentalCompensationAlert billboards={billboards.filter(b => selected.includes(String(b.ID)))} startDate={startDate} endDate={endDate} contractNumber={contractNumber} savedPrices={currentContract?.billboard_prices} choices={compensationChoices} onChange={setCompensationChoices} />
         <ContractEditHeader
           contractNumber={contractNumber}
           onBack={() => navigate('/admin/contracts')}
@@ -3402,8 +3425,44 @@ export default function ContractEdit() {
                 <RefreshCw className="h-4 w-4" />
                 استعارة لوحة من عقد آخر
               </Button>
+              {!isExpiredContract && compensationRows.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="gap-2 border-primary/50 text-primary hover:bg-primary/10 cursor-pointer"
+                  onClick={() => setCompensationDialogOpen(true)}
+                  title="تمديد اللوحات المستعارة في عقودها الأصلية بمدة هذا العقد"
+                >
+                  <AlertCircle className="h-4 w-4" />
+                  استعانة بلوحات مؤجرة — تعويض العقد الأصلي
+                  <span className="rounded-full bg-primary/20 px-2 py-0.5 text-xs font-semibold">
+                    {compensationRows.length}
+                  </span>
+                </Button>
+              )}
             </div>
             </details>
+
+            {/* إشعار اللوحات المستعارة القابلة للتعويض — فتح النافذة */}
+            {!isExpiredContract && compensationRows.length > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-primary shrink-0" />
+                  <span className="font-medium text-foreground">
+                    توجد لوحات مستعارة من عقود أخرى مؤهلة للتعويض ({compensationRows.length} لوحة)
+                  </span>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 border-primary/50 text-primary hover:bg-primary/10 cursor-pointer text-xs"
+                  onClick={() => setCompensationDialogOpen(true)}
+                >
+                  فتح نافذة التعويض
+                </Button>
+              </div>
+            )}
             {/* خريطة لوحات العقد الموسعة عند اختيار نمط الخريطة أو النمط المدمج */}
             {boardsViewMode === 'map' && (
               <div className="w-full h-[760px] lg:h-[84vh] min-h-[620px] rounded-2xl overflow-hidden border border-border shadow-sm relative">
@@ -4454,6 +4513,20 @@ export default function ContractEdit() {
           onDone={() => {
             getContractEditBillboards(true).then(setBillboards).catch(() => {});
           }}
+        />
+
+        <RentalCompensationDialog
+          open={compensationDialogOpen}
+          onOpenChange={setCompensationDialogOpen}
+          billboards={billboards.filter(b => selected.includes(String(b.ID)))}
+          startDate={startDate}
+          endDate={endDate}
+          contractNumber={contractNumber}
+          contractStatus={currentContract?.status || currentContract?.Status}
+          isExpired={isExpiredContract}
+          choices={compensationChoices}
+          onChange={setCompensationChoices}
+          savedPrices={currentContract?.billboard_prices}
         />
 
         {/* تنبيه تغيير الأسعار المحفوظة */}

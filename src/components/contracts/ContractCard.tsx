@@ -203,10 +203,10 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
     if (isVisible && detailsOpen) {
       const contractNum = Number(contract.Contract_Number ?? contract.id);
       if (contractNum && !isNaN(contractNum)) {
-        supabase.from('paused_billboards' as any).select('refund_amount').eq('contract_number', contractNum)
+        supabase.from('paused_billboards' as any).select('refund_amount, lifecycle_state').eq('contract_number', contractNum)
           .then(({ data, error }) => {
             if (!error && data) {
-              const sum = data.reduce((acc, pb: any) => acc + (Number(pb.refund_amount) || 0), 0);
+              const sum = data.filter((pb: any) => pb.lifecycle_state !== 'cancelled').reduce((acc, pb: any) => acc + (Number(pb.refund_amount) || 0), 0);
               setSuspensionDiscount(sum);
             }
           });

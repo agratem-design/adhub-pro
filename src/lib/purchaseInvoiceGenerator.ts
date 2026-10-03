@@ -1,3 +1,4 @@
+import type { ResolvedPrintStyles } from './unifiedInvoiceBase';
 /**
  * Unified Purchase Invoice HTML Generator
  * يستخدم نفس القاعدة الموحدة كفاتورة العقد
@@ -51,13 +52,13 @@ function parseSizeToMeters(size?: string): number {
   return 0;
 }
 
-export async function generatePurchaseInvoiceHTML(data: PurchaseInvoiceData): Promise<string> {
+export async function generatePurchaseInvoiceHTML(data: PurchaseInvoiceData, previewStyles?: ResolvedPrintStyles): Promise<string> {
   const [t, extras] = await Promise.all([
-    resolveInvoiceStyles('purchase_invoice', {
+    previewStyles ?? resolveInvoiceStyles('purchase_invoice', {
       titleAr: data.invoiceName || 'فاتورة مشتريات',
       titleEn: 'PURCHASE INVOICE',
     }),
-    fetchInvoiceExtras(),
+    previewStyles ? Promise.resolve({ bankAccounts: [], stampImageUrl: '' }) : fetchInvoiceExtras(),
   ]);
 
   const subtotal = data.items.reduce((sum, item) => sum + item.total, 0);

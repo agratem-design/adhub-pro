@@ -11,7 +11,7 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { toast } from 'sonner';
-import html2canvas from 'html2canvas';
+import browserCanvas from '@/lib/browserCanvas';
 import { toBlob as htmlToImageBlob } from 'html-to-image';
 import { extractImagePalette, pickAccentColor, pickGlowColor, pickSecondaryColor, alphaToHex, buildCoverColorRoles } from '@/utils/extractImagePalette';
 import { ShardSphereCover } from '@/components/design-studio/ShardSphereCover';
@@ -1423,7 +1423,7 @@ export default function DesignStudio() {
       const viewBoxMatch = svgContent.match(/viewBox=["']([^"']+)["']/);
 
       // Always strip intrinsic width/height so the SVG scales to its container,
-      // and ensure a viewBox + preserveAspectRatio exist for correct rendering in html2canvas.
+      // and ensure a viewBox + preserveAspectRatio exist for correct rendering in browserCanvas.
       const w = widthMatch ? parseFloat(widthMatch[1]) : 100;
       const h = heightMatch ? parseFloat(heightMatch[1]) : 100;
 
@@ -2620,7 +2620,7 @@ export default function DesignStudio() {
 
   // ══════════════════════════════════════════
   //   COVER EXPORT — captures the live cover template
-  //   via SVG <foreignObject> → Canvas 2D (no html2canvas).
+  //   via SVG <foreignObject> → Canvas 2D (no browserCanvas).
   //   The browser rasterises the DOM into an <img>, which we
   //   then draw onto a CanvasRenderingContext2D.
   // ══════════════════════════════════════════
@@ -2637,7 +2637,7 @@ export default function DesignStudio() {
 
     // ─── Step 1: Build an off-screen host at NATURAL size and clone the
     // live preview into it. We never touch the live DOM, so React can't
-    // reconcile our changes away, and html2canvas captures the element at
+    // reconcile our changes away, and browserCanvas captures the element at
     // its true 1:1 size (no zoom/crop).
     const host = document.createElement('div');
     host.style.position = 'fixed';
@@ -2783,7 +2783,7 @@ export default function DesignStudio() {
       }));
 
       // Wait for cloned images to actually load (they're new <img> elements
-      // with data: URLs — html2canvas otherwise captures empty slots).
+      // with data: URLs — browserCanvas otherwise captures empty slots).
       await Promise.all(cloneImgs.map((img) => new Promise<void>((resolve) => {
         if (img.complete && img.naturalWidth > 0) return resolve();
         img.onload = () => resolve();
@@ -2806,10 +2806,10 @@ export default function DesignStudio() {
       (clone.style as any).textRendering = 'geometricPrecision';
 
       // ─── Step 2: Capture the clone at its natural size. No window/width
-      // overrides — html2canvas will use the element's real bounds.
-      // Use html-to-image (SVG <foreignObject>) instead of html2canvas — it
+      // overrides — browserCanvas will use the element's real bounds.
+      // Use html-to-image (SVG <foreignObject>) instead of browserCanvas — it
       // preserves backdrop-filter blur and Arabic letter shaping because the
-      // browser does the real rendering. html2canvas reimplements layout and
+      // browser does the real rendering. browserCanvas reimplements layout and
       // breaks both (square non-blurred boxes + disconnected Arabic chars).
       const blob = await htmlToImageBlob(clone, {
         width: W,
@@ -2834,7 +2834,7 @@ export default function DesignStudio() {
   // ══════════════════════════════════════════
   //   DIRECT CANVAS 2D RENDERER (export only)
   //   Draws the exact same data as the preview
-  //   without relying on html2canvas/DOM cloning.
+  //   without relying on browserCanvas/DOM cloning.
   // ══════════════════════════════════════════
   const renderDesignToBlob = async (): Promise<Blob> => {
     const W = canvasWidth;
@@ -9324,7 +9324,7 @@ export default function DesignStudio() {
                           </div>
                         ) : (
                           <>
-                            {/* Blurred background replica to simulate backdrop-filter (works in Chrome + html2canvas export) */}
+                            {/* Blurred background replica to simulate backdrop-filter (works in Chrome + browserCanvas export) */}
                             {(glassPanel.blur ?? 15) > 0 && canvasImageUrl && (
                               <div style={{
                                 position: 'absolute',
@@ -9529,7 +9529,7 @@ export default function DesignStudio() {
                           </div>
                         ) : (
                           <>
-                            {/* Blurred background replica to simulate backdrop-filter (works in Chrome + html2canvas export) */}
+                            {/* Blurred background replica to simulate backdrop-filter (works in Chrome + browserCanvas export) */}
                             {(locationStrip.blur ?? 10) > 0 && canvasImageUrl && (
                               <div style={{
                                 position: 'absolute',

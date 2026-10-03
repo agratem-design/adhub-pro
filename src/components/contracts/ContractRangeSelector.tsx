@@ -10,12 +10,14 @@ import { Contract } from '@/services/contractService';
 
 interface ContractRangeSelectorProps {
   contracts: Contract[];
+  disabled?: boolean;
   onSelectRange: (contractIds: Set<string | number>) => void;
 }
 
 export const ContractRangeSelector = ({
   contracts,
-  onSelectRange
+  onSelectRange,
+  disabled = false
 }: ContractRangeSelectorProps) => {
   const [open, setOpen] = useState(false);
   const [fromNumber, setFromNumber] = useState('');
@@ -107,12 +109,12 @@ export const ContractRangeSelector = ({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2">
-          <Filter className="h-4 w-4" />
+        <Button variant="outline" size="sm" disabled={disabled} className="min-h-[44px] cursor-pointer text-[13px] gap-2">
+          <Filter aria-hidden="true" className="h-4 w-4" />
           تحديد نطاق
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-80" align="start" dir="rtl">
+      <PopoverContent className="w-[min(320px,calc(100vw-32px))]" align="start" dir="rtl">
         <Tabs defaultValue="number" className="w-full">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="number" className="gap-1">

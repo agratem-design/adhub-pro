@@ -1,3 +1,4 @@
+import type { ResolvedPrintStyles } from './unifiedInvoiceBase';
 /**
  * Unified Contract Invoice HTML Generator
  * يستخدم القاعدة الموحدة (unifiedInvoiceBase) + fetchPrintSettingsForInvoice
@@ -41,8 +42,8 @@ export interface ContractInvoiceData {
   autoPrint?: boolean;
 }
 
-export async function generateContractInvoiceHTML(data: ContractInvoiceData): Promise<string> {
-  const t = await resolveInvoiceStyles('contract', {
+export async function generateContractInvoiceHTML(data: ContractInvoiceData, previewStyles?: ResolvedPrintStyles): Promise<string> {
+  const t = previewStyles ?? await resolveInvoiceStyles('contract', {
     titleAr: 'فاتورة العقد',
     titleEn: 'CONTRACT INVOICE',
   });

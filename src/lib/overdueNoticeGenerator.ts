@@ -1,3 +1,4 @@
+import type { ResolvedPrintStyles } from './unifiedInvoiceBase';
 /**
  * Unified Overdue Notice HTML Generator (إشعار تأخير)
  * يستخدم القاعدة الموحدة (unifiedInvoiceBase) + fetchPrintSettingsForInvoice
@@ -21,8 +22,8 @@ export interface OverdueNoticeData {
   autoPrint?: boolean;
 }
 
-export async function generateOverdueNoticeHTML(data: OverdueNoticeData): Promise<string> {
-  const t = await resolveInvoiceStyles('overdue_notice', {
+export async function generateOverdueNoticeHTML(data: OverdueNoticeData, previewStyles?: ResolvedPrintStyles): Promise<string> {
+  const t = previewStyles ?? await resolveInvoiceStyles('overdue_notice', {
     titleAr: 'إشعار تأخير دفعة',
     titleEn: 'OVERDUE NOTICE',
   });

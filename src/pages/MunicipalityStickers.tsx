@@ -12,7 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import html2canvas from 'html2canvas';
+import browserCanvas from '@/lib/browserCanvas';
 import jsPDF from 'jspdf';
 
 interface Municipality {
@@ -493,7 +493,7 @@ export default function MunicipalityStickers() {
       // 1) صفحة معلومات الطباعة (الجدول) على الصفحة الأولى
       const summaryElement = document.querySelector('.print-summary-page') as HTMLElement | null;
       if (summaryElement) {
-        const summaryCanvas = await html2canvas(summaryElement, {
+        const summaryCanvas = await browserCanvas(summaryElement, {
           scale: 1.5,
           backgroundColor: '#ffffff',
           useCORS: true,
@@ -558,7 +558,7 @@ export default function MunicipalityStickers() {
       
       for (let i = 0; i < stickerElements.length; i++) {
         const el = stickerElements[i];
-        const canvas = await html2canvas(el, {
+        const canvas = await browserCanvas(el, {
           scale: 1.5,
           backgroundColor: '#ffffff',
           useCORS: true,
@@ -681,7 +681,7 @@ export default function MunicipalityStickers() {
     toast.info('جاري إنشاء ملف SVG...');
     
     try {
-      const canvas = await html2canvas(previewGrid, {
+      const canvas = await browserCanvas(previewGrid, {
         scale: 2,
         backgroundColor: '#ffffff',
         useCORS: true,

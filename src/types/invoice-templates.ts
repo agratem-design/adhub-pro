@@ -248,9 +248,9 @@ export const INVOICE_TEMPLATES: InvoiceTemplateInfo[] = [
   },
   {
     id: 'sizes_invoice',
-    name: 'فاتورة المقاسات',
-    nameEn: 'Sizes Invoice',
-    description: 'فاتورة مقاسات اللوحات من العقود',
+    name: 'كشف مقاسات الطباعة',
+    nameEn: 'Sizes Statement',
+    description: 'كشف مقاسات الطباعة واللوحات من العقود',
     icon: 'Ruler',
     category: 'invoices',
     sections: TEMPLATE_SECTIONS.sizes_invoice
@@ -692,5 +692,5 @@ export const INVOICE_TITLES: Record<InvoiceTemplateType, { ar: string; en: strin
   cutout_task: { ar: 'فاتورة مهمة قص', en: 'CUTOUT TASK' },
   composite_task: { ar: 'المهام المجمعة', en: 'COMPOSITE TASK' },
   customer_invoice: { ar: 'فاتورة الزبون', en: 'CUSTOMER INVOICE' },
-  sizes_invoice: { ar: 'فاتورة المقاسات', en: 'SIZES INVOICE' },
+  sizes_invoice: { ar: 'كشف مقاسات الطباعة', en: 'SIZES STATEMENT' },
 };

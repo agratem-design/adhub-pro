@@ -1650,7 +1650,7 @@ export function PrintAllContractBillboardsDialog({
     }
   };
 
-  // Rasterize SVG URL to PNG data URL for html2canvas compatibility
+  // Rasterize SVG URL to PNG data URL for browserCanvas compatibility
   const rasterizeSvgForPdf = async (url: string, w = 2480, h = 3508): Promise<string> => {
     if (!url || url.startsWith('data:')) return url;
     return new Promise<string>((resolve) => {

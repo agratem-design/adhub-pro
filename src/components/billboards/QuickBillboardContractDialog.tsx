@@ -410,6 +410,7 @@ export function ContractManagementDialog(props: Props) {
                 startDate={effective}
                 endDate={contract['End Date']}
                 contractNumber={targetId}
+                contractStatus={contract?.Status || contract?.status}
                 choices={choices}
                 onChange={setChoices}
               />

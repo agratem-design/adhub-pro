@@ -1,3 +1,5 @@
+import { ContractSelectionToolbar } from '@/components/contracts/ContractSelectionToolbar';
+import { prepareSizesInvoiceContracts } from '@/lib/sizesInvoice';
 // @ts-nocheck
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -128,6 +130,7 @@ export default function Contracts() {
   const [sizesInvoiceOpen, setSizesInvoiceOpen] = useState(false);
   const [sizesInvoiceData, setSizesInvoiceData] = useState<{ billboards: any[]; customerName: string; contractNumbers: string[] }>({ billboards: [], customerName: '', contractNumbers: [] });
   const [isPrintingSelected, setIsPrintingSelected] = useState(false);
+  const [isPreparingSizes, setIsPreparingSizes] = useState(false);
   const CONTRACTS_PER_PAGE = 30;
   const [currentPage, setCurrentPage] = usePersistedState<number>('contracts.currentPage', 1);
   const [billboardPrintData, setBillboardPrintData] = useState<{
@@ -1167,65 +1170,25 @@ export default function Contracts() {
   };
 
   const handlePrintSizesInvoice = async () => {
-    if (selectedContractIds.size === 0) {
-      toast.error('يرجى اختيار عقد واحد على الأقل');
-      return;
-    }
-
+    if (!selectedContractIds.size || isPreparingSizes) return;
+    setIsPreparingSizes(true);
     try {
-      const allBillboards: any[] = [];
-      const contractNumbers: string[] = [];
-      let customerName = '';
-
-      for (const contractId of selectedContractIds) {
-        try {
-          const contractWithBillboards = await getContractWithBillboards(String(contractId));
-          const billboardsData = (contractWithBillboards as any).billboards || [];
-          const contractNumber = (contractWithBillboards as any).Contract_Number || contractId;
-          contractNumbers.push(String(contractNumber));
-          
-          if (!customerName) {
-            customerName = (contractWithBillboards as any).customer_name || '';
-          }
-
-          // جلب اللوحات المحددة كوجه واحد في هذا العقد
-          const singleFaceRaw = (contractWithBillboards as any).single_face_billboards;
-          let singleFaceSet = new Set<string>();
-          if (singleFaceRaw) {
-            try {
-              const ids = typeof singleFaceRaw === 'string' ? JSON.parse(singleFaceRaw) : singleFaceRaw;
-              if (Array.isArray(ids)) singleFaceSet = new Set(ids.map(String));
-            } catch {}
-          }
-          
-          billboardsData.forEach((b: any) => {
-            const bId = String(b.ID || b.id || '');
-            // إذا كانت اللوحة محددة كوجه واحد، نعدّل Faces_Count لتظهر صحيحة في الطباعة
-            if (singleFaceSet.has(bId)) {
-              allBillboards.push({ ...b, Faces_Count: 1, faces_count: 1 });
-            } else {
-              allBillboards.push(b);
-            }
-          });
-        } catch (e) {
-          console.error(`Failed to load contract ${contractId}:`, e);
-        }
+      const selected = Array.from(selectedContractIds);
+      const loaded: any[] = [];
+      // Limit parallel requests while preserving every selected contract.
+      for (let index = 0; index < selected.length; index += 6) {
+        const batch = await Promise.all(selected.slice(index, index + 6).map(id => getContractWithBillboards(String(id))));
+        loaded.push(...batch);
       }
-
-      if (allBillboards.length === 0) {
-        toast.error('لا توجد لوحات في العقود المختارة');
-        return;
-      }
-
-      setSizesInvoiceData({
-        billboards: allBillboards,
-        customerName,
-        contractNumbers,
-      });
+      const invoice = prepareSizesInvoiceContracts(loaded);
+      if (!invoice.billboards.length) { toast.error('لا توجد لوحات في العقود المختارة'); return; }
+      setSizesInvoiceData(invoice);
       setSizesInvoiceOpen(true);
     } catch (error) {
       console.error('Error preparing sizes invoice:', error);
-      toast.error('فشل في تجهيز فاتورة المقاسات');
+      toast.error('تعذّر تحميل أحد العقود المختارة. أعد المحاولة لتجهيز الفاتورة كاملة.');
+    } finally {
+      setIsPreparingSizes(false);
     }
   };
 
@@ -1641,76 +1604,12 @@ export default function Contracts() {
 
       {/* شريط الاختيار المتعدد */}
       {selectedContractIds.size > 0 && (
-        <Card className="border-primary/50 bg-primary/5 shadow-lg sticky top-4 z-40">
-          <CardContent className="p-4">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <Badge variant="default" className="text-base px-3 py-1">
-                  {selectedContractIds.size} عقد مختار
-                </Badge>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={clearSelection}
-                  className="gap-1 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-4 w-4" />
-                  إلغاء الاختيار
-                </Button>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <ContractRangeSelector
-                  contracts={contracts}
-                  onSelectRange={handleRangeSelection}
-                />
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={selectAllFiltered}
-                    className="gap-2"
-                  >
-                    <CheckSquare className="h-4 w-4" />
-                    اختيار الكل ({filteredContracts.length})
-                  </Button>
-                </div>
-                <Button
-                  onClick={handlePrintSelectedContracts}
-                  disabled={isPrintingSelected}
-                  variant="outline"
-                  className="gap-2 border-primary text-primary hover:bg-primary/10"
-                >
-                  {isPrintingSelected ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Printer className="h-4 w-4" />
-                  )}
-                  طباعة العقود ({selectedContractIds.size})
-                </Button>
-                <Button
-                  onClick={handlePrintSizesInvoice}
-                  variant="outline"
-                  className="gap-2 border-amber-500 text-amber-600 hover:bg-amber-50"
-                >
-                  <Ruler className="h-4 w-4" />
-                  طباعة فاتورة المقاسات
-                </Button>
-                <Button
-                  onClick={handleExportMultipleContracts}
-                  disabled={isExportingMultiple}
-                  className="gap-2 bg-green-600 hover:bg-green-700 text-white"
-                >
-                  {isExportingMultiple ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Download className="h-4 w-4" />
-                  )}
-                  تنزيل اللوحات Excel
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <ContractSelectionToolbar count={selectedContractIds.size} filteredCount={filteredContracts.length}
+          printing={isPrintingSelected} preparingSizes={isPreparingSizes} exporting={isExportingMultiple}
+          onClear={clearSelection} onSelectAll={selectAllFiltered} onPrint={handlePrintSelectedContracts}
+          onSizes={handlePrintSizesInvoice} onExport={handleExportMultipleContracts}
+          rangeSelector={<ContractRangeSelector contracts={filteredContracts} onSelectRange={handleRangeSelection} disabled={isPreparingSizes || isPrintingSelected || isExportingMultiple} />}
+        />
       )}
 
       {/* Sizes Invoice Dialog */}

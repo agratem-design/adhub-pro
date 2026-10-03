@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useId } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
@@ -115,6 +115,7 @@ export function UnifiedTaskInvoice({
   const allTasks = tasks && tasks.length > 1 ? tasks : [task];
   const isGroupInvoice = allTasks.length > 1;
   const printRef = useRef<HTMLDivElement>(null);
+  const controlId = useId();
   const queryClient = useQueryClient();
   const [reloadCounter, setReloadCounter] = useState(0);
   const [isRecalculating, setIsRecalculating] = useState(false);
@@ -135,7 +136,7 @@ export function UnifiedTaskInvoice({
           if (installItems) {
             for (const i of installItems) {
               let itemCost = getCurrentOperationInstallationCost(i, t.task_type);
-              
+
               if (t.task_type === 'reinstallation') {
                 const bb = (i as any).billboard;
                 const sizeStr = bb?.Size || '8x3';
@@ -153,7 +154,7 @@ export function UnifiedTaskInvoice({
                 });
                 const iterations = Math.max(1, i.reinstall_count || 1);
                 const standardItemCost = Math.round(area * faces * 10 * iterations);
-                
+
                 if (standardItemCost > 0) {
                   itemCost = standardItemCost;
                   await supabase
@@ -288,7 +289,7 @@ export function UnifiedTaskInvoice({
   const [showBackFaceImages, setShowBackFaceImages] = useState(false);
   const [showTasksBreakdown, setShowTasksBreakdown] = useState(false);
   const [hideReprintLabels, setHideReprintLabels] = useState(true);
-  const [showDimensions, setShowDimensions] = useState(true);
+
   const [showServiceBreakdown, setShowServiceBreakdown] = useState(false);
   const [whatsAppSending, setWhatsAppSending] = useState(false);
   const [pdfExporting, setPdfExporting] = useState(false);
@@ -2081,10 +2082,10 @@ export function UnifiedTaskInvoice({
   const buildInvoiceLayoutCss = () => `
     [data-invoice-print] {
       --invoice-gold: ${primaryColor};
-      --invoice-gold-soft: #f6edda;
-      --invoice-ink: #1d1b17;
-      --invoice-muted: #6f685c;
-      --invoice-line: #ddd5c5;
+      --invoice-gold-soft: ${customerBg};
+      --invoice-ink: ${customerText};
+      --invoice-muted: ${customerText};
+      --invoice-line: ${tableBorder};
     }
     [data-invoice-print] .invoice-recipient-card {
       display: grid !important;
@@ -2093,14 +2094,14 @@ export function UnifiedTaskInvoice({
       gap: 14px !important;
       padding: 10px 12px !important;
       margin-bottom: 8px !important;
-      border: 1px solid #e4dac4 !important;
+      border: 1px solid ${customerSectionBorderColor} !important;
       border-right: 4px solid var(--invoice-gold) !important;
-      border-radius: 10px !important;
+      border-radius: 6px !important;
       background: ${customerBg} !important;
       box-shadow: none !important;
     }
     [data-invoice-print] .invoice-recipient-label {
-      color: #847a67 !important;
+      color: ${customerText} !important;
       font-size: 8.5px !important;
       font-weight: 700 !important;
       margin-bottom: 2px !important;
@@ -2109,7 +2110,7 @@ export function UnifiedTaskInvoice({
       color: var(--invoice-ink) !important;
       font-size: 17px !important;
       font-weight: 700 !important;
-      line-height: 1.25 !important;
+      line-height: 1.5 !important;
     }
     [data-invoice-print] .invoice-recipient-subtitle {
       color: var(--invoice-muted) !important;
@@ -2125,9 +2126,9 @@ export function UnifiedTaskInvoice({
     [data-invoice-print] .invoice-overview-stat {
       min-width: 58px !important;
       padding: 6px 8px !important;
-      border: 1px solid #e9e0ce !important;
+      border: 1px solid ${tableBorder} !important;
       border-radius: 8px !important;
-      background: #ffffff !important;
+      background: ${customerBg} !important;
       text-align: center !important;
     }
     [data-invoice-print] .invoice-overview-stat strong {
@@ -2147,9 +2148,9 @@ export function UnifiedTaskInvoice({
     [data-invoice-print] .invoice-size-summary {
       margin: 0 0 7px !important;
       padding: 6px 8px !important;
-      border: 1px solid #e8dfcf !important;
-      border-radius: 9px !important;
-      background: #fbfaf7 !important;
+      border: 1px solid ${tableBorder} !important;
+      border-radius: 6px !important;
+      background: ${customerBg} !important;
     }
     [data-invoice-print] .invoice-size-summary-title {
       color: var(--invoice-ink) !important;
@@ -2158,10 +2159,10 @@ export function UnifiedTaskInvoice({
     }
     [data-invoice-print] .invoice-size-chip {
       padding: 3px 7px !important;
-      border: 1px solid #dfd3bb !important;
-      border-radius: 999px !important;
-      background: #ffffff !important;
-      color: #463f33 !important;
+      border: 1px solid ${tableBorder} !important;
+      border-radius: 4px !important;
+      background: ${customerBg} !important;
+      color: ${customerText} !important;
       font-size: 8.5px !important;
       font-weight: 700 !important;
     }
@@ -2176,7 +2177,7 @@ export function UnifiedTaskInvoice({
     [data-invoice-print] .invoice-detail-table td { width: auto !important; }
     [data-invoice-print] .invoice-items-table thead th {
       padding: 6px 3px !important;
-      border-color: #5c5549 !important;
+      border-color: ${tableBorder} !important;
       font-size: 9px !important;
       line-height: 1.35 !important;
       font-weight: 700 !important;
@@ -2202,13 +2203,19 @@ export function UnifiedTaskInvoice({
       font-weight: 700 !important;
     }
     [data-invoice-print] .invoice-items-table tfoot tr:last-child td:last-child {
-      color: ${totalText} !important;
+      color: #262626 !important;
       font-size: 12px !important;
     }
+    [data-invoice-print] table tfoot tr,
+    [data-invoice-print] table tfoot td {
+      background: #ffffff !important;
+      color: #262626 !important;
+      border-top: 1px solid ${tableBorder} !important;
+    }
     [data-invoice-print] .invoice-total-section {
-      border: 1px solid #29261f !important;
+      border: 1px solid ${tableBorder} !important;
       border-top: 3px solid var(--invoice-gold) !important;
-      border-radius: 9px !important;
+      border-radius: 6px !important;
       box-shadow: none !important;
     }
     @media print {
@@ -2515,6 +2522,8 @@ export function UnifiedTaskInvoice({
         { label: 'م² إجمالي', value: (data?.totalArea || 0).toFixed(2) },
       ];
 
+  const hasInstalledPhotos = Object.values(installedImagesMap).some(images => images.face_a || images.face_b) || Boolean(data?.items?.some(item => item.installedImageA || item.installedImageB || item.reinstallInstalledImageA || item.reinstallInstalledImageB || item.originalInstalledImageA || item.originalInstalledImageB));
+  const hasReprintContent = Boolean(data?.items?.some(item => /إعادة طباعة/.test(item.sizeName || "")));
   // ✅ تعريف متغيرات حساب الأعمدة على مستوى المكون - تجميع من جميع المهام
   const aggPrintCost = allTasks.reduce((s, t) => s + (t.customer_print_cost || 0), 0);
   const aggInstallCost = allTasks.reduce((s, t) => s + (t.customer_installation_cost || 0), 0);
@@ -2557,7 +2566,7 @@ export function UnifiedTaskInvoice({
                 </p>
               </div>
             </div>
-            <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 xl:w-auto xl:flex-wrap xl:justify-end xl:overflow-visible xl:pb-0">
+            <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto xl:justify-end">
               {/* زر التبديل بين العرض التفصيلي والمجمّع - لفاتورة الزبون فقط */}
               {invoiceType === 'customer' && (
                 <>
@@ -2583,11 +2592,11 @@ export function UnifiedTaskInvoice({
                   </div>
                   <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                     <Switch
-                      id="showServiceBreakdown"
+                      id={`${controlId}-showServiceBreakdown`}
                       checked={showServiceBreakdown}
                       onCheckedChange={setShowServiceBreakdown}
                     />
-                    <Label htmlFor="showServiceBreakdown" className="text-xs sm:text-sm cursor-pointer">
+                    <Label htmlFor={`${controlId}-showServiceBreakdown`} className="text-xs sm:text-sm cursor-pointer">
                       <span className="hidden sm:inline">تفصيل الطباعة والتركيب</span>
                       <span className="sm:hidden">تفصيل</span>
                     </Label>
@@ -2595,20 +2604,20 @@ export function UnifiedTaskInvoice({
                   {showServiceBreakdown && (
                     <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                       <Switch
-                        id="showPriceDetails"
+                        id={`${controlId}-showPriceDetails`}
                         checked={showPriceDetails}
                         onCheckedChange={setShowPriceDetails}
                       />
-                      <Label htmlFor="showPriceDetails" className="text-xs sm:text-sm cursor-pointer">
+                      <Label htmlFor={`${controlId}-showPriceDetails`} className="text-xs sm:text-sm cursor-pointer">
                         <span className="hidden sm:inline">تفاصيل السعر</span>
                         <span className="sm:hidden">السعر</span>
                       </Label>
                     </div>
                   )}
-                  {/* زر إظهار صور التركيب */}
+                  {hasInstalledPhotos && (
                   <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                     <Switch
-                      id="showInstalledImages"
+                      id={`${controlId}-showInstalledImages`}
                       checked={showInstalledImages}
                       onCheckedChange={(checked) => {
                         setShowInstalledImages(checked);
@@ -2617,20 +2626,21 @@ export function UnifiedTaskInvoice({
                         }
                       }}
                     />
-                    <Label htmlFor="showInstalledImages" className="text-xs sm:text-sm cursor-pointer">
+                    <Label htmlFor={`${controlId}-showInstalledImages`} className="text-xs sm:text-sm cursor-pointer">
                       <span className="hidden sm:inline">صور التركيب</span>
                       <span className="sm:hidden">التركيب</span>
                     </Label>
                   </div>
+                  )}
                   {/* زر إظهار صور الوجه الخلفي */}
-                  {showInstalledImages && (
+                  {showInstalledImages && hasInstalledPhotos && displayMode === 'detailed' && (
                     <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                       <Switch
-                        id="showBackFaceImages"
+                        id={`${controlId}-showBackFaceImages`}
                         checked={showBackFaceImages}
                         onCheckedChange={setShowBackFaceImages}
                       />
-                      <Label htmlFor="showBackFaceImages" className="text-xs sm:text-sm cursor-pointer">
+                      <Label htmlFor={`${controlId}-showBackFaceImages`} className="text-xs sm:text-sm cursor-pointer">
                         <span className="hidden sm:inline">الوجه الخلفي</span>
                         <span className="sm:hidden">خلفي</span>
                       </Label>
@@ -2658,119 +2668,26 @@ export function UnifiedTaskInvoice({
               {invoiceType !== 'customer' && (
                 <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                   <Switch
-                    id="showCosts"
+                    id={`${controlId}-showCosts`}
                     checked={showCosts}
                     onCheckedChange={setShowCosts}
                   />
-                  <Label htmlFor="showCosts" className="text-xs sm:text-sm cursor-pointer flex items-center gap-1">
+                  <Label htmlFor={`${controlId}-showCosts`} className="text-xs sm:text-sm cursor-pointer flex items-center gap-1">
                     {showCosts ? <Eye className="h-3 w-3 sm:h-4 sm:w-4" /> : <EyeOff className="h-3 w-3 sm:h-4 sm:w-4" />}
                     <span className="hidden sm:inline">{showCosts ? 'إظهار التكلفة' : 'إخفاء التكلفة'}</span>
                     <span className="sm:hidden">التكلفة</span>
                   </Label>
                 </div>
               )}
-              {/* زر إعادة حساب التكاليف */}
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-10 shrink-0 cursor-pointer gap-1 rounded-xl border-amber-500/25 bg-amber-500/5 text-xs text-amber-500 transition-all duration-200 hover:bg-amber-500/10 hover:text-amber-400"
-                onClick={handleRecalculateCosts}
-                disabled={isRecalculating}
-              >
-                {isRecalculating ? (
-                  <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-3 w-3 sm:h-4 sm:w-4" />
-                )}
-                <span className="hidden sm:inline">إعادة حساب التكاليف</span>
-                <span className="sm:hidden">إعادة الحساب</span>
-              </Button>
-              {/* زر الخصم السريع */}
-              {invoiceType === 'customer' && (
-                <Popover open={discountOpen} onOpenChange={setDiscountOpen}>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" size="sm" className="h-10 shrink-0 cursor-pointer gap-1 rounded-xl text-xs transition-all duration-200">
-                      <Percent className="h-3 w-3 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">خصم</span>
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-80" align="end">
-                    <div className="space-y-3" dir="rtl">
-                      <h4 className="font-semibold text-sm">خصم سريع</h4>
-                      {/* إجمالي كل مهمة */}
-                      <div className="space-y-1 text-xs">
-                        {allTasks.map((t, i) => (
-                          <div key={t.id} className="flex justify-between items-center p-1.5 rounded bg-muted">
-                            <span>مهمة #{t.task_number || i + 1} (عقد #{t.contract_id})</span>
-                            <span className="font-bold">{(t.customer_total || 0).toLocaleString()} د.ل</span>
-                          </div>
-                        ))}
-                        <div className="flex justify-between items-center p-1.5 rounded bg-primary/10 font-bold text-sm">
-                          <span>الإجمالي الكلي</span>
-                          <span>{allTasks.reduce((s, t) => s + (t.customer_total || 0), 0).toLocaleString()} د.ل</span>
-                        </div>
-                      </div>
-                      {/* مبلغ الخصم */}
-                      <div className="space-y-1">
-                        <Label className="text-xs">مبلغ الخصم</Label>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={discountAmount || ''}
-                          onChange={e => setDiscountAmount(Number(e.target.value))}
-                          placeholder="0"
-                          className="h-8"
-                        />
-                      </div>
-                      {/* تطبيق على */}
-                      <div className="space-y-1">
-                        <Label className="text-xs">تطبيق على</Label>
-                        <Select value={discountTarget} onValueChange={setDiscountTarget}>
-                          <SelectTrigger className="h-8">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">تقسيم على جميع المهام</SelectItem>
-                            {allTasks.map((t, i) => (
-                              <SelectItem key={t.id} value={t.id}>
-                                مهمة #{t.task_number || i + 1} (عقد #{t.contract_id})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      {/* سبب الخصم */}
-                      <div className="space-y-1">
-                        <Label className="text-xs">السبب (اختياري)</Label>
-                        <Input
-                          value={discountReason}
-                          onChange={e => setDiscountReason(e.target.value)}
-                          placeholder="سبب الخصم..."
-                          className="h-8"
-                        />
-                      </div>
-                      <Button
-                        onClick={handleSaveDiscount}
-                        disabled={savingDiscount || discountAmount <= 0}
-                        className="w-full h-8 text-sm"
-                        size="sm"
-                      >
-                        {savingDiscount ? <Loader2 className="h-3 w-3 animate-spin ml-1" /> : null}
-                        حفظ الخصم
-                      </Button>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              )}
               {/* زر إظهار/إخفاء تفصيل المهام المجمعة */}
               {isGroupInvoice && invoiceType === 'customer' && (
                 <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                   <Switch
-                    id="showTasksBreakdown"
+                    id={`${controlId}-showTasksBreakdown`}
                     checked={showTasksBreakdown}
                     onCheckedChange={setShowTasksBreakdown}
                   />
-                  <Label htmlFor="showTasksBreakdown" className="text-xs sm:text-sm cursor-pointer">
+                  <Label htmlFor={`${controlId}-showTasksBreakdown`} className="text-xs sm:text-sm cursor-pointer">
                     <span className="hidden sm:inline">تفصيل المهام</span>
                     <span className="sm:hidden">التفصيل</span>
                   </Label>
@@ -2779,39 +2696,28 @@ export function UnifiedTaskInvoice({
               {/* زر إظهار/إخفاء الختم والتوقيع - لجميع أنواع الفواتير */}
               <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                 <Switch
-                  id="showSignatureSection"
+                  id={`${controlId}-showSignatureSection`}
                   checked={showSignatureSection}
                   onCheckedChange={setShowSignatureSection}
                 />
-                <Label htmlFor="showSignatureSection" className="text-xs sm:text-sm cursor-pointer">
+                <Label htmlFor={`${controlId}-showSignatureSection`} className="text-xs sm:text-sm cursor-pointer">
                   <span className="hidden sm:inline">الختم والتوقيع</span>
                   <span className="sm:hidden">التوقيع</span>
                 </Label>
               </div>
-              {/* زر إخفاء عبارات إعادة الطباعة */}
+              {hasReprintContent && (
               <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
                 <Switch
-                  id="hideReprintLabels"
+                  id={`${controlId}-hideReprintLabels`}
                   checked={hideReprintLabels}
                   onCheckedChange={setHideReprintLabels}
                 />
-                <Label htmlFor="hideReprintLabels" className="text-xs sm:text-sm cursor-pointer">
+                <Label htmlFor={`${controlId}-hideReprintLabels`} className="text-xs sm:text-sm cursor-pointer">
                   <span className="hidden sm:inline">إخفاء عبارات إعادة الطباعة</span>
                   <span className="sm:hidden">إخفاء إعادة</span>
                 </Label>
               </div>
-              {/* زر إظهار/إخفاء أعمدة الأبعاد */}
-              <div className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-border/35 bg-background/60 px-2.5">
-                <Switch
-                  id="showDimensions"
-                  checked={showDimensions}
-                  onCheckedChange={setShowDimensions}
-                />
-                <Label htmlFor="showDimensions" className="text-xs sm:text-sm cursor-pointer">
-                  <span className="hidden sm:inline">الأبعاد</span>
-                  <span className="sm:hidden">أبعاد</span>
-                </Label>
-              </div>
+              )}
               <Button onClick={handlePrint} className="h-10 shrink-0 cursor-pointer gap-2 rounded-xl px-4 font-black transition-all duration-200 active:scale-95" size="sm">
                 <Printer className="h-3 w-3 sm:h-4 sm:w-4" />
                 <span>طباعة</span>
@@ -2921,39 +2827,6 @@ export function UnifiedTaskInvoice({
                   <span>واتساب</span>
                 </Button>
               )}
-              {/* Print and Download */}
-              <Button onClick={handlePrint} className="h-10 shrink-0 cursor-pointer gap-2 rounded-xl px-4 font-black transition-all duration-200 active:scale-95" size="sm">
-                <Printer className="h-3 w-3 sm:h-4 sm:w-4" />
-                <span>طباعة</span>
-              </Button>
-              <Button
-                variant="outline"
-                className="h-10 shrink-0 cursor-pointer gap-2 rounded-xl px-4 font-black transition-all duration-200 active:scale-95"
-                size="sm"
-                disabled={pdfExporting}
-                onClick={async () => {
-                  if (!printRef.current) return;
-                  setPdfExporting(true);
-                  try {
-                    const fullHtml = buildPrintableHtml();
-                    const contractPart = contractIds.length > 1 ? `عقود ${contractIds.join('-')}` : `عقد ${contractIds[0] ?? task.contract_id}`;
-                    const _pdfFileName = `${getInvoiceTitleAr()} - ${recipient.name} - ${contractPart} - ${format(new Date(), 'yyyy-MM-dd')}.pdf`;
-                    await saveHtmlDocAsPdf(fullHtml, _pdfFileName, {
-                      marginMm: [5, 5, 5, 5],
-                      waitMs: 1500,
-                    });
-                    toast.success('تم تحميل PDF بنجاح');
-                  } catch (e) {
-                    console.error(e);
-                    toast.error('فشل تحميل PDF');
-                  } finally {
-                    setPdfExporting(false);
-                  }
-                }}
-              >
-                {pdfExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                <span>{pdfExporting ? 'جارٍ تجهيز PDF' : 'تحميل PDF'}</span>
-              </Button>
               <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="h-10 w-10 shrink-0 cursor-pointer rounded-xl transition-all duration-200" aria-label="إغلاق نافذة الفاتورة">
                 <X className="h-4 w-4" />
               </Button>
@@ -3168,7 +3041,7 @@ export function UnifiedTaskInvoice({
                     ? 1 + Number(hasPrintCost) + Number(hasInstallCost) + Number(hasCutoutCost)
                     : 1;
                 const columnWeights = [3.5, ...(isCustomerLike ? [14] : []), 11,
-                  ...(isCustomerLike ? [20] : []), 10, ...(showDimensions ? [5, 5] : []),
+                  ...(isCustomerLike ? [20] : []), 10,
                   8, 11, 8.5, ...Array(costColumnCount).fill(12)];
                 const columnWeightTotal = columnWeights.reduce((sum, weight) => sum + weight, 0);
 
@@ -3188,12 +3061,7 @@ export function UnifiedTaskInvoice({
                           <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '20%', fontSize: '10px', fontWeight: 'bold' }}>الموقع</th>
                         )}
                         <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '10%', fontSize: '10px', fontWeight: 'bold' }}>المقاس</th>
-                        {showDimensions && (
-                          <>
-                            <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '5%', fontSize: '10px', fontWeight: 'bold' }}>العرض</th>
-                            <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '5%', fontSize: '10px', fontWeight: 'bold' }}>الارتفاع</th>
-                          </>
-                        )}
+
                         <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '8%', fontSize: '10px', fontWeight: 'bold' }}>الوجه</th>
                         <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '11%', fontSize: '10px', fontWeight: 'bold' }}>التصميم</th>
                         <th style={{ padding: '7px 4px', color: tableHeaderText, border: `1px solid ${tableBorder}`, textAlign: 'center', width: '8.5%', fontSize: '10px', fontWeight: 'bold' }}>المساحة</th>
@@ -3441,59 +3309,25 @@ export function UnifiedTaskInvoice({
                                       {/* إظهار نوع اللوحة تحت المقاس */}
                                       {item.billboardType && (
                                         <div style={{ fontSize: '8px', color: '#555', marginBottom: '3px', lineHeight: '1.2', display: 'block' }}>
-                                          <span style={{
-                                            background: item.billboardType === 'تيبول' ? '#fff8e1' : '#f3e5f5',
-                                            padding: '2px 5px',
-                                            borderRadius: '3px',
-                                            border: '1px solid rgba(0,0,0,0.06)',
-                                          }}>
-                                            {item.billboardType}
-                                          </span>
+                                          <span className="invoice-print-label">{item.billboardType}</span>
                                         </div>
                                       )}
                                       {/* إظهار عدد الأوجه تحت المقاس */}
                                       {item.billboardFaces && (
                                         <div style={{ fontSize: '8px', color: '#666', lineHeight: '1.2', display: 'block' }}>
-                                          <span style={{
-                                            background: '#e0f2fe',
-                                            color: '#0369a1',
-                                            padding: '2px 5px',
-                                            borderRadius: '3px',
-                                            border: '1px solid #bae6fd',
-                                          }}>
-                                            {item.billboardFaces === 1 ? 'وجه واحد' : item.billboardFaces === 2 ? 'وجهين' : `${item.billboardFaces} أوجه`}
-                                          </span>
+                                          <span className="invoice-print-label">{item.billboardFaces === 1 ? 'وجه واحد' : item.billboardFaces === 2 ? 'وجهين' : `${item.billboardFaces} أوجه`}</span>
                                         </div>
                                       )}
                                     </td>
                                   )}
-                                  {/* العرض والارتفاع - يُدمج للوحات ذات الوجهين */}
-                                  {showDimensions && isFirst && (() => {
-                                    let w = item.width || 0;
-                                    let h = item.height || 0;
-                                    if (w === 0 && h === 0 && item.sizeName) {
-                                      const match = item.sizeName.replace(' (مجسم)', '').match(/(\d+(?:\.\d+)?)[x×X](\d+(?:\.\d+)?)/i);
-                                      if (match) { w = parseFloat(match[1]); h = parseFloat(match[2]); }
-                                    }
-                                    return (
-                                      <>
-                                        <td rowSpan={faceCount} style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', fontFamily: 'Manrope', fontSize: '9.5px', fontWeight: 'bold', overflow: 'visible', whiteSpace: 'normal' }}>
-                                          {w > 0 ? `${w} م` : '-'}
-                                        </td>
-                                        <td rowSpan={faceCount} style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', verticalAlign: 'middle', fontFamily: 'Manrope', fontSize: '9.5px', fontWeight: 'bold', overflow: 'visible', whiteSpace: 'normal' }}>
-                                          {h > 0 ? `${h} م` : '-'}
-                                        </td>
-                                      </>
-                                    );
-                                  })()}
                                   {/* الوجه - منفصل لكل صف */}
                                   <td style={{ padding: '4px 3px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontSize: '9px', overflow: 'visible', whiteSpace: 'normal' }}>
                                     {item.face === 'both' ? (
-                                      <span style={{ background: '#e3f2fd', padding: '2px 6px', borderRadius: '3px', color: '#1565c0', fontWeight: 'bold' }}>أمامي + خلفي</span>
+                                      <span className="invoice-print-label">أمامي + خلفي</span>
                                     ) : item.face === 'a' ? (
-                                      <span style={{ background: '#e8f5e9', padding: '2px 6px', borderRadius: '3px', color: '#2e7d32', fontWeight: 'bold' }}>أمامي</span>
+                                      <span className="invoice-print-label">أمامي</span>
                                     ) : (
-                                      <span style={{ background: '#fff3e0', padding: '2px 6px', borderRadius: '3px', color: '#ef6c00', fontWeight: 'bold' }}>خلفي</span>
+                                      <span className="invoice-print-label">خلفي</span>
                                     )}
                                   </td>
                                   {/* التصميم - منفصل لكل صف */}
@@ -3570,7 +3404,7 @@ export function UnifiedTaskInvoice({
                     {isCustomerLike && showCosts && (invoiceType !== 'customer' || showServiceBreakdown) && (
                       <tfoot data-no-break style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                         <tr style={{ backgroundColor: tableHeaderBg, fontWeight: 'bold' }}>
-                          <td colSpan={7 + (showDimensions ? 2 : 0)} style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
+                          <td colSpan={7} style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
                             الإجمالي
                           </td>
                           <td style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10.5px' }}>
@@ -3600,7 +3434,7 @@ export function UnifiedTaskInvoice({
                     {invoiceType === 'customer' && showCosts && !showServiceBreakdown && (
                       <tfoot data-no-break style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
                         <tr style={{ backgroundColor: tableHeaderBg, fontWeight: 'bold' }}>
-                          <td colSpan={7 + (showDimensions ? 2 : 0)} style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
+                          <td colSpan={7} style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
                             الإجمالي
                           </td>
                           <td style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10.5px' }}>
@@ -3626,7 +3460,7 @@ export function UnifiedTaskInvoice({
                             hasDeductions && !hideReprintLabels ? (
                               <>
                                 <tr style={{ backgroundColor: tableHeaderBg }}>
-                                  <td colSpan={5 + (showDimensions ? 2 : 0)} style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '10px' }}>
+                                  <td colSpan={5} style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '10px' }}>
                                     إجمالي الأعمال
                                   </td>
                                   <td style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10px' }}>
@@ -3637,7 +3471,7 @@ export function UnifiedTaskInvoice({
                                   </td>
                                 </tr>
                                 <tr style={{ backgroundColor: '#fff3f3' }}>
-                                  <td colSpan={6 + (showDimensions ? 2 : 0)} style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: '#c00', fontSize: '10px' }}>
+                                  <td colSpan={6} style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: '#c00', fontSize: '10px' }}>
                                     خصم إعادة الطباعة (على المطبعة)
                                   </td>
                                   <td style={{ padding: '8px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontWeight: 'bold', color: '#c00', fontSize: '10px' }}>
@@ -3645,7 +3479,7 @@ export function UnifiedTaskInvoice({
                                   </td>
                                 </tr>
                                 <tr style={{ backgroundColor: tableHeaderBg, fontWeight: 'bold' }}>
-                                  <td colSpan={5 + (showDimensions ? 2 : 0)} style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
+                                  <td colSpan={5} style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
                                     الإجمالي المستحق
                                   </td>
                                   <td style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10px' }}>
@@ -3658,7 +3492,7 @@ export function UnifiedTaskInvoice({
                               </>
                             ) : (
                               <tr style={{ backgroundColor: tableHeaderBg, fontWeight: 'bold' }}>
-                                <td colSpan={5 + (showDimensions ? 2 : 0)} style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
+                                <td colSpan={5} style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
                                   الإجمالي
                                 </td>
                                 <td style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', color: tableHeaderText, fontSize: '10px' }}>
@@ -3671,7 +3505,7 @@ export function UnifiedTaskInvoice({
                             )
                           ) : (
                             <tr style={{ backgroundColor: tableHeaderBg, fontWeight: 'bold' }}>
-                              <td colSpan={5 + (showDimensions ? 2 : 0)} style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
+                              <td colSpan={5} style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', color: tableHeaderText, fontSize: '11px' }}>
                                 إجمالي المساحة
                               </td>
                               <td style={{ padding: '10px 6px', border: `1px solid ${tableBorder}`, textAlign: 'center', fontFamily: 'Manrope', fontWeight: 'bold', color: totalText, backgroundColor: totalBg, fontSize: '11px' }}>
@@ -3833,9 +3667,9 @@ export function UnifiedTaskInvoice({
                                 <div style={{ fontWeight: 'bold', fontSize: '9px' }}>{cleanReprintLabel(item.sizeName)}</div>
                                 <div style={{ fontSize: '8px', color: '#666', marginTop: '2px' }}>
                                   {item.face === 'a' ? (
-                                    <span style={{ background: '#e8f5e9', padding: '2px 6px', borderRadius: '3px', color: '#2e7d32' }}>أمامي</span>
+                                    <span className="invoice-print-label">أمامي</span>
                                   ) : item.face === 'b' ? (
-                                    <span style={{ background: '#fff3e0', padding: '2px 6px', borderRadius: '3px', color: '#ef6c00' }}>خلفي</span>
+                                    <span className="invoice-print-label">خلفي</span>
                                   ) : (
                                     <span style={{ background: '#e3f2fd', padding: '1px 4px', borderRadius: '3px', color: '#1565c0', fontWeight: 'bold' }}>وجهين</span>
                                   )}

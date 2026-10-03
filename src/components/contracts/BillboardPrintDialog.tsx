@@ -7,7 +7,7 @@ import { Printer, Download } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
 import QRCode from 'qrcode';
-import html2pdf from 'html2pdf.js';
+import browserPdf from '@/lib/browserPdf';
 import { normalizeGoogleImageUrl } from '@/utils/imageUtils';
 
 interface BillboardPrintDialogProps {
@@ -652,7 +652,7 @@ export default function BillboardPrintDialog({
         margin: 0,
         filename: `billboards-contract-${contractId}-${printType}.pdf`,
         image: { type: 'jpeg' as const, quality: 0.98 },
-        html2canvas: {
+        canvas: {
           scale: 2,
           useCORS: true,
           allowTaint: true,
@@ -688,7 +688,7 @@ export default function BillboardPrintDialog({
       const pdfContent = container.querySelector('body') || container;
 
       console.log(`🔄 Generating PDF with ${billboards.length} pages...`);
-      await html2pdf().from(pdfContent).set(opt).save();
+      await browserPdf().from(pdfContent).set(opt).save();
 
       // Clean up
       document.body.removeChild(container);

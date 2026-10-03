@@ -1,0 +1,55 @@
+src\hooks\useAccountStatementPDF.ts:388:      const pdfBlob: Blob = await html2pdf()
+src\pages\ContractPDFDialog.tsx:1709:      await html2pdf().set(opt).from(iframeDoc.body).save();
+src\utils\printWindowHelper.ts:1389:            var pdf = new jsPDFClass({ unit: 'mm', format: 'a4', orientation: orientation, compress: true });
+src\utils\pdfHelpers.ts:234:export async function saveHtmlAsPdf(html: string, filename: string, opts: SavePdfOptions = {}) {
+src\utils\pdfHelpers.ts:242:    await html2pdf()
+src\utils\pdfHelpers.ts:428:    const pdf = new jsPDF({ orientation, unit: 'mm', format: 'a4', compress: true });
+src\utils\pdfHelpers.ts:514:export async function saveIframeAsPdf(
+src\utils\pdfHelpers.ts:534:export async function iframeToPdfBlob(
+src\utils\pdfHelpers.ts:612:export async function saveHtmlDocAsPdf(
+src\utils\pdfHelpers.ts:635: * ★ Shared high-quality PDF engine used by both saveHtmlDocAsPdf and htmlToPdfBlob.
+src\utils\pdfHelpers.ts:784:      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true });
+src\utils\pdfHelpers.ts:899:    const pdf = new jsPDF({ orientation, unit: 'mm', format: 'a4', compress: true });
+src\utils\pdfHelpers.ts:933: * ★ Uses the same high-quality html2canvas + jsPDF engine as saveHtmlDocAsPdf
+src\utils\pdfHelpers.ts:936:export async function htmlToPdfBlob(html: string, filename: string, opts: PdfBlobOptions = {}): Promise<Blob> {
+src\utils\pdfHelpers.ts:948:export async function htmlToPdfBlobOptimized(html: string, filename: string, opts: PdfBlobOptions = {}): Promise<Blob> {
+src\utils\pdfHelpers.ts:949:  return htmlToPdfBlob(html, filename, opts);
+src\utils\pdfHelpers.ts:956:export async function iframeToPdfBlobOptimized(
+src\utils\pdfHelpers.ts:961:  return iframeToPdfBlob(iframeEl, filename, opts);
+src\utils\pdfDriveWhatsApp.ts:6:import { htmlToPdfBlobOptimized } from '@/utils/pdfHelpers';
+src\utils\pdfDriveWhatsApp.ts:24:export function downloadPdfBlob(blob: Blob, fileName: string): void {
+src\utils\pdfDriveWhatsApp.ts:127:  const pdfBlob = await htmlToPdfBlobOptimized(options.html, options.fileName, { landscape: options.landscape });
+src\utils\pdfDriveWhatsApp.ts:146:  const pdfBlob = await htmlToPdfBlobOptimized(options.html, options.fileName, { landscape: options.landscape });
+src\pages\MunicipalityStickers.tsx:483:      const pdf = new jsPDF({
+src\components\composite-tasks\UnifiedTaskInvoice.tsx:15:import { saveHtmlDocAsPdf, htmlToPdfBlob } from '@/utils/pdfHelpers';
+src\components\composite-tasks\UnifiedTaskInvoice.tsx:2737:                    await saveHtmlDocAsPdf(fullHtml, _pdfFileName, {
+src\components\composite-tasks\UnifiedTaskInvoice.tsx:2773:                        const pdfBlob = await htmlToPdfBlob(fullHtml, _waFileName1);
+src\components\composite-tasks\UnifiedTaskInvoice.tsx:2812:                      const pdfBlob = await htmlToPdfBlob(fullHtml, _waFileName2);
+src\components\shared\printing\UnifiedPrintAllDialog.tsx:2093:      const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation, compress: true });
+src\components\shared\printing\UnifiedPrintAllDialog.tsx:2126:  const downloadPdfBlob = (blob: Blob, filename: string) => {
+src\components\shared\printing\UnifiedPrintAllDialog.tsx:2157:      downloadPdfBlob(pdfBlob, pdfFileName);
+src\components\installation\SendTeamInstallationReportDialog.tsx:136:    const pdfBlob: Blob = await html2pdf()
+src\components\customers\SendAccountStatementDialog.tsx:1078:      html2pdf()
+src\components\reports\ReportView.tsx:97:    const { saveHtmlAsPdf } = await import('@/utils/pdfHelpers');
+src\components\reports\ReportView.tsx:261:    await saveHtmlAsPdf(
+src\components\print\UnifiedPrintDialog.tsx:15:import { htmlToPdfBlobOptimized, iframeToPdfBlobOptimized } from '@/utils/pdfHelpers';
+src\components\print\UnifiedPrintDialog.tsx:16:import { downloadPdfBlob, uploadPdfBlobToDrive, uploadPdfBlobAndSendWhatsApp } from '@/utils/pdfDriveWhatsApp';
+src\components\print\UnifiedPrintDialog.tsx:180:      ? await iframeToPdfBlobOptimized(iframeRef.current, fileName, { landscape: isLandscape, marginMm: [0, 0, 0, 0] })
+src\components\print\UnifiedPrintDialog.tsx:181:      : await htmlToPdfBlobOptimized(contentHtml, fileName, { landscape: isLandscape });
+src\components\print\UnifiedPrintDialog.tsx:189:      downloadPdfBlob(pdfBlob, fileName);
+src\components\print\PrintPreviewDialog.tsx:20:import { iframeToPdfBlob } from '@/utils/pdfHelpers';
+src\components\print\PrintPreviewDialog.tsx:21:import { downloadPdfBlob, uploadPdfBlobToDrive, uploadPdfBlobAndSendWhatsApp } from '@/utils/pdfDriveWhatsApp';
+src\components\print\PrintPreviewDialog.tsx:205:    const pdfBlob = await iframeToPdfBlob(iframeRef.current, fileName, {
+src\components\print\PrintPreviewDialog.tsx:217:      downloadPdfBlob(pdfBlob, fileName);
+src\components\tasks\PrintAllContractBillboardsDialog.tsx:20:import { htmlToPdfBlob, htmlToPdfBlobOptimized } from '@/utils/pdfHelpers';
+src\components\tasks\PrintAllContractBillboardsDialog.tsx:1705:    return htmlToPdfBlob(preparedHtml, `لوحات_${resolvedContractNumbers.length > 1 ? 'multiple-contracts' : (resolvedContractNumbers[0] || contractNumber)}.pdf`, {
+src\components\tasks\PrintAllContractBillboardsDialog.tsx:1712:  const downloadPdfBlob = (blob: Blob, filename: string) => {
+src\components\tasks\PrintAllContractBillboardsDialog.tsx:1737:      downloadPdfBlob(pdfBlob, pdfFileName);
+src\components\tasks\PrintAllContractBillboardsDialog.tsx:1761:      const pdfBlob = await htmlToPdfBlobOptimized(preparedHtml, `upload_${resolvedContractNumbers.length > 1 ? 'multiple-contracts' : (resolvedContractNumbers[0] || contractNumber)}.pdf`, { marginMm: [0, 0, 0, 0], waitMs: 1500, landscape: false });
+src\components\billing\ModernPrintInvoiceDialog.tsx:963:      await html2pdf().set(opt).from(tempDiv).save();
+src\components\contracts\SendBillboardPDFWhatsApp.tsx:10:import { saveHtmlAsPdf } from '@/utils/pdfHelpers';
+src\components\contracts\SendBillboardPDFWhatsApp.tsx:343:      html2pdf()
+src\components\billing\SendAccountStatementDialog.tsx:134:    const pdfBlob: Blob = await html2pdf().set({
+src\components\contracts\BillboardPrintIndividual.tsx:695:      const pdf = new jsPDF({
+src\components\contracts\BillboardPrintDialog.tsx:691:      await html2pdf().from(pdfContent).set(opt).save();
+src\components\Contract\ContractInvoiceDialog.tsx:609:      const pdf = new jsPDF({

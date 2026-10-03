@@ -25,90 +25,27 @@ const formatArabicNumber = (num: number): string => {
   return formattedInteger;
 };
 
-export default function FriendRentalReceiptPrintDialog({ 
-  open, 
-  onOpenChange, 
-  rental, 
-  customerName 
-}: FriendRentalReceiptPrintDialogProps) {
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [billboardData, setBillboardData] = useState<any>(null);
-  const [installationData, setInstallationData] = useState<any>(null);
 
-  const loadBillboardData = async () => {
-    if (!rental?.billboard_id) return;
-
-    try {
-      // Load billboard data
-      const { data: billboard, error: billboardError } = await supabase
-        .from('billboards')
-        .select('*')
-        .eq('ID', rental.billboard_id)
-        .single();
-
-      if (!billboardError && billboard) {
-        setBillboardData(billboard);
-
-        // Load installation task data for this billboard and contract
-        const { data: installationTask } = await supabase
-          .from('installation_tasks')
-          .select(`
-            *,
-            installation_task_items!inner(*)
-          `)
-          .eq('contract_id', rental.contract_number)
-          .single();
-
-        if (installationTask) {
-          const items = (installationTask as any).installation_task_items || [];
-          const billboardItem = items.find((item: any) => item.billboard_id === rental.billboard_id);
-          
-          if (billboardItem) {
-            setInstallationData(billboardItem);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error loading billboard data:', error);
-    }
-  };
-
-  useEffect(() => {
-    if (open && rental) {
-      loadBillboardData();
-    }
-  }, [open, rental]);
-
-  const handlePrintReceipt = async () => {
-    if (!rental) {
-      toast.error('لا توجد بيانات للطباعة');
-      return;
-    }
-
-    setIsGenerating(true);
-    
-    try {
-      // جلب إعدادات القالب المحفوظة
-      const styles = await getMergedInvoiceStylesAsync('friend_rental');
+export function buildFriendReceiptHTML(styles: Awaited<ReturnType<typeof getMergedInvoiceStylesAsync>>, rental: any, customerName: string, billboardData: any, installationData: any): string {
       const baseUrl = window.location.origin;
       const logoUrl = styles.logoPath || '/logofaresgold.svg';
       const fullLogoUrl = logoUrl.startsWith('http') ? logoUrl : `${baseUrl}${logoUrl}`;
-      
+
       // No popup test needed
 
       const receiptDate = formatDateForPrint(new Date().toISOString(), styles.showHijriDate);
       const receiptNumber = `FR-${Date.now()}`;
-      
+
       const billboardName = billboardData?.Billboard_Name || `لوحة ${rental.billboard_id}`;
       const billboardSize = billboardData?.Size || 'غير محدد';
       const rentalCost = Number(rental.friend_rental_cost || 0);
       const startDate = formatDateForPrint(rental.start_date, styles.showHijriDate);
       const endDate = formatDateForPrint(rental.end_date, styles.showHijriDate);
-      
-      const installationDate = installationData?.installation_date 
+
+      const installationDate = installationData?.installation_date
         ? formatDateForPrint(installationData.installation_date, styles.showHijriDate)
         : 'غير محدد';
-      
+
       const designImage = installationData?.design_face_a || billboardData?.design_face_a;
       const installedImage = installationData?.installed_image_face_a_url;
 
@@ -121,8 +58,8 @@ export default function FriendRentalReceiptPrintDialog({
         styles,
         fullLogoUrl,
         metaLinesHtml,
-        titleAr: 'إيصال إيجار شريك',
-        titleEn: 'FRIEND RENTAL'
+        titleAr: styles.invoiceTitle || 'إيصال إيجار شريك',
+        titleEn: styles.invoiceTitleEn || 'FRIEND RENTAL'
       });
 
       const footerHtml = unifiedFooterHtml(styles, 'صفحة 1 من 1');
@@ -137,9 +74,9 @@ export default function FriendRentalReceiptPrintDialog({
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;700&display=swap');
             @font-face { font-family: 'Manrope'; src: url('${baseUrl}/Manrope-Bold.otf') format('opentype'); font-weight: 700; }
-            
+
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            
+
             html, body {
               width: 210mm;
               height: 297mm;
@@ -152,7 +89,7 @@ export default function FriendRentalReceiptPrintDialog({
               line-height: 1.3;
               overflow: hidden;
             }
-            
+
             .receipt-container {
               width: 210mm;
               min-height: 297mm;
@@ -160,9 +97,9 @@ export default function FriendRentalReceiptPrintDialog({
               display: flex;
               flex-direction: column;
             }
-            
+
             ${unifiedHeaderFooterCss(styles)}
-            
+
             .customer-section {
               background: ${styles.primaryColor}10;
               padding: 15px;
@@ -170,44 +107,44 @@ export default function FriendRentalReceiptPrintDialog({
               border-radius: 8px;
               border: ${styles.tableBorderWidth || 1}px ${styles.tableBorderStyle || 'solid'} ${styles.tableBorderColor};
             }
-            
+
             .customer-title {
               font-size: 14px;
               font-weight: bold;
               color: ${styles.primaryColor};
               margin-bottom: 10px;
             }
-            
+
             .customer-details {
               display: grid;
               grid-template-columns: 1fr 1fr;
               gap: 10px;
             }
-            
+
             .customer-field {
               display: flex;
               justify-content: space-between;
             }
-            
+
             .field-label { font-weight: bold; color: ${styles.customerSectionTextColor}; }
             .field-value { color: #212529; }
-            
+
             .billboard-images {
               display: grid;
               grid-template-columns: 1fr 1fr;
               gap: 15px;
               margin: 20px 0;
             }
-            
+
             .image-container { text-align: center; }
-            
+
             .image-label {
               font-size: 14px;
               font-weight: bold;
               color: ${styles.primaryColor};
               margin-bottom: 8px;
             }
-            
+
             .billboard-image {
               width: 100%;
               height: 200px;
@@ -215,25 +152,25 @@ export default function FriendRentalReceiptPrintDialog({
               border-radius: 8px;
               border: 2px solid ${styles.tableBorderColor};
             }
-            
+
             .details-table {
               width: 100%;
               border-collapse: collapse;
               margin: 20px 0;
             }
-            
+
             .details-table th, .details-table td {
               border: ${styles.tableBorderWidth || 1}px ${styles.tableBorderStyle || 'solid'} ${styles.tableBorderColor};
               padding: 10px;
               text-align: center;
             }
-            
+
             .details-table th {
               background: ${styles.primaryColor}15;
               font-weight: bold;
               color: ${styles.primaryColor};
             }
-            
+
             .amount-section {
               background: ${styles.primaryColor};
               color: white;
@@ -242,12 +179,12 @@ export default function FriendRentalReceiptPrintDialog({
               margin: 20px 0;
               text-align: center;
             }
-            
+
             .amount-label { font-size: 16px; margin-bottom: 10px; }
             .amount-value { font-size: 32px; font-weight: bold; }
-            
+
             .content-area { flex: 1; }
-            
+
             @media print {
               html, body { width: 210mm; height: 297mm; margin: 0; padding: 0; }
               @page { size: A4; margin: 0; }
@@ -257,7 +194,7 @@ export default function FriendRentalReceiptPrintDialog({
         <body>
           <div class="receipt-container">
             ${headerHtml}
-            
+
             <div class="content-area">
               <div class="customer-section">
                 <div class="customer-title">معلومات العميل</div>
@@ -330,11 +267,81 @@ export default function FriendRentalReceiptPrintDialog({
         </html>
       `;
 
+
+ return htmlContent;
+}
+
+export default function FriendRentalReceiptPrintDialog({
+  open,
+  onOpenChange,
+  rental,
+  customerName
+}: FriendRentalReceiptPrintDialogProps) {
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [billboardData, setBillboardData] = useState<any>(null);
+  const [installationData, setInstallationData] = useState<any>(null);
+
+  const loadBillboardData = async () => {
+    if (!rental?.billboard_id) return;
+
+    try {
+      // Load billboard data
+      const { data: billboard, error: billboardError } = await supabase
+        .from('billboards')
+        .select('*')
+        .eq('ID', rental.billboard_id)
+        .single();
+
+      if (!billboardError && billboard) {
+        setBillboardData(billboard);
+
+        // Load installation task data for this billboard and contract
+        const { data: installationTask } = await supabase
+          .from('installation_tasks')
+          .select(`
+            *,
+            installation_task_items!inner(*)
+          `)
+          .eq('contract_id', rental.contract_number)
+          .single();
+
+        if (installationTask) {
+          const items = (installationTask as any).installation_task_items || [];
+          const billboardItem = items.find((item: any) => item.billboard_id === rental.billboard_id);
+
+          if (billboardItem) {
+            setInstallationData(billboardItem);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading billboard data:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (open && rental) {
+      loadBillboardData();
+    }
+  }, [open, rental]);
+
+  const handlePrintReceipt = async () => {
+    if (!rental) {
+      toast.error('لا توجد بيانات للطباعة');
+      return;
+    }
+
+    setIsGenerating(true);
+
+    try {
+      // جلب إعدادات القالب المحفوظة
+      const styles = await getMergedInvoiceStylesAsync('friend_rental');
+      const htmlContent = buildFriendReceiptHTML(styles, rental, customerName, billboardData, installationData);
       const { showPrintPreview } = await import('@/components/print/PrintPreviewDialog');
       showPrintPreview(htmlContent, `فاتورة إيجار شريك - ${customerName}`, 'billing-receipts');
-      
+
       toast.success('تم إعداد الفاتورة للطباعة');
-      
+
     } catch (error) {
       console.error('Error generating receipt:', error);
       toast.error('حدث خطأ أثناء إعداد الفاتورة');
@@ -351,7 +358,7 @@ export default function FriendRentalReceiptPrintDialog({
             طباعة فاتورة إيجار لوحة
           </UIDialog.DialogTitle>
         </UIDialog.DialogHeader>
-        
+
         <div className="py-6 space-y-4">
           <div className="bg-accent/10 border border-primary/30 rounded-lg p-4">
             <div className="grid grid-cols-2 gap-3 text-sm">

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import html2pdf from 'html2pdf.js';
+import browserPdf from '@/lib/browserPdf';
 import { supabase } from '@/integrations/supabase/client';
 import { generateAccountStatementHTML } from '@/utils/accountStatementHTML';
 import { cleanStatementNote } from '@/lib/printUtils';
@@ -170,7 +170,7 @@ export function useAccountStatementPDF() {
         .from('paused_billboards' as any)
         .select('*')
         .in('contract_number', contractNumbers);
-      if (pausedData) pausedBillboards = pausedData;
+      if (pausedData) pausedBillboards = pausedData.filter((pb: any) => pb.lifecycle_state !== 'cancelled');
     }
 
     // إنشاء قائمة الحركات
@@ -385,12 +385,12 @@ export function useAccountStatementPDF() {
       const pdfTarget = iframeDoc.body;
 
       console.log('تحويل HTML إلى PDF...');
-      const pdfBlob: Blob = await html2pdf()
+      const pdfBlob: Blob = await browserPdf()
         .set({
           margin: [10, 0, 10, 0],
           filename: `كشف_حساب_${params.customerName}.pdf`,
           image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: {
+          canvas: {
             scale: 2,
             useCORS: true,
             allowTaint: true,

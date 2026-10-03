@@ -46,8 +46,8 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
 
 /**
  * Rasterize an SVG (or any image) URL to a PNG data URL via an offscreen canvas.
- * html2canvas cannot render complex SVGs (especially those with embedded <image>),
- * so we pre-rasterize them to PNG which html2canvas handles perfectly.
+ * browserCanvas cannot render complex SVGs (especially those with embedded <image>),
+ * so we pre-rasterize them to PNG which browserCanvas handles perfectly.
  */
 async function rasterizeSvgToDataUrl(
   url: string,

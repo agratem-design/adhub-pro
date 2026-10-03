@@ -12,7 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Printer, Download, X, Loader2, FileText, CloudUpload, MessageCircle, Send } from 'lucide-react';
 import { toast } from 'sonner';
-import { htmlToPdfBlobOptimized } from '@/utils/pdfHelpers';
+import { htmlToPdfBlobOptimized, iframeToPdfBlobOptimized } from '@/utils/pdfHelpers';
 import { downloadPdfBlob, uploadPdfBlobToDrive, uploadPdfBlobAndSendWhatsApp } from '@/utils/pdfDriveWhatsApp';
 import { preparePrintWindow, writePrintWindow, formatWindowsSafeFileName } from '@/utils/printWindowHelper';
 
@@ -176,7 +176,9 @@ export function UnifiedPrintDialog({
       contentHtml = element.outerHTML;
     }
 
-    const pdfBlob = await htmlToPdfBlobOptimized(contentHtml, fileName, { landscape: isLandscape });
+    const pdfBlob = html && iframeRef.current?.contentDocument?.body
+      ? await iframeToPdfBlobOptimized(iframeRef.current, fileName, { landscape: isLandscape, marginMm: [0, 0, 0, 0] })
+      : await htmlToPdfBlobOptimized(contentHtml, fileName, { landscape: isLandscape });
     return { pdfBlob, fileName };
   };
 
@@ -185,13 +187,8 @@ export function UnifiedPrintDialog({
     try {
       const { pdfBlob, fileName } = await getDialogPdfBlob();
       downloadPdfBlob(pdfBlob, fileName);
-      toast.success('تم تحميل ملف PDF بنجاح');
-    } catch (error) {
-      console.error('PDF download error:', error);
-      toast.error('فشل تحميل PDF');
-    } finally {
-      setIsDownloading(false);
-    }
+    } catch (error) { toast.error('تعذر إنشاء ملف PDF'); console.error(error); }
+    finally { setIsDownloading(false); }
   };
 
   const handleDownloadPdf = handleDownloadPDF;
@@ -239,7 +236,7 @@ export function UnifiedPrintDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={`${maxWidth} w-full max-h-[100dvh] sm:max-h-[95vh] p-0`}>
+      <DialogContent hideCloseButton className={`${maxWidth} w-full max-h-[100dvh] sm:max-h-[95vh] p-0`}>
         <DialogHeader className="p-4 border-b bg-gradient-to-l from-primary/5 to-background">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -274,7 +271,7 @@ export function UnifiedPrintDialog({
                 ) : (
                   <Download className="h-4 w-4" />
                 )}
-                <span className="hidden sm:inline">تحميل PDF</span>
+                <span className="hidden sm:inline">حفظ PDF</span>
               </Button>
               {html && (
                 <>
@@ -331,8 +328,9 @@ export function UnifiedPrintDialog({
                   </Popover>
                 </>
               )}
-              <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)}>
+              <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="cursor-pointer hover:bg-destructive/10 hover:text-destructive" title="إغلاق">
                 <X className="h-4 w-4" />
+                <span className="sr-only">إغلاق</span>
               </Button>
             </div>
           </div>

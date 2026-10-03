@@ -128,7 +128,7 @@ export async function exportContractReviewExcel({ contract }: ExportContractRevi
       .select('*')
       .eq('contract_number', Number(contractNumber))
       .order('pause_date', { ascending: false });
-    pausedRows = (paused || []).map((p: any) => {
+    pausedRows = (paused || []).filter((p: any) => p.lifecycle_state !== 'cancelled').map((p: any) => {
       const consumed = num(p.consumed_amount);
       const refund = p.manual_refund != null ? num(p.manual_refund) : num(p.refund_amount);
       totalPausedConsumed += consumed;

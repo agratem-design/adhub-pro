@@ -1,3 +1,4 @@
+import type { ResolvedPrintStyles } from './unifiedInvoiceBase';
 /**
  * Unified Sales Invoice HTML Generator
  * يستخدم نفس القاعدة الموحدة كفاتورة العقد
@@ -33,13 +34,13 @@ export interface SalesInvoiceData {
   autoPrint?: boolean;
 }
 
-export async function generateSalesInvoiceHTML(data: SalesInvoiceData): Promise<string> {
+export async function generateSalesInvoiceHTML(data: SalesInvoiceData, previewStyles?: ResolvedPrintStyles): Promise<string> {
   const [t, extras] = await Promise.all([
-    resolveInvoiceStyles('sales_invoice', {
+    previewStyles ?? resolveInvoiceStyles('sales_invoice', {
       titleAr: data.invoiceName || 'فاتورة مبيعات',
       titleEn: 'SALES INVOICE',
     }),
-    fetchInvoiceExtras(),
+    previewStyles ? Promise.resolve({ bankAccounts: [], stampImageUrl: '' }) : fetchInvoiceExtras(),
   ]);
 
   const subtotal = data.items.reduce((sum, item) => sum + item.total, 0);
