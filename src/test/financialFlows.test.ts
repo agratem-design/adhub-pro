@@ -16,6 +16,17 @@ describe('operating balances', () => {
   it('uses independent friend and partnership fees without charging friend rent twice', () => {
     expect(calculateOperatingFees({ ...contract, friend_rental_data: JSON.stringify([{ friendRentalCost: 2000 }]), friend_rental_operating_fee_enabled: true, friend_rental_operating_fee_rate: 5, partnership_operating_data: [{ operating_fee_amount: 50 }] }, 6000).collectedFeeAmount).toBe(475);
   });
+  it('does not apply the regular rate to partnership rent that already has its own fee', () => {
+    // 10000 rent of which 4000 is a partnership board (own fee 120): regular 10% applies to 6000 only
+    expect(calculateOperatingFees({ ...contract, include_operating_in_installation: false, partnership_operating_data: [{ price_after_discount: 4000, operating_fee_amount: 120 }] }, 12000).fullFeeAmount).toBe(720);
+  });
+  it('keeps installation of friend boards whose rental includes it inside the rental base', () => {
+    const friend = { ...contract, include_operating_in_installation: false, installation_enabled: true,
+      friend_rental_data: [{ billboardId: '7', friendRentalCost: 3000 }],
+      billboard_prices: [{ billboardId: '7', installationCost: 500 }, { billboardId: '8', installationCost: 1500 }] };
+    expect(calculateOperatingFees(friend, 12000).fullFeeAmount).toBe(750);
+    expect(calculateOperatingFees({ ...friend, friend_rental_includes_installation: false }, 12000).fullFeeAmount).toBe(700);
+  });
   it('does not deduct withdrawals consumed by a closure again from open contracts', () => {
     const contracts = [contract, { ...contract, Contract_Number: 1087 }];
     const payments = contracts.map(c => ({ contract_number: c.Contract_Number, amount: 12000, entry_type: 'payment' }));

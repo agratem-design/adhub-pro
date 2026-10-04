@@ -23,7 +23,7 @@ const TooltipContent = React.forwardRef<
       sticky="partial"
       hideWhenDetached
       className={cn(
-        "pointer-events-none z-[120] max-w-[min(22rem,calc(100vw-1.5rem))] whitespace-normal break-words rounded-lg border border-border/70 bg-popover px-3 py-2 text-right font-tajawal text-xs leading-relaxed text-popover-foreground shadow-xl animate-in fade-in-0 zoom-in-95 motion-reduce:animate-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        "pointer-events-none z-[10060] max-w-[min(22rem,calc(100vw-1.5rem))] whitespace-normal break-words rounded-lg border border-border/70 bg-popover px-3 py-2 text-right font-tajawal text-xs leading-relaxed text-popover-foreground shadow-xl animate-in fade-in-0 zoom-in-95 motion-reduce:animate-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
         className,
       )}
       {...props}

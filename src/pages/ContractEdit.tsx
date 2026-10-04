@@ -45,6 +45,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 // Import modular components
 import { ContractExpensesManager } from '@/components/contracts/ContractExpensesManager';
 import { ContractEditHeader } from '@/components/contracts/edit/ContractEditHeader';
+import { PendingChangesBanner } from '@/components/contracts/edit/PendingChangesBanner';
+import { PricingSnapshotCard } from '@/components/contracts/edit/PricingSnapshotCard';
+import { buildPricingSnapshot, parsePricingSnapshot, shouldRefreshSnapshot } from '@/utils/pricingSnapshot';
+import { rescaleInstallmentsToTotal, installmentsMatchTotal } from '@/utils/rescaleInstallments';
 import { SelectedBillboardsCard } from '@/components/contracts/edit/SelectedBillboardsCard';
 import { BillboardFilters } from '@/components/contracts/edit/BillboardFilters';
 import { AvailableBillboardsGrid } from '@/components/contracts/edit/AvailableBillboardsGrid';
@@ -116,6 +120,8 @@ export default function ContractEdit() {
   const [billboards, setBillboards] = useState<Billboard[]>([]);
   const [loading, setLoading] = useState(true);
   const [contractHydrated, setContractHydrated] = useState(false);
+  // ⚠️ لوحات أضيفت/أزيلت بعد التحميل: تُعاد الحسابات ويُمنع الحفظ حتى «معالجة التعديلات»
+  const [billboardBaseline, setBillboardBaseline] = useState<{ ids: string[]; total: number } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [redistributeDiscount, setRedistributeDiscount] = useState(false);
   const [draftBaseline, setDraftBaseline] = useState<string | null>(null);
@@ -844,9 +850,19 @@ export default function ContractEdit() {
         setOperatingFeeRatePrint(Number(c.operating_fee_rate_print ?? c.operating_fee_rate ?? 3));
 
         // ✅ NEW: Load level discounts
+        // تخفيضات المستوى كانت تُحفظ سابقاً دون أن تُطبق على الإجمالي؛ لا نُحمّلها إلا إذا حُفظت
+        // مطبقةً فعلاً على أسعار اللوحات (levelDiscountPercent) حتى لا يتغير إجمالي العقود القديمة عند فتحها.
         const savedLevelDiscounts = c.level_discounts;
-        if (savedLevelDiscounts && typeof savedLevelDiscounts === 'object') {
+        const levelAppliedInPrices = (() => {
+          try {
+            const rows = typeof c.billboard_prices === 'string' ? JSON.parse(c.billboard_prices) : c.billboard_prices;
+            return Array.isArray(rows) && rows.some((r: any) => r && 'levelDiscountPercent' in r);
+          } catch { return false; }
+        })();
+        if (savedLevelDiscounts && typeof savedLevelDiscounts === 'object' && levelAppliedInPrices) {
           setLevelDiscounts(savedLevelDiscounts as Record<string, number>);
+        } else {
+          setLevelDiscounts({});
         }
 
         // ✅ NEW: Load friend rental includes installation
@@ -1501,6 +1517,17 @@ export default function ContractEdit() {
       basePrice = (daily || 0) * days;
     }
 
+    // ✅ مثل تعديل العرض: إذا لم يوجد سعر في جدول الأسعار لهذا المقاس/المستوى/الفئة
+    //    نستخدم سعر اللوحة الأساسي (شهري) بدل احتسابها بصفر دون تنبيه.
+    if (!basePrice || basePrice <= 0) {
+      const bp = Number((billboard as any).Price || (billboard as any).price || 0);
+      if (bp > 0) {
+        basePrice = pricingMode === 'months'
+          ? bp * Math.max(1, Number(durationMonths || 0))
+          : Math.round((bp / 30) * Math.max(0, Number(durationDays || 0)));
+      }
+    }
+
     // ✅ FIXED: Return BASE price only - print/installation costs handled separately
     const convertedPrice = applyExchangeRate(basePrice);
     
@@ -1908,8 +1935,10 @@ export default function ContractEdit() {
         const replacementAllocation = isReplacement ? Number(replacementAllocationsMap.get(id) || 0) : 0;
         const indDiscount = individualDiscounts[id];
         const origFaces = Number((bb as any).Faces_Count ?? (bb as any).faces_count ?? (bb as any).faces ?? 2);
+        const levelPct = Number(levelDiscounts[String((bb as any).Level || (bb as any).level || '')] || 0);
         return {
           billboardId: id,
+          levelDiscountPercent: levelPct,
           baseRentalPrice: calculateBillboardPrice(bb),
           installationPrice: applyExchangeRate(installRaw),
           printCost: printRaw,
@@ -1923,7 +1952,7 @@ export default function ContractEdit() {
       .filter(Boolean) as any[];
 
   }, [selected, billboards, installationDetails, mergedPrintCostDetails, calculateBillboardPrice,
-    singleFaceBillboards, replacementAllocationsMap, individualDiscounts, storedPriceMap,
+    singleFaceBillboards, replacementAllocationsMap, individualDiscounts, levelDiscounts, storedPriceMap,
     useStoredPrices, currentContract, exchangeRate]);
 
   const pricingOptions = { printCostEnabled, includePrintInPrice, installationEnabled, includeInstallationInPrice };
@@ -2049,13 +2078,15 @@ export default function ContractEdit() {
           individualDiscountValue: individualDiscounts[r.billboardId]?.value || 0,
           individualDiscountType: individualDiscounts[r.billboardId]?.type || 'amount',
           individualDiscountAmt: r.individualDiscountAmt || 0,
+          levelDiscountPercent: Number(levelDiscounts[String((billboards.find(b => String((b as any).ID) === r.billboardId) as any)?.Level || '')] || 0),
+          levelDiscountAmt: r.levelDiscountAmt || 0,
           startDate: billboardCustomDates[r.billboardId]?.startDate || '',
           endDate: billboardCustomDates[r.billboardId]?.endDate || '',
           startDateReason: billboardCustomDates[r.billboardId]?.startDateReason || '',
         };
       })
       .filter(Boolean);
-  }, [selected, unifiedPricingByBillboard, pricingCategory, pricingMode, durationMonths, durationDays, individualDiscounts, billboardCustomDates, contractCurrency, exchangeRate, singleFaceBillboards, billboards, printCostEnabled, installationEnabled, validFriendCosts, friendRentalIncludesPrint]);
+  }, [selected, unifiedPricingByBillboard, pricingCategory, pricingMode, durationMonths, durationDays, individualDiscounts, levelDiscounts, billboardCustomDates, contractCurrency, exchangeRate, singleFaceBillboards, billboards, printCostEnabled, installationEnabled, validFriendCosts, friendRentalIncludesPrint]);
 
   // Historical prices are loaded once and shared by the display and save.
   const pausedTotals = pausedPricingFirst.totals;
@@ -2112,17 +2143,18 @@ export default function ContractEdit() {
     let fee = Math.round(Math.max(0, netRentalForCompany) * (operatingFeeRate / 100) * 100) / 100;
     
     // إذا كانت النسبة شاملة التركيب - بنسبة مستقلة
+    // يشمل تركيب/طباعة اللوحات الموقوفة المحتسبة على الزبون (نفس قيمة installation_cost المحفوظة وسجل مصروفات التشغيل)
     if (includeOperatingInInstallation && installationEnabled) {
-      fee += Math.round(installationCostCombined * (operatingFeeRateInstallation / 100) * 100) / 100;
+      fee += Math.round((installationCostCombined + Number(pausedTotals.installSum || 0)) * (operatingFeeRateInstallation / 100) * 100) / 100;
     }
     
     // إذا كانت النسبة شاملة الطباعة - بنسبة مستقلة
     if (includeOperatingInPrint && printCostEnabled) {
-      fee += Math.round(printCostTotalCombined * (operatingFeeRatePrint / 100) * 100) / 100;
+      fee += Math.round((printCostTotalCombined + Number(pausedTotals.printSum || 0)) * (operatingFeeRatePrint / 100) * 100) / 100;
     }
     
     setOperatingFee(fee);
-  }, [netRentalForCompany, operatingFeeRate, includeOperatingInInstallation, includeOperatingInPrint, installationCostCombined, printCostTotalCombined, installationEnabled, printCostEnabled, operatingFeeRateInstallation, operatingFeeRatePrint]);
+  }, [netRentalForCompany, operatingFeeRate, includeOperatingInInstallation, includeOperatingInPrint, installationCostCombined, printCostTotalCombined, installationEnabled, printCostEnabled, operatingFeeRateInstallation, operatingFeeRatePrint, pausedTotals.installSum, pausedTotals.printSum]);
   
   // ✅ NEW: Calculate partnership operating fee
   const partnershipOperatingFee = useMemo(() => {
@@ -2968,6 +3000,11 @@ export default function ContractEdit() {
       if (!contractNumber || saving) return;
       if (!contractHydrated || loading || pausedPricingFirst.loading || pausedPricingFirst.error) { toast.error(pausedPricingFirst.error || "انتظر اكتمال تحميل العقد والإيقافات"); return; }
       if (!customerName.trim() || !startDate || !endDate || endDate < startDate) { toast.error('راجع اسم العميل وتواريخ العقد'); return; }
+      if (pendingBillboardChanges) {
+        toast.error('تم تعديل لوحات العقد — اضغط «معالجة التعديلات» لإعادة توزيع الدفعات قبل الحفظ');
+        setWorkspaceSection('pricing');
+        return;
+      }
       const missingFriendCosts = selected.filter(id => {
         const board = billboards.find(b => String((b as any).ID) === id) as any;
         const cost = validFriendCosts.find(row => row.billboardId === id);
@@ -3182,6 +3219,14 @@ export default function ContractEdit() {
       updates['Payment 2'] = String(installmentsForSaving[1]?.amount || 0);
       updates['Payment 3'] = String(installmentsForSaving[2]?.amount || 0);
 
+      // ✅ حفظ نسخة من قائمة أسعار الفئة وقت التسعير (لمعرفة السعر المعتمد آنذاك)
+      {
+        const existingSnapshot = parsePricingSnapshot(currentContract?.pricing_snapshot);
+        if (shouldRefreshSnapshot(existingSnapshot, pricingCategory, useStoredPrices)) {
+          const snap = buildPricingSnapshot(pricingData, pricingCategory, durations);
+          if (snap) updates.pricing_snapshot = snap;
+        }
+      }
       updates.customer_id = customerId;
       const latestRevision = Number(c?.edit_revision ?? currentContract?.edit_revision ?? 0);
       const saveResult = await saveContractEditAtomic(contractNumber, updates, latestRevision, taskTypes ? { ...taskTypes } : {});
@@ -3250,6 +3295,30 @@ export default function ContractEdit() {
     contractCurrency, exchangeRate, operatingFeeRate, partnershipOperatingFeeRate, friendBillboardCosts, friendRentalIncludesInstallation, friendRentalIncludesPrint,
     singleFaceBillboards: Array.from(singleFaceBillboards), useStoredPrices, useFactorsPricing, levelDiscounts });
   useEffect(() => { if (contractHydrated && draftBaseline === null) setDraftBaseline(draftFingerprint); }, [contractHydrated, draftBaseline, draftFingerprint]);
+  useEffect(() => {
+    if (contractHydrated && billboardBaseline === null) setBillboardBaseline({ ids: [...selected], total: finalTotal });
+  }, [contractHydrated, billboardBaseline, selected, finalTotal]);
+  const addedSinceBaseline = billboardBaseline ? selected.filter((id) => !billboardBaseline.ids.includes(id)) : [];
+  const removedSinceBaseline = billboardBaseline ? billboardBaseline.ids.filter((id) => !selected.includes(id)) : [];
+  const pendingBillboardChanges = addedSinceBaseline.length > 0 || removedSinceBaseline.length > 0;
+  const zeroPricedAddedNames = addedSinceBaseline
+    .filter((id) => {
+      const row: any = unifiedPricingByBillboard.get(id);
+      return row && !row.isReplacement && Number(row.baseRentalPrice || 0) <= 0;
+    })
+    .map((id) => {
+      const bb: any = billboards.find((b) => String((b as any).ID) === id);
+      return bb?.Billboard_Name || bb?.name || `#${id}`;
+    });
+  const processBillboardChanges = () => {
+    if (zeroPricedAddedNames.length > 0) {
+      toast.error(`حدّد سعر اللوحات بدون سعر أولاً: ${zeroPricedAddedNames.join('، ')}`);
+      return;
+    }
+    setInstallments((prev) => rescaleInstallmentsToTotal(prev, finalTotal));
+    setBillboardBaseline({ ids: [...selected], total: finalTotal });
+    toast.success('تمت معالجة التعديلات: أُعيد توزيع الدفعات على الإجمالي الجديد');
+  };
   const hasDraftChanges = draftBaseline !== null && draftFingerprint !== draftBaseline;
   useEffect(() => {
     if (!hasDraftChanges) return;
@@ -3303,6 +3372,20 @@ export default function ContractEdit() {
           <div><span className="text-xs text-muted-foreground">فرق الدفعات</span><p className="font-semibold">{money(installments.reduce((sum, row) => sum + Number(row.amount || 0), 0) - finalTotal).toLocaleString('ar-LY')} {getCurrencySymbol(contractCurrency)}</p></div>
           {hasDraftChanges && <Button className="sm:col-span-4 cursor-pointer" variant="outline" onClick={() => setReloadKey(key => key + 1)}>التراجع عن تعديلات المسودة وإعادة تحميل المحفوظ</Button>}
         </div>
+        {pendingBillboardChanges && billboardBaseline && (
+          <PendingChangesBanner
+            added={addedSinceBaseline.length}
+            removed={removedSinceBaseline.length}
+            previousTotal={billboardBaseline.total}
+            newTotal={finalTotal}
+            installmentsMatch={installmentsMatchTotal(installments, finalTotal)}
+            currencySymbol={getCurrencySymbol(contractCurrency)}
+            entityLabel="العقد"
+            zeroPricedNames={zeroPricedAddedNames}
+            onProcess={processBillboardChanges}
+            onReview={() => setWorkspaceSection('pricing')}
+          />
+        )}
         <details className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
           <summary className="cursor-pointer">معلومات الحفظ والأسعار المحفوظة</summary>
           <p className="pt-2 leading-6">تعديلات العقد تُحفظ بزر الحفظ. إجراءات الإيقاف والاستبدال والاستئناف تُنفّذ فور تأكيدها وتظهر في السجل.</p>
@@ -3847,6 +3930,7 @@ export default function ContractEdit() {
 
           {/* Sidebar - القائمة الجانبية */}
           <div id="contract-pricing" className={`${workspaceSection === 'pricing' ? 'grid' : 'hidden'} scroll-mt-40 min-w-0 items-start gap-5 lg:grid-cols-2`}>
+            <PricingSnapshotCard snapshot={currentContract?.pricing_snapshot} currentPricing={pricingData} entityLabel="العقد" />
             <div className="lg:col-span-2 flex flex-wrap items-center justify-between gap-3">
               <div><h2 className="text-lg font-bold">الأسعار والخدمات والدفعات</h2><p className="text-sm text-muted-foreground">اضبط التكاليف، ثم راجع الخصومات والإجمالي وجدول السداد.</p></div>
               <div className="flex flex-wrap gap-2">

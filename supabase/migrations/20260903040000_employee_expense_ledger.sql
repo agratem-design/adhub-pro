@@ -88,3 +88,4 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.pay_employee_due(uuid,numeric,text,text,text,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.pay_employee_due(uuid,numeric,text,text,text,uuid) TO authenticated;
+;

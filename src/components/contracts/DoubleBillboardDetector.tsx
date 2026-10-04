@@ -35,6 +35,8 @@ interface ConflictEntry {
   billboardName: string;
   landmark?: string;
   city?: string;
+  district?: string;
+  municipality?: string;
   size?: string;
   contracts: ConflictContractInfo[];
 }
@@ -160,16 +162,18 @@ export function DoubleBillboardDetector() {
         const ids = conflictEntries.map((e) => Number(e.billboardId));
         const { data: bbData } = await supabase
           .from('billboards')
-          .select('ID, Billboard_Name, Nearest_Landmark, City, Size, Ad_Type')
+          .select('ID, Billboard_Name, Nearest_Landmark, City, District, Municipality, Size, Ad_Type')
           .in('ID', ids);
 
         if (bbData) {
-          const infoMap: Record<string, { name: string; landmark?: string; city?: string; size?: string; adType?: string }> = {};
+          const infoMap: Record<string, { name: string; landmark?: string; city?: string; district?: string; municipality?: string; size?: string; adType?: string }> = {};
           for (const bb of bbData) {
             infoMap[String(bb.ID)] = {
               name: bb.Billboard_Name || `لوحة #${bb.ID}`,
               landmark: bb.Nearest_Landmark || undefined,
               city: bb.City || undefined,
+              district: (bb as any).District || undefined,
+              municipality: (bb as any).Municipality || undefined,
               size: bb.Size || undefined,
               adType: (bb as any).Ad_Type || (bb as any).ad_type || undefined,
             };
@@ -180,6 +184,8 @@ export function DoubleBillboardDetector() {
               entry.billboardName = info.name;
               entry.landmark = info.landmark;
               entry.city = info.city;
+              entry.district = info.district;
+              entry.municipality = info.municipality;
               entry.size = info.size;
 
               // إذا كان نوع الإعلان غير محدد في العقد، استخدم نوع الإعلان من اللوحة
@@ -206,207 +212,119 @@ export function DoubleBillboardDetector() {
 
   const toggleBb = (id: string) => setExpandedBb((prev) => (prev === id ? null : id));
 
+  const runScanAndOpen = () => { setOpen(true); runScan(); };
+
   return (
-    <div className="rounded-2xl border border-amber-500/30 bg-card text-card-foreground shadow-lg overflow-hidden my-4" dir="rtl">
-
-      {/* ── رأس المكوّن (قابل للطي) ── */}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between gap-3 px-5 py-4 hover:bg-muted/40 transition-colors duration-150 text-right"
-        dir="rtl"
-      >
-        <div className="flex items-center gap-3 text-right" dir="rtl">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
-            <ScanSearch className="h-5 w-5 text-amber-500" />
-          </div>
-          <div className="text-right" dir="rtl">
-            <h3 className="text-base font-bold text-amber-500 leading-tight">كاشف اللوحات المتضاربة (التأجير المزدوج)</h3>
-            <p className="text-xs text-muted-foreground mt-1">كشف وفحص اللوحات المحجوزة في أكثر من عقد نشط لنفس الفترة الزمنية</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 shrink-0" dir="rtl">
-          {scanned && conflicts.length > 0 && (
-            <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-xs px-2.5 py-1">
-              {conflicts.length} لوحة متضاربة
-            </Badge>
-          )}
-          {scanned && conflicts.length === 0 && (
-            <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs px-2.5 py-1">
-              لا توجد تعارضات
-            </Badge>
-          )}
-          {open ? <ChevronUp className="h-5 w-5 text-muted-foreground" /> : <ChevronDown className="h-5 w-5 text-muted-foreground" />}
-        </div>
-      </button>
-
-      {/* ── المحتوى ── */}
-      {open && (
-        <div className="border-t border-border/60 bg-muted/10">
-
-          {/* شريط الإجراءات والزر */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 px-5 py-3.5 bg-muted/30 border-b border-border/40" dir="rtl">
-            <p className="text-xs text-muted-foreground leading-relaxed text-right">
-              اضغط على زر الفحص للتحقق التلقائي من جميع العقود السارية واستخراج اللوحات المكررة بتفاصيلها.
+    <section className="my-4 overflow-hidden rounded-2xl border border-border/60 bg-card text-card-foreground" dir="rtl" aria-label="كاشف اللوحات المتضاربة">
+      {/* الرأس: العنوان + النتيجة + زر الفحص مباشرة */}
+      <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <ScanSearch className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div className="min-w-0">
+            <h3 className="text-base font-bold leading-tight text-foreground">كاشف التأجير المزدوج</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {!scanned && !loading && 'يفحص العقود السارية ويكشف أي لوحة محجوزة في أكثر من عقد لنفس الفترة.'}
+              {loading && 'جاري فحص العقود السارية...'}
+              {scanned && !loading && conflicts.length === 0 && (
+                <span className="inline-flex items-center gap-1.5 text-emerald-500">
+                  <ShieldCheck className="h-4 w-4" /> لا توجد تعارضات — كل اللوحات مؤجرة بدون تداخل.
+                </span>
+              )}
+              {scanned && !loading && conflicts.length > 0 && (
+                <span className="inline-flex items-center gap-1.5 text-rose-400">
+                  <AlertTriangle className="h-4 w-4" /> {conflicts.length} لوحة محجوزة في أكثر من عقد نشط.
+                </span>
+              )}
             </p>
-            <Button
-              size="sm"
-              onClick={runScan}
-              disabled={loading}
-              className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-bold gap-2 h-9 px-4 shadow-md transition-all"
-            >
-              {loading
-                ? <Loader2 className="h-4 w-4 animate-spin" />
-                : <ScanSearch className="h-4 w-4" />}
-              {loading ? 'جاري الفحص...' : 'فحص الآن'}
-            </Button>
           </div>
-
-          {/* ✅ لا تعارضات */}
-          {scanned && conflicts.length === 0 && (
-            <div className="flex items-center gap-3 px-6 py-6 text-right" dir="rtl">
-              <ShieldCheck className="h-9 w-9 text-emerald-400 shrink-0" />
-              <div>
-                <p className="text-base font-bold text-emerald-400">النظام سليم — لا توجد تعارضات</p>
-                <p className="text-xs text-muted-foreground mt-1">جميع اللوحات في العقود النشطة مؤجرة بدون تداخل زمني</p>
-              </div>
-            </div>
-          )}
-
-          {/* ❌ قائمة التعارضات */}
-          {conflicts.length > 0 && (
-            <div className="p-4 space-y-3 max-h-[550px] overflow-y-auto" dir="rtl">
-              {/* ملخص */}
-              <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/25 mb-4 text-right" dir="rtl">
-                <AlertTriangle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" />
-                <p className="text-xs text-red-300 leading-relaxed">
-                  تم اكتشاف <strong className="text-red-200 text-sm font-bold">{conflicts.length} لوحة</strong> محجوزة في أكثر من عقد نشط لنفس المدة — اضغط على اللوحة لمشاهدة العقود المتعارضة وأقرب نقطة دالة والمنطقة.
-                </p>
-              </div>
-
-              {conflicts.map((entry) => {
-                const isExpanded = expandedBb === entry.billboardId;
-                return (
-                  <div key={entry.billboardId} className="rounded-xl border border-red-500/30 bg-card shadow-sm overflow-hidden text-right" dir="rtl">
-
-                    {/* رأس اللوحة المختصر */}
-                    <button
-                      type="button"
-                      onClick={() => toggleBb(entry.billboardId)}
-                      className="w-full flex flex-col md:flex-row md:items-center justify-between gap-3 px-4 py-3 hover:bg-red-500/5 transition-colors text-right"
-                      dir="rtl"
-                    >
-                      <div className="flex items-center gap-3 text-right" dir="rtl">
-                        <div className="w-8 h-8 rounded-lg bg-red-500/15 border border-red-500/30 flex items-center justify-center shrink-0">
-                          <AlertTriangle className="h-4 w-4 text-red-400" />
-                        </div>
-                        <div className="text-right" dir="rtl">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-base font-bold text-foreground">{entry.billboardName}</span>
-                            {entry.size && (
-                              <span className="text-xs font-semibold px-2 py-0.5 rounded bg-muted text-muted-foreground border border-border">
-                                {entry.size}
-                              </span>
-                            )}
-                          </div>
-                          
-                          {/* أقرب نقطة دالة والمنطقة */}
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1 flex-wrap" dir="rtl">
-                            {entry.landmark && (
-                              <span className="flex items-center gap-1 text-amber-500/90 font-medium">
-                                <MapPin className="h-3.5 w-3.5 shrink-0" />
-                                أقرب نقطة دالة: {entry.landmark}
-                              </span>
-                            )}
-                            {entry.city && (
-                              <span className="flex items-center gap-1 text-slate-300">
-                                <Building className="h-3.5 w-3.5 shrink-0" />
-                                المدينة/المنطقة: {entry.city}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-3 shrink-0 self-end md:self-center" dir="rtl">
-                        <span className="text-xs px-2.5 py-1 rounded-full bg-red-500/15 text-red-300 border border-red-500/30 font-bold">
-                          متضاربة في {entry.contracts.length} عقود
-                        </span>
-                        {isExpanded
-                          ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                          : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-                      </div>
-                    </button>
-
-                    {/* تفاصيل العقود عند التوسع */}
-                    {isExpanded && (
-                      <div className="border-t border-red-500/20 bg-muted/20 divide-y divide-border/40" dir="rtl">
-                        {entry.contracts.map((c, ci) => (
-                          <div key={c.contractNumber + ci} className="p-4 space-y-2 text-right" dir="rtl">
-                            <div className="flex items-center justify-between gap-2" dir="rtl">
-                              <div className="flex items-center gap-2 text-xs" dir="rtl">
-                                <Hash className="h-4 w-4 text-amber-400 shrink-0" />
-                                <span className="text-muted-foreground">رقم العقد:</span>
-                                <span className="font-mono font-bold text-amber-400 text-sm">#{c.contractNumber}</span>
-                              </div>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => navigate(`/admin/contracts/${c.contractNumber}/edit`)}
-                                className="h-7 px-2.5 text-xs gap-1 border-primary/40 text-primary hover:bg-primary/10"
-                              >
-                                فتح العقد للتعديل
-                                <ExternalLink className="h-3 w-3" />
-                              </Button>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 pt-1 text-xs" dir="rtl">
-                              {/* المستأجر */}
-                              <div className="flex items-center gap-1.5 text-right" dir="rtl">
-                                <User className="h-3.5 w-3.5 text-blue-400 shrink-0" />
-                                <span className="text-muted-foreground">المستأجر:</span>
-                                <span className="text-foreground font-semibold truncate">{c.customerName || 'غير محدد'}</span>
-                              </div>
-
-                              {/* نوع الإعلان */}
-                              <div className="flex items-center gap-1.5 text-right" dir="rtl">
-                                <Tag className="h-3.5 w-3.5 text-violet-400 shrink-0" />
-                                <span className="text-muted-foreground">نوع الإعلان:</span>
-                                <span className="font-bold text-xs px-2.5 py-0.5 rounded-md bg-violet-500/20 text-violet-300 border border-violet-500/35 inline-block">
-                                  {c.adType || 'غير محدد'}
-                                </span>
-                              </div>
-
-                              {/* المتبقي */}
-                              <div className="flex items-center gap-1.5 text-right" dir="rtl">
-                                <Clock className="h-3.5 w-3.5 text-orange-400 shrink-0" />
-                                <span className="text-muted-foreground">المتبقي بالعقد:</span>
-                                <span className={`font-bold ${daysColor(c.daysRemaining)}`}>
-                                  {c.daysRemaining > 0 ? `${c.daysRemaining} يوم` : 'انتهى'}
-                                </span>
-                              </div>
-
-                              {/* تاريخ البداية والنهاية */}
-                              <div className="flex items-center gap-1.5 sm:col-span-2 md:col-span-3 text-right mt-1" dir="rtl">
-                                <Calendar className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                                <span className="text-muted-foreground">فترة الإيجار:</span>
-                                <span className="text-foreground font-mono">
-                                  من {c.startDate ? formatDate(c.startDate) : '—'} إلى {c.endDate ? formatDate(c.endDate) : '—'}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {scanned && conflicts.length > 0 && (
+            <Button variant="outline" size="sm" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+              {open ? 'إخفاء التفاصيل' : 'عرض التفاصيل'}
+              {open ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </Button>
+          )}
+          <Button size="sm" onClick={runScanAndOpen} disabled={loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4" />}
+            {loading ? 'جاري الفحص...' : scanned ? 'إعادة الفحص' : 'فحص الآن'}
+          </Button>
+        </div>
+      </div>
+
+      {/* قائمة التعارضات */}
+      {open && conflicts.length > 0 && (
+        <ul className="max-h-[560px] divide-y divide-border/50 overflow-y-auto border-t border-border/60">
+          {conflicts.map((entry) => {
+            const isExpanded = expandedBb === entry.billboardId;
+            return (
+              <li key={entry.billboardId}>
+                <button
+                  type="button"
+                  onClick={() => toggleBb(entry.billboardId)}
+                  aria-expanded={isExpanded}
+                  className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3 text-right transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/60"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-foreground">{entry.billboardName}</span>
+                      {entry.size && <span className="rounded bg-muted px-1.5 py-px text-xs text-muted-foreground">{entry.size}</span>}
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                      {entry.landmark && <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{entry.landmark}</span>}
+                      {(entry.district || entry.municipality || entry.city) && (
+                        <span className="inline-flex items-center gap-1">
+                          <Building className="h-3.5 w-3.5" />
+                          {[entry.district, entry.municipality && entry.municipality !== entry.district ? entry.municipality : null, entry.city].filter(Boolean).join('، ')}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="rounded-md bg-rose-500/10 px-2 py-0.5 text-xs font-semibold text-rose-400">في {entry.contracts.length} عقود</span>
+                    {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                  </div>
+                </button>
+
+                {isExpanded && (
+                  <div className="space-y-2 bg-muted/20 px-4 pb-4 pt-1">
+                    {entry.contracts.map((c, ci) => (
+                      <div key={c.contractNumber + ci} className="flex flex-col gap-2 rounded-xl border border-border/50 bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0 space-y-1 text-sm">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span dir="ltr" className="font-bold tabular-nums text-foreground">#{c.contractNumber}</span>
+                            <span className="truncate text-foreground/90">{c.customerName || 'عميل غير محدد'}</span>
+                            {c.adType && <span className="rounded bg-muted px-1.5 py-px text-xs text-muted-foreground">{c.adType}</span>}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                            <span className="inline-flex items-center gap-1">
+                              <Calendar className="h-3.5 w-3.5" />
+                              {c.startDate ? formatDate(c.startDate) : '—'} إلى {c.endDate ? formatDate(c.endDate) : '—'}
+                            </span>
+                            <span className={`inline-flex items-center gap-1 font-semibold ${daysColor(c.daysRemaining)}`}>
+                              <Clock className="h-3.5 w-3.5" />
+                              {c.daysRemaining > 0 ? `متبقي ${c.daysRemaining} يوم` : 'انتهى'}
+                            </span>
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate(`/admin/contracts/edit?contract=${c.contractNumber}`)}
+                          className="shrink-0"
+                        >
+                          فتح العقد
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
       )}
-    </div>
+    </section>
   );
 }

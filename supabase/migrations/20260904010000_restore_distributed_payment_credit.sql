@@ -60,3 +60,4 @@ BEGIN
   INSERT INTO customer_payments SELECT v_credit.*;
 END
 $$;
+;

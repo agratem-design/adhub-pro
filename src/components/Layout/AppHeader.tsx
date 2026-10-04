@@ -81,15 +81,13 @@ export const AppHeader: React.FC<AppHeaderProps> = ({ onToggleSidebar }) => {
             <button
               onClick={() => setDbModalOpen(true)}
               className={cn(
-                'hidden sm:flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[11px] font-semibold border transition-all cursor-pointer hover:scale-105',
-                isOfflineMode
-                  ? 'bg-blue-500/10 text-blue-600 border-blue-500/30 dark:text-blue-300 hover:bg-blue-500/20'
-                  : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-300 hover:bg-emerald-500/20'
+                'hidden sm:flex items-center gap-2 px-3 h-8 rounded-lg text-xs font-semibold border border-border/60 bg-card text-foreground transition-colors cursor-pointer hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60'
               )}
               title="إدارة قاعدة البيانات والتبديل بين الوضع السحابي والمحلي"
             >
-              {isOfflineMode ? <WifiOff className="h-3 w-3" /> : <Wifi className="h-3 w-3" />}
-              <span>{isOfflineMode ? 'أوفلاين (محلي)' : 'سحابي (Online)'}</span>
+              <span className={cn('h-2 w-2 rounded-full', isOfflineMode ? 'bg-sky-500' : 'bg-emerald-500')} aria-hidden="true" />
+              {isOfflineMode ? <WifiOff className="h-3.5 w-3.5 text-muted-foreground" /> : <Wifi className="h-3.5 w-3.5 text-muted-foreground" />}
+              <span>{isOfflineMode ? 'قاعدة محلية' : 'قاعدة سحابية'}</span>
             </button>
           )}
 

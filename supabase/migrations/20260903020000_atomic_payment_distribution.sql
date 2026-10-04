@@ -234,3 +234,4 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.save_payment_distribution(uuid,jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.save_payment_distribution(uuid,jsonb) TO authenticated;
+;

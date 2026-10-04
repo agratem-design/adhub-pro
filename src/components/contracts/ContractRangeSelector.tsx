@@ -109,7 +109,7 @@ export const ContractRangeSelector = ({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" disabled={disabled} className="min-h-[44px] cursor-pointer text-[13px] gap-2">
+        <Button variant="outline" size="sm" disabled={disabled} className="gap-2">
           <Filter aria-hidden="true" className="h-4 w-4" />
           تحديد نطاق
         </Button>

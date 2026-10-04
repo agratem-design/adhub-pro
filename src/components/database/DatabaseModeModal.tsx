@@ -333,18 +333,18 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
 
   return (
     <div
-      className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200"
+      className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200"
       dir="rtl"
       onClick={() => onOpenChange(false)}
     >
       <div
-        className="w-full max-w-3xl max-h-[90vh] flex flex-col bg-slate-950 text-slate-100 border-2 border-primary/40 rounded-2xl shadow-[0_0_60px_rgba(0,0,0,0.9)] overflow-hidden relative"
+        className="w-full max-w-3xl max-h-[90vh] flex flex-col bg-background text-foreground border border-border/60 rounded-2xl shadow-2xl overflow-hidden relative"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Full Modal Restore Progress Overlay */}
         {isRestoring && (
-          <div className="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200">
-            <div className="max-w-md w-full p-6 rounded-2xl bg-slate-900 border-2 border-primary/50 shadow-2xl space-y-5">
+          <div className="absolute inset-0 z-50 bg-background/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-200">
+            <div className="max-w-md w-full p-6 rounded-2xl bg-card border-2 border-primary/50 shadow-2xl space-y-5">
               <div className="flex justify-center">
                 {restoreSuccess ? (
                   <div className="w-16 h-16 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center animate-bounce">
@@ -359,10 +359,10 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
               </div>
 
               <div className="space-y-1.5">
-                <h3 className="text-base font-black text-white">
+                <h3 className="text-base font-black text-foreground">
                   {restoreSuccess ? 'اكتمل تركيب قاعدة البيانات بنجاح!' : 'جاري استعادة وتركيب النسخة الاحتياطية...'}
                 </h3>
-                <p className="text-xs text-slate-300 font-mono">
+                <p className="text-xs text-foreground/80 font-mono">
                   {selectedBackup?.fileName} ({selectedBackup?.fileSizeMB} MB)
                 </p>
               </div>
@@ -376,10 +376,10 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                     {restoreProgress?.percent || 20}%
                   </span>
                 </div>
-                <Progress value={restoreProgress?.percent || 20} className="h-2.5 bg-slate-800" />
+                <Progress value={restoreProgress?.percent || 20} className="h-2.5 bg-muted" />
               </div>
 
-              <div className="pt-2 text-[11px] text-slate-400 flex items-center justify-center gap-1.5 border-t border-slate-800">
+              <div className="pt-2 text-[11px] text-muted-foreground flex items-center justify-center gap-1.5 border-t border-border/60">
                 <Zap className="w-3.5 h-3.5 text-primary" />
                 <span>إعادة بناء المخطط من الصفر وضبط صلاحيات الـ API المحلي تلقائياً</span>
               </div>
@@ -388,16 +388,16 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
         )}
 
         {/* Header */}
-        <div className="p-4 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between">
+        <div className="p-4 bg-muted/40 border-b border-border/60 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-primary/20 text-primary border border-primary/30">
               <Database className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">
+              <h2 className="text-base font-bold text-foreground">
                 إدارة قاعدة البيانات والمزامنة السحابية
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-muted-foreground mt-0.5">
                 التبديل بين السحابي والمحلي، ومزامنة التعديلات بدون تعارضات، واستعادة النسخ الاحتياطية
               </p>
             </div>
@@ -426,7 +426,7 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
 
             <button
               onClick={() => onOpenChange(false)}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -434,7 +434,7 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
         </div>
 
         {/* Content Body */}
-        <div className="p-4 space-y-4 flex-1 overflow-y-auto bg-slate-950">
+        <div className="p-4 space-y-4 flex-1 overflow-y-auto bg-background">
           {/* Mode Selector Tabs */}
           <div className="grid grid-cols-2 gap-3">
             {/* Cloud Option */}
@@ -444,17 +444,17 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                 'p-3.5 rounded-xl border-2 transition-all cursor-pointer flex flex-col gap-2',
                 selectedMode === 'cloud'
                   ? 'border-emerald-500 bg-emerald-500/10 shadow-md'
-                  : 'border-slate-800 bg-slate-900/60 hover:border-emerald-500/40'
+                  : 'border-border/60 bg-muted/30 hover:border-emerald-500/40'
               )}
             >
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm font-bold text-white">
+                <div className="flex items-center gap-2 text-sm font-bold text-foreground">
                   <Cloud className="w-4 h-4 text-emerald-400" />
                   قاعدة البيانات السحابية (Online)
                 </div>
                 {selectedMode === 'cloud' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
               </div>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-muted-foreground">
                 الاتصال المباشر مع سيرفر Supabase السحابي، مزامنة تلقائية لجميع البيانات الحية.
               </p>
               <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 font-sans font-medium">
@@ -470,41 +470,41 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                 'p-3.5 rounded-xl border-2 transition-all cursor-pointer flex flex-col gap-2',
                 selectedMode === 'local'
                   ? 'border-primary bg-primary/10 shadow-md'
-                  : 'border-slate-800 bg-slate-900/60 hover:border-primary/40'
+                  : 'border-border/60 bg-muted/30 hover:border-primary/40'
               )}
             >
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm font-bold text-white">
+                <div className="flex items-center gap-2 text-sm font-bold text-foreground">
                   <HardDrive className="w-4 h-4 text-primary" />
                   قاعدة البيانات المحلية (Offline)
                 </div>
                 {selectedMode === 'local' && <CheckCircle2 className="w-4 h-4 text-primary" />}
               </div>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-muted-foreground">
                 العمل المستقل محلياً على هذا الجهاز بدون الحاجة لإنترنت عبر استعادة نسخة احتياطية.
               </p>
-              <div className="text-[10px] text-slate-400 font-mono truncate" dir="ltr">
+              <div className="text-[10px] text-muted-foreground font-mono truncate" dir="ltr">
                 {localUrl}
               </div>
             </div>
           </div>
 
           {/* Conflict-Free Smart Sync Section */}
-          <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 shadow-sm space-y-3">
+          <div className="p-3.5 rounded-xl bg-muted/40 border border-border/60 shadow-sm space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="p-1.5 rounded-md bg-primary/20 text-primary">
                   <ArrowUpDown className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-white">المزامنة الذكية بدون تعارضات (Smart Sync)</h4>
-                  <p className="text-[10px] text-slate-400">
+                  <h4 className="text-xs font-bold text-foreground">المزامنة الذكية بدون تعارضات (Smart Sync)</h4>
+                  <p className="text-[10px] text-muted-foreground">
                     نقل وتحديث العقود واللوحات والمدفوعات بين المحلي والسحابي بأسلوب دمج ذكي (UPSERT)
                   </p>
                 </div>
               </div>
               {lastSyncTime && (
-                <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                <div className="text-[10px] text-muted-foreground flex items-center gap-1">
                   <Clock className="w-3 h-3" />
                   <span>آخر مزامنة: {new Date(lastSyncTime).toLocaleDateString('ar-LY')} {new Date(lastSyncTime).toLocaleTimeString('ar-LY', { hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
@@ -517,7 +517,7 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                 size="sm"
                 onClick={handleSyncLocalToCloud}
                 disabled={isSyncing}
-                className="h-9 text-xs font-bold gap-2 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/20 bg-slate-900"
+                className="h-9 text-xs font-bold gap-2 border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/20 bg-card"
               >
                 {isSyncing && syncType === 'upload' ? (
                   <>
@@ -537,7 +537,7 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                 size="sm"
                 onClick={handleSyncCloudToLocal}
                 disabled={isSyncing}
-                className="h-9 text-xs font-bold gap-2 border-blue-500/40 text-blue-400 hover:bg-blue-500/20 bg-slate-900"
+                className="h-9 text-xs font-bold gap-2 border-blue-500/40 text-blue-400 hover:bg-blue-500/20 bg-card"
               >
                 {isSyncing && syncType === 'download' ? (
                   <>
@@ -555,22 +555,22 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
 
             {/* Sync Progress Bar */}
             {isSyncing && syncProgress && (
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-2 mt-2">
-                <div className="flex justify-between text-xs font-bold text-white">
+              <div className="p-3 rounded-lg bg-background border border-border/60 space-y-2 mt-2">
+                <div className="flex justify-between text-xs font-bold text-foreground">
                   <span className="flex items-center gap-1.5">
                     <Layers className="w-3.5 h-3.5 text-primary" />
                     {syncProgress.message}
                   </span>
                   <span className="text-primary">{syncProgress.percent}%</span>
                 </div>
-                <Progress value={syncProgress.percent} className="h-1.5 bg-slate-800" />
+                <Progress value={syncProgress.percent} className="h-1.5 bg-muted" />
               </div>
             )}
           </div>
 
           {/* Image Cache Downloader Manager */}
           <div className="pt-1">
-            <ImageCacheManager className="bg-slate-950/70 border-slate-800 text-slate-100" />
+            <ImageCacheManager className="bg-background/70 border-border/60 text-foreground" />
           </div>
 
           {/* Local Mode Details & Stack Automation */}
@@ -582,17 +582,17 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Cpu className="w-4 h-4 text-primary" />
-                      <span className="text-xs font-bold text-white">
+                      <span className="text-xs font-bold text-foreground">
                         محرك التشغيل المحلي (Docker & Supabase Engine):
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="text-[10px] gap-1 bg-slate-900 border-slate-700 text-slate-200">
+                      <Badge variant="outline" className="text-[10px] gap-1 bg-card border-border text-foreground/90">
                         Docker:
                         <span className={cn('w-2 h-2 rounded-full inline-block', stackStatus?.dockerRunning ? 'bg-emerald-400' : 'bg-red-500')} />
                         {stackStatus?.dockerRunning ? 'يعمل' : 'متوقف'}
                       </Badge>
-                      <Badge variant="outline" className="text-[10px] gap-1 bg-slate-900 border-slate-700 text-slate-200">
+                      <Badge variant="outline" className="text-[10px] gap-1 bg-card border-border text-foreground/90">
                         Supabase:
                         <span className={cn('w-2 h-2 rounded-full inline-block', stackStatus?.supabaseRunning ? 'bg-emerald-400' : 'bg-red-500')} />
                         {stackStatus?.supabaseRunning ? 'جاهز' : 'متوقف'}
@@ -601,7 +601,7 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                   </div>
 
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                    <p className="text-[11px] text-foreground/80 leading-relaxed">
                       يقوم هذا الزر بتشغيل Docker وحاويات Supabase المحلية تلقائياً بنقرة واحدة.
                     </p>
                     <div className="flex items-center gap-2 shrink-0">
@@ -610,7 +610,7 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                           size="sm"
                           variant="outline"
                           onClick={handleStopLocalStack}
-                          className="h-8 text-xs text-red-400 border-red-500/30 hover:bg-red-500/20 bg-slate-900"
+                          className="h-8 text-xs text-red-400 border-red-500/30 hover:bg-red-500/20 bg-card"
                         >
                           <Square className="w-3.5 h-3.5 ml-1" />
                           إيقاف السيرفر
@@ -639,26 +639,26 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                   </div>
 
                   {isStartingStack && stackProgress && (
-                    <div className="p-2.5 rounded-lg bg-slate-950 border border-primary/30 space-y-1.5 mt-2">
+                    <div className="p-2.5 rounded-lg bg-background border border-primary/30 space-y-1.5 mt-2">
                       <div className="flex justify-between text-[11px] text-primary font-bold">
                         <span>{stackProgress.message}</span>
                         <span>{stackProgress.percent}%</span>
                       </div>
-                      <Progress value={stackProgress.percent} className="h-1.5 bg-slate-800" />
+                      <Progress value={stackProgress.percent} className="h-1.5 bg-muted" />
                     </div>
                   )}
                 </div>
               )}
 
               {/* Backups Card */}
-              <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 shadow-sm space-y-3">
+              <div className="p-3.5 rounded-xl bg-muted/40 border border-border/60 shadow-sm space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <Label className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
                       <FileDown className="w-4 h-4 text-primary" />
                       النسخ الاحتياطية المتوفرة للاستعادة (.dump / .sql):
                     </Label>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
                       اختر ملف النسخة وسيقوم النظام بتركيبه وإعادة بناء قاعدة البيانات المحلية من الصفر
                     </p>
                   </div>
@@ -668,7 +668,7 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                       variant="outline"
                       onClick={loadBackups}
                       disabled={loadingBackups}
-                      className="h-7 text-[11px] px-2.5 bg-slate-900 border-slate-700 text-slate-200 hover:text-white"
+                      className="h-7 text-[11px] px-2.5 bg-card border-border text-foreground/90 hover:text-foreground"
                     >
                       <RefreshCw className={cn('w-3 h-3 ml-1', loadingBackups && 'animate-spin')} />
                       تحديث
@@ -677,7 +677,7 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                       size="sm"
                       variant="outline"
                       onClick={handleBrowseFile}
-                      className="h-7 text-[11px] px-2.5 bg-slate-900 border-slate-700 text-slate-200 hover:text-white"
+                      className="h-7 text-[11px] px-2.5 bg-card border-border text-foreground/90 hover:text-foreground"
                     >
                       <FolderOpen className="w-3 h-3 ml-1" />
                       استعراض ملف...
@@ -688,8 +688,8 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                 {/* Backups List */}
                 <ScrollArea className="h-44 pr-1">
                   {backups.length === 0 ? (
-                    <div className="h-36 flex flex-col items-center justify-center gap-1.5 text-slate-400 text-xs">
-                      <AlertCircle className="w-6 h-6 text-slate-500" />
+                    <div className="h-36 flex flex-col items-center justify-center gap-1.5 text-muted-foreground text-xs">
+                      <AlertCircle className="w-6 h-6 text-muted-foreground/80" />
                       <span>لم يتم العثور على نسخ احتياطية في مجلد المستندات</span>
                       <Button variant="link" size="sm" onClick={handleBrowseFile} className="text-xs text-primary">
                         انقر لاختيار ملف نسخة احتياطية من جهازك
@@ -707,7 +707,7 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                               'p-3 rounded-lg border transition-all cursor-pointer flex items-center justify-between gap-3',
                               isPicked
                                 ? 'border-primary bg-primary/20 shadow-md ring-1 ring-primary'
-                                : 'border-slate-800 bg-slate-950 hover:bg-slate-800/60'
+                                : 'border-border/60 bg-background hover:bg-muted/60'
                             )}
                           >
                             <div className="flex items-center gap-2.5 min-w-0">
@@ -719,7 +719,7 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                               </div>
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1.5">
-                                  <strong className="text-xs text-white truncate">{b.fileName}</strong>
+                                  <strong className="text-xs text-foreground truncate">{b.fileName}</strong>
                                   <Badge
                                     variant="secondary"
                                     className={cn(
@@ -732,7 +732,7 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                                     {b.typeLabel}
                                   </Badge>
                                 </div>
-                                <div className="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
+                                <div className="text-[10px] text-muted-foreground flex items-center gap-2 mt-0.5">
                                   <span>الحجم: {b.fileSizeMB} MB</span>
                                   <span>•</span>
                                   <span>الصيغة: {b.format}</span>
@@ -759,10 +759,10 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                 {selectedBackup && (
                   <div className="p-3 rounded-lg bg-primary/15 border border-primary/40 flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-xs font-bold text-white truncate">
+                      <div className="text-xs font-bold text-foreground truncate">
                         النسخة الجاهزة للتركيب: <span className="text-primary font-bold">{selectedBackup.fileName}</span>
                       </div>
-                      <div className="text-[10px] text-slate-300 mt-0.5">
+                      <div className="text-[10px] text-foreground/80 mt-0.5">
                         سيتم مسح المخطط المحلي وإعادة بنائه وتعبئته بالكامل من هذا الملف ({selectedBackup.fileSizeMB} MB).
                       </div>
                     </div>
@@ -779,28 +779,28 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
                 )}
 
                 {/* Local Server Config */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-800">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-border/60">
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-slate-400 flex items-center gap-1">
+                    <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <Server className="w-3 h-3 text-primary" />
                       عنوان سيرفر Supabase المحلي:
                     </Label>
                     <Input
                       value={localUrl}
                       onChange={(e) => setLocalUrl(e.target.value)}
-                      className="h-8 text-xs font-mono bg-slate-950 border-slate-800 text-slate-200"
+                      className="h-8 text-xs font-mono bg-background border-border/60 text-foreground/90"
                       dir="ltr"
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[11px] text-slate-400 flex items-center gap-1">
+                    <Label className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <KeyRound className="w-3 h-3 text-primary" />
                       مفتاح Anon Key المحلي:
                     </Label>
                     <Input
                       value={localKey}
                       onChange={(e) => setLocalKey(e.target.value)}
-                      className="h-8 text-xs font-mono bg-slate-950 border-slate-800 text-slate-200"
+                      className="h-8 text-xs font-mono bg-background border-border/60 text-foreground/90"
                       dir="ltr"
                     />
                   </div>
@@ -811,8 +811,8 @@ export function DatabaseModeModal({ open, onOpenChange, isFirstRun = false }: Pr
         </div>
 
         {/* Footer */}
-        <div className="p-3 bg-slate-900/90 border-t border-slate-800 flex items-center justify-between">
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={isRestoring || isSyncing} className="text-slate-400 hover:text-white">
+        <div className="p-3 bg-muted/40 border-t border-border/60 flex items-center justify-between">
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={isRestoring || isSyncing} className="text-muted-foreground hover:text-foreground">
             إغلاق
           </Button>
 

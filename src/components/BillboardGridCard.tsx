@@ -965,12 +965,12 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
       <Card 
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        className={`group relative overflow-hidden rounded-[1.75rem] border-2 bg-card flex flex-col h-full transition-all duration-500 ease-out ${
+        className={`group relative overflow-hidden rounded-2xl border bg-card flex flex-col h-full transition-colors duration-200 ${
           isTorn
             ? 'border-destructive ring-2 ring-destructive/60 ring-offset-2 ring-offset-background shadow-[0_0_0_1px_hsl(var(--destructive)/0.4)]'
-            : 'border-border'
+            : 'border-border/60'
         } ${isSelected ? 'ring-2 ring-primary ring-offset-2 ring-offset-background border-primary' : ''} ${
-          !dominantColor && isHovered ? 'shadow-luxury border-primary/50' : ''
+          isHovered ? 'border-primary/40' : ''
         }`}
         style={getCardStyle()}
       >
@@ -980,11 +980,9 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
           {/* ── اليمين: بادج المقاس الذهبي ── */}
           <div
             title="مقاس اللوحة"
-            className="relative flex flex-col items-center justify-center px-3 py-1.5 shrink-0 bg-gradient-to-b from-amber-400 to-amber-600 text-neutral-950 overflow-hidden transition-all duration-500 group-hover:from-amber-300 group-hover:to-amber-500 group-hover:shadow-[0_0_18px_rgba(251,191,36,0.6)] rounded-tr-[1.5rem]"
+            className="relative flex flex-col items-center justify-center px-3 py-1.5 shrink-0 bg-primary text-primary-foreground"
           >
-            <span className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/25 to-transparent" />
-            <span className="pointer-events-none absolute inset-0 bg-gradient-to-l from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700 ease-in-out" />
-            <span className="relative text-[8px] font-black uppercase tracking-widest opacity-70 leading-none">مقاس</span>
+            <span className="relative text-[9px] font-semibold opacity-75 leading-none">مقاس</span>
             <span className="relative font-black text-lg tabular-nums leading-tight tracking-tight mt-0.5">
               {(() => {
                 const s = String(billboard.Size || '—');
@@ -1000,7 +998,7 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
 
             {/* نقطة الحالة + أيقونة + نص */}
             <div className={`flex items-center gap-1.5 shrink-0 ${statusTheme.text}`}>
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusTheme.dot} shadow-[0_0_6px_currentColor] animate-pulse`} />
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusTheme.dot}`} />
               <StatusIcon className="h-3.5 w-3.5 shrink-0" />
               <span className="text-[11px] font-extrabold whitespace-nowrap">{statusLabel}</span>
             </div>
@@ -1308,16 +1306,12 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
               {/* 1. معلومات العقد والتصميم النشط (تذكرة مثقوبة بأسلوب أوبن ديزاين رأسية) */}
               {hasActiveContract && !contractExpired && (
                 <div 
-                  className="relative rounded-2xl border border-dashed border-primary/30 bg-gradient-to-br from-primary/5 via-primary/5/80 to-transparent shadow-inner overflow-hidden select-none animate-fade-in flex flex-col"
-                  style={dominantColor ? {
-                    borderColor: `rgba(${dominantColor}, 0.25)`,
-                    background: `linear-gradient(135deg, rgba(${dominantColor}, 0.08) 0%, rgba(${dominantColor}, 0.03) 50%, transparent 100%)`
-                  } : undefined}
+                  className="relative rounded-xl border border-border/50 bg-muted/25 overflow-hidden select-none"
                 >
                   {/* الجانب العلوي (تصميم الإعلان الممدد أفقياً لمنع التشوه) */}
                   {frontDesignUrl && (
                     <div 
-                      className="relative w-full aspect-[21/9] bg-muted/15 border-b border-dashed border-primary/20 overflow-hidden cursor-pointer group/design shrink-0"
+                      className="relative w-full aspect-[21/9] bg-muted/15 border-b border-border/50 overflow-hidden cursor-pointer group/design shrink-0"
                       onClick={(e) => {
                         e.stopPropagation();
                         openDesignPreview(frontDesignUrl, 'التصميم الإعلاني');
@@ -1339,27 +1333,11 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                     </div>
                   )}
 
-                  {/* خط التثقيب الأفقي مع قطع الدوائر الجانبية */}
-                  {frontDesignUrl && (
-                    <div className="relative h-px w-full shrink-0">
-                      {/* الدائرة اليمنى */}
-                      <div 
-                        className="absolute -right-1.5 -top-1.5 w-3 h-3 rounded-full bg-background border border-border/40 shadow-[inset_1px_0_1px_rgba(0,0,0,0.05)]" 
-                        style={dominantColor ? { borderColor: `rgba(${dominantColor}, 0.25)` } : undefined}
-                      />
-                      {/* الدائرة اليسرى */}
-                      <div 
-                        className="absolute -left-1.5 -top-1.5 w-3 h-3 rounded-full bg-background border border-border/40 shadow-[inset_-1px_0_1px_rgba(0,0,0,0.05)]" 
-                        style={dominantColor ? { borderColor: `rgba(${dominantColor}, 0.25)` } : undefined}
-                      />
-                    </div>
-                  )}
-
                   {/* الجانب السفلي (تفاصيل العقد المنظمة) */}
                   <div className="p-3 flex flex-col justify-between space-y-2.5 min-w-0">
                     {/* رأس العقد */}
                     <div className="flex items-center justify-between gap-1.5">
-                      <span className="flex items-center gap-1 text-[10px] font-extrabold text-primary uppercase tracking-wider">
+                      <span className="flex items-center gap-1 text-xs font-bold text-primary">
                         <FileText className="h-3.5 w-3.5 shrink-0" />
                         عقد نشط
                       </span>
@@ -1631,11 +1609,8 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                     })();
                     return (
                       <div
-                        className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-all duration-300 hover:shadow-md relative overflow-hidden"
-                        style={{
-                          background: `linear-gradient(90deg, ${bgColor}20 0%, ${bgColor}08 100%)`,
-                          borderColor: `${bgColor}45`,
-                        }}
+                        className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border bg-muted/20 relative overflow-hidden"
+                        style={{ borderColor: 'hsl(var(--border) / 0.6)' }}
                       >
                         {/* شريط اللون الجانبي */}
                         <div className="absolute right-0 top-0 bottom-0 w-1 rounded-r-xl" style={{ backgroundColor: bgColor }} />
@@ -1691,11 +1666,8 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                     })();
                     return (
                       <div
-                        className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-all duration-300 hover:shadow-md relative overflow-hidden"
-                        style={{
-                          background: `linear-gradient(90deg, ${bgColor}20 0%, ${bgColor}08 100%)`,
-                          borderColor: `${bgColor}45`,
-                        }}
+                        className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl border bg-muted/20 relative overflow-hidden"
+                        style={{ borderColor: 'hsl(var(--border) / 0.6)' }}
                       >
                         {/* شريط اللون الجانبي */}
                         <div className="absolute right-0 top-0 bottom-0 w-1 rounded-r-xl" style={{ backgroundColor: bgColor }} />
@@ -2093,17 +2065,17 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
             )}
 
             {/* CTA Dock — كل العناصر في صف أفقي واحد */}
-            <div className="mt-auto pt-3 border-t border-primary/15">
+            <div className="mt-auto pt-3 border-t border-border/50">
               <div className="flex items-center gap-1.5 flex-wrap">
 
                 {/* حجز سريع */}
                 {showBookingActions && (
                   <Button
                     onClick={() => onBooking?.(billboard)}
-                    className={`flex-1 h-9 font-bold text-sm rounded-xl shadow-md transition-all duration-300 border-0 min-w-[80px] ${
+                    className={`flex-1 h-9 font-bold text-sm rounded-lg border-0 min-w-[80px] transition-colors ${
                       isAvailable
-                        ? 'bg-gradient-to-r from-primary to-primary/90 text-primary-foreground hover:shadow-[0_8px_24px_-6px_hsl(var(--primary)/0.5)] hover:scale-[1.02]'
-                        : 'bg-gradient-to-r from-amber-500 to-orange-500 text-white'
+                        ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                        : 'bg-amber-600 text-white hover:bg-amber-600/90'
                     }`}
                   >
                     {isAvailable ? (
@@ -2123,11 +2095,10 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                     onClick={() => setExtendDialogOpen(true)}
                     aria-label={hasExtension ? 'تمديد إضافي' : 'تمديد الإيجار'}
                     title={hasExtension ? 'تمديد إضافي' : 'تمديد الإيجار'}
-                    className={`h-9 w-9 p-0 rounded-xl shadow-sm border-0 shrink-0 ${
-                      hasExtension
-                        ? 'bg-gradient-to-br from-orange-500 to-amber-500 text-white hover:scale-105'
-                        : 'bg-gradient-to-br from-emerald-500 to-green-600 text-white hover:scale-105'
-                    } transition-all`}
+                    variant="outline"
+                    className={`h-9 w-9 p-0 rounded-lg border-border/60 bg-card shrink-0 transition-colors hover:bg-muted ${
+                      hasExtension ? 'text-amber-500' : 'text-emerald-500'
+                    }`}
                   >
                     <CalendarPlus className="h-4 w-4" />
                   </Button>
@@ -2140,7 +2111,7 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                     aria-label="تاريخ اللوحة"
                     title="تاريخ اللوحة"
                     variant="outline"
-                    className="h-9 w-9 p-0 rounded-xl border border-primary/30 bg-primary/5 text-primary hover:bg-primary hover:text-primary-foreground shrink-0 transition-all"
+                    className="h-9 w-9 p-0 rounded-lg border-border/60 bg-card text-foreground hover:bg-muted shrink-0 transition-colors"
                   >
                     <History className="h-4 w-4" />
                   </Button>
@@ -2155,7 +2126,7 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                       aria-label="فتح على الخريطة"
                       title="فتح على الخريطة"
                       variant="outline"
-                      className="h-9 w-9 p-0 rounded-xl border border-border bg-background text-foreground hover:bg-primary hover:text-primary-foreground hover:border-primary disabled:opacity-40 shrink-0 transition-all"
+                      className="h-9 w-9 p-0 rounded-lg border-border/60 bg-card text-foreground hover:bg-muted shrink-0 transition-colors"
                     >
                       <MapPin className="h-4 w-4" />
                     </Button>
@@ -2164,7 +2135,7 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                       aria-label="عرض التفاصيل"
                       title="عرض التفاصيل"
                       variant="outline"
-                      className="h-9 w-9 p-0 rounded-xl border border-border bg-background text-foreground hover:bg-primary hover:text-primary-foreground shrink-0 transition-all"
+                      className="h-9 w-9 p-0 rounded-lg border-border/60 bg-card text-foreground hover:bg-muted shrink-0 transition-colors"
                     >
                       <Eye className="h-4 w-4" />
                     </Button>
@@ -2198,7 +2169,7 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                         } catch (e: any) { toast.error(e?.message || 'فشل العملية'); }
                       }}
                       title={isTorn ? 'إلغاء حالة الممزق' : 'تسجيل كإعلان ممزق'}
-                      className={`h-9 w-9 p-0 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                      className={`h-9 w-9 p-0 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
                         isTorn
                           ? 'border-destructive bg-destructive/10 text-destructive hover:bg-destructive/20'
                           : 'border-border bg-muted/30 text-muted-foreground hover:bg-destructive/10 hover:border-destructive/40 hover:text-destructive'
@@ -2210,7 +2181,7 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                     <button
                       onClick={handleToggleVisibility}
                       title={isVisibleInAvailable ? 'إخفاء من المتاحة' : 'إظهار في المتاحة'}
-                      className={`h-9 w-9 p-0 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                      className={`h-9 w-9 p-0 rounded-lg border flex items-center justify-center shrink-0 transition-colors ${
                         isVisibleInAvailable
                           ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20'
                           : 'border-rose-500/40 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20'

@@ -244,6 +244,7 @@ export default function InstallationTasks() {
   const [syncMissingDialogOpen, setSyncMissingDialogOpen] = useState(false);
   const [syncMissingContractId, setSyncMissingContractId] = useState<number>(0);
   const [syncMissingTaskIds, setSyncMissingTaskIds] = useState<string[]>([]);
+  const [syncMissingContractIds, setSyncMissingContractIds] = useState<number[]>([]);
   const [completionInstallationDate, setCompletionInstallationDate] = useState<Date | undefined>(new Date());
   
   // Add billboards to task dialog
@@ -1950,81 +1951,166 @@ export default function InstallationTasks() {
     },
   });
 
-  // ── مزامنة اللوحات الناقصة (التركيب) ──
+  // ── مطابقة لوحات مهام التركيب مع العقد (إضافة الناقص + حذف الزائد غير المركّب) ──
   const syncMissingBillboardsMutation = useMutation({
-    mutationFn: async ({ contractId, selectedBillboards: inputBillboards }: { contractId: number; selectedBillboards: { ID: number; Size: string | null; City: string | null; Faces_Count: number | null; friend_company_id: string | null }[] }) => {
-      if (inputBillboards.length === 0) throw new Error('لم يتم اختيار أي لوحة');
+    mutationFn: async ({ contractId, groupTaskIds, selectedBillboards: inputBillboards, removeItemIds = [] }: {
+      contractId: number;
+      groupTaskIds: string[];
+      selectedBillboards: { ID: number; Size: string | null; City: string | null; Faces_Count: number | null; friend_company_id: string | null; contractId?: number }[];
+      removeItemIds?: string[];
+    }) => {
+      if (inputBillboards.length === 0 && removeItemIds.length === 0) throw new Error('لم يتم اختيار أي لوحة');
 
-      // 🚫 Filter paused billboards out
-      const { data: pausedRows } = await supabase
-        .from('paused_billboards' as any)
-        .select('billboard_id')
-        .eq('contract_number', contractId);
-      const pausedSet = new Set<number>((pausedRows || []).map((p: any) => Number(p.billboard_id)));
-      const selectedBillboards = inputBillboards.filter((b) => !pausedSet.has(Number(b.ID)));
-      if (selectedBillboards.length === 0) throw new Error('جميع اللوحات المختارة موقوفة');
+      const groupTasks = tasks.filter((t: any) => groupTaskIds.includes(t.id));
+      const refTask: any = groupTasks.find((t: any) => t.contract_id === contractId) || groupTasks[0];
+      const groupType = refTask?.task_type || 'installation';
 
+      // ── 1) حذف اللوحات الزائدة (ليست في العقد) — مع حماية المركّبة ──
+      let removedCount = 0;
+      if (removeItemIds.length > 0) {
+        const safeIds = allTaskItems
+          .filter((i: any) =>
+            removeItemIds.includes(i.id) &&
+            groupTaskIds.includes(i.task_id) &&
+            i.status !== 'completed' &&
+            !i.replaced_by_item_id &&
+            !i.replacement_status
+          )
+          .map((i: any) => i.id);
 
-      const { data: teamsData } = await supabase
-        .from('installation_teams')
-        .select('id, team_name, sizes, cities, priority, friend_company_ids');
-      
-      if (!teamsData?.length) throw new Error('لا توجد فرق');
-      
-      const sortedTeams = [...teamsData].sort((a: any, b: any) => (b.priority || 0) - (a.priority || 0));
-      
-      const createdTasksMap = new Map<string, string>();
-      let addedCount = 0;
+        if (safeIds.length > 0) {
+          const { error: delError } = await supabase
+            .from('installation_task_items')
+            .delete()
+            .in('id', safeIds)
+            .neq('status', 'completed');
+          if (delError) throw delError;
+          removedCount = safeIds.length;
 
-      
-      for (const bb of selectedBillboards) {
-        const team = findCorrectTeam(sortedTeams, bb.Size, bb.City, bb.friend_company_id);
-        
-        if (!team) continue;
-        
-        const mapKey = `${team.id}_${contractId}`;
-        let existingTask = tasks.find((t: any) => t.team_id === team.id && t.contract_id === contractId);
-        let targetTaskId: string;
-        
-        if (existingTask) {
-          targetTaskId = existingTask.id;
-        } else if (createdTasksMap.has(mapKey)) {
-          targetTaskId = createdTasksMap.get(mapKey)!;
-        } else {
-          const { data: newTask, error } = await supabase
-            .from('installation_tasks')
-            .insert({ contract_id: contractId, team_id: team.id, status: 'pending' })
-            .select('id')
-            .single();
-          if (error || !newTask) continue;
-          targetTaskId = newTask.id;
-          createdTasksMap.set(mapKey, targetTaskId);
+          // حذف المهام التي أصبحت فارغة
+          const affectedTaskIds = [...new Set(allTaskItems.filter((i: any) => safeIds.includes(i.id)).map((i: any) => i.task_id))];
+          for (const tid of affectedTaskIds) {
+            const { data: remaining } = await supabase
+              .from('installation_task_items')
+              .select('id')
+              .eq('task_id', tid)
+              .limit(1);
+            if (!remaining || remaining.length === 0) {
+              await supabase.from('installation_tasks').delete().eq('id', tid);
+            }
+          }
         }
-        
-        const { error: insertError } = await supabase
-          .from('installation_task_items')
-          .insert({
-            task_id: targetTaskId,
-            billboard_id: bb.ID,
-            status: 'pending',
-            faces_to_install: bb.Faces_Count || 2,
-          });
-        
-        if (!insertError) addedCount++;
       }
-      
-      return addedCount;
+
+      // ── 2) إضافة اللوحات الناقصة (في العقد وليست في المهام) ──
+      let addedCount = 0;
+      if (inputBillboards.length > 0) {
+        const contractNums = [...new Set(inputBillboards.map(b => Number(b.contractId || contractId)))];
+        const { data: pausedRows } = await supabase
+          .from('paused_billboards' as any)
+          .select('billboard_id, contract_number')
+          .in('contract_number', contractNums);
+        const pausedKey = new Set<string>((pausedRows || []).map((p: any) => `${Number(p.contract_number)}_${Number(p.billboard_id)}`));
+        const selectedBillboards = inputBillboards.filter((b) => !pausedKey.has(`${Number(b.contractId || contractId)}_${Number(b.ID)}`));
+
+        const { data: teamsData } = await supabase
+          .from('installation_teams')
+          .select('id, team_name, sizes, cities, priority, friend_company_ids');
+        if (!teamsData?.length) throw new Error('لا توجد فرق');
+        const sortedTeams = [...teamsData].sort((a: any, b: any) => (b.priority || 0) - (a.priority || 0));
+
+        const createdTasksMap = new Map<string, string>();
+        // المهام التي حُذفت لأنها أصبحت فارغة لا يمكن استخدامها
+        const { data: aliveTasks } = await supabase.from('installation_tasks').select('id').in('id', groupTaskIds.length ? groupTaskIds : ['00000000-0000-0000-0000-000000000000']);
+        const aliveSet = new Set((aliveTasks || []).map((t: any) => t.id));
+
+        for (const bb of selectedBillboards) {
+          const team = findCorrectTeam(sortedTeams, bb.Size, bb.City, bb.friend_company_id);
+          if (!team) continue;
+
+          const bbContract = Number(bb.contractId || contractId);
+          const mapKey = `${team.id}_${bbContract}`;
+          // أولاً: مهمة من نفس المجموعة لنفس الفرقة تغطي هذا العقد
+          const existingTask: any =
+            groupTasks.find((t: any) => aliveSet.has(t.id) && t.team_id === team.id && (derivedContractIdsByTaskId.get(t.id) || [t.contract_id]).includes(bbContract)) ||
+            groupTasks.find((t: any) => aliveSet.has(t.id) && t.team_id === team.id);
+          let targetTaskId: string;
+
+          if (existingTask) {
+            targetTaskId = existingTask.id;
+          } else if (createdTasksMap.has(mapKey)) {
+            targetTaskId = createdTasksMap.get(mapKey)!;
+          } else {
+            const insertPayload: any = { contract_id: bbContract, team_id: team.id, status: 'pending', task_type: groupType };
+            if (groupType === 'reinstallation') insertPayload.reinstallation_number = refTask?.reinstallation_number || 1;
+            const { data: newTask, error } = await supabase
+              .from('installation_tasks')
+              .insert(insertPayload)
+              .select('id')
+              .single();
+            if (error || !newTask) continue;
+            targetTaskId = newTask.id;
+            createdTasksMap.set(mapKey, targetTaskId);
+          }
+
+          const { error: insertError } = await supabase
+            .from('installation_task_items')
+            .insert({
+              task_id: targetTaskId,
+              billboard_id: bb.ID,
+              status: 'pending',
+              faces_to_install: bb.Faces_Count || 2,
+            });
+          if (!insertError) addedCount++;
+        }
+      }
+
+      return { addedCount, removedCount };
     },
-    onSuccess: (count) => {
-      toast.success(`تم إضافة ${count} لوحة ناقصة إلى مهام التركيب`);
+    onSuccess: ({ addedCount, removedCount }) => {
+      const parts: string[] = [];
+      if (addedCount > 0) parts.push(`إضافة ${addedCount} لوحة`);
+      if (removedCount > 0) parts.push(`حذف ${removedCount} لوحة ليست في العقد`);
+      toast.success(`تمت مطابقة اللوحات مع العقد: ${parts.join('، ') || 'لا تغييرات'}`);
       setSyncMissingDialogOpen(false);
       refetchTasks();
       refetchTaskItems();
     },
     onError: (error: any) => {
-      toast.error(error.message || 'فشل في إضافة اللوحات الناقصة');
+      toast.error(error.message || 'فشل في مطابقة اللوحات مع العقد');
     },
   });
+
+  // فتح نافذة المطابقة لمهمة: تُجمع كل مهام نفس النوع (ونفس رقم إعادة التركيب) المرتبطة بنفس العقود
+  const openContractSyncForTask = (taskId: string) => {
+    const t: any = tasks.find((x: any) => x.id === taskId);
+    if (!t) return;
+    const type = t.task_type || 'installation';
+    const sameKind = (x: any) =>
+      (x.task_type || 'installation') === type &&
+      (type !== 'reinstallation' || (x.reinstallation_number || 1) === (t.reinstallation_number || 1));
+
+    const contractSet = new Set<number>(derivedContractIdsByTaskId.get(taskId) || [t.contract_id]);
+    let group = new Set<string>([taskId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const x of tasks as any[]) {
+        if (group.has(x.id) || !sameKind(x)) continue;
+        const ids = derivedContractIdsByTaskId.get(x.id) || [x.contract_id];
+        if (ids.some((c: number) => contractSet.has(c))) {
+          group.add(x.id);
+          ids.forEach((c: number) => { if (!contractSet.has(c)) { contractSet.add(c); changed = true; } });
+          changed = true;
+        }
+      }
+    }
+
+    setSyncMissingContractId(t.contract_id);
+    setSyncMissingContractIds([...contractSet]);
+    setSyncMissingTaskIds([...group]);
+    setSyncMissingDialogOpen(true);
+  };
 
   // ── تجميع المهام المتفرقة (التركيب) ──
   const mergeTasksMutation = useMutation({
@@ -2709,10 +2795,8 @@ export default function InstallationTasks() {
             }}
             onPrintInvoice={handlePrintInvoice}
             onCreatePrintTask={(taskId) => { setSelectedTaskForPrint(taskId); setCreatePrintTaskDialogOpen(true); }}
-            onSyncMissingBillboards={(contractId, taskIds) => {
-              setSyncMissingContractId(contractId);
-              setSyncMissingTaskIds(taskIds);
-              setSyncMissingDialogOpen(true);
+            onSyncMissingBillboards={(_contractId, taskIds) => {
+              if (taskIds[0]) openContractSyncForTask(taskIds[0]);
             }}
           />
           </motion.div>
@@ -3647,22 +3731,22 @@ export default function InstallationTasks() {
         open={syncMissingDialogOpen}
         onOpenChange={setSyncMissingDialogOpen}
         contractId={syncMissingContractId}
+        contractIds={syncMissingContractIds}
         taskIds={syncMissingTaskIds}
-        existingBillboardIds={new Set(
-          allTaskItems
-            .filter(item => syncMissingTaskIds.includes(item.task_id))
-            .map(item => item.billboard_id)
-        )}
+        existingItems={allTaskItems.filter(item => syncMissingTaskIds.includes(item.task_id)) as any}
         billboardById={billboardById}
-        onConfirm={(selectedBillboards) => {
+        onConfirm={(selectedBillboards, removeItemIds) => {
           syncMissingBillboardsMutation.mutate({
             contractId: syncMissingContractId,
+            groupTaskIds: syncMissingTaskIds,
+            removeItemIds,
             selectedBillboards: selectedBillboards.map(b => ({
               ID: b.ID,
               Size: b.Size,
               City: b.City,
               Faces_Count: b.Faces_Count,
               friend_company_id: b.friend_company_id,
+              contractId: b.contractId,
             })),
           });
         }}

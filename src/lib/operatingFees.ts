@@ -23,8 +23,20 @@ export function calculateOperatingFees(record: Record<string, any>, paid = finan
   const friendCosts = rows(record.friend_rental_data).reduce((sum, row) => sum + financialNumber(row.friendRentalCost ?? row.friend_rental_cost), 0);
   const friendFee = record.friend_rental_operating_fee_enabled === true
     ? Math.round(friendCosts * financialNumber(record.friend_rental_operating_fee_rate) / 100) : 0;
-  const partnershipFee = rows(record.partnership_operating_data).reduce((sum, row) => sum + financialNumber(row.operating_fee_amount), 0);
-  const rentalBase = Math.max(0, rent - friendCosts);
+  const partnershipRows = rows(record.partnership_operating_data);
+  const partnershipFee = partnershipRows.reduce((sum, row) => sum + financialNumber(row.operating_fee_amount), 0);
+  // إيجار لوحات الشراكة له نسبته المستقلة (partnershipFee) فلا تُطبق عليه نسبة الإيجار العادية مرة ثانية
+  const partnershipRent = partnershipRows.reduce((sum, row) => sum + financialNumber(row.price_after_discount), 0);
+  // اللوحات الصديقة التي يشمل إيجارها التركيب/الطباعة: الشركة لا تتحمل تكلفتهما، فيبقيان ضمن صافي الإيجار (نفس صفحة تعديل العقد)
+  const friendIds = new Set(rows(record.friend_rental_data).map(row => String(row.billboardId ?? row.billboard_id ?? '')));
+  const priceRows = rows(record.billboard_prices).filter(row => friendIds.has(String(row.billboardId ?? row.billboard_id ?? '')));
+  const installationOn = record.installation_enabled === true || record.installation_enabled === 'true';
+  const printOn = record.print_cost_enabled === true || record.print_cost_enabled === 'true';
+  const friendIncludesInstallation = record.friend_rental_includes_installation !== false;
+  const friendIncludesPrint = priceRows.some(row => row.friendRentalIncludesPrint === true);
+  const friendAddBack = (installationOn && friendIncludesInstallation ? priceRows.reduce((sum, row) => sum + financialNumber(row.installationCost), 0) : 0)
+    + (printOn && friendIncludesPrint ? priceRows.reduce((sum, row) => sum + financialNumber(row.printCost), 0) : 0);
+  const rentalBase = Math.max(0, rent + friendAddBack - friendCosts - partnershipRent);
   const calculate = (ratio: number) => Math.round(rentalBase * ratio * rate / 100)
     + (record.include_operating_in_installation === true ? Math.round(installation * ratio * installationRate / 100) : 0)
     + (record.include_operating_in_print === true ? Math.round(print * ratio * printRate / 100) : 0)

@@ -5,7 +5,7 @@ function installRepeatedPrintHeader() {
   let originalNodes: Node[] = [];
 
   window.addEventListener('beforeprint', () => {
-    if (shell) return;
+    if (shell || document.querySelector('.print-pagination-shell')) return;
     // Skip fixed-layout pages (posters/canvas/contracts with fixed .page cards)
     if (document.querySelector('.page:not(.paper), [data-print-page]:not(.paper), .canvas2d-print-page')) return;
 

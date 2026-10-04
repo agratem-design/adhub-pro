@@ -82,15 +82,31 @@ export class ErrorBoundary extends Component<Props, State> {
       `Component Stack:\n${this.state.errorInfo?.componentStack || ''}`,
     ].join('\n\n');
 
-    navigator.clipboard.writeText(errorText)
-      .then(() => {
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(errorText)
+        .then(() => {
+          this.setState({ copied: true });
+          toast.success('تم نسخ تفاصيل الخطأ إلى الحافظة');
+          setTimeout(() => this.setState({ copied: false }), 3000);
+        })
+        .catch(() => {
+          toast.error('تعذر نسخ تفاصيل الخطأ');
+        });
+    } else {
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = errorText;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
         this.setState({ copied: true });
         toast.success('تم نسخ تفاصيل الخطأ إلى الحافظة');
         setTimeout(() => this.setState({ copied: false }), 3000);
-      })
-      .catch(() => {
+      } catch {
         toast.error('تعذر نسخ تفاصيل الخطأ');
-      });
+      }
+    }
   };
 
   toggleDetails = (): void => {

@@ -78,3 +78,4 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.cancel_expense_settlement(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.cancel_expense_settlement(uuid) TO authenticated;
+;

@@ -116,17 +116,17 @@ export const BillboardActions: React.FC<BillboardActionsProps> = ({
     <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
       {/* 1-Click Instant Export & Upload to Website (4 Months) */}
       <Button
-        variant="default"
+        variant="outline"
         size="sm"
         disabled={isQuickUploading}
         onClick={handleQuickUpload}
-        className="h-8 sm:h-9 px-2.5 sm:px-3.5 text-xs sm:text-sm font-bold gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-sm transition-all active:scale-95 disabled:opacity-70"
+        className="h-9 px-3 text-xs sm:text-sm font-semibold gap-1.5"
         title="تصدير ورفع المتاحة والقادمة (4 أشهر) فوراً إلى الموقع الإلكتروني بضغطة واحدة"
       >
         {isQuickUploading ? (
-          <Loader2 className="h-4 w-4 animate-spin text-white" />
+          <Loader2 className="h-4 w-4 animate-spin" />
         ) : (
-          <Zap className="h-4 w-4 fill-current text-amber-300 animate-pulse" />
+          <Zap className="h-4 w-4 text-primary" />
         )}
         <span>{isQuickUploading ? 'جاري الرفع...' : 'تصدير سريع'}</span>
       </Button>
@@ -137,9 +137,9 @@ export const BillboardActions: React.FC<BillboardActionsProps> = ({
           <Button 
             variant="outline"
             size="sm"
-            className="h-8 sm:h-9 px-2.5 sm:px-3 text-xs sm:text-sm font-semibold gap-1.5 bg-gradient-to-r from-emerald-500/10 to-teal-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 shadow-sm transition-all"
+            className="h-9 px-3 text-xs sm:text-sm font-semibold gap-1.5"
           >
-            <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            <FileSpreadsheet className="h-4 w-4" />
             <span>تصدير</span>
           </Button>
         </DropdownMenuTrigger>
@@ -274,7 +274,7 @@ export const BillboardActions: React.FC<BillboardActionsProps> = ({
             <Button 
               variant="outline"
               size="sm"
-              className="h-8 sm:h-9 px-2.5 sm:px-3 text-xs sm:text-sm font-semibold gap-1.5 bg-gradient-to-r from-blue-500/10 to-indigo-500/10 hover:bg-blue-500/20 border-blue-500/30 text-blue-700 dark:text-blue-300 shadow-sm transition-all"
+              className="h-9 px-3 text-xs sm:text-sm font-semibold gap-1.5"
             >
               <Upload className="h-4 w-4 text-blue-600 dark:text-blue-400" />
               <span>استيراد</span>
@@ -323,7 +323,7 @@ export const BillboardActions: React.FC<BillboardActionsProps> = ({
         disabled={isSyncing}
         variant="outline"
         size="sm"
-        className="h-8 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm font-semibold gap-1.5 bg-gradient-to-r from-sky-500/10 to-cyan-500/10 hover:bg-sky-500/20 border-sky-500/30 text-sky-700 dark:text-sky-300 shadow-sm transition-all"
+        className="h-9 px-3 text-xs sm:text-sm font-semibold gap-1.5"
         title="مزامنة مع Google Sheets"
       >
         <Cloud className={`h-4 w-4 text-sky-600 dark:text-sky-400 ${isSyncing ? 'animate-pulse' : ''}`} />
@@ -335,7 +335,7 @@ export const BillboardActions: React.FC<BillboardActionsProps> = ({
         onClick={onAdvancedPrintClick}
         variant="outline"
         size="sm"
-        className="h-8 sm:h-9 px-2.5 sm:px-3 text-xs sm:text-sm font-semibold gap-1.5 bg-gradient-to-r from-violet-500/10 to-purple-500/10 hover:bg-violet-500/20 border-violet-500/30 text-violet-700 dark:text-violet-300 shadow-sm transition-all"
+        className="h-9 px-3 text-xs sm:text-sm font-semibold gap-1.5"
       >
         <Printer className="h-4 w-4 text-violet-600 dark:text-violet-400" />
         <span>طباعة</span>
@@ -350,7 +350,7 @@ export const BillboardActions: React.FC<BillboardActionsProps> = ({
           <Button 
             variant="outline"
             size="sm"
-            className="h-8 sm:h-9 px-2 sm:px-3 text-xs sm:text-sm font-semibold gap-1.5 shadow-sm transition-all"
+            className="h-9 px-3 text-xs sm:text-sm font-semibold gap-1.5"
           >
             <MoreHorizontal className="h-4 w-4" />
             <span className="hidden xs:inline">أدوات</span>
@@ -386,7 +386,7 @@ export const BillboardActions: React.FC<BillboardActionsProps> = ({
         <DropdownMenuTrigger asChild>
           <Button 
             size="sm"
-            className="h-8 sm:h-9 px-2.5 sm:px-3.5 text-xs sm:text-sm font-bold gap-1.5 bg-gradient-to-r from-primary to-amber-600 text-primary-foreground shadow-md hover:shadow-gold transition-all"
+            className="h-9 px-3.5 text-xs sm:text-sm font-bold gap-1.5"
           >
             <Plus className="h-4 w-4" />
             <span>إضافة لوحة</span>

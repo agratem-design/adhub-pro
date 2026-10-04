@@ -29,7 +29,7 @@ import {
   LayoutList, Layers, FileText, X,
   ChevronLeft, ChevronRight, Building2, CalendarDays,
   Banknote, FolderOpen, MessageCircle, ExternalLink, Download, Search,
-  ArrowUpDown, ArrowUp, ArrowDown, Merge
+  ArrowUpDown, ArrowUp, ArrowDown, Merge, ListChecks
 } from 'lucide-react';
 import { exportInstallationTaskImagesToZip } from '@/utils/exportInstallationTaskImagesToZip';
 import { toast } from 'sonner';
@@ -362,7 +362,7 @@ const TaskCardRowInner = ({
   task, idx, cfg, isSelected, deleteConfirmId,
   onOpenTask, onToggle, onPrintTask, onPrintAll, onSendWhatsApp, onDistributeDesigns, onManageDesigns,
   onAddBillboard, onDeleteTask, setDeleteConfirmId, onEditTask, onCompleteAllBillboards, onPrintInvoice,
-  onCreatePrintTask, onGroupColorExtracted, onDuplicateAsReinstallation,
+  onCreatePrintTask, onGroupColorExtracted, onDuplicateAsReinstallation, onSyncWithContract,
   isSelectionDisabled,
 }: any) => {
   const [dominantColor, setDominantColor] = useState<string | null>(null);
@@ -660,6 +660,12 @@ const TaskCardRowInner = ({
                         تكرار كإعادة تركيب
                       </DropdownMenuItem>
                     )}
+                    {onSyncWithContract && (
+                      <DropdownMenuItem onClick={() => onSyncWithContract(task.id)} className="gap-2">
+                        <ListChecks className="h-4 w-4 text-emerald-500" />
+                        مطابقة اللوحات مع العقد
+                      </DropdownMenuItem>
+                    )}
 
                     {onPrintInvoice && (
                       <>
@@ -875,6 +881,9 @@ const TaskCardRowInner = ({
               )}
               {onDuplicateAsReinstallation && (
                 <ActionBtn icon={RefreshCw} label="تكرار كإعادة تركيب" onClick={() => onDuplicateAsReinstallation(task.id)} color="text-amber-600" />
+              )}
+              {onSyncWithContract && (
+                <ActionBtn icon={ListChecks} label="مطابقة مع العقد" onClick={() => onSyncWithContract(task.id)} color="text-emerald-500" />
               )}
               <ActionBtn icon={Plus} label="إضافة لوحة" onClick={() => onAddBillboard(task.id)} color="text-emerald-400" />
               <ActionBtn icon={Edit} label="تعديل" onClick={() => onEditTask(task.id)} color="text-amber-400" />
@@ -1797,6 +1806,7 @@ export const InstallationTasksTable: React.FC<Props> = ({
                               onCreatePrintTask={onCreatePrintTask}
                               onGroupColorExtracted={(color: string) => registerGroupColor(groupKey, color)}
                               onDuplicateAsReinstallation={onDuplicateAsReinstallation}
+                              onSyncWithContract={onSyncMissingBillboards ? (id: string) => onSyncMissingBillboards(task.contract_id ?? task.contractNumber, [id]) : undefined}
                             />
                           );
                         })}
@@ -1833,6 +1843,7 @@ export const InstallationTasksTable: React.FC<Props> = ({
                   onPrintInvoice={onPrintInvoice}
                   onCreatePrintTask={onCreatePrintTask}
                   onDuplicateAsReinstallation={onDuplicateAsReinstallation}
+                              onSyncWithContract={onSyncMissingBillboards ? (id: string) => onSyncMissingBillboards(task.contract_id ?? task.contractNumber, [id]) : undefined}
                 />
               );
             })

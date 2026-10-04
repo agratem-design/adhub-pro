@@ -1056,16 +1056,6 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
       )}
       style={cardStyle}
     >
-      {/* Design-colour accent with a gold fallback */}
-      <div
-        className="absolute inset-x-0 top-0 h-1 z-40 pointer-events-none"
-        style={{
-          background: dominantHsl
-            ? `linear-gradient(90deg, hsl(${designPalette[0]}), hsl(${designPalette[1]}), hsl(${designPalette[2]}))`
-            : 'linear-gradient(90deg, transparent, hsl(var(--primary)), transparent)',
-        }}
-      />
-      
       {/* Checkbox للاختيار - في أعلى اليمين فوق كل شيء */}
       {onToggleSelect && (
         <button
@@ -1092,7 +1082,7 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
       
       {/* منطقة الصورة - بتنسيق فاخر بداخل بطاقة بحدود ناعمة */}
       <div className="p-3 pb-0 flex-shrink-0">
-        <div className="relative h-56 sm:h-64 w-full rounded-xl overflow-hidden bg-muted/20 border border-border/50 group/design">
+        <div className={cn("relative w-full rounded-xl overflow-hidden bg-muted/20 border border-border/50 group/design", designImage ? "h-48 sm:h-52" : "h-14")}>
           {designImage ? (
             <div 
               className="relative h-full w-full cursor-pointer"
@@ -1162,9 +1152,9 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
               )}
             </div>
           ) : (
-            <div className="h-full w-full flex flex-col items-center justify-center bg-muted/10">
-              <ImageIcon className="h-7 w-7 text-muted-foreground/30 mb-1" />
-              <span className="text-[10px] text-muted-foreground/50">بدون تصميم متوفر</span>
+            <div className="h-full w-full flex items-center justify-center gap-2 bg-muted/10 text-muted-foreground/60">
+              <ImageIcon className="h-4 w-4" />
+              <span className="text-xs">لا يوجد تصميم بعد</span>
             </div>
           )}
 
@@ -1199,7 +1189,7 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
       {/* Fullscreen Design Modal */}
       {showDesignFullscreen && designImage && createPortal(
         <div 
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[10020] bg-black/90 flex items-center justify-center p-4"
           onClick={() => setShowDesignFullscreen(false)}
         >
           {designImages.length > 1 && (
@@ -1242,28 +1232,14 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
         document.body
       )}
 
-      {/* شريط الحالة البصري السفلي للصورة */}
-      <div
-        className="h-1 w-full flex-shrink-0"
-        style={dominantHsl ? { backgroundColor: `hsl(${dominantHsl})` } : { backgroundColor: 'hsl(var(--primary) / 0.2)' }}
-      />
-      
       {/* محتوى الكارد */}
       <CardContent className="p-4 flex-grow flex flex-col justify-between space-y-3">
-        <div className="grid grid-cols-2 gap-3 rounded-xl border border-primary/25 bg-background/85 p-3 shadow-sm">
-          <div className="min-w-0">
-            <span className="block text-xs font-semibold text-muted-foreground">رقم العقد</span>
-            <span dir="ltr" className="mt-1 block break-words text-right font-manrope text-2xl font-extrabold leading-tight tabular-nums text-foreground">
-              #{contractNumber}
-            </span>
-          </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <span dir="ltr" className="font-manrope text-2xl font-extrabold leading-none tabular-nums text-foreground">#{contractNumber}</span>
           {yearlyCode && (
-            <div className="min-w-0 border-r border-primary/25 pr-3">
-              <span className="block text-xs font-semibold text-muted-foreground">الترقيم السنوي</span>
-              <span dir="ltr" className="mt-1 block break-words text-right font-manrope text-xl font-extrabold leading-tight tabular-nums text-primary">
-                {yearlyCode}
-              </span>
-            </div>
+            <span className="text-xs text-muted-foreground">
+              الترقيم السنوي <span dir="ltr" className="font-manrope font-bold tabular-nums text-primary">{yearlyCode}</span>
+            </span>
           )}
         </div>
 
@@ -1301,11 +1277,9 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
         </div>
         
         {/* نوع الإعلان وإجمالي المساحة بالأمتار */}
-        <div className="flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl border border-amber-500/30 dark:border-amber-400/30 bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-primary/10 dark:from-amber-500/20 dark:via-amber-400/10 dark:to-transparent shadow-sm">
+        <div className="flex items-center justify-between gap-2.5 border-t border-border/50 pt-3">
           <div className="flex items-center gap-2 min-w-0 flex-1">
-            <div className="p-1 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-300 shrink-0">
-              <PaintBucket className="h-4 w-4" />
-            </div>
+            <PaintBucket className="h-4 w-4 shrink-0 text-primary" />
             {isEditingAdType ? (
               <div className="flex items-center gap-1.5 flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
                 <Input
@@ -1349,8 +1323,8 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
               </div>
             ) : (
               <div className="flex items-center gap-1.5 min-w-0 flex-1 py-0.5">
-                <span className="text-[11px] font-medium text-muted-foreground dark:text-amber-200/70 shrink-0 leading-normal">نوع الإعلان:</span>
-                <span className="text-xs sm:text-[13px] font-extrabold text-foreground dark:text-amber-100 truncate tracking-wide leading-relaxed py-0.5" title={currentAdType || 'غير محدد'}>
+                <span className="text-xs text-muted-foreground shrink-0 leading-normal">نوع الإعلان:</span>
+                <span className="text-sm font-bold text-foreground truncate leading-relaxed py-0.5" title={currentAdType || 'غير محدد'}>
                   {currentAdType || 'غير محدد'}
                 </span>
                 <button
@@ -1369,35 +1343,24 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
             )}
           </div>
           {totalArea > 0 && (
-            <Badge variant="outline" className="text-[11px] font-bold font-numbers px-2.5 py-0.5 shrink-0 bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-500/30">
-              <Ruler className="h-3 w-3 ml-1 shrink-0 text-emerald-500 dark:text-emerald-400" />
+            <Badge variant="outline" className="text-[11px] font-semibold font-numbers px-2 py-0.5 shrink-0 bg-muted/50 text-foreground/80 border-border/60">
+              <Ruler className="h-3 w-3 ml-1 shrink-0 text-muted-foreground" />
               <span>{totalArea.toLocaleString('ar-LY', { maximumFractionDigits: 1 })} م²</span>
             </Badge>
           )}
         </div>
         
         {/* التواريخ */}
-        <div className="grid grid-cols-2 gap-2 text-[11px]">
-          <div className={cn("flex items-center gap-1.5 p-2 rounded-xl border", bgMutedClass)}>
-            <Calendar className="h-4 w-4 shrink-0 text-emerald-500" />
-            <div className="min-w-0">
-              <span className={cn("text-[9px] block", textMutedClass)}>تاريخ البدء</span>
-              <span className={cn("font-semibold font-manrope truncate block", textClass)}>
-                {contract.start_date ? new Date(contract.start_date).toLocaleDateString('ar') : '—'}
-              </span>
-            </div>
-          </div>
-          <div className={cn("flex items-center gap-1.5 p-2 rounded-xl border", bgMutedClass)}>
-            <Calendar className="h-4 w-4 shrink-0 text-rose-500" />
-            <div className="min-w-0">
-              <span className={cn("text-[9px] block", textMutedClass)}>تاريخ الانتهاء</span>
-              <span className={cn("font-semibold font-manrope truncate block", textClass)}>
-                {contract.end_date ? new Date(contract.end_date).toLocaleDateString('ar') : '—'}
-              </span>
-            </div>
-          </div>
+        <div className="flex items-center justify-between gap-2 text-xs">
+          <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+            <Calendar className="h-3.5 w-3.5 shrink-0" />
+            من <span className="font-manrope font-semibold tabular-nums text-foreground">{contract.start_date ? new Date(contract.start_date).toLocaleDateString('ar') : '—'}</span>
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+            إلى <span className="font-manrope font-semibold tabular-nums text-foreground">{contract.end_date ? new Date(contract.end_date).toLocaleDateString('ar') : '—'}</span>
+          </span>
         </div>
-        
+
         {/* مهام التركيب والعمليات */}
         {detailsOpen && installationTasks.total > 0 && (
           <div className={cn("p-3 rounded-xl border space-y-2.5", bgMutedClass)}>
@@ -1475,54 +1438,36 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
         )}
         
         {/* شريط السداد والمالية */}
-        <div className="p-3.5 rounded-xl border border-border/60 bg-background/55 transition-colors duration-200 space-y-3 hover:border-primary/30">
+        <div className="p-3.5 rounded-xl bg-muted/30 space-y-3">
           <div className="flex justify-between items-center">
-            <div className="flex items-center gap-1.5">
-              <div className="p-1 rounded-lg bg-primary/10 text-primary">
-                <DollarSign className="h-3.5 w-3.5" />
-              </div>
-              <span className={cn("font-bold text-xs", textClass)}>حالة السداد والمالية</span>
-            </div>
+            <span className="text-xs font-semibold text-muted-foreground">السداد <span className="font-manrope tabular-nums text-foreground">{paymentPercentage.toFixed(0)}%</span></span>
             <Badge variant={progress.variant} className="text-[9px] font-bold px-2 py-0.5">
               {progress.label}
             </Badge>
           </div>
 
-          {/* Progress bar */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[10px] font-semibold">
-              <span className={textMutedClass}>نسبة المدفوع</span>
-              <span className={cn("font-manrope", textPrimaryClass)}>{paymentPercentage.toFixed(0)}%</span>
-            </div>
-            <div className="h-2 rounded-full overflow-hidden relative bg-muted">
-              <div 
-                className="absolute inset-y-0 right-0 rounded-full bg-gradient-to-l from-primary to-primary-glow transition-all duration-500"
-                style={{ width: `${Math.min(paymentPercentage, 100)}%` }}
-              />
-            </div>
+          <div className="h-1.5 rounded-full overflow-hidden relative bg-muted">
+            <div
+              className={cn("absolute inset-y-0 right-0 rounded-full transition-all duration-500", paymentPercentage >= 100 ? "bg-emerald-500" : "bg-primary")}
+              style={{ width: `${Math.min(paymentPercentage, 100)}%` }}
+            />
           </div>
 
           {/* Paid / Remaining values */}
-          <div className={cn("grid grid-cols-3 gap-2 text-[10px] pt-1.5 border-t", borderClass)}>
+          <dl className="grid grid-cols-3 gap-2">
             <div>
-              <span className={cn("block", textMutedClass)}>المستحق</span>
-              <span className="font-bold font-manrope text-xs text-primary">
-                {finalTotalCost.toLocaleString('ar-LY')} د.ل
-              </span>
+              <dt className="text-[11px] text-muted-foreground">المستحق</dt>
+              <dd className="font-manrope text-base font-bold tabular-nums text-foreground">{finalTotalCost.toLocaleString('ar-LY')}</dd>
             </div>
             <div>
-              <span className={cn("block", textMutedClass)}>المحصل فعلياً</span>
-              <span className="font-bold font-manrope text-xs text-green-600 dark:text-green-400">
-                {totalPaid.toLocaleString('ar-LY')} د.ل
-              </span>
+              <dt className="text-[11px] text-muted-foreground">المحصّل</dt>
+              <dd className="font-manrope text-base font-bold tabular-nums text-emerald-500">{totalPaid.toLocaleString('ar-LY')}</dd>
             </div>
             <div>
-              <span className={cn("block", textMutedClass)}>الذمم المتبقية</span>
-              <span className={cn("font-bold font-manrope text-xs", textClass)}>
-                {remaining.toLocaleString('ar-LY')} د.ل
-              </span>
+              <dt className="text-[11px] text-muted-foreground">المتبقي</dt>
+              <dd className={cn("font-manrope text-base font-bold tabular-nums", remaining > 0 ? "text-rose-400" : "text-muted-foreground")}>{remaining.toLocaleString('ar-LY')}</dd>
             </div>
-          </div>
+          </dl>
 
           {/* Receipts list */}
           {detailsOpen && contractPayments.length > 0 && (
@@ -1656,11 +1601,11 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
         )}
 
         {/* أزرار العمليات (Bento Action Bar) */}
-        <div className="space-y-2 pt-2 border-t border-border/20">
+        <div className="space-y-2 pt-3 border-t border-border/50">
           <div className="flex gap-2">
             <Button
               onClick={() => onPrint(contract)}
-              className="flex-1 h-10 font-bold text-xs rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm active:scale-95 cursor-pointer transition-all duration-200"
+              className="flex-1 h-10 font-bold text-sm rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm active:scale-95 cursor-pointer transition-all duration-200"
             >
               <Printer className="h-4 w-4 ml-1 shrink-0" />
               طباعة العقد
@@ -1669,7 +1614,7 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
             <Button
               onClick={() => navigate(`/admin/contracts/view/${contract.id}`)}
               variant="outline"
-              className="flex-1 h-10 font-bold text-xs rounded-xl border-border hover:bg-muted active:scale-95 cursor-pointer transition-all duration-200"
+              className="flex-1 h-10 font-bold text-sm rounded-lg border-border/60 hover:bg-muted active:scale-95 cursor-pointer transition-all duration-200"
             >
               <Eye className="h-4 w-4 ml-1 shrink-0" />
               عرض العقد
@@ -1841,39 +1786,36 @@ const ContractCardComponent: React.FC<ContractCardProps> = ({
             </DropdownMenu>
           </div>
 
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2 [&_button]:h-9 [&_button]:rounded-lg [&_button]:text-xs">
             {onPrintAll && (
               <Button
                 variant="outline"
                 onClick={() => onPrintAll(contract)}
-                className="flex-1 text-[10px] h-9 rounded-xl border-border hover:bg-muted active:scale-95 cursor-pointer transition-all duration-200"
+                className="flex-1 border-border/60 hover:bg-muted cursor-pointer"
               >
                 <Printer className="h-3.5 w-3.5 ml-1 shrink-0" />
-                <span>طباعة الكل</span>
+                طباعة الكل
               </Button>
             )}
             <Button
               variant="outline"
               onClick={() => navigate(`/admin/contracts/${contract.Contract_Number ?? contract.id}/expenses`)}
               className={cn(
-                "flex-1 text-[10px] h-8 rounded-xl border-border",
-                totalExpenses > 0 
-                  ? "border-destructive/30 text-destructive bg-destructive/5 hover:bg-destructive/10" 
-                  : "hover:bg-muted"
+                "flex-1 cursor-pointer",
+                totalExpenses > 0
+                  ? "border-destructive/30 text-destructive hover:bg-destructive/10"
+                  : "border-border/60 hover:bg-muted"
               )}
             >
               <AlertTriangle className="h-3.5 w-3.5 ml-1 shrink-0" />
-              <span>المصاريف</span>
+              المصاريف{totalExpenses > 0 ? ` (${totalExpenses.toLocaleString('ar-LY')})` : ''}
             </Button>
+            <SendContractDialog
+              contractNumber={String((contract as any).Contract_Number ?? contract.id)}
+              customerName={contract.customer_name || (contract as any)['Customer Name'] || ''}
+              customerPhone={customerData?.phone || undefined}
+            />
           </div>
-
-        <div className="flex gap-2">
-          <SendContractDialog
-            contractNumber={String((contract as any).Contract_Number ?? contract.id)}
-            customerName={contract.customer_name || (contract as any)['Customer Name'] || ''}
-            customerPhone={customerData?.phone || undefined}
-          />
-        </div>
         </div>
 
         <EnhancedDistributePaymentDialog

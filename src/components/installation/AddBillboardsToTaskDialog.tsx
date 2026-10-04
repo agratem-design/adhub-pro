@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -166,34 +166,55 @@ export function AddBillboardsToTaskDialog({
     return map;
   }, [billboards]);
 
+  // عقود المهمة (العقد الأساسي + العقود المدمجة)
+  const taskContractSet = useMemo(() => {
+    return new Set<number>([Number(contractId), ...contractIds.map(Number)].filter(Boolean));
+  }, [contractId, contractIds]);
+
   // Group available billboards by contract, with search filtering
   const contractGroups = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     return customerContracts
       .map((contract: any) => {
         const bbIds = contractBillboardMap.get(contract.Contract_Number) || [];
-        const available = bbIds
+        const availableAll = bbIds
           .filter(id => !existingBillboardIds.includes(id))
           .map(id => billboardById[id])
-          .filter(Boolean)
-          .filter((b: any) => {
-            if (!q) return true;
-            const name = (b.Billboard_Name || '').toLowerCase();
-            const landmark = (b.Nearest_Landmark || '').toLowerCase();
-            return name.includes(q) || landmark.includes(q);
-          });
+          .filter(Boolean);
+        const available = availableAll.filter((b: any) => {
+          if (!q) return true;
+          const name = (b.Billboard_Name || '').toLowerCase();
+          const landmark = (b.Nearest_Landmark || '').toLowerCase();
+          return name.includes(q) || landmark.includes(q);
+        });
         return {
-          contractNumber: contract.Contract_Number,
+          contractNumber: Number(contract.Contract_Number),
           customerName: contract['Customer Name'],
           adType: contract['Ad Type'],
           billboards: available,
+          availableCount: availableAll.length,
           totalInContract: bbIds.length,
+          isTaskContract: taskContractSet.has(Number(contract.Contract_Number)),
         };
       })
-      .filter(g => g.billboards.length > 0);
-  }, [customerContracts, contractBillboardMap, existingBillboardIds, billboardById, searchQuery]);
+      // عقود المهمة أولاً ثم الأحدث
+      .sort((a, b) => (Number(b.isTaskContract) - Number(a.isTaskContract)) || (b.contractNumber - a.contractNumber));
+  }, [customerContracts, contractBillboardMap, existingBillboardIds, billboardById, searchQuery, taskContractSet]);
 
-  const totalAvailable = contractGroups.reduce((sum, g) => sum + g.billboards.length, 0);
+  // العقد المعروض حالياً — افتراضياً عقد المهمة
+  const [activeContract, setActiveContract] = useState<number>(Number(contractId));
+  useEffect(() => {
+    if (open) {
+      setActiveContract(Number(contractId));
+      setSelectedIds([]);
+      setSearchQuery('');
+    }
+  }, [open, contractId]);
+
+  const activeGroup = contractGroups.find(g => g.contractNumber === activeContract);
+  const activeBillboards = activeGroup?.billboards || [];
+
+  const totalAvailable = contractGroups.reduce((sum, g) => sum + g.availableCount, 0);
 
   // Mutations
   const addMutation = useMutation({
@@ -231,33 +252,21 @@ export function AddBillboardsToTaskDialog({
     setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
+  const activeIds = activeBillboards.map((b: any) => b.ID);
+  const allActiveSelected = activeIds.length > 0 && activeIds.every((id: number) => selectedIds.includes(id));
+
+  // تحديد/إلغاء كل لوحات العقد المعروض
   const handleSelectAll = () => {
-    const allAvailableIds = contractGroups.flatMap(g => g.billboards.map((b: any) => b.ID));
-    if (selectedIds.length === allAvailableIds.length) {
-      setSelectedIds([]);
+    if (allActiveSelected) {
+      setSelectedIds(prev => prev.filter(id => !activeIds.includes(id)));
     } else {
-      setSelectedIds(allAvailableIds);
+      setSelectedIds(prev => [...new Set([...prev, ...activeIds])]);
     }
   };
 
-  const handleSelectContract = (contractNumber: number) => {
-    const group = contractGroups.find(g => g.contractNumber === contractNumber);
-    if (!group) return;
-    const groupIds = group.billboards.map((b: any) => b.ID);
-    const allSelected = groupIds.every((id: number) => selectedIds.includes(id));
-    if (allSelected) {
-      setSelectedIds(prev => prev.filter(id => !groupIds.includes(id)));
-    } else {
-      setSelectedIds(prev => [...new Set([...prev, ...groupIds])]);
-    }
-  };
-
-  const toggleContract = (cn: number) => {
-    setOpenContracts(prev => {
-      const next = new Set(prev);
-      if (next.has(cn)) next.delete(cn); else next.add(cn);
-      return next;
-    });
+  const selectedCountByContract = (contractNumber: number) => {
+    const ids = contractBillboardMap.get(contractNumber) || [];
+    return ids.filter(id => selectedIds.includes(id)).length;
   };
 
   const handleAdd = () => {
@@ -290,6 +299,39 @@ export function AddBillboardsToTaskDialog({
             <Badge variant="default" className="bg-emerald-600">{totalAvailable} متاحة للإضافة</Badge>
           </div>
 
+          {/* Contract switcher */}
+          {!isLoading && contractGroups.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {contractGroups.map(g => {
+                const isActive = g.contractNumber === activeContract;
+                const selCount = selectedCountByContract(g.contractNumber);
+                return (
+                  <button
+                    key={g.contractNumber}
+                    type="button"
+                    onClick={() => setActiveContract(g.contractNumber)}
+                    className={`shrink-0 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs transition-all ${
+                      isActive
+                        ? 'border-primary bg-primary/10 text-foreground shadow-sm'
+                        : 'border-border bg-muted/20 text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                    }`}
+                  >
+                    <FileText className={`h-3.5 w-3.5 ${isActive ? 'text-primary' : ''}`} />
+                    <span className="font-bold">#{g.contractNumber}</span>
+                    {g.adType && <span className="max-w-[120px] truncate">{g.adType}</span>}
+                    {g.isTaskContract && (
+                      <Badge className="h-4 px-1.5 text-[9px] bg-amber-500/15 text-amber-600 border border-amber-500/30">عقد المهمة</Badge>
+                    )}
+                    <Badge variant="outline" className="h-4 px-1.5 text-[9px]">{g.availableCount}</Badge>
+                    {selCount > 0 && (
+                      <Badge className="h-4 px-1.5 text-[9px] bg-primary text-primary-foreground">{selCount} ✓</Badge>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* Search */}
           <div className="relative">
             <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -303,63 +345,39 @@ export function AddBillboardsToTaskDialog({
 
           {isLoading ? (
             <div className="text-center py-8 text-muted-foreground">جاري التحميل...</div>
-          ) : totalAvailable === 0 ? (
+          ) : !activeGroup ? (
             <div className="text-center py-8 text-muted-foreground">
-              {searchQuery ? 'لا توجد نتائج مطابقة للبحث' : 'جميع لوحات الزبون موجودة في المهمة بالفعل'}
+              لم يتم العثور على العقد #{activeContract} — اختر عقداً آخر من الأعلى
             </div>
           ) : (
             <>
               {/* Select all + counter */}
               <div className="flex items-center justify-between">
-                <Button variant="outline" size="sm" onClick={handleSelectAll}>
-                  {selectedIds.length === totalAvailable ? 'إلغاء تحديد الكل' : 'تحديد الكل'}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={handleSelectAll} disabled={activeIds.length === 0}>
+                    {allActiveSelected ? 'إلغاء تحديد لوحات العقد' : 'تحديد كل لوحات العقد'}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    عقد #{activeGroup.contractNumber}{activeGroup.adType ? ` • ${activeGroup.adType}` : ''} — {activeGroup.totalInContract} لوحة في العقد
+                  </span>
+                </div>
                 <Badge variant="secondary">{selectedIds.length} محددة</Badge>
               </div>
 
-              {/* Contracts list */}
-              <ScrollArea className="h-[500px] border rounded-lg">
-                <div className="p-3 space-y-3">
-                  {contractGroups.map(group => {
-                    const groupIds = group.billboards.map((b: any) => b.ID);
-                    const allGroupSelected = groupIds.every((id: number) => selectedIds.includes(id));
-                    const someGroupSelected = groupIds.some((id: number) => selectedIds.includes(id));
-                    const isOpen = openContracts.has(group.contractNumber);
-
+              <ScrollArea className="h-[460px] border rounded-lg">
+                {activeBillboards.length === 0 ? (
+                  <div className="text-center py-16 text-muted-foreground text-sm">
+                    {searchQuery
+                      ? 'لا توجد نتائج مطابقة للبحث في هذا العقد'
+                      : 'جميع لوحات هذا العقد موجودة في المهمة بالفعل — يمكنك اختيار عقد آخر للزبون من الأعلى'}
+                  </div>
+                ) : (
+                <div className="p-3">
+                  {[activeGroup].map(group => {
                     return (
-                      <Collapsible
-                        key={group.contractNumber}
-                        open={isOpen}
-                        onOpenChange={() => toggleContract(group.contractNumber)}
-                      >
-                        <div className="border rounded-xl overflow-hidden">
-                          <CollapsibleTrigger asChild>
-                            <div className="flex items-center gap-2 p-3 bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors">
-                              <Checkbox
-                                checked={allGroupSelected}
-                                className={someGroupSelected && !allGroupSelected ? 'opacity-50' : ''}
-                                onCheckedChange={() => {
-                                  handleSelectContract(group.contractNumber);
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                              />
-                              <FileText className="h-4 w-4 text-primary shrink-0" />
-                              <div className="flex-1 min-w-0">
-                                <span className="font-medium text-sm">عقد #{group.contractNumber}</span>
-                                {group.adType && (
-                                  <span className="text-xs text-muted-foreground mr-2">• {group.adType}</span>
-                                )}
-                              </div>
-                              <Badge variant="outline" className="text-xs shrink-0">
-                                {group.billboards.length} لوحة
-                              </Badge>
-                              <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-                            </div>
-                          </CollapsibleTrigger>
-
-                          <CollapsibleContent>
-                            <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              {group.billboards.map((billboard: any) => {
+                      <div key={group.contractNumber}>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {activeBillboards.map((billboard: any) => {
                                 const imgSrc = billboard.design_face_a || billboard.Image_URL;
                                 const isSelected = selectedIds.includes(billboard.ID);
                                 return (
@@ -476,12 +494,11 @@ export function AddBillboardsToTaskDialog({
                                 );
                               })}
                             </div>
-                          </CollapsibleContent>
-                        </div>
-                      </Collapsible>
+                      </div>
                     );
                   })}
                 </div>
+                )}
               </ScrollArea>
             </>
           )}

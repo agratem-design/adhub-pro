@@ -1,4 +1,6 @@
 import { usePricingDurations } from '@/hooks/usePricingDurations';
+import { PricingSnapshotCard } from '@/components/contracts/edit/PricingSnapshotCard';
+import { buildPricingSnapshot, parsePricingSnapshot, shouldRefreshSnapshot } from '@/utils/pricingSnapshot';
 import { durationPrice, durationName, durationEnd } from '@/utils/pricingDuration';
 // @ts-nocheck
 import { isBillboardAvailable } from '@/utils/contractUtils';
@@ -14,6 +16,7 @@ import { calculateInstallationCostFromIds } from '@/services/installationService
 import { getPriceFor, getDailyPriceFor, CustomerType } from '@/data/pricing';
 import { useContractPricing } from '@/hooks/useContractPricing';
 import { calculateAllBillboardPrices } from '@/utils/contractBillboardPricing';
+import { money } from '@/utils/contractEditMoney';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -22,7 +25,10 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import type { Billboard } from '@/types';
-import { ArrowLeft, Save, Map as MapIcon, Wrench, FileText, List, DollarSign, Printer, Trash2, RefreshCw, Calculator, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Save, Map as MapIcon, Wrench, FileText, List, DollarSign, Printer, Trash2, RefreshCw, Calculator, AlertTriangle, Layers, Plus, Filter, ChevronDown } from 'lucide-react';
+import { ContractEditHeader } from '@/components/contracts/edit/ContractEditHeader';
+import { PendingChangesBanner } from '@/components/contracts/edit/PendingChangesBanner';
+import { rescaleInstallmentsToTotal, installmentsMatchTotal } from '@/utils/rescaleInstallments';
 import { getBillboardDimensions } from '@/lib/billboardDimensions';
 
 // Import modular components (shared with contract edit)
@@ -41,6 +47,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 
 export default function OfferEdit() {
   const navigate = useNavigate();
+  // ✅ نفس تخطيط صفحة تعديل العقد
+  const [workspaceSection, setWorkspaceSection] = useState<'basics' | 'boards' | 'catalog' | 'pricing'>('boards');
+  const [boardsViewMode, setBoardsViewMode] = useState<'cards' | 'map' | 'split'>('cards');
+  const [catalogFiltersCollapsed, setCatalogFiltersCollapsed] = useState(false);
+  // ⚠️ لوحات أضيفت/أزيلت بعد تحميل العرض: يُمنع الحفظ حتى «معالجة التعديلات»
+  const [billboardBaseline, setBillboardBaseline] = useState<{ ids: string[]; total: number } | null>(null);
   const { id: offerId } = useParams();
   const isEditing = Boolean(offerId);
 
@@ -316,14 +328,32 @@ export default function OfferEdit() {
           setRentCost(savedTotal);
           setOriginalTotal(savedTotal);
         }
-        // ✅ افتراضياً: إعادة احتساب أسعار العرض من جديد وفق جدول التسعير الحالي
-        setUseStoredPrices(false);
+        // ✅ مثل تعديل العقد: يفتح العرض على أسعاره المحفوظة حتى لا يتغير إجماليه بمجرد فتحه.
+        //    زر «إعادة الاحتساب» يحدّث الأسعار من الجدول الحالي عند الحاجة.
+        setUseStoredPrices(calculatedBaseRent > 0);
 
-        const disc = Number(offer.discount ?? 0);
-        if (!isNaN(disc) && disc > 0) {
-          setDiscountType('amount');
-          setDiscountValue(disc);
+        // الخصم العام: العروض الجديدة تحفظ في discount الخصم العام فقط. العروض القديمة كانت تحفظ فيه
+        // (العام + الفردي + المستوى) فنستخرج الخصم العام من نصيب اللوحات المحفوظ حتى لا يُحسب الخصم الفردي مرتين.
+        let savedPriceRows: any[] = [];
+        try {
+          const raw = typeof offer.billboard_prices === 'string' ? JSON.parse(offer.billboard_prices) : offer.billboard_prices;
+          savedPriceRows = Array.isArray(raw) ? raw : [];
+        } catch { savedPriceRows = []; }
+        const isNewSchema = savedPriceRows.some((r: any) => r && 'levelDiscountPercent' in r);
+        let disc = Number(offer.discount ?? 0);
+        if (!isNewSchema && savedPriceRows.length > 0) {
+          if (savedPriceRows.some((r: any) => r?.discountPerBillboard != null)) {
+            disc = savedPriceRows.reduce((sum: number, r: any) => sum + Number(r?.discountPerBillboard || 0), 0);
+          } else {
+            disc = Math.max(0, disc - savedPriceRows.reduce((sum: number, r: any) => sum + Number(r?.individualDiscountAmt || 0), 0));
+          }
         }
+        if (Number.isFinite(disc) && disc > 0) {
+          setDiscountType('amount');
+          setDiscountValue(Math.round(disc * 100) / 100);
+        }
+        // تخفيض المستوى في العروض القديمة مدموج في الخصم العام أعلاه، فلا نُحمّله منفصلاً
+        if (!isNewSchema) (offer as any).level_discounts = null;
 
         // Installation
         setInstallationEnabled(offer.installation_enabled !== false);
@@ -618,15 +648,6 @@ export default function OfferEdit() {
   }, [billboards, selected, levelDiscounts, calculateBillboardPrice]);
 
   // General discount before individual discounts
-  const generalDiscountAmount = useMemo(() => {
-    let baseDiscount = 0;
-    if (discountValue) {
-      baseDiscount = discountType === 'percent'
-        ? (baseTotal * Math.max(0, Math.min(100, discountValue)) / 100)
-        : Math.max(0, discountValue);
-    }
-    return baseDiscount + totalLevelDiscountAmount;
-  }, [discountType, discountValue, baseTotal, totalLevelDiscountAmount]);
 
   // Print cost details
   const printCostDetails = useMemo(() => {
@@ -687,50 +708,73 @@ export default function OfferEdit() {
     });
   }, [billboards, selected, printCostEnabled, printPricePerMeter, customPrintCosts, sizeDimensionsMap]);
 
-  // ✅ NEW: Calculate unified billboard prices (same as ContractEdit)
-  const unifiedPricingByBillboard = useMemo(() => {
-    const selectedInputs = selected
-      .map((id) => {
-        const bb = billboards.find((b) => String((b as any).ID) === id);
-        if (!bb) return null;
-        const installRaw = installationDetails.find((d) => d.billboardId === id)?.installationPrice || 0;
-        const printRaw = perBillboardPrintCosts.find((d) => d.billboardId === id)?.printCost || 0;
-        const origFaces = Number((bb as any).Faces_Count ?? (bb as any).faces_count ?? (bb as any).faces ?? 2);
-        const indDiscount = individualDiscounts[id];
-        return {
-          billboardId: id,
-          baseRentalPrice: calculateBillboardPrice(bb),
-          installationPrice: installRaw,
-          printCost: printRaw,
-          isSingleFace: origFaces === 1 || singleFaceBillboards.has(id),
-          individualDiscountValue: indDiscount?.value,
-          individualDiscountType: indDiscount?.type,
-        };
-      })
-      .filter(Boolean) as any[];
+  // ✅ مدخلات التسعير الموحد (نفس منطق تعديل العقد) — مصدر واحد للعرض والحفظ والطباعة
+  const offerPricingInputs = useMemo(() => selected
+    .map((id) => {
+      const bb = billboards.find((b) => String((b as any).ID) === id);
+      if (!bb) return null;
+      const installRaw = installationDetails.find((d) => d.billboardId === id)?.installationPrice || 0;
+      const origFaces = Number((bb as any).Faces_Count ?? (bb as any).faces_count ?? (bb as any).faces ?? 2);
+      // perBillboardPrintCosts محسوبة بعدد الأوجه الفعلي؛ اللوحة ذات الوجه الواحد تُضاعف هنا لأن الحساب الموحد ينصّفها (نفس منطق تعديل العقد)
+      const printRaw = (perBillboardPrintCosts.find((d) => d.billboardId === id)?.printCost || 0) * (origFaces === 1 ? 2 : 1);
+      const indDiscount = individualDiscounts[id];
+      return {
+        billboardId: id,
+        baseRentalPrice: calculateBillboardPrice(bb),
+        installationPrice: installRaw,
+        printCost: printRaw,
+        isSingleFace: origFaces === 1 || singleFaceBillboards.has(id),
+        individualDiscountValue: indDiscount?.value,
+        individualDiscountType: indDiscount?.type,
+        levelDiscountPercent: Number(levelDiscounts[String((bb as any).Level || (bb as any).level || '')] || 0),
+      };
+    })
+    .filter(Boolean) as any[], [selected, billboards, installationDetails, perBillboardPrintCosts, calculateBillboardPrice,
+    singleFaceBillboards, individualDiscounts, levelDiscounts]);
 
-    const results = calculateAllBillboardPrices(selectedInputs, {
-      totalDiscount: generalDiscountAmount,
-      printCostEnabled,
-      includePrintInPrice,
-      installationEnabled,
-      includeInstallationInPrice,
-    });
+  const offerPricingOptions = { printCostEnabled, includePrintInPrice, installationEnabled, includeInstallationInPrice };
+
+  // قاعدة الخصم العام = صافي الإيجار بعد الخصم الفردي وتخفيض المستوى ودون التركيب/الطباعة المضمّنة (مثل العقد)
+  const offerDiscountBase = useMemo(() => money(calculateAllBillboardPrices(offerPricingInputs, { totalDiscount: 0, ...offerPricingOptions })
+    .reduce((sum, row) => sum + row.netRentalBeforeDiscount, 0)),
+    [offerPricingInputs, printCostEnabled, includePrintInPrice, installationEnabled, includeInstallationInPrice]);
+
+  const requestedGeneralDiscount = money(!discountValue ? 0 : discountType === 'percent'
+    ? offerDiscountBase * Math.max(0, Math.min(100, discountValue)) / 100
+    : Math.max(0, discountValue));
+  const generalDiscountAmount = Math.min(requestedGeneralDiscount, offerDiscountBase);
+  const generalDiscountExceedsBase = requestedGeneralDiscount > offerDiscountBase + 0.005;
+
+  const unifiedPricingByBillboard = useMemo(() => {
+    const results = calculateAllBillboardPrices(offerPricingInputs, { totalDiscount: generalDiscountAmount, ...offerPricingOptions });
     return new Map(results.map((r) => [r.billboardId, r]));
-  }, [
-    selected,
-    billboards,
-    installationDetails,
-    perBillboardPrintCosts,
-    calculateBillboardPrice,
-    singleFaceBillboards,
-    individualDiscounts,
-    generalDiscountAmount,
-    printCostEnabled,
-    includePrintInPrice,
-    installationEnabled,
-    includeInstallationInPrice,
-  ]);
+  }, [offerPricingInputs, generalDiscountAmount, printCostEnabled, includePrintInPrice, installationEnabled, includeInstallationInPrice]);
+
+  // صفوف أسعار اللوحات المحفوظة/المطبوعة — نفس أرقام الكروت بالضبط
+  const offerBillboardPriceRows = useMemo(() => Array.from(unifiedPricingByBillboard.values()).map((r) => ({
+    billboardId: r.billboardId,
+    schemaVersion: 2,
+    basePriceBeforeDiscount: r.baseRentalPrice,
+    baseRental: r.baseRentalPrice,
+    contractPrice: r.baseRentalPrice,
+    priceBeforeDiscount: money(r.baseRentalPrice + r.extraPrintCost + r.extraInstallCost),
+    netRentalBeforeDiscount: money(r.netRentalBeforeDiscount),
+    discountPerBillboard: money(r.discountPerBillboard),
+    individualDiscountValue: individualDiscounts[r.billboardId]?.value || 0,
+    individualDiscountType: individualDiscounts[r.billboardId]?.type || 'amount',
+    individualDiscountAmt: money(r.individualDiscountAmt || 0),
+    levelDiscountPercent: Number(offerPricingInputs.find((i: any) => i.billboardId === r.billboardId)?.levelDiscountPercent || 0),
+    levelDiscountAmt: money(r.levelDiscountAmt || 0),
+    netRentalAfterDiscount: money(r.netRentalAfterDiscount),
+    printCost: printCostEnabled ? r.printCost : 0,
+    installationCost: installationEnabled ? r.installationPrice : 0,
+    includedPrintCost: r.includedPrintCost,
+    includedInstallCost: r.includedInstallCost,
+    isSingleFace: !!offerPricingInputs.find((i: any) => i.billboardId === r.billboardId)?.isSingleFace,
+    priceAfterDiscount: money(r.totalForBoard),
+    finalPrice: money(r.totalForBoard),
+    totalBillboardPrice: money(r.totalForBoard),
+  })), [unifiedPricingByBillboard, individualDiscounts, offerPricingInputs, printCostEnabled, installationEnabled]);
 
   const handleUpdatePrintUnitCost = (size: string, newCost: number) => {
     setInstallmentsLoaded(false);
@@ -779,15 +823,13 @@ export default function OfferEdit() {
     return generalDiscountAmount + combinedServiceTotals.totalIndividualDiscount;
   }, [generalDiscountAmount, combinedServiceTotals.totalIndividualDiscount]);
 
-  const finalTotal = useMemo(() => {
-    const baseAfterDiscount = Math.max(0, baseTotal - discountAmount);
-    return baseAfterDiscount + extraInstallationChargedToCustomer + extraPrintChargedToCustomer;
-  }, [baseTotal, discountAmount, extraInstallationChargedToCustomer, extraPrintChargedToCustomer]);
+  // الإجمالي = مجموع أسعار اللوحات النهائية (نفس الكروت والحفظ والطباعة)
+  const finalTotal = useMemo(() => money(Array.from(unifiedPricingByBillboard.values())
+    .reduce((sum, row) => sum + row.totalForBoard, 0)), [unifiedPricingByBillboard]);
 
-  const rentalCostOnly = useMemo(() => {
-    const baseAfterDiscount = Math.max(0, baseTotal - discountAmount);
-    return Math.max(0, baseAfterDiscount - includedInstallationCost - includedPrintCost);
-  }, [baseTotal, discountAmount, includedInstallationCost, includedPrintCost]);
+  // صافي الإيجار = الإجمالي ناقص تكاليف التركيب والطباعة (مضمّنة أو إضافية)
+  const rentalCostOnly = useMemo(() => Math.max(0, money(finalTotal - actualInstallationCost - actualPrintCost)),
+    [finalTotal, actualInstallationCost, actualPrintCost]);
 
   // Grouped installation cost summary like ContractEdit
   const installationCostSummary = useMemo(() => {
@@ -818,10 +860,10 @@ export default function OfferEdit() {
 
   // Operating fee
   useEffect(() => {
-    const baseForFee = !installationEnabled ? finalTotal : rentalCostOnly;
-    const fee = Math.round(baseForFee * 0.03 * 100) / 100;
+    // نسبة التشغيل على صافي الإيجار فقط (بدون تركيب وطباعة) — نفس قاعدة العقد
+    const fee = Math.round(Math.max(0, rentalCostOnly) * 0.03 * 100) / 100;
     setOperatingFee(fee);
-  }, [installationEnabled, finalTotal, rentalCostOnly]);
+  }, [rentalCostOnly]);
 
   // Auto-create installments
   useEffect(() => {
@@ -1033,7 +1075,6 @@ export default function OfferEdit() {
 
     setUserEditedRentCost(false);
     setInstallmentsLoaded(false);
-    if (useStoredPrices) setUseStoredPrices(false);
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
@@ -1042,8 +1083,7 @@ export default function OfferEdit() {
       const id = String((pendingMaintenanceBillboard as any).ID);
       setUserEditedRentCost(false);
       setInstallmentsLoaded(false);
-      if (useStoredPrices) setUseStoredPrices(false);
-      setSelected(prev => [...prev, id]);
+        setSelected(prev => [...prev, id]);
       setPendingMaintenanceBillboard(null);
     }
     setMaintenanceConfirmOpen(false);
@@ -1052,7 +1092,6 @@ export default function OfferEdit() {
   const removeSelected = (id: string) => {
     setUserEditedRentCost(false);
     setInstallmentsLoaded(false);
-    if (useStoredPrices) setUseStoredPrices(false);
     setSelected(prev => prev.filter(x => x !== id));
     setFriendBillboardCosts(prev => prev.filter(f => f.billboardId !== id));
     setSingleFaceBillboards(prev => { const next = new Set(prev); next.delete(id); return next; });
@@ -1062,7 +1101,6 @@ export default function OfferEdit() {
   const removeMultipleSelected = (ids: string[]) => {
     setUserEditedRentCost(false);
     setInstallmentsLoaded(false);
-    if (useStoredPrices) setUseStoredPrices(false);
     setSelected(prev => prev.filter(x => !ids.includes(x)));
     setFriendBillboardCosts(prev => prev.filter(f => !ids.includes(f.billboardId)));
     setSingleFaceBillboards(prev => {
@@ -1396,6 +1434,21 @@ export default function OfferEdit() {
   const save = async () => {
     try {
       if (!customerName || selected.length === 0) { toast.error('يرجى تعبئة البيانات المطلوبة واختيار لوحات'); return; }
+      if (pendingBillboardChanges) {
+        toast.error('تم تعديل لوحات العرض — اضغط «معالجة التعديلات» لإعادة توزيع الدفعات قبل الحفظ');
+        setWorkspaceSection('pricing');
+        return;
+      }
+      if (generalDiscountExceedsBase) {
+        toast.error('الخصم أكبر من صافي الإيجار القابل للخصم — قلّل قيمة الخصم قبل الحفظ');
+        setWorkspaceSection('pricing');
+        return;
+      }
+      if (installments.length > 0 && !installmentsMatchTotal(installments, finalTotal)) {
+        toast.error('مجموع الدفعات لا يساوي إجمالي العرض — أعد توزيع الدفعات قبل الحفظ');
+        setWorkspaceSection('pricing');
+        return;
+      }
       setSaving(true);
 
       const selectedBillboardsData = billboards
@@ -1420,52 +1473,7 @@ export default function OfferEdit() {
           Price: calculateBillboardPrice(b),
         }));
 
-      // ✅ Use unified pricing helper (same as ContractEdit)
-      const pricingInputs = selectedBillboardsData.map(b => {
-        const fullBillboard = billboards.find(bb => String((bb as any).ID) === b.id);
-        const baseBillboardPrice = fullBillboard ? calculateBillboardPrice(fullBillboard) : 0;
-        const printCostForBillboard = perBillboardPrintCosts.find(p => p.billboardId === b.id)?.printCost || 0;
-        const installDetail = installationDetails.find(d => d.billboardId === b.id);
-        const installCostForBillboard = installDetail?.installationPrice || 0;
-        const isSingleFace = singleFaceBillboards.has(b.id);
-        const indDiscount = individualDiscounts[b.id];
-        return {
-          billboardId: b.id,
-          baseRentalPrice: baseBillboardPrice,
-          installationPrice: installCostForBillboard,
-          printCost: printCostForBillboard,
-          isSingleFace,
-          individualDiscountValue: indDiscount?.value,
-          individualDiscountType: indDiscount?.type,
-        };
-      });
-
-      const pricingResults = calculateAllBillboardPrices(pricingInputs, {
-        totalDiscount: generalDiscountAmount,
-        printCostEnabled,
-        includePrintInPrice,
-        installationEnabled,
-        includeInstallationInPrice,
-      });
-
-      const billboardPrices = pricingResults.map(r => ({
-        billboardId: r.billboardId,
-        basePriceBeforeDiscount: r.baseRentalPrice,
-        priceBeforeDiscount: r.baseRentalPrice + r.extraPrintCost + r.extraInstallCost,
-        discountPerBillboard: Math.round(r.discountPerBillboard),
-        individualDiscountValue: individualDiscounts[r.billboardId]?.value || 0,
-        individualDiscountType: individualDiscounts[r.billboardId]?.type || 'amount',
-        individualDiscountAmt: r.individualDiscountAmt || 0,
-        priceAfterDiscount: Math.round(r.totalForBoard),
-        contractPrice: r.baseRentalPrice,
-        finalPrice: Math.round(r.totalForBoard),
-        printCost: r.extraPrintCost,
-        installationCost: r.extraInstallCost,
-        totalBillboardPrice: Math.round(r.totalForBoard),
-        baseRental: r.baseRentalPrice,
-        netRentalBeforeDiscount: r.netRentalBeforeDiscount,
-        netRentalAfterDiscount: Math.round(r.netRentalAfterDiscount),
-      }));
+      const billboardPrices = offerBillboardPriceRows;
 
       const installmentsForSaving = (installments || []).map((inst, idx) => {
         const defaultPaymentType = idx === 0 ? 'عند التوقيع' : (idx === 1 ? 'عند التركيب' : 'شهري');
@@ -1487,7 +1495,8 @@ export default function OfferEdit() {
         duration_label: pricingMode === 'months' ? durationName(durationMonths, durations) : `${durationDays} يوم`,
         use_30_day_month: use30DayMonth,
         total: finalTotal,
-        discount: discountAmount,
+        // الخصم العام فقط (الخصم الفردي وتخفيض المستوى محفوظان داخل أسعار اللوحات) — نفس معنى Discount في العقد
+        discount: generalDiscountAmount,
         discount_type: discountType === 'percent' ? 'percentage' : 'fixed',
         discount_percentage: discountType === 'percent' ? discountValue : 0,
         status: currentOffer?.status || 'pending',
@@ -1524,12 +1533,24 @@ export default function OfferEdit() {
         localStorage.setItem('adhub_offer_draft_backup', JSON.stringify(offerData));
       } catch {}
 
+      // ✅ حفظ نسخة من قائمة أسعار الفئة وقت التسعير
+      const existingSnapshot = parsePricingSnapshot((currentOffer as any)?.pricing_snapshot);
+      const offerPayload: any = { ...offerData };
+      if (shouldRefreshSnapshot(existingSnapshot, pricingCategory, useStoredPrices)) {
+        const snap = buildPricingSnapshot(pricing.pricingData || [], pricingCategory, durations);
+        if (snap) offerPayload.pricing_snapshot = snap;
+      }
+      const missingSnapshotColumn = (err: any) => !!err && 'pricing_snapshot' in offerPayload && /pricing_snapshot/i.test(String(err.message || err.details || ''));
+      const withoutSnapshot = () => { const { pricing_snapshot: _omit, ...rest } = offerPayload; return rest; };
+
       if (isEditing) {
-        const { error } = await supabase.from('offers').update(offerData).eq('id', offerId);
+        let { error } = await supabase.from('offers').update(offerPayload).eq('id', offerId);
+        if (missingSnapshotColumn(error)) ({ error } = await supabase.from('offers').update(withoutSnapshot()).eq('id', offerId));
         if (error) throw error;
         toast.success('تم تحديث العرض بنجاح');
       } else {
-        const { error } = await supabase.from('offers').insert([offerData]);
+        let { error } = await supabase.from('offers').insert([offerPayload]);
+        if (missingSnapshotColumn(error)) ({ error } = await supabase.from('offers').insert([withoutSnapshot()]));
         if (error) throw error;
         toast.success('تم إنشاء العرض بنجاح');
       }
@@ -1554,42 +1575,39 @@ export default function OfferEdit() {
 
   // ========== RENDER ==========
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/30 text-foreground p-4 md:p-6" dir="rtl">
-      <div className="max-w-[1600px] mx-auto space-y-4">
-        {/* Header - مثل ContractEditHeader */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-primary mb-2">
-              {isEditing ? `تعديل عرض #${currentOffer?.offer_number || ''}` : 'إنشاء عرض سعر جديد'}
-            </h1>
-            <p className="text-muted-foreground">
-              {isEditing ? 'تعديل عرض سعر موجود مع نظام دفعات ديناميكي' : 'إنشاء عرض سعر جديد - يمكنك إضافة جميع اللوحات'}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button 
-              variant="outline" 
-              onClick={() => navigate('/admin/offers')}
-              className="border-border hover:bg-accent"
-            >
-              <ArrowLeft className="h-4 w-4 ml-2" />
-              عودة
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleRecalculateAll}
-              disabled={refreshingPrices || saving}
-              className="border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 gap-2 font-semibold shadow-sm"
-              title="إعادة احتساب جميع أسعار وتكاليف العرض بالكامل من جديد وفق جدول التسعير الحالي"
-            >
-              <RefreshCw className={`h-4 w-4 ${refreshingPrices ? 'animate-spin' : ''}`} />
-              إعادة الاحتساب من جديد
-            </Button>
-            {isEditing && currentOffer && (
-              <Button 
-                variant="outline"
-                onClick={() => {
+  useEffect(() => {
+    if (isEditing && currentOffer && billboardBaseline === null && selected.length > 0 && finalTotal > 0) {
+      setBillboardBaseline({ ids: [...selected], total: finalTotal });
+    }
+  }, [isEditing, currentOffer, billboardBaseline, selected, finalTotal]);
+  const addedSinceBaseline = billboardBaseline ? selected.filter((id) => !billboardBaseline.ids.includes(id)) : [];
+  const removedSinceBaseline = billboardBaseline ? billboardBaseline.ids.filter((id) => !selected.includes(id)) : [];
+  const pendingBillboardChanges = addedSinceBaseline.length > 0 || removedSinceBaseline.length > 0;
+  const zeroPricedAddedNames = addedSinceBaseline
+    .filter((id) => {
+      const row: any = unifiedPricingByBillboard.get(id);
+      return row && !row.isReplacement && Number(row.baseRentalPrice || 0) <= 0;
+    })
+    .map((id) => {
+      const bb: any = billboards.find((b) => String((b as any).ID) === id);
+      return bb?.Billboard_Name || bb?.name || `#${id}`;
+    });
+  const processBillboardChanges = () => {
+    if (zeroPricedAddedNames.length > 0) {
+      toast.error(`حدّد سعر اللوحات بدون سعر أولاً: ${zeroPricedAddedNames.join('، ')}`);
+      return;
+    }
+    setInstallments((prev: any[]) => rescaleInstallmentsToTotal(prev, finalTotal));
+    setInstallmentsLoaded(true);
+    setBillboardBaseline({ ids: [...selected], total: finalTotal });
+    toast.success('تمت معالجة التعديلات: أُعيد توزيع الدفعات على الإجمالي الجديد');
+  };
+
+  const handlePrintOffer = () => {
+    if (!isEditing || !currentOffer) {
+      toast.info('احفظ العرض أولاً ثم اطبعه');
+      return;
+    }
                   // ✅ Map offer data to contract-compatible fields for ContractPDFDialog
                   const selectedBBs = billboards.filter(b => selected.includes(String((b as any).ID)));
                   const mappedContract = {
@@ -1608,7 +1626,7 @@ export default function OfferEdit() {
                     Duration: pricingMode === 'months' ? durationName(durationMonths, durations) : `${durationDays} يوم`,
                     Total: finalTotal,
                     'Total Rent': finalTotal,
-                    Discount: discountAmount,
+                    Discount: generalDiscountAmount,
                     installation_cost: actualInstallationCost,
                     installation_enabled: installationEnabled,
                     include_installation_in_price: includeInstallationInPrice,
@@ -1624,69 +1642,152 @@ export default function OfferEdit() {
                     operating_fee_rate: 3,
                     single_face_billboards: singleFaceBillboards.size > 0 ? JSON.stringify(Array.from(singleFaceBillboards)) : null,
                     level_discounts: Object.keys(levelDiscounts).length > 0 ? levelDiscounts : null,
-                    billboard_prices: (() => {
-                      const pricingInputs = selectedBBs.map((b: any) => {
-                        const bId = String(b.ID);
-                        const printCostForBb = perBillboardPrintCosts.find(p => p.billboardId === bId)?.printCost || 0;
-                        const installDetail = installationDetails.find(d => d.billboardId === bId);
-                        const indDiscount = individualDiscounts[bId];
-                        return {
-                          billboardId: bId,
-                          baseRentalPrice: calculateBillboardPrice(b),
-                          installationPrice: installDetail?.installationPrice || 0,
-                          printCost: printCostForBb,
-                          isSingleFace: singleFaceBillboards.has(bId),
-                          individualDiscountValue: indDiscount?.value,
-                          individualDiscountType: indDiscount?.type,
-                        };
-                      });
-                      const results = calculateAllBillboardPrices(pricingInputs, {
-                        totalDiscount: generalDiscountAmount,
-                        printCostEnabled,
-                        includePrintInPrice,
-                        installationEnabled,
-                        includeInstallationInPrice,
-                      });
-                      return JSON.stringify(results.map(r => ({
-                        billboardId: r.billboardId,
-                        finalPrice: Math.round(r.totalForBoard),
-                        baseRental: r.baseRentalPrice,
-                        installationCost: r.extraInstallCost,
-                        netRentalBeforeDiscount: r.netRentalBeforeDiscount,
-                        discountPerBillboard: Math.round(r.discountPerBillboard),
-                        individualDiscountValue: individualDiscounts[r.billboardId]?.value || 0,
-                        individualDiscountType: individualDiscounts[r.billboardId]?.type || 'amount',
-                        individualDiscountAmt: r.individualDiscountAmt || 0,
-                        netRentalAfterDiscount: Math.round(r.netRentalAfterDiscount),
-                        priceBeforeDiscount: r.baseRentalPrice,
-                        priceAfterDiscount: Math.round(r.totalForBoard),
-                      })));
-                    })(),
+                    billboard_prices: JSON.stringify(offerBillboardPriceRows),
                     billboards_data: currentOffer.billboards_data,
                   };
                   setPdfContractData(mappedContract);
                   setPdfOpen(true);
-                }}
-                className="border-border hover:bg-accent"
-              >
-                <Printer className="h-4 w-4 ml-2" />
-                طباعة العرض
-              </Button>
-            )}
-            <Button 
-              onClick={save} 
-              disabled={saving}
-              className="bg-primary text-primary-foreground hover:bg-primary/90"
+  };
+
+  const selectedOfferBillboardsMapped = billboards
+    .filter((b) => selected.includes(String((b as any).ID)))
+    .map(b => ({
+      ...mapBillboardWithEffectiveStatus(b),
+      Customer_Name: (b as any).Customer_Name || customerName || '',
+      Ad_Type: (b as any).Ad_Type || adType || '',
+    })) as Billboard[];
+
+  return (
+    <div className="min-h-screen bg-muted/20 text-foreground p-3 md:p-4" dir="rtl">
+      <div className="max-w-[1440px] mx-auto space-y-3">
+        <div className="sticky top-0 z-30 space-y-2 bg-background/95 pb-2 backdrop-blur">
+        <ContractEditHeader
+          contractNumber={String(currentOffer?.offer_number || '')}
+          title={isEditing ? `تعديل عرض سعر #${currentOffer?.offer_number || ''}` : 'إنشاء عرض سعر جديد'}
+          subtitle="العرض لا يحجز اللوحات — راجع الأسعار والدفعات قبل حفظ العرض"
+          printLabel="طباعة العرض"
+          saveLabel={isEditing ? 'حفظ التعديلات' : 'حفظ العرض'}
+          hidePrint={!isEditing || !currentOffer}
+          onBack={() => navigate('/admin/offers')}
+          onPrint={handlePrintOffer}
+          onSave={save}
+          saving={saving}
+          extraActions={
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRecalculateAll}
+              disabled={refreshingPrices || saving}
+              className="border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 gap-2"
+              title="إعادة احتساب جميع أسعار وتكاليف العرض من جديد وفق جدول التسعير الحالي"
             >
-              <Save className="h-4 w-4 ml-2" />
-              {saving ? 'جاري الحفظ...' : 'حفظ العرض'}
+              <RefreshCw className={`h-4 w-4 ${refreshingPrices ? 'animate-spin' : ''}`} />
+              إعادة الاحتساب
             </Button>
-          </div>
+          }
+        />
+        <nav aria-label="أقسام تعديل العرض" className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1.5">
+          {([
+            ['basics', 'بيانات العرض'],
+            ['boards', `لوحات العرض (${selected.length})`],
+            ['catalog', 'اختيار لوحات جديدة'],
+            ['pricing', 'الأسعار والدفعات'],
+          ] as const).map(([section, label]) => (
+            <button key={section} type="button" aria-pressed={workspaceSection === section}
+              onClick={() => setWorkspaceSection(section)}
+              className={`min-h-11 flex-1 cursor-pointer whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${workspaceSection === section ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
+              {label}
+            </button>
+          ))}
+        </nav>
         </div>
 
-        <div className="flex flex-col xl:flex-row gap-4">
-          {/* Main Content */}
-          <div className="flex-1 space-y-6">
+        <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card px-3 py-2 sm:grid-cols-4" aria-live="polite">
+          <div><span className="text-xs text-muted-foreground">حالة العرض</span><p className="text-sm font-semibold">{isEditing ? (currentOffer?.status === 'approved' ? 'معتمد' : currentOffer?.status === 'rejected' ? 'مرفوض' : 'قيد الانتظار') : 'عرض جديد'}</p></div>
+          <div><span className="text-xs text-muted-foreground">الإجمالي السابق</span><p className="font-semibold">{Number(originalTotal || 0).toLocaleString('ar-LY')} د.ل</p></div>
+          <div><span className="text-xs text-muted-foreground">الإجمالي الحالي</span><p className="font-semibold text-primary">{Number(finalTotal || 0).toLocaleString('ar-LY')} د.ل</p></div>
+          <div><span className="text-xs text-muted-foreground">عدد اللوحات</span><p className="font-semibold">{selected.length}</p></div>
+        </div>
+
+        {pendingBillboardChanges && billboardBaseline && (
+          <PendingChangesBanner
+            added={addedSinceBaseline.length}
+            removed={removedSinceBaseline.length}
+            previousTotal={billboardBaseline.total}
+            newTotal={finalTotal}
+            installmentsMatch={installmentsMatchTotal(installments, finalTotal)}
+            entityLabel="العرض"
+            zeroPricedNames={zeroPricedAddedNames}
+            onProcess={processBillboardChanges}
+            onReview={() => setWorkspaceSection('pricing')}
+          />
+        )}
+
+        <section className={`${workspaceSection === 'basics' ? 'grid' : 'hidden'} scroll-mt-40 items-start gap-5 lg:grid-cols-2`} aria-label="بيانات العرض">
+            {/* معلومات العميل */}
+            <CustomerInfoForm
+              customerName={customerName}
+              setCustomerName={setCustomerName}
+              adType={adType}
+              setAdType={setAdType}
+              pricingCategory={pricingCategory}
+              setPricingCategory={handlePricingCategoryChange}
+              pricingCategories={pricingCategories}
+              customers={customers}
+              customerOpen={customerOpen}
+              setCustomerOpen={setCustomerOpen}
+              customerQuery={customerQuery}
+              setCustomerQuery={setCustomerQuery}
+              onAddCustomer={handleAddCustomer}
+              onSelectCustomer={handleSelectCustomer}
+              customerCompany={customerCompany}
+              customerPhone={customerPhone}
+            />
+
+            {/* التواريخ والمدة */}
+            <ContractDatesForm
+              startDate={startDate}
+              setStartDate={setStartDate}
+              endDate={endDate}
+              pricingMode={pricingMode}
+              setPricingMode={handlePricingModeChange}
+              durationMonths={durationMonths}
+              setDurationMonths={handleDurationMonthsChange}
+              durationDays={durationDays}
+              setDurationDays={handleDurationDaysChange}
+              use30DayMonth={use30DayMonth}
+              setUse30DayMonth={handleUse30DayMonthChange}
+            />
+
+        </section>
+
+        <div className="flex flex-col gap-6">
+          <div className={`${['boards', 'catalog'].includes(workspaceSection) ? 'block' : 'hidden'} scroll-mt-40 min-w-0 space-y-4`}>
+            <div className={workspaceSection === 'boards' ? 'space-y-3' : 'hidden'}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <h2 className="text-base font-bold">لوحات العرض</h2>
+                <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl border border-border">
+                  <Button type="button" size="sm" variant={boardsViewMode === 'cards' ? 'default' : 'ghost'} onClick={() => setBoardsViewMode('cards')} className="h-8 gap-1.5 text-xs font-medium cursor-pointer">
+                    <List className="h-3.5 w-3.5" />
+                    قائمة البطاقات
+                  </Button>
+                  <Button type="button" size="sm" variant={boardsViewMode === 'map' ? 'default' : 'ghost'} onClick={() => setBoardsViewMode('map')} className="h-8 gap-1.5 text-xs font-medium cursor-pointer">
+                    <MapIcon className="h-3.5 w-3.5" />
+                    خريطة اللوحات ({selected.length})
+                  </Button>
+                  <Button type="button" size="sm" variant={boardsViewMode === 'split' ? 'default' : 'ghost'} onClick={() => setBoardsViewMode('split')} className="h-8 gap-1.5 text-xs font-medium cursor-pointer">
+                    <Layers className="h-3.5 w-3.5" />
+                    عرض مدمج
+                  </Button>
+                </div>
+              </div>
+              <Button type="button" variant="outline" onClick={() => setWorkspaceSection('catalog')} className="min-h-10 cursor-pointer gap-2 transition-all duration-200">
+                <Plus className="h-4 w-4" />
+                اختيار لوحات جديدة
+              </Button>
+            </div>
+
             {/* زر إزالة اللوحات الفارغة */}
             {(() => {
               const emptyIds = selected.filter(id => !billboards.find(b => String((b as any).ID) === id));
@@ -1767,7 +1868,47 @@ export default function OfferEdit() {
               );
             })()}
 
-            {/* اللوحات المرتبطة */}
+            {boardsViewMode === 'map' && (
+              <div className="w-full h-[760px] lg:h-[84vh] min-h-[620px] rounded-2xl overflow-hidden border border-border shadow-sm relative">
+                <SelectableGoogleHomeMap
+                  className="w-full h-full"
+                  billboards={selectedOfferBillboardsMapped}
+                  selectedBillboards={selectedBillboardsSet}
+                  onToggleSelection={(billboardId) => {
+                    const billboard = billboards.find((b) => String((b as any).ID) === billboardId);
+                    if (billboard) toggleSelect(billboard);
+                  }}
+                  pricingMode={pricingMode}
+                  durationMonths={durationMonths}
+                  durationDays={durationDays}
+                  pricingCategory={pricingCategory}
+                  calculateBillboardPrice={calculateBillboardPrice}
+                  billboardPricingResults={unifiedPricingByBillboard}
+                />
+              </div>
+            )}
+            {boardsViewMode === 'split' && (
+              <div className="w-full h-[540px] lg:h-[58vh] min-h-[440px] mb-4 rounded-2xl overflow-hidden border border-border shadow-sm relative">
+                <SelectableGoogleHomeMap
+                  className="w-full h-full"
+                  billboards={selectedOfferBillboardsMapped}
+                  selectedBillboards={selectedBillboardsSet}
+                  onToggleSelection={(billboardId) => {
+                    const billboard = billboards.find((b) => String((b as any).ID) === billboardId);
+                    if (billboard) toggleSelect(billboard);
+                  }}
+                  pricingMode={pricingMode}
+                  durationMonths={durationMonths}
+                  durationDays={durationDays}
+                  pricingCategory={pricingCategory}
+                  calculateBillboardPrice={calculateBillboardPrice}
+                  billboardPricingResults={unifiedPricingByBillboard}
+                />
+              </div>
+            )}
+
+            {boardsViewMode !== 'map' && (
+            <>
             <SelectedBillboardsCard
               selected={selected}
               billboards={billboards}
@@ -1802,52 +1943,34 @@ export default function OfferEdit() {
               adType={adType}
             />
 
-            {/* خريطة اللوحات المرتبطة - مطوية افتراضياً */}
-            {selected.length > 0 && (
-              <Card className="bg-card border-border shadow-card overflow-hidden">
-                <Collapsible defaultOpen={false}>
-                  <CollapsibleTrigger asChild>
-                    <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-accent/50 transition-colors">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
-                          <MapIcon className="h-5 w-5 text-blue-600" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-card-foreground">خريطة اللوحات المرتبطة</h3>
-                          <p className="text-xs text-muted-foreground">
-                            {selected.length} لوحة مرتبطة بالعرض
-                          </p>
-                        </div>
-                      </div>
-                      <Badge variant="secondary" className="bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
-                        {selected.length}
-                      </Badge>
-                    </div>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <div className="border-t border-border">
-                      <SelectableGoogleHomeMap
-                        className="w-full h-[550px] lg:h-[650px]"
-                        billboards={billboards
-                          .filter((b) => selected.includes(String((b as any).ID)))
-                          .map(b => ({
-                            ...mapBillboardWithEffectiveStatus(b),
-                            Customer_Name: (b as any).Customer_Name || customerName || '',
-                            Ad_Type: (b as any).Ad_Type || adType || '',
-                          })) as Billboard[]}
-                        selectedBillboards={selectedBillboardsSet}
-                        hideInternalFilters
-                        billboardPricingResults={unifiedPricingByBillboard}
-                      />
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
-              </Card>
+            </>
             )}
+            </div>
 
- {/* اختيار اللوحات مع الخريطة - Tabs مثل صفحة العقود */}
-            <Card className="border-amber-500/20 shadow-[0_20px_50px_rgba(0,0,0,0.15)] rounded-3xl overflow-hidden h-[calc(100vh-160px)] min-h-[950px] flex flex-col border bg-card/60 backdrop-blur-md">
-              <div className="p-3 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border-b border-border/60 shrink-0">
+            <div className={workspaceSection === 'catalog' ? 'space-y-4' : 'hidden'}>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div><h2 className="text-lg font-bold">اختيار لوحات جديدة</h2><p className="text-sm text-muted-foreground">ابحث وحدد اللوحات لإضافتها إلى العرض</p></div>
+                <Button type="button" variant="outline" onClick={() => setWorkspaceSection('boards')} className="min-h-10 cursor-pointer transition-all duration-200">مراجعة لوحات العرض ({selected.length})</Button>
+              </div>
+            <Card className="flex min-h-[700px] flex-col overflow-hidden border-border shadow-sm">
+              <div className="shrink-0 border-b border-border bg-gradient-to-l from-primary/10 via-primary/5 to-transparent p-3 lg:p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+                    <Filter className="h-3.5 w-3.5 text-primary" />
+                    فلاتر البحث والتصفية
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setCatalogFiltersCollapsed(prev => !prev)}
+                    className="h-7 px-2.5 text-xs gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer rounded-lg border border-border/60 bg-background/50"
+                  >
+                    <span>{catalogFiltersCollapsed ? 'إظهار الفلاتر' : 'طي الفلاتر لتوسيع المساحة'}</span>
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${catalogFiltersCollapsed ? '' : 'rotate-180'}`} />
+                  </Button>
+                </div>
+                {!catalogFiltersCollapsed && (
                 <BillboardFilters
                   searchQuery={searchQuery}
                   setSearchQuery={setSearchQuery}
@@ -1870,6 +1993,7 @@ export default function OfferEdit() {
                   totalCount={billboards.length}
                   selectedCount={selected.length}
                 />
+                )}
               </div>
 
               <Tabs value={viewMode} onValueChange={(val) => setViewMode(val as 'list' | 'map')} className="w-full flex-1 flex flex-col min-h-0">
@@ -1886,7 +2010,7 @@ export default function OfferEdit() {
                   </TabsList>
                 </div>
                 
-                <TabsContent value="list" className="m-0 flex-1 overflow-y-auto min-h-0">
+                <TabsContent value="list" className="m-0 flex-1 overflow-y-auto min-h-[500px] max-h-[75vh]">
                   <div className="p-3 space-y-3">
                     <AvailableBillboardsGrid
                       billboards={filtered}
@@ -1906,9 +2030,9 @@ export default function OfferEdit() {
                   </div>
                 </TabsContent>
                 
-                <TabsContent value="map" className="m-0 p-3 flex-1 min-h-0">
+                <TabsContent value="map" className="m-0 p-0 flex-1 min-h-[650px] h-[760px] lg:h-[84vh] relative">
                   <SelectableGoogleHomeMap
-                    className="w-full h-[700px] lg:h-[800px]"
+                    className="w-full h-full min-h-[650px]"
                     billboards={filtered.map((b) => mapBillboardWithEffectiveStatus(b)) as Billboard[]}
                     selectedBillboards={selectedBillboardsSet}
                     onToggleSelection={(billboardId) => {
@@ -1936,45 +2060,18 @@ export default function OfferEdit() {
                 </TabsContent>
               </Tabs>
             </Card>
+            </div>
           </div>
 
-          {/* Sidebar - القائمة الجانبية */}
-          <div className="w-full xl:w-[420px] space-y-3 xl:sticky xl:top-4 xl:self-start">
-            {/* معلومات العميل */}
-            <CustomerInfoForm
-              customerName={customerName}
-              setCustomerName={setCustomerName}
-              adType={adType}
-              setAdType={setAdType}
-              pricingCategory={pricingCategory}
-              setPricingCategory={handlePricingCategoryChange}
-              pricingCategories={pricingCategories}
-              customers={customers}
-              customerOpen={customerOpen}
-              setCustomerOpen={setCustomerOpen}
-              customerQuery={customerQuery}
-              setCustomerQuery={setCustomerQuery}
-              onAddCustomer={handleAddCustomer}
-              onSelectCustomer={handleSelectCustomer}
-              customerCompany={customerCompany}
-              customerPhone={customerPhone}
-            />
-
-            {/* التواريخ والمدة */}
-            <ContractDatesForm
-              startDate={startDate}
-              setStartDate={setStartDate}
-              endDate={endDate}
-              pricingMode={pricingMode}
-              setPricingMode={handlePricingModeChange}
-              durationMonths={durationMonths}
-              setDurationMonths={handleDurationMonthsChange}
-              durationDays={durationDays}
-              setDurationDays={handleDurationDaysChange}
-              use30DayMonth={use30DayMonth}
-              setUse30DayMonth={handleUse30DayMonthChange}
-            />
-
+          <div className={`${workspaceSection === 'pricing' ? 'grid' : 'hidden'} scroll-mt-40 min-w-0 items-start gap-5 lg:grid-cols-2`}>
+            {isEditing && <PricingSnapshotCard snapshot={(currentOffer as any)?.pricing_snapshot} currentPricing={pricing.pricingData || []} entityLabel="العرض" />}
+            <div className="lg:col-span-2 flex flex-wrap items-center justify-between gap-3">
+              <div><h2 className="text-lg font-bold">الأسعار والخدمات والدفعات</h2><p className="text-sm text-muted-foreground">اضبط التكاليف والخصومات والدفعات ثم راجع الملخص</p></div>
+              <div className="flex flex-wrap gap-2">
+                <a href="#offer-summary" className="min-h-10 rounded-lg border border-border bg-card px-4 py-2 text-sm cursor-pointer hover:bg-muted">الملخص</a>
+                <a href="#offer-payments" className="min-h-10 rounded-lg border border-border bg-card px-4 py-2 text-sm cursor-pointer hover:bg-muted">الدفعات</a>
+              </div>
+            </div>
             {/* تكلفة التركيب */}
             <Card className="bg-card border-border shadow-lg overflow-hidden">
               <div className="h-1 bg-gradient-to-r from-orange-500 to-red-500" />
@@ -2002,7 +2099,7 @@ export default function OfferEdit() {
                       <div className="flex justify-between items-center">
                         <span className="font-medium text-orange-700 dark:text-orange-300">إجمالي التركيب:</span>
                         <span className="text-xl font-bold text-orange-600">
-                          {installationCostSummary.totalInstallationCost.toLocaleString('ar-LY')} د.ل
+                          {actualInstallationCost.toLocaleString('ar-LY')} د.ل
                         </span>
                       </div>
                     </div>
@@ -2132,53 +2229,6 @@ export default function OfferEdit() {
               </Card>
             )}
 
-            {/* مكون تخفيض حسب المستوى */}
-            {selected.length > 0 && (
-              <LevelDiscountsCard
-                selectedBillboards={billboards.filter(b => selected.includes(String((b as any).ID)))}
-                levelDiscounts={levelDiscounts}
-                setLevelDiscounts={setLevelDiscounts}
-                currencySymbol="د.ل"
-                calculateBillboardPrice={calculateBillboardPrice}
-                sizeNames={pricing.sizeNames}
-              />
-            )}
-
-            {/* الأقساط */}
-            <InstallmentsManager
-              installments={installments}
-              finalTotal={finalTotal}
-              startDate={startDate}
-              endDate={endDate}
-              disableAutoRedistribute={installmentsLoaded}
-              onDistributeEvenly={distributeEvenly}
-              onDistributeWithInterval={distributeWithInterval}
-              onDistributeByDurationPeriods={distributeByDurationPeriods}
-              onCreateManualInstallments={createManualInstallments}
-              onApplyUnequalDistribution={handleApplyUnequalDistribution}
-              onAddInstallment={addInstallment}
-              onRemoveInstallment={removeInstallment}
-              onUpdateInstallment={updateInstallment}
-              onClearAll={clearAllInstallments}
-              installmentSummary={installmentSummary}
-              // ✅ Pass saved settings
-              savedDistributionType={installmentDistributionType}
-              savedFirstPaymentAmount={installmentFirstPaymentAmount}
-              savedFirstPaymentType={installmentFirstPaymentType}
-              savedInterval={installmentInterval}
-              savedCount={installmentCount}
-              savedHasDifferentFirstPayment={hasDifferentFirstPayment}
-              savedFirstAtSigning={installmentFirstAtSigning}
-              // ✅ Sync callbacks
-              onDistributionTypeChange={setInstallmentDistributionType}
-              onFirstPaymentAmountChange={setInstallmentFirstPaymentAmount}
-              onFirstPaymentTypeChange={setInstallmentFirstPaymentType}
-              onIntervalChange={setInstallmentInterval}
-              onCountChange={setInstallmentCount}
-              onHasDifferentFirstPaymentChange={setHasDifferentFirstPayment}
-              onFirstAtSigningChange={setInstallmentFirstAtSigning}
-            />
-
             {/* مؤشر ومحدد مصدر الأسعار */}
             {isEditing && (
               <Card className="bg-card border-border shadow-lg overflow-hidden">
@@ -2254,6 +2304,56 @@ export default function OfferEdit() {
               </Card>
             )}
 
+            {/* مكون تخفيض حسب المستوى */}
+            {selected.length > 0 && (
+              <LevelDiscountsCard
+                selectedBillboards={billboards.filter(b => selected.includes(String((b as any).ID)))}
+                levelDiscounts={levelDiscounts}
+                setLevelDiscounts={setLevelDiscounts}
+                currencySymbol="د.ل"
+                calculateBillboardPrice={calculateBillboardPrice}
+                sizeNames={pricing.sizeNames}
+              />
+            )}
+
+            <div id="offer-payments" className="scroll-mt-40 lg:col-span-2">
+            {/* الأقساط */}
+            <InstallmentsManager
+              installments={installments}
+              finalTotal={finalTotal}
+              startDate={startDate}
+              endDate={endDate}
+              disableAutoRedistribute={installmentsLoaded}
+              onDistributeEvenly={distributeEvenly}
+              onDistributeWithInterval={distributeWithInterval}
+              onDistributeByDurationPeriods={distributeByDurationPeriods}
+              onCreateManualInstallments={createManualInstallments}
+              onApplyUnequalDistribution={handleApplyUnequalDistribution}
+              onAddInstallment={addInstallment}
+              onRemoveInstallment={removeInstallment}
+              onUpdateInstallment={updateInstallment}
+              onClearAll={clearAllInstallments}
+              installmentSummary={installmentSummary}
+              // ✅ Pass saved settings
+              savedDistributionType={installmentDistributionType}
+              savedFirstPaymentAmount={installmentFirstPaymentAmount}
+              savedFirstPaymentType={installmentFirstPaymentType}
+              savedInterval={installmentInterval}
+              savedCount={installmentCount}
+              savedHasDifferentFirstPayment={hasDifferentFirstPayment}
+              savedFirstAtSigning={installmentFirstAtSigning}
+              // ✅ Sync callbacks
+              onDistributionTypeChange={setInstallmentDistributionType}
+              onFirstPaymentAmountChange={setInstallmentFirstPaymentAmount}
+              onFirstPaymentTypeChange={setInstallmentFirstPaymentType}
+              onIntervalChange={setInstallmentInterval}
+              onCountChange={setInstallmentCount}
+              onHasDifferentFirstPaymentChange={setHasDifferentFirstPayment}
+              onFirstAtSigningChange={setInstallmentFirstAtSigning}
+            />
+
+            </div>
+            <div id="offer-summary" className="scroll-mt-40 lg:col-span-2">
             {/* ملخص التكلفة */}
             <CostSummaryCard
               estimatedTotal={estimatedTotal}
@@ -2286,6 +2386,7 @@ export default function OfferEdit() {
               includePrintInPrice={includePrintInPrice}
               setIncludePrintInPrice={setIncludePrintInPrice}
             />
+            </div>
           </div>
         </div>
       </div>

@@ -62,3 +62,4 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.settle_payroll_run(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.settle_payroll_run(uuid) TO authenticated;
+;

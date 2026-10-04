@@ -20,6 +20,8 @@ export interface BillboardPricingInput {
   savedDiscount?: number;
   individualDiscountValue?: number;
   individualDiscountType?: 'percent' | 'amount';
+  /** تخفيض المستوى (نسبة من سعر إيجار اللوحة) — يُطبق على هذه اللوحة فقط ويُضاف لخصمها الفردي */
+  levelDiscountPercent?: number;
 }
 
 export interface BillboardPricingOptions {
@@ -42,6 +44,7 @@ export interface BillboardPricingResult {
   rawDiscountPerBillboard: number;
   discountPerBillboard: number;
   individualDiscountAmt: number;   // calculated individual discount amount
+  levelDiscountAmt: number;        // part of individualDiscountAmt that comes from the level discount
   netRentalAfterDiscount: number;
   extraPrintCost: number;
   extraInstallCost: number;
@@ -80,9 +83,12 @@ export function calculateAllBillboardPrices(
     const requestedIndividual = input.individualDiscountType === 'percent'
       ? availableRental * nonnegative(input.individualDiscountValue ?? 0) / 100
       : nonnegative(input.individualDiscountValue ?? 0);
-    const individualDiscountAmt = input.isReplacement ? 0 : Math.min(availableRental, nonnegative(requestedIndividual));
+    const levelPct = Math.min(100, nonnegative(input.levelDiscountPercent ?? 0));
+    const requestedLevel = money(baseRentalPrice * levelPct / 100);
+    const levelDiscountAmt = input.isReplacement ? 0 : Math.min(availableRental, requestedLevel);
+    const individualDiscountAmt = input.isReplacement ? 0 : money(Math.min(availableRental, levelDiscountAmt + nonnegative(requestedIndividual)));
     return { input, billboardId: input.billboardId, baseRentalPrice, installationPrice, printCost,
-      includedPrintCost, includedInstallCost, individualDiscountAmt,
+      includedPrintCost, includedInstallCost, individualDiscountAmt, levelDiscountAmt,
       netRentalBeforeDiscount: nonnegative(availableRental - individualDiscountAmt),
       extraPrintCost: options.includePrintInPrice || input.isReplacement ? 0 : printCost,
       extraInstallCost: options.includeInstallationInPrice || input.isReplacement ? 0 : installationPrice };

@@ -33,3 +33,4 @@ END $$;
 DROP TRIGGER IF EXISTS guard_expense_amount_update ON public.expenses;
 CREATE TRIGGER guard_expense_amount_update BEFORE UPDATE OF amount ON public.expenses
 FOR EACH ROW EXECUTE FUNCTION public.guard_expense_amount_update();
+;

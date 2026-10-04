@@ -365,7 +365,8 @@
 [data-radix-select-content],
 [data-radix-popover-content],
 .command-wrapper {
-  z-index: 9999 !important;
+  /* فوق النوافذ (9999) ونوافذ التأكيد (10011) حتى تعمل القوائم داخلها */
+  z-index: 10050 !important;
 }
 
 /* Custom scrollbar for summary cards */
@@ -833,6 +834,7 @@ body[data-scroll-locked] {
 
 body[data-scroll-locked] [data-radix-popper-content-wrapper],
 body[data-scroll-locked] [role="dialog"],
+body[data-scroll-locked] [role="alertdialog"],
 body[data-scroll-locked] [data-radix-dialog-overlay],
 body[data-scroll-locked] [data-radix-dialog-content] {
   pointer-events: auto !important;

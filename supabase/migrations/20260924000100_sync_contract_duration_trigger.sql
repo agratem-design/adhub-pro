@@ -72,3 +72,4 @@ $function$;
 UPDATE public."Contract"
 SET "Duration" = 'شهر ونصف'
 WHERE "Contract_Number"::text = '1308';
+;

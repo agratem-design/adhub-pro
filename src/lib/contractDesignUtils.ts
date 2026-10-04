@@ -6,7 +6,25 @@ export const contractDesignCache = new Map<number, string[]>();
  * جلب جميع تصاميم العقد مع الفولباك الكامل المطابق تماماً لـ ContractCard
  * يضمن نفس ترتيب الأولويات، والترتيب التصاعدي لتصاميم المهمة، ودعم الكاش.
  */
-export async function fetchContractDesignUrls(
+// ⚡ منع تكرار نفس الطلب لنفس العقد أثناء تنفيذه (عدة بطاقات تطلب نفس العقد معاً)
+const contractDesignInFlight = new Map<number, Promise<string[]>>();
+
+export function fetchContractDesignUrls(
+  contractNumber: number,
+  contractObj?: any
+): Promise<string[]> {
+  if (!contractNumber || !Number.isFinite(contractNumber)) return Promise.resolve([]);
+  const cached = contractDesignCache.get(contractNumber);
+  if (cached && cached.length > 0) return Promise.resolve(cached);
+  const pending = contractDesignInFlight.get(contractNumber);
+  if (pending) return pending;
+  const promise = fetchContractDesignUrlsUncached(contractNumber, contractObj)
+    .finally(() => contractDesignInFlight.delete(contractNumber));
+  contractDesignInFlight.set(contractNumber, promise);
+  return promise;
+}
+
+async function fetchContractDesignUrlsUncached(
   contractNumber: number,
   contractObj?: any
 ): Promise<string[]> {

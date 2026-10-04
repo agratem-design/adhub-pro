@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useId } from 'react';
+import { useState, useEffect, useRef, useId, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
@@ -878,7 +878,7 @@ export function UnifiedTaskInvoice({
                 const facesCount = actualFacesCount;
 
                 // ✅ كشف التكلفة القديمة لإعادة التركيب (فقط لمهام إعادة التركيب)
-                const isTaskReinstall = (operationTask as any)?.task_type === 'reinstallation' || (task as any)?.task_type === 'reinstallation';
+                const isTaskReinstall = (linkedTask as any)?.task_type === 'reinstallation' || (task as any)?.task_type === 'reinstallation';
                 const itemReinstallCount = isTaskReinstall ? (item.reinstall_count || 0) : 0;
                 if (itemReinstallCount > 0 && itemCompanyCost > 0) {
                   const baseInstallPrice = sizeInfo.installationPrice || 0;
@@ -2244,15 +2244,15 @@ export function UnifiedTaskInvoice({
   @font-face { font-family: 'Manrope'; src: url('/Manrope-Regular.otf') format('opentype'); font-weight: 400; }
   @font-face { font-family: 'Manrope'; src: url('/Manrope-Bold.otf') format('opentype'); font-weight: 700; }
   * { margin: 0; padding: 0; box-sizing: border-box !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
-  html, body { font-family: '${fontFamily}', 'Noto Sans Arabic', Arial, sans-serif; direction: rtl; background: #fff; width: 100%; box-sizing: border-box !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  .print-container { width: 100% !important; max-width: 100% !important; min-height: auto; padding: 0 !important; margin: 0 !important; background: #fff; display: block; box-sizing: border-box !important; }
+  html, body { font-family: '${fontFamily}', 'Noto Sans Arabic', Arial, sans-serif; direction: rtl; background: #fff; width: 100%; height: auto !important; min-height: 0 !important; box-sizing: border-box !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  .print-container { width: 100% !important; max-width: 100% !important; min-height: 0 !important; height: auto !important; padding: 0 !important; margin: 0 !important; background: #fff; display: block; box-sizing: border-box !important; }
   ${unifiedHeaderFooterCss(unifiedStyles)}
   [data-invoice-print] td { border-color: ${tableBorder} !important; }
   ${buildInvoiceLayoutCss()}
   table { page-break-inside: auto !important; width: 100% !important; max-width: 100% !important; border-collapse: collapse !important; margin-bottom: 8px !important; box-sizing: border-box !important; }
   tr { page-break-inside: avoid !important; break-inside: avoid !important; }
-  thead { display: table-header-group; }
-  tfoot { display: table-row-group !important; page-break-inside: avoid !important; break-inside: avoid !important; }
+  thead { display: table-header-group !important; }
+  tfoot { display: table-footer-group !important; page-break-inside: avoid !important; break-inside: avoid !important; }
   tfoot tr { display: table-row !important; }
   img { page-break-inside: avoid !important; break-inside: avoid !important; }
   td img { position: relative; z-index: 1; max-width: 100% !important; height: auto !important; object-fit: contain !important; }
@@ -2268,26 +2268,108 @@ export function UnifiedTaskInvoice({
     break-inside: avoid !important;
   }
 
-  .u-footer { margin-top: auto; page-break-inside: avoid !important; break-inside: avoid !important; }
+  table.print-pagination-shell {
+    width: 100% !important;
+    max-width: 100% !important;
+    border-collapse: collapse !important;
+    border: none !important;
+    table-layout: fixed !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+  }
+  table.print-pagination-shell > thead {
+    display: table-header-group !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+  table.print-pagination-shell > tfoot {
+    display: table-footer-group !important;
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+  table.print-pagination-shell > tbody {
+    display: table-row-group !important;
+  }
+  table.print-pagination-shell > thead > tr > td,
+  table.print-pagination-shell > tfoot > tr > td,
+  table.print-pagination-shell > tbody > tr > td {
+    padding: 0 !important;
+    border: none !important;
+    background: transparent !important;
+    vertical-align: top !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .u-header {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-bottom: 8px !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+  .u-footer {
+    width: 100% !important;
+    margin-top: 8px !important;
+    margin-bottom: 0 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
   @media print {
     @page { size: A4 portrait; margin: 8mm 10mm; }
     * { box-sizing: border-box !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    .print-container, .page, [data-print-page] { width: 100% !important; max-width: 100% !important; min-height: auto; padding: 0 !important; margin: 0 !important; display: block; box-sizing: border-box !important; }
-    .page { width: 100% !important; height: auto !important; min-height: auto !important; max-height: none !important; }
-    .page:last-child { page-break-after: avoid !important; break-after: avoid !important; }
-    .u-header { width: 100% !important; max-width: 100% !important; padding-top: 2px; }
-    .u-logo { width: auto; object-fit: contain; overflow: visible; }
-    .u-footer { width: 100% !important; margin-top: 14px; page-break-inside: avoid !important; break-inside: avoid !important; }
-    .total-section, .cost-section, .summary-section, .cost-summary {
-      break-inside: avoid !important;
+    html, body {
+      background: #fff !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      height: auto !important;
+      min-height: 0 !important;
     }
+    .print-container, .paper, [data-invoice-print] {
+      width: 100% !important;
+      max-width: 100% !important;
+      min-height: 0 !important;
+      height: auto !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      display: block !important;
+      box-shadow: none !important;
+      border: none !important;
+    }
+    .u-header { width: 100% !important; max-width: 100% !important; padding-top: 0 !important; }
+    .u-logo { width: auto; object-fit: contain; overflow: visible; }
+    .u-footer { width: 100% !important; margin-top: 8px !important; margin-bottom: 0 !important; page-break-inside: avoid !important; break-inside: avoid !important; }
+    .total-section, .cost-section, .summary-section, .cost-summary, .invoice-recipient-card, .invoice-total-section {
+      break-inside: avoid !important;
+      page-break-inside: avoid !important;
+    }
+
+    /* الهيدر في الصفحة الأولى فقط */
+    table.print-pagination-shell > thead { display: table-row-group !important; }
+
+    /* الفوتر ثابت أسفل كل صفحة: نسخة ثابتة مرئية + مساحة محجوزة غير مرئية في tfoot حتى لا يغطي المحتوى */
+    table.print-pagination-shell > tfoot .u-footer { visibility: hidden !important; margin-bottom: 0 !important; }
+    .print-fixed-footer {
+      display: block !important;
+      position: fixed !important;
+      left: 0; right: 0; bottom: 0;
+      background: #fff !important;
+    }
+    .print-fixed-footer .u-footer { margin-bottom: 0 !important; }
+    .print-fixed-footer .u-page-number { display: none !important; }
+  }
+  @media screen {
+    .print-fixed-footer { display: none !important; }
   }
 </style>
 </head>
 <body>
-<div class="page print-container" data-print-page data-page-title="${getInvoiceTitle() || 'فاتورة المهمة'}" data-invoice-print>
+<div class="paper print-container" data-page-title="${getInvoiceTitle() || 'فاتورة المهمة'}" data-invoice-print>
   ${printContent}
 </div>
+<div class="print-fixed-footer" aria-hidden="true">${unifiedFooterHtml({ ...unifiedStyles, footerText: '' } as any)}</div>
 </body>
 </html>`;
   };
@@ -2308,6 +2390,38 @@ export function UnifiedTaskInvoice({
     });
   };
 
+  // دالة حساب التكاليف الفعلية لخدمات العميل لتحديد مسميات الفاتورة ديناميكياً
+  const getCustomerOperationCosts = useCallback(() => {
+    const taskPrintCost = isGroupInvoice
+      ? allTasks.reduce((s, t) => s + (Number(t.customer_print_cost) || 0), 0)
+      : (Number(task.customer_print_cost) || 0);
+
+    const taskInstallCost = isGroupInvoice
+      ? allTasks.reduce((s, t) => s + (Number(t.customer_installation_cost) || 0), 0)
+      : (Number(task.customer_installation_cost) || 0);
+
+    const taskCutoutCost = isGroupInvoice
+      ? allTasks.reduce((s, t) => s + (Number(t.customer_cutout_cost) || 0), 0)
+      : (Number(task.customer_cutout_cost) || 0);
+
+    const itemsPrintSum = data?.items?.reduce((s, i) => s + (Number(i.printCost) || 0), 0) || 0;
+    const itemsInstallSum = data?.items?.reduce((s, i) => s + (Number(i.installCost) || 0), 0) || 0;
+    const itemsCutoutSum = data?.items?.reduce((s, i) => s + (Number(i.cutoutCost) || 0), 0) || 0;
+
+    const printCost = taskPrintCost > 0 ? taskPrintCost : itemsPrintSum;
+    const installCost = taskInstallCost > 0 ? taskInstallCost : itemsInstallSum;
+    const cutoutCost = taskCutoutCost > 0 ? taskCutoutCost : itemsCutoutSum;
+
+    return {
+      hasPrint: printCost > 0,
+      hasInstall: installCost > 0,
+      hasCutout: cutoutCost > 0,
+      printCost,
+      installCost,
+      cutoutCost,
+    };
+  }, [allTasks, isGroupInvoice, task.customer_print_cost, task.customer_installation_cost, task.customer_cutout_cost, data?.items]);
+
   const getInvoiceTitle = () => {
     const contractLabel = contractIds.length > 1
       ? `عقود #${contractIds.join(', #')}`
@@ -2320,12 +2434,21 @@ export function UnifiedTaskInvoice({
       ? allTasks.reduce((s, t) => s + (t.customer_total || 0), 0)
       : (data?.totalCost || task.customer_total || 0);
 
-    const services: string[] = [];
-    if (task.print_task_id || (task.customer_print_cost && task.customer_print_cost > 0)) services.push('طباعة');
-    if (task.cutout_task_id || (task.customer_cutout_cost && task.customer_cutout_cost > 0)) services.push('قص');
-    if (task.installation_task_id || (task.customer_installation_cost && task.customer_installation_cost > 0)) services.push('تركيب');
-
-    const servicesText = services.length > 0 ? services.join(' و') : 'خدمات';
+    let prefix = 'فاتورة';
+    if (invoiceType === 'customer') {
+      const { hasPrint, hasInstall, hasCutout } = getCustomerOperationCosts();
+      const services: string[] = [];
+      if (hasPrint) services.push('طباعة');
+      if (hasInstall) services.push('تركيب');
+      if (hasCutout) services.push('قص');
+      prefix = services.length > 0 ? `فاتورة ${services.join(' و ')}` : 'فاتورة';
+    } else if (invoiceType === 'print_vendor') {
+      prefix = 'فاتورة طباعة';
+    } else if (invoiceType === 'cutout_vendor') {
+      prefix = 'فاتورة قص مجسمات';
+    } else {
+      prefix = 'فاتورة تركيب';
+    }
 
     let recipientName = customerName;
     if (invoiceType === 'print_vendor' || invoiceType === 'cutout_vendor') {
@@ -2335,7 +2458,7 @@ export function UnifiedTaskInvoice({
     }
 
     const groupLabel = isGroupInvoice ? ` | ${allTasks.length} مهام` : '';
-    return `فاتورة ${servicesText} | ${recipientName} | ${contractLabel} | ${invoiceDate} | ${facesCount} وجه | ${totalCost.toLocaleString()} د.ل${groupLabel}`;
+    return `${prefix} | ${recipientName} | ${contractLabel} | ${invoiceDate} | ${facesCount} وجه | ${totalCost.toLocaleString()} د.ل${groupLabel}`;
   };
 
   const getInvoiceIcon = () => {
@@ -2423,9 +2546,7 @@ export function UnifiedTaskInvoice({
   const getInvoiceTitleAr = () => {
     let base = 'فاتورة';
     if (invoiceType === 'customer') {
-      const hasPrint = Boolean(task.print_task_id) || (task.customer_print_cost || 0) > 0;
-      const hasInstall = Boolean(task.installation_task_id) || (task.customer_installation_cost || 0) > 0;
-      const hasCutout = Boolean(task.cutout_task_id) || (task.customer_cutout_cost || 0) > 0;
+      const { hasPrint, hasInstall, hasCutout } = getCustomerOperationCosts();
       const parts: string[] = [];
       if (hasPrint) parts.push('طباعة');
       if (hasInstall) parts.push('تركيب');
@@ -2839,7 +2960,7 @@ export function UnifiedTaskInvoice({
             <div
               ref={printRef}
               data-invoice-print
-              className="bg-white shadow-2xl"
+              className="paper bg-white shadow-2xl"
               style={{
                 width: '210mm',
                 maxWidth: '100%',
@@ -2860,18 +2981,71 @@ export function UnifiedTaskInvoice({
                  ${unifiedHeaderFooterCss(unifiedStyles)}
                  [data-invoice-print] td { border-color: ${tableBorder} !important; }
                  ${buildInvoiceLayoutCss()}
-                 [data-invoice-print] .u-footer { margin-top: auto; }
+                 [data-invoice-print] .u-footer { margin-top: 8px; }
+                 table.print-pagination-shell {
+                   width: 100% !important;
+                   max-width: 100% !important;
+                   border-collapse: collapse !important;
+                   border: none !important;
+                   table-layout: fixed !important;
+                   margin: 0 !important;
+                   padding: 0 !important;
+                   background: transparent !important;
+                 }
+                 table.print-pagination-shell > thead {
+                   display: table-header-group !important;
+                   break-inside: avoid !important;
+                   page-break-inside: avoid !important;
+                 }
+                 table.print-pagination-shell > tfoot {
+                   display: table-footer-group !important;
+                   break-inside: avoid !important;
+                   page-break-inside: avoid !important;
+                 }
+                 table.print-pagination-shell > tbody {
+                   display: table-row-group !important;
+                 }
+                 table.print-pagination-shell > thead > tr > td,
+                 table.print-pagination-shell > tfoot > tr > td,
+                 table.print-pagination-shell > tbody > tr > td {
+                   padding: 0 !important;
+                   border: none !important;
+                   background: transparent !important;
+                   vertical-align: top !important;
+                   width: 100% !important;
+                   box-sizing: border-box !important;
+                 }
+                 @media print {
+                   [data-invoice-print] {
+                     min-height: 0 !important;
+                     height: auto !important;
+                     padding: 0 !important;
+                     margin: 0 !important;
+                     box-shadow: none !important;
+                   }
+                 }
               `}} />
-              {/* Header - Unified Engine */}
-              <div dangerouslySetInnerHTML={{
-                __html: unifiedHeaderHtml({
-                  styles: unifiedStyles,
-                  fullLogoUrl,
-                  metaLinesHtml,
-                  titleAr: getInvoiceTitleAr(),
-                  titleEn: '',
-                })
-              }} />
+
+              <table className="print-pagination-shell" style={{ width: '100%', borderCollapse: 'collapse', border: 'none', margin: 0, padding: 0 }}>
+                <thead style={{ display: 'table-header-group' }}>
+                  <tr>
+                    <td className="print-shell-header-cell" style={{ border: 'none', padding: 0, background: 'transparent' }}>
+                      {/* Header - Unified Engine */}
+                      <div dangerouslySetInnerHTML={{
+                        __html: unifiedHeaderHtml({
+                          styles: unifiedStyles,
+                          fullLogoUrl,
+                          metaLinesHtml,
+                          titleAr: getInvoiceTitleAr(),
+                          titleEn: '',
+                        })
+                      }} />
+                    </td>
+                  </tr>
+                </thead>
+                <tbody style={{ display: 'table-row-group' }}>
+                  <tr>
+                    <td className="print-shell-content-cell" style={{ border: 'none', padding: 0, background: 'transparent' }}>
 
               {/* Recipient Info */}
               <div
@@ -4020,8 +4194,24 @@ export function UnifiedTaskInvoice({
                 </div>
               )}
 
-              {/* Footer - Unified Engine */}
-              <div dangerouslySetInnerHTML={{ __html: unifiedFooterHtml(unifiedStyles) }} />
+                      {/* رسالة الختام مرة واحدة في نهاية المحتوى (وليست مع الفوتر المكرر) */}
+                      {unifiedStyles?.footerText ? (
+                        <div className="u-closing-message" style={{ textAlign: 'center', fontSize: 12, lineHeight: 1.8, padding: '12px 0', color: '#555', breakInside: 'avoid' }}>
+                          {unifiedStyles.footerText}
+                        </div>
+                      ) : null}
+                    </td>
+                  </tr>
+                </tbody>
+                <tfoot style={{ display: 'table-footer-group' }}>
+                  <tr>
+                    <td className="print-shell-footer-cell" style={{ border: 'none', padding: 0, background: 'transparent' }}>
+                      {/* Footer - Unified Engine */}
+                      <div dangerouslySetInnerHTML={{ __html: unifiedFooterHtml({ ...unifiedStyles, footerText: '' } as any) }} />
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
             </div>
           </div>
         </ScrollArea>

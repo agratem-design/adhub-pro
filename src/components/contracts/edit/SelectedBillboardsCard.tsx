@@ -1221,6 +1221,7 @@ export function SelectedBillboardsCard({
                 const netRentalBeforeDiscount = pricingData?.netRentalBeforeDiscount ?? (baseTotalForBoard - includedPrintCost - includedInstallCost);
                 const discountPerBillboard = pricingData?.discountPerBillboard ?? 0;
                 const individualDiscountAmt = pricingData?.individualDiscountAmt ?? 0;
+                const levelDiscountAmt = pricingData?.levelDiscountAmt ?? 0;
                 const netRentalAfterDiscount = pricingData?.netRentalAfterDiscount ?? Math.max(0, netRentalBeforeDiscount - discountPerBillboard);
                 const extraPrintCost = pricingData?.extraPrintCost ?? ((printCostEnabled && !includePrintInPrice) ? printCostForBillboard : 0);
                 const extraInstallCost = pricingData?.extraInstallCost ?? ((installationEnabled && !includeInstallationInPrice) ? installPrice : 0);
@@ -1541,7 +1542,7 @@ export function SelectedBillboardsCard({
                       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border border-border bg-muted/20 p-3 text-xs">
                         <dt className="text-muted-foreground">السعر قبل الخصم</dt>
                         <dd className="text-left font-semibold tabular-nums">{formatAmount(baseTotalForBoard + extraInstallCost + extraPrintCost)} {currencySymbol}</dd>
-                        <dt className="text-muted-foreground">الخصم الفردي</dt>
+                        <dt className="text-muted-foreground">{levelDiscountAmt > 0 ? `الخصم الفردي (منه تخفيض المستوى ${formatAmount(levelDiscountAmt)})` : 'الخصم الفردي'}</dt>
                         <dd className="text-left font-semibold tabular-nums">{formatAmount(individualDiscountAmt)} {currencySymbol}</dd>
                         <dt className="text-muted-foreground">نصيب اللوحة من خصم العقد</dt>
                         <dd className="text-left font-semibold tabular-nums">{formatAmount(discountPerBillboard)} {currencySymbol}</dd>
@@ -1628,7 +1629,7 @@ export function SelectedBillboardsCard({
                         {/* Individual Discount */}
                         {individualDiscountAmt > 0 && (
                           <div className="flex justify-between items-center bg-red-500/10 rounded-lg px-3 py-1.5 -mx-1 border border-red-500/20">
-                            <span className="text-xs font-bold text-red-600">خصم اللوحة المحدد</span>
+                            <span className="text-xs font-bold text-red-600">{levelDiscountAmt > 0 ? 'خصم اللوحة + تخفيض المستوى' : 'خصم اللوحة المحدد'}</span>
                             <span className="text-sm font-bold text-red-600 font-manrope">- {formatAmount(individualDiscountAmt)} {currencySymbol}</span>
                           </div>
                         )}

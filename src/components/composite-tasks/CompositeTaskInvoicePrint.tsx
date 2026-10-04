@@ -86,11 +86,15 @@ function getEffectiveCustomerTotal(task: CompositeTaskWithDetails, details?: any
 }
 
 
-// دالة لتوليد عنوان الفاتورة ديناميكياً بناءً على المكونات
+// دالة لتوليد عنوان الفاتورة ديناميكياً بناءً على المكونات ذات القيمة الفعلية
 function generateDynamicInvoiceTitle(task: CompositeTaskWithDetails, details: any): { ar: string; en: string } {
-  const hasPrint = (task.customer_print_cost || 0) > 0 || (details?.print?.print_task_items?.length > 0);
-  const hasInstallation = (task.customer_installation_cost || 0) > 0 || (details?.installationItems?.length > 0);
-  const hasCutout = (task.customer_cutout_cost || 0) > 0 || (details?.totalCutouts > 0);
+  const printCost = Number(task.customer_print_cost) || 0;
+  const installCost = Number(task.customer_installation_cost) || 0;
+  const cutoutCost = Number(task.customer_cutout_cost) || Number(details?.customerCutoutTotal) || 0;
+
+  const hasPrint = printCost > 0;
+  const hasInstallation = installCost > 0;
+  const hasCutout = cutoutCost > 0;
   
   const components: string[] = [];
   const componentsEn: string[] = [];

@@ -1269,25 +1269,24 @@ export default function Contracts() {
   }
 
   return (
-    <div className="min-h-full space-y-4 bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.08),transparent_32rem)] p-3 sm:space-y-6 sm:p-4 md:p-6" dir="rtl">
-      <section className="overflow-hidden rounded-3xl border border-primary/20 bg-card shadow-sm">
-        <div className="flex flex-col gap-6 bg-gradient-to-l from-primary/10 via-card to-card p-5 sm:p-7 xl:flex-row xl:items-center xl:justify-between">
+    <div className="min-h-full space-y-4 p-3 sm:space-y-5 sm:p-4 md:p-6" dir="rtl">
+      <section className="overflow-hidden rounded-2xl border border-border/60 bg-card">
+        <div className="flex flex-col gap-4 p-4 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-              <FileText className="h-6 w-6" />
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
+              <FileText className="h-5 w-5" />
             </div>
             <div>
-              <p className="mb-1 text-xs font-semibold text-muted-foreground">العقود واللوحات الإعلانية</p>
-              <h1 className="text-2xl font-extrabold tracking-tight text-foreground sm:text-3xl">إدارة العقود</h1>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">تابع عقودك وتصاميمك، واصل إلى الطباعة والتحصيل من مكان واحد.</p>
+              <h1 className="text-2xl font-bold text-foreground sm:text-3xl">العقود</h1>
+              <p className="mt-1 text-sm text-muted-foreground">عقود الإيجار وتصاميمها وطباعتها وتحصيلها.</p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2 [&_button]:cursor-pointer [&_button]:rounded-xl [&_button]:transition-colors [&_button]:duration-200">
-            <Button variant="outline" size="sm" onClick={() => setAlertsDialogOpen(true)} className="gap-1.5 rounded-full h-8 sm:h-9 px-2.5 sm:px-3 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setAlertsDialogOpen(true)}>
               <Send className="h-3.5 w-3.5" />
               <span>تنبيهات</span>
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setReportDialogOpen(true)} className="gap-1.5 rounded-full h-8 sm:h-9 px-2.5 sm:px-3 text-xs">
+            <Button variant="outline" size="sm" onClick={() => setReportDialogOpen(true)}>
               <FileText className="h-3.5 w-3.5" />
               <span>تقرير</span>
             </Button>
@@ -1297,15 +1296,15 @@ export default function Contracts() {
                   variant="outline"
                   size="sm"
                   onClick={() => setMissingNumbersOpen(true)}
-                  className="gap-1.5 rounded-full h-8 sm:h-9 px-2.5 sm:px-3 text-xs border-amber-500/30 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 font-bold"
+                  
                   title="البحث عن فجوات الترقيم وإضافة عقد برقم مفقود"
                 >
-                  <Hash className="h-3.5 w-3.5 text-amber-500" />
+                  <Hash className="h-3.5 w-3.5" />
                   <span>أرقام ناقصة</span>
                 </Button>
                 <Button
                   size="sm"
-                  className="gap-1.5 rounded-full h-8 sm:h-9 px-3 sm:px-4 text-xs font-bold bg-gradient-to-l from-primary to-primary/80 hover:shadow-[var(--shadow-luxury)] transition-shadow"
+                  
                   onClick={() => setQuickCreateOpen(true)}
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -1315,22 +1314,22 @@ export default function Contracts() {
             )}
           </div>
         </div>
-        <div className="grid grid-cols-3 divide-x divide-x-reverse divide-border/60 border-t border-border/60 bg-background/40">
+        <div className="grid grid-cols-3 divide-x divide-x-reverse divide-border/60 border-t border-border/60">
           {[
-            { label: 'عقود مسجلة', value: validContracts.length, icon: FileText, color: 'text-primary' },
-            { label: 'غير مسددة', value: unpaidContracts.length, icon: DollarSign, color: 'text-amber-600 dark:text-amber-400' },
-            { label: 'متأخرة التركيب', value: delayedContractIds.size, icon: Clock, color: 'text-rose-600 dark:text-rose-400' },
+            { label: 'عقود مسجلة', value: validContracts.length, icon: FileText, color: 'text-muted-foreground' },
+            { label: 'غير مسددة', value: unpaidContracts.length, icon: DollarSign, color: 'text-muted-foreground' },
+            { label: 'متأخرة التركيب', value: delayedContractIds.size, icon: Clock, color: 'text-muted-foreground' },
           ].map(({ label, value, icon: Icon, color }) => (
-            <div key={label} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:gap-3 sm:px-6">
+            <div key={label} className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:gap-3 sm:px-6">
               <Icon className={`h-5 w-5 shrink-0 ${color}`} />
-              <div><div className="font-manrope text-2xl font-extrabold tabular-nums text-foreground">{value.toLocaleString()}</div><div className="mt-1 text-xs text-muted-foreground">{label}</div></div>
+              <div><div className={`font-manrope text-2xl font-bold tabular-nums ${label !== 'عقود مسجلة' && value > 0 ? (label === 'متأخرة التركيب' ? 'text-rose-400' : 'text-amber-500') : 'text-foreground'}`}>{value.toLocaleString()}</div><div className="mt-0.5 text-xs text-muted-foreground">{label}</div></div>
             </div>
           ))}
         </div>
       </section>
 
       {/* البحث والفلاتر المحسّنة */}
-      <Card className="overflow-hidden rounded-3xl border border-border/60 bg-card shadow-sm">
+      <Card className="overflow-hidden rounded-2xl border border-border/60 bg-card shadow-none">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 bg-muted/20 p-3 sm:px-5">
           <div role="group" aria-label="نطاق العقود" className="flex flex-wrap gap-1 rounded-xl bg-background p-1">
             {[
