@@ -41,8 +41,12 @@ import { createPinSvgUrl } from '@/hooks/useMapMarkers';
 import MunicipalityPrintSettingsDialog from '@/components/municipality/MunicipalityPrintSettingsDialog';
 import { ExcelColumnMappingDialog, ColumnMapping } from '@/components/municipality/ExcelColumnMappingDialog';
 import { ImageUploadZone } from '@/components/ui/image-upload-zone';
+import { BillboardSequenceInput } from '@/components/municipality/BillboardSequenceInput';
+import { getMunicipalityImportMedia } from '@/utils/municipalityImportMedia';
 import { reorderMunicipalityItems, municipalityColor } from '@/utils/municipalityOrdering';
-import { parseCoordinateInput, formatCoordinateInput } from '@/utils/coordinateInput';
+import { buildMunicipalityPhoto } from '@/utils/municipalityPhoto';
+import { buildMunicipalitySizeFields } from '@/utils/municipalitySizeFields';
+import { parseCoordinateInput, formatCoordinateInput, formatPrintCoordinates } from '@/utils/coordinateInput';
 
 import { Switch } from '@/components/ui/switch';
 import { calculateDistance } from '@/hooks/useMapNavigation';
@@ -1029,7 +1033,6 @@ export default function MunicipalityBillboardOrganizer() {
     }
   };
 
-  const [printStudioTab, setPrintStudioTab] = useState<'signatures' | 'cover' | 'layout' | 'status' | 'background'>('signatures');
   const [previewBlueprintMode, setPreviewBlueprintMode] = useState<'card' | 'cover'>('card');
 
   const resolveCoverTitle = (templateStr: string, municipality: string, cityNameVal: string, collName: string) => {
@@ -2680,9 +2683,7 @@ export default function MunicipalityBillboardOrganizer() {
       latitude: coords?.[0] || null,
       longitude: coords?.[1] || null,
       item_type: 'existing',
-      design_face_a: b.design_face_a,
-      design_face_b: b.design_face_b,
-      image_url: b.Image_URL,
+      ...getMunicipalityImportMedia(b),
       municipality: b.Municipality || '',
       status: statusToUse,
     };
@@ -2728,9 +2729,7 @@ export default function MunicipalityBillboardOrganizer() {
           latitude: coords?.[0] || null,
           longitude: coords?.[1] || null,
           item_type: 'existing',
-          design_face_a: b.design_face_a,
-          design_face_b: b.design_face_b,
-          image_url: b.Image_URL,
+          ...getMunicipalityImportMedia(b),
           municipality: b.Municipality || '',
           status: statusToUse,
         });
@@ -2809,6 +2808,18 @@ export default function MunicipalityBillboardOrganizer() {
     setShowMoveDialog(false);
     setMoveSourceSeqs([]);
     setMoveTargetSeq('');
+  };
+
+  const applyListSequence = (sequence: number, target: number) => {
+    if (!Number.isInteger(target) || target < 1 || target > currentCollection.items.length) {
+      toast.error('أدخل رقم ترتيب صحيحاً ضمن نطاق المجموعة');
+      return;
+    }
+    setCurrentCollection(prev => ({ ...prev, items: reorderMunicipalityItems(prev.items, [sequence], target, 1) }));
+    setSelectedItems(new Set());
+    setNumberingClicks([]);
+    setInlineEditingCell(null);
+    toast.success(`تم نقل اللوحة إلى الرقم ${target}. احفظ المجموعة لتثبيت الترتيب`);
   };
 
   // Update item (Enhanced to apply changes to all items with the same size or selected items)
@@ -3033,9 +3044,7 @@ export default function MunicipalityBillboardOrganizer() {
       latitude: coords?.[0] || null,
       longitude: coords?.[1] || null,
       item_type: 'existing',
-      design_face_a: b.design_face_a,
-      design_face_b: b.design_face_b,
-      image_url: b.Image_URL,
+      ...getMunicipalityImportMedia(b),
       municipality: b.Municipality || '',
     });
     setShowReplaceDialog(false);
@@ -3319,9 +3328,7 @@ export default function MunicipalityBillboardOrganizer() {
         latitude: coords?.[0] || null,
         longitude: coords?.[1] || null,
         item_type: 'existing' as const,
-        design_face_a: b.design_face_a,
-        design_face_b: b.design_face_b,
-        image_url: b.Image_URL,
+        ...getMunicipalityImportMedia(b),
         municipality: municipality,
         status: statusToUse,
       };
@@ -3654,22 +3661,37 @@ export default function MunicipalityBillboardOrganizer() {
     );
   }, [currentCollection.items, searchItems]);
 
-  const sortByDbSizeRank = () => {
+  const [sortingBySize, setSortingBySize] = useState(false);
+  const sortByDbSizeRank = async () => {
     if (currentCollection.items.length === 0) {
       toast.error('لا توجد لوحات لترتيبها');
       return;
     }
-    setCurrentCollection(prev => {
-      const sorted = [...prev.items].sort((a, b) => {
-        const orderA = getSizeSortOrder(a.size);
-        const orderB = getSizeSortOrder(b.size);
-        if (orderA !== orderB) return orderA - orderB;
-        return a.sequence_number - b.sequence_number;
-      });
-      const resequenced = sorted.map((item, idx) => ({ ...item, sequence_number: idx + 1 }));
-      return { ...prev, items: resequenced };
-    });
-    toast.success('تم إعادة ترتيب وتسلسل اللوحات حسب رتبة المقاسات المعتمدة في الإعدادات');
+    setSortingBySize(true);
+    try {
+      const { data, error } = await supabase.from('sizes').select('name, sort_order').order('sort_order', { ascending: true });
+      if (error) throw error;
+      if (!data?.length) {
+        toast.error('لا توجد مقاسات مرتبة في جدول المقاسات');
+        return;
+      }
+      setSizesList(data);
+      const normalize = (value: string) => value.replace(/[×X*]/g, 'x').replace(/\s+/g, '').toLowerCase();
+      const ranks = new Map(data.map(size => [normalize(size.name), Number(size.sort_order ?? Number.MAX_SAFE_INTEGER)]));
+      setCurrentCollection(prev => ({ ...prev, items: [...prev.items]
+        .sort((a, b) => (ranks.get(normalize(a.size || '')) ?? Number.MAX_SAFE_INTEGER)
+          - (ranks.get(normalize(b.size || '')) ?? Number.MAX_SAFE_INTEGER)
+          || a.sequence_number - b.sequence_number)
+        .map((item, index) => ({ ...item, sequence_number: index + 1 })) }));
+      setSelectedItems(new Set());
+      setNumberingClicks([]);
+      setInlineEditingCell(null);
+      toast.success('تم ترتيب اللوحات حسب جدول المقاسات. احفظ المجموعة لتثبيت الترتيب');
+    } catch {
+      toast.error('تعذر تحميل ترتيب المقاسات، حاول مجددًا');
+    } finally {
+      setSortingBySize(false);
+    }
   };
 
   // Get unique sizes from current items sorted strictly by DB size rank (sort_order)
@@ -3891,7 +3913,7 @@ export default function MunicipalityBillboardOrganizer() {
                 <td class="num">${formatSizeForPrint(it.size, showHeightInPrint) || '-'}</td>
                 ${showFacesCol ? `<td class="num">${it.faces_count || '-'}</td>` : ''}
                 ${showCompanyCol ? `<td class="loc" style="text-align: center;">${resolveItemCompany(it) || '-'}</td>` : ''}
-                <td class="coords">${it.latitude && it.longitude ? `${it.latitude}, ${it.longitude}` : '-'}</td>
+                <td class="coords">${formatPrintCoordinates(it.latitude, it.longitude) || '-'}</td>
                 ${showStatusInPrint ? `<td class="num">${it.status || '-'}</td>` : ''}
                 <td class="qr-col-cell">
                   ${qrDataUrl ? `
@@ -4080,7 +4102,6 @@ export default function MunicipalityBillboardOrganizer() {
         const qrDataUrl = qrInfo?.dataUrl || '';
         const coords = (item.latitude != null && item.longitude != null) ? `${item.latitude},${item.longitude}` : '';
 
-        const hasDesign = item.design_face_a || item.design_face_b;
         const mainImage = item.image_url || '';
 
         const pinColor = (s as any).pin_color?.trim() || undefined;
@@ -4175,7 +4196,7 @@ export default function MunicipalityBillboardOrganizer() {
                   </div>
                 `}
                 <div style="height: ${s.coords_bar_height || '26px'}; background: rgba(255,255,255,0.95); display: flex; align-items: center; justify-content: center; z-index: 12; border-top: 1px solid #ddd; flex-shrink: 0;">
-                  <span style="font-size: ${s.coords_font_size || '11px'}; font-weight: 700; color: #222; direction: ltr; font-family: '${s.coords_font_family || 'Manrope'}-Bold', '${s.coords_font_family || 'Manrope'}', monospace; letter-spacing: 0.5px;">${lat}, ${lng}</span>
+                  <span style="font-size: ${s.coords_font_size || '11px'}; font-weight: 700; color: #222; direction: ltr; font-family: '${s.coords_font_family || 'Manrope'}-Bold', '${s.coords_font_family || 'Manrope'}', monospace; letter-spacing: 0.5px;">${formatPrintCoordinates(item.latitude, item.longitude)}</span>
                 </div>
               </div>
             `;
@@ -4195,14 +4216,8 @@ export default function MunicipalityBillboardOrganizer() {
             `;
           }
         } else {
-          if (hasDesign) {
-            imageSectionHtml = '';
-          } else if (mainImage) {
-            imageSectionHtml = `
-              <div class="absolute-field" style="top: ${s.main_image_top}; left: ${s.main_image_left}; transform: translateX(-50%); width: ${s.main_image_width}; height: ${s.main_image_height}; overflow: hidden; border: 3px solid #000; border-radius: 0 0 0 8px; z-index: 5;">
-                <img src="${mainImage}" alt="" style="width: 100%; height: 100%; object-fit: contain;" />
-              </div>
-            `;
+          if (mainImage) {
+            imageSectionHtml = buildMunicipalityPhoto(s, resolveImg(mainImage));
           } else if (coords) {
             imageSectionHtml = `
               <div style="
@@ -4213,7 +4228,7 @@ export default function MunicipalityBillboardOrganizer() {
                 background: #f5f5f5; flex-direction: column; gap: 8px; z-index: 5;
               ">
                 <div style="font-size: 14px; font-weight: 700; color: #333;">الإحداثيات</div>
-                <div style="font-size: 18px; font-weight: 700; color: #000; direction: ltr; font-family: '${s.coords_font_family || 'Manrope'}', sans-serif;">${coords}</div>
+                <div style="font-size: 18px; font-weight: 700; color: #000; direction: ltr; font-family: '${s.coords_font_family || 'Manrope'}', sans-serif;">${formatPrintCoordinates(item.latitude, item.longitude)}</div>
                 <div style="font-size: 12px; color: #666; font-family: '${s.coords_font_family || 'Manrope'}', sans-serif;">المقاس: ${formatSizeForPrint(item.size, showHeightInPrint)}</div>
               </div>
             `;
@@ -4256,15 +4271,9 @@ export default function MunicipalityBillboardOrganizer() {
               `;
             })()}
 
-            <div class="absolute-field" style="top: ${s.size_top}; left: ${s.size_left}; transform: translateX(-50%); width: 70mm; display: flex; align-items: center; justify-content: center; text-align: center; font-size: ${s.size_font_size}; font-weight: ${s.size_font_weight || '500'}; color: ${s.size_color}; z-index: 5; margin: 0; padding: 0;">
-              ${generatePrintedSizeHtml(item.size, showHeightInPrint, (s as any).show_size_dimension_labels === 'true')}
-            </div>
-
-            ${s.faces_count_show !== 'false' ? `
-            <div class="absolute-field" style="top: ${s.faces_count_top || `calc(${s.size_top} + 12mm)`}; left: ${s.size_left}; transform: translateX(-50%); width: 70mm; display: flex; align-items: center; justify-content: center; text-align: center; font-size: ${s.faces_count_font_size}; font-weight: ${(s as any).faces_count_font_weight || '700'}; color: ${s.faces_count_color || '#000000'}; font-family: '${(s as any).faces_count_font_family || s.coords_font_family || 'Doran'}', sans-serif; z-index: 5; margin: 0; padding: 0; line-height: 1;">
-              ${(!item.faces_count || item.faces_count === 'وجهين' || item.faces_count === '2' || item.faces_count === 2) ? 'وجهين' : 'وجه واحد'}
-            </div>
-            ` : ''}
+            ${buildMunicipalitySizeFields(s,
+              generatePrintedSizeHtml(item.size, showHeightInPrint, (s as any).show_size_dimension_labels === 'true'),
+              (!item.faces_count || item.faces_count === 'وجهين' || item.faces_count === '2' || item.faces_count === 2) ? 'وجهين' : 'وجه واحد')}
 
             ${imageSectionHtml}
 
@@ -4284,22 +4293,6 @@ export default function MunicipalityBillboardOrganizer() {
               </div>
             ` : ''}
 
-            ${hasDesign && printImageSource === 'actual_image' ? `
-              <div class="absolute-field" style="top: ${s.designs_top}; left: ${s.designs_left}; width: ${s.designs_width}; display: flex; gap: ${s.designs_gap}; z-index: 5;">
-                ${item.design_face_a ? `
-                  <div style="flex: 1; text-align: center;">
-                    <div style="font-size: 13px; font-weight: 500; margin-bottom: 4px; color: #333;">التصميم - الوجه الأمامي</div>
-                    <img src="${resolveImg(item.design_face_a)}" alt="" style="width: 100%; max-height: ${s.design_image_height}; object-fit: contain; border: 1px solid #ddd; border-radius: 4px;" />
-                  </div>
-                ` : ''}
-                ${item.design_face_b ? `
-                  <div style="flex: 1; text-align: center;">
-                    <div style="font-size: 13px; font-weight: 500; margin-bottom: 4px; color: #333;">التصميم - الوجه الخلفي</div>
-                    <img src="${resolveImg(item.design_face_b)}" alt="" style="width: 100%; max-height: ${s.design_image_height}; object-fit: contain; border: 1px solid #ddd; border-radius: 4px;" />
-                  </div>
-                ` : ''}
-              </div>
-            ` : ''}
           </div>
         `);
       }
@@ -4415,9 +4408,9 @@ export default function MunicipalityBillboardOrganizer() {
             });
           }
           if (document.readyState === 'complete') {
-            printWhenLoaded();
+            document.fonts.ready.then(printWhenLoaded);
           } else {
-            window.addEventListener('load', printWhenLoaded);
+            window.addEventListener('load', () => document.fonts.ready.then(printWhenLoaded));
           }
         </script></body>
         </html>
@@ -4965,6 +4958,14 @@ export default function MunicipalityBillboardOrganizer() {
                   </Button>
                 </div>
 
+                <Button size="sm" variant="outline"
+                  className="h-10 cursor-pointer gap-1.5 rounded-xl border-primary/25 text-xs text-primary transition-all duration-200 hover:bg-primary/10"
+                  disabled={sortingBySize || currentCollection.items.length < 2}
+                  onClick={sortByDbSizeRank} title="إعادة ترقيم جميع اللوحات حسب sort_order في جدول المقاسات">
+                  {sortingBySize ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowUpDown className="h-3.5 w-3.5" />}
+                  ترتيب حسب المقاسات
+                </Button>
+
                 {/* Search in Items */}
                 <div className="relative">
                   <Filter className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -5175,7 +5176,7 @@ export default function MunicipalityBillboardOrganizer() {
                           }}
                         />
                       </th>
-                      <th className="p-3 text-center w-12 font-semibold">#</th>
+                      <th className="p-3 text-center w-28 font-semibold">رقم الترتيب</th>
                       <th className="p-3 text-right font-semibold">الموقع / اسم اللوحة</th>
                       {showCompanyColumn && (
                         <th className="p-3 text-center font-semibold min-w-[130px]">الشركة</th>
@@ -5218,7 +5219,9 @@ export default function MunicipalityBillboardOrganizer() {
                             }}
                           />
                         </td>
-                        <td className="p-3 text-center font-bold text-primary">{item.sequence_number}</td>
+                        <td className="p-2 text-center"><BillboardSequenceInput sequence={item.sequence_number} total={currentCollection.items.length}
+                            name={item.billboard_name || item.location_text || `اللوحة ${item.sequence_number}`}
+                            onApply={target => applyListSequence(item.sequence_number, target)} /></td>
                         {/* Location / Billboard Name Cell with Pencil Quick Edit */}
                         {inlineEditingCell?.seq === item.sequence_number && inlineEditingCell?.field === 'location' ? (
                           <td className="p-2" onClick={(e) => e.stopPropagation()}>
@@ -5466,10 +5469,9 @@ export default function MunicipalityBillboardOrganizer() {
                             }}
                             className="rounded-md border-border/20"
                           />
-                          <div className="flex items-center gap-1 bg-primary/10 text-primary font-bold px-2 py-0.5 rounded-lg text-xs">
-                            <span>#</span>
-                            <span>{String(item.sequence_number).padStart(2, '0')}</span>
-                          </div>
+                          <BillboardSequenceInput sequence={item.sequence_number} total={currentCollection.items.length}
+                            name={item.billboard_name || item.location_text || `اللوحة ${item.sequence_number}`}
+                            onApply={target => applyListSequence(item.sequence_number, target)} />
                         </div>
 
                         {/* Drag Handle */}
@@ -7280,22 +7282,22 @@ export default function MunicipalityBillboardOrganizer() {
       </Dialog>
 
       <Dialog open={showPrintDialog} onOpenChange={setShowPrintDialog}>
-        <DialogContent className="max-w-7xl w-[96vw] h-[92vh] max-h-[92vh] border-border/30 rounded-3xl bg-background/98 backdrop-blur-xl shadow-2xl p-0 overflow-hidden flex flex-col">
+        <DialogContent dir="rtl" className="municipality-print-dialog max-w-7xl w-[calc(100vw-24px)] h-[calc(100dvh-24px)] max-h-[calc(100dvh-24px)] rounded-2xl border-border bg-background p-0 flex flex-col gap-0 overflow-hidden">
           {/* Top Header */}
-          <div className="px-6 py-3.5 border-b border-border/20 bg-card/80 flex items-center justify-between shrink-0">
+          <div className="px-4 sm:px-5 py-4 pl-12 sm:pl-14 border-b border-border bg-muted/20 flex flex-wrap items-center justify-between gap-3 shrink-0">
             <div className="flex items-center gap-3">
               <div className="p-2.5 bg-primary/10 text-primary border border-primary/20 rounded-2xl shadow-sm">
                 <Printer className="h-5 w-5" />
               </div>
               <div>
-                <DialogTitle className="font-extrabold text-base flex items-center gap-2">
-                  <span>استوديو تحضير الطباعة الشاملة</span>
+                <DialogTitle className="font-semibold text-base flex items-center gap-2">
+                  <span>طباعة لوحات البلدية</span>
                   <Badge variant="outline" className="text-[10px] font-bold border-primary/30 text-primary bg-primary/5">
                     {currentCollection.items.length} لوحة
                   </Badge>
                 </DialogTitle>
                 <DialogDescription className="text-[11px] text-muted-foreground mt-0.5">
-                  تجهيز ومعاينة مستند الطباعة النهائي، ضبط ترويسة الجدول والتوقيعات وتخطيط الأوراق
+                  رتّب محتوى المستند وشكله، ثم اطبع جميع اللوحات
                 </DialogDescription>
               </div>
             </div>
@@ -7319,7 +7321,7 @@ export default function MunicipalityBillboardOrganizer() {
           <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-0 overflow-hidden min-h-0">
             
             {/* ── LEFT PANEL: Live Card Blueprint Preview & Stats (4 Cols) ── */}
-            <div className="lg:col-span-4 bg-muted/20 p-5 flex flex-col justify-between border-l border-border/20 overflow-y-auto custom-scrollbar">
+            <div className="municipality-print-preview hidden lg:flex lg:col-span-4 bg-muted/20 p-4 flex-col justify-between gap-4 border-l border-border overflow-y-auto">
               <div className="space-y-4 flex flex-col items-center">
                 <div className="w-full flex items-center justify-between">
                   <div className="flex items-center gap-1 bg-background/80 p-1 rounded-xl border border-border/20">
@@ -7383,7 +7385,7 @@ export default function MunicipalityBillboardOrganizer() {
                           <div className="text-[11px] font-bold text-slate-600">
                             {coverPhrase || 'لوحات'}
                           </div>
-                          <div className="text-xs font-black text-slate-900 leading-tight">
+                          <div className="text-xs font-semibold text-slate-900 leading-tight">
                             {resolveCoverTitle(coverTitle, municipalityName || 'الخمس', cityName, collectionName)}
                           </div>
                           {coverSubtitle && (
@@ -7406,12 +7408,12 @@ export default function MunicipalityBillboardOrganizer() {
                     {/* Header info */}
                     <div className="flex items-start justify-between border-b border-slate-100 pb-2">
                       <div className="space-y-0.5">
-                        <div className="text-[10px] font-extrabold text-slate-700">موقع بلدية {municipalityName || 'الخمس'}</div>
+                        <div className="text-[10px] font-semibold text-slate-700">موقع بلدية {municipalityName || 'الخمس'}</div>
                         <div className="text-[9px] text-slate-400">لوحة رقم #1</div>
                       </div>
                       {/* Status badge representation */}
                       {showStatusInPrint && (
-                        <div className={`px-2 py-0.5 rounded text-[8px] font-black border uppercase ${
+                        <div className={`px-2 py-0.5 rounded text-[8px] font-semibold border uppercase ${
                           statusColor ? '' : 'bg-amber-100 border-amber-300 text-amber-600'
                         }`} style={{ 
                           color: statusColor || undefined, 
@@ -7479,31 +7481,31 @@ export default function MunicipalityBillboardOrganizer() {
 
               {/* Summary Stats Overview */}
               <div className="mt-4 p-3.5 rounded-2xl border border-border/15 bg-background/60 space-y-2 text-xs">
-                <div className="text-[11px] font-extrabold text-foreground flex items-center gap-1.5 border-b border-border/10 pb-1.5">
+                <div className="text-[11px] font-semibold text-foreground flex items-center gap-1.5 border-b border-border/10 pb-1.5">
                   <FileText className="h-3.5 w-3.5 text-primary" /> ملخص مخرجات الطباعة
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
                   <div className="p-2 rounded-xl bg-muted/40 flex flex-col">
                     <span className="text-[10px] text-muted-foreground">عدد اللوحات الكلي:</span>
-                    <span className="font-extrabold text-foreground">{currentCollection.items.length} لوحة</span>
+                    <span className="font-semibold text-foreground">{currentCollection.items.length} لوحة</span>
                   </div>
                   <div className="p-2 rounded-xl bg-muted/40 flex flex-col">
                     <span className="text-[10px] text-muted-foreground">صفحة الغلاف:</span>
-                    <span className={`font-extrabold ${coverPageEnabled ? 'text-emerald-500' : 'text-muted-foreground'}`}>
+                    <span className={`font-semibold ${coverPageEnabled ? 'text-emerald-500' : 'text-muted-foreground'}`}>
                       {coverPageEnabled ? 'مفعّلة (صفحة 1)' : 'معطّلة'}
                     </span>
                   </div>
                   <div className="p-2 rounded-xl bg-muted/40 flex flex-col">
                     <span className="text-[10px] text-muted-foreground">صفحات الملخص:</span>
-                    <span className="font-extrabold text-foreground">{Math.max(1, Math.ceil(currentCollection.items.length / (summaryRowsPerPage || 17)))} صفحة</span>
+                    <span className="font-semibold text-foreground">{Math.max(1, Math.ceil(currentCollection.items.length / (summaryRowsPerPage || 17)))} صفحة</span>
                   </div>
                   <div className="p-2 rounded-xl bg-muted/40 flex flex-col">
                     <span className="text-[10px] text-muted-foreground">الموقعون المفعلون:</span>
-                    <span className="font-extrabold text-foreground">{showSignatures ? signersList.filter(s => s.enabled).length : 0} موقعين</span>
+                    <span className="font-semibold text-foreground">{showSignatures ? signersList.filter(s => s.enabled).length : 0} موقعين</span>
                   </div>
                   <div className="p-2 rounded-xl bg-muted/40 flex flex-col col-span-2">
                     <span className="text-[10px] text-muted-foreground">إجمالي أمتار الجدول:</span>
-                    <span className={`font-extrabold ${hideTotalMeters ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                    <span className={`font-semibold ${hideTotalMeters ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
                       {hideTotalMeters ? 'مخفي (معطّل من الطباعة)' : 'مُفعّل (يظهر في تذييل الجدول)'}
                     </span>
                   </div>
@@ -7514,103 +7516,25 @@ export default function MunicipalityBillboardOrganizer() {
             {/* ── RIGHT PANEL: Spacious Tabbed Configuration Workspace (8 Cols) ── */}
             <div className="lg:col-span-8 flex flex-col min-h-0 overflow-hidden bg-background">
               
-              {/* Tab Switcher Header */}
-              <div className="p-3 border-b border-border/20 bg-muted/10 shrink-0">
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrintStudioTab('signatures');
-                      setPreviewBlueprintMode('card');
-                    }}
-                    className={`px-2.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 border ${
-                      printStudioTab === 'signatures'
-                        ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                        : 'bg-background hover:bg-muted/60 text-muted-foreground border-border/20'
-                    }`}
-                  >
-                    <PenTool className="h-3.5 w-3.5" />
-                    <span>التوقيعات والترويسة</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrintStudioTab('cover');
-                      setPreviewBlueprintMode('cover');
-                    }}
-                    className={`px-2.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 border ${
-                      printStudioTab === 'cover'
-                        ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                        : 'bg-background hover:bg-muted/60 text-muted-foreground border-border/20'
-                    }`}
-                  >
-                    <BookOpen className="h-3.5 w-3.5" />
-                    <span>صفحة الغلاف</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrintStudioTab('layout');
-                      setPreviewBlueprintMode('card');
-                    }}
-                    className={`px-2.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 border ${
-                      printStudioTab === 'layout'
-                        ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                        : 'bg-background hover:bg-muted/60 text-muted-foreground border-border/20'
-                    }`}
-                  >
-                    <List className="h-3.5 w-3.5" />
-                    <span>تخطيط الصفوف</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrintStudioTab('status');
-                      setPreviewBlueprintMode('card');
-                    }}
-                    className={`px-2.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 border ${
-                      printStudioTab === 'status'
-                        ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                        : 'bg-background hover:bg-muted/60 text-muted-foreground border-border/20'
-                    }`}
-                  >
-                    <Tag className="h-3.5 w-3.5" />
-                    <span>شارة الحالة</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPrintStudioTab('background');
-                      setPreviewBlueprintMode('card');
-                    }}
-                    className={`px-2.5 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center justify-center gap-1.5 border ${
-                      printStudioTab === 'background'
-                        ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-                        : 'bg-background hover:bg-muted/60 text-muted-foreground border-border/20'
-                    }`}
-                  >
-                    <FileSpreadsheet className="h-3.5 w-3.5" />
-                    <span>ورقة الخلفية</span>
-                  </button>
-                </div>
-              </div>
+              <nav aria-label="أقسام إعدادات الطباعة" className="municipality-print-nav flex shrink-0 gap-2 overflow-x-auto border-b border-border bg-card px-4 py-3">
+                <a href="#municipality-print-cover" className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">الغلاف</a>
+                <a href="#municipality-print-signatures" className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">الترويسة والتوقيعات</a>
+                <a href="#municipality-print-layout" className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">المحتوى وتخطيط الصفحات</a>
+                <a href="#municipality-print-status" className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">الحالة والمظهر</a>
+                <a href="#municipality-print-background" className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">خلفية الطباعة</a>
+              </nav>
 
               {/* Tab Contents (Spacious Scroll Area) */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar">
+              <div className="municipality-print-options flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4">
                 
                 {/* ── TAB: COVER PAGE ── */}
-                {printStudioTab === 'cover' && (
-                  <div className="space-y-5 animate-in fade-in duration-200">
+                <section id="municipality-print-cover" className="municipality-print-section scroll-mt-3"><h3 className="print-section-title"><BookOpen className="h-4 w-4 text-primary" />الغلاف</h3><div className="space-y-3">
                     
                     {/* Master Cover Enable Switch */}
                     <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-3 shadow-sm">
                       <div className="flex items-center justify-between">
                         <div className="space-y-0.5">
-                          <Label htmlFor="cover_page_enabled_toggle" className="text-xs font-black text-foreground flex items-center gap-1.5">
+                          <Label htmlFor="cover_page_enabled_toggle" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                             <BookOpen className="h-4 w-4 text-primary" />
                             <span>تضمين صفحة الغلاف في مستند الطباعة</span>
                           </Label>
@@ -7632,7 +7556,7 @@ export default function MunicipalityBillboardOrganizer() {
                         <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-3 shadow-sm">
                           <div className="flex items-center justify-between">
                             <div className="space-y-0.5">
-                              <Label htmlFor="cover_title_input" className="text-xs font-black text-foreground flex items-center gap-1.5">
+                              <Label htmlFor="cover_title_input" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                                 <Building2 className="h-4 w-4 text-primary" />
                                 <span>العنوان الرئيسي لصفحة الغلاف *</span>
                               </Label>
@@ -7772,7 +7696,7 @@ export default function MunicipalityBillboardOrganizer() {
                         <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-4 shadow-sm">
                           <div className="flex items-center justify-between">
                             <div className="space-y-0.5">
-                              <Label className="text-xs font-black text-foreground flex items-center gap-1.5">
+                              <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                                 <ImageIcon className="h-4 w-4 text-amber-500" />
                                 <span>شعار صفحة الغلاف</span>
                               </Label>
@@ -7813,7 +7737,7 @@ export default function MunicipalityBillboardOrganizer() {
                                   <span>شعار قالب الخلفية:</span>
                                   <span className="text-foreground underline">{matchingBg?.name || 'الخلفية الافتراضية'}</span>
                                   {(coverLogoUrl === 'auto' || !coverLogoUrl) && (
-                                    <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-primary text-primary-foreground font-black mr-1">
+                                    <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-primary text-primary-foreground font-semibold mr-1">
                                       مُفعّل تلقائياً
                                     </span>
                                   )}
@@ -7941,17 +7865,17 @@ export default function MunicipalityBillboardOrganizer() {
                       </div>
                     )}
                   </div>
-                )}
+                </section>
                 
                 {/* ── TAB 1: SIGNATURES & HEADER TITLE ── */}
-                {printStudioTab === 'signatures' && (
+                <section id="municipality-print-signatures" className="municipality-print-section scroll-mt-3"><h3 className="print-section-title"><PenTool className="h-4 w-4 text-primary" />الترويسة والتوقيعات</h3>
                   <div className="space-y-5 animate-in fade-in duration-200">
                     
                     {/* Header Title Editor */}
                     <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-3 shadow-sm">
                       <div className="flex items-center justify-between">
                         <div className="space-y-0.5">
-                          <Label htmlFor="header_title_input" className="text-xs font-black text-foreground flex items-center gap-1.5">
+                          <Label htmlFor="header_title_input" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                             <Building2 className="h-4 w-4 text-primary" />
                             <span>عنوان ترويسة جدول اللوحات</span>
                           </Label>
@@ -8014,7 +7938,7 @@ export default function MunicipalityBillboardOrganizer() {
                     <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-3 shadow-sm">
                       <div className="flex items-center justify-between">
                         <div className="space-y-0.5">
-                          <Label htmlFor="hide_total_meters_sig_toggle" className="text-xs font-black text-foreground flex items-center gap-1.5 cursor-pointer">
+                          <Label htmlFor="hide_total_meters_sig_toggle" className="text-xs font-semibold text-foreground flex items-center gap-1.5 cursor-pointer">
                             <SlidersHorizontal className="h-4 w-4 text-primary" />
                             <span>إخفاء إجمالي الأمتار من الجدول</span>
                           </Label>
@@ -8034,7 +7958,7 @@ export default function MunicipalityBillboardOrganizer() {
                     <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-3 shadow-sm">
                       <div className="flex items-center justify-between">
                         <div className="space-y-0.5">
-                          <Label htmlFor="show_company_sig_toggle" className="text-xs font-black text-foreground flex items-center gap-1.5 cursor-pointer">
+                          <Label htmlFor="show_company_sig_toggle" className="text-xs font-semibold text-foreground flex items-center gap-1.5 cursor-pointer">
                             <Building2 className="h-4 w-4 text-primary" />
                             <span>إظهار عمود الشركة في الطباعة والملخص</span>
                           </Label>
@@ -8054,7 +7978,7 @@ export default function MunicipalityBillboardOrganizer() {
                     <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-4 shadow-sm">
                       <div className="flex items-center justify-between border-b border-border/15 pb-3">
                         <div className="space-y-0.5">
-                          <Label htmlFor="show_signatures_toggle" className="text-xs font-black text-foreground flex items-center gap-1.5">
+                          <Label htmlFor="show_signatures_toggle" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                             <PenTool className="h-4 w-4 text-primary" />
                             <span>إظهار التوقيعات والاعتمادات أسفل الملخص</span>
                           </Label>
@@ -8075,7 +7999,7 @@ export default function MunicipalityBillboardOrganizer() {
                           {/* Presets & Controls Bar */}
                           <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-muted/30 border border-border/15">
                             <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-[10px] font-extrabold text-muted-foreground">توزيع الموقعين:</span>
+                              <span className="text-[10px] font-semibold text-muted-foreground">توزيع الموقعين:</span>
                               <button
                                 type="button"
                                 onClick={() => applySignersPreset('3_official')}
@@ -8188,7 +8112,7 @@ export default function MunicipalityBillboardOrganizer() {
                                       checked={sig.enabled}
                                       onCheckedChange={(checked) => updateSigner(sig.id, { enabled: checked })}
                                     />
-                                    <span className="text-xs font-black text-foreground">
+                                    <span className="text-xs font-semibold text-foreground">
                                       توقيع #{idx + 1}
                                     </span>
                                   </div>
@@ -8269,16 +8193,16 @@ export default function MunicipalityBillboardOrganizer() {
                     </div>
 
                   </div>
-                )}
+                </section>
 
                 {/* ── TAB 2: LAYOUT & ROWS ── */}
-                {printStudioTab === 'layout' && (
+                <section id="municipality-print-layout" className="municipality-print-section scroll-mt-3"><h3 className="print-section-title"><LayoutGrid className="h-4 w-4 text-primary" />المحتوى وتخطيط الصفحات</h3>
                   <div className="space-y-5 animate-in fade-in duration-200">
                     
                     {/* Image Source Mode */}
                     <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-3 shadow-sm">
                       <div className="space-y-0.5">
-                        <Label className="text-xs font-black text-foreground flex items-center gap-1.5">
+                        <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                           <ImageIcon className="h-4 w-4 text-primary" />
                           <span>صورة اللوحة في الطباعة</span>
                         </Label>
@@ -8307,7 +8231,7 @@ export default function MunicipalityBillboardOrganizer() {
                               }`}
                             >
                               <div className="flex items-center justify-between w-full">
-                                <span className={`text-xs font-black ${isSelected ? 'text-primary' : 'text-foreground'}`}>{opt.title}</span>
+                                <span className={`text-xs font-semibold ${isSelected ? 'text-primary' : 'text-foreground'}`}>{opt.title}</span>
                                 <IconComp className={`h-5 w-5 ${isSelected ? 'text-primary' : 'opacity-40'}`} />
                               </div>
                               <span className="text-[11px] leading-relaxed opacity-80">{opt.desc}</span>
@@ -8321,7 +8245,7 @@ export default function MunicipalityBillboardOrganizer() {
                     <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-3.5 shadow-sm">
                       <div className="flex items-center justify-between gap-3">
                         <div className="space-y-0.5">
-                          <Label htmlFor="summary_rows_per_page" className="text-xs font-black text-foreground flex items-center gap-1.5">
+                          <Label htmlFor="summary_rows_per_page" className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                             <List className="h-4 w-4 text-primary" />
                             <span>عدد الصفوف في جدول الملخص</span>
                           </Label>
@@ -8334,7 +8258,7 @@ export default function MunicipalityBillboardOrganizer() {
                             type="button"
                             variant="outline"
                             size="icon"
-                            className="h-9 w-9 rounded-xl border-border/30 font-black text-base"
+                            className="h-9 w-9 rounded-xl border-border/30 font-semibold text-base"
                             onClick={() => setSummaryRowsPerPage(prev => Math.max(1, prev - 1))}
                           >
                             -
@@ -8349,13 +8273,13 @@ export default function MunicipalityBillboardOrganizer() {
                               const val = parseInt(e.target.value, 10);
                               setSummaryRowsPerPage(isNaN(val) ? 17 : Math.max(1, Math.min(50, val)));
                             }}
-                            className="h-9 w-20 text-center font-black text-sm rounded-xl bg-background border-border/30"
+                            className="h-9 w-20 text-center font-semibold text-sm rounded-xl bg-background border-border/30"
                           />
                           <Button
                             type="button"
                             variant="outline"
                             size="icon"
-                            className="h-9 w-9 rounded-xl border-border/30 font-black text-base"
+                            className="h-9 w-9 rounded-xl border-border/30 font-semibold text-base"
                             onClick={() => setSummaryRowsPerPage(prev => Math.min(50, prev + 1))}
                           >
                             +
@@ -8460,15 +8384,15 @@ export default function MunicipalityBillboardOrganizer() {
                     )}
 
                   </div>
-                )}
+                </section>
 
                 {/* ── TAB 3: STATUS BADGE & APPEARANCE ── */}
-                {printStudioTab === 'status' && (
+                <section id="municipality-print-status" className="municipality-print-section scroll-mt-3"><h3 className="print-section-title"><Tag className="h-4 w-4 text-primary" />الحالة والمظهر</h3>
                   <div className="space-y-5 animate-in fade-in duration-200">
                     <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-4 shadow-sm">
                       <div className="flex items-center justify-between border-b border-border/10 pb-3">
                         <div className="space-y-0.5">
-                          <Label className="text-xs font-black text-foreground flex items-center gap-1.5">
+                          <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                             <Tag className="h-4 w-4 text-primary" />
                             <span>تخصيص موضع وتصميم شارة الحالة</span>
                           </Label>
@@ -8531,14 +8455,14 @@ export default function MunicipalityBillboardOrganizer() {
                       )}
                     </div>
                   </div>
-                )}
+                </section>
 
                 {/* ── TAB 4: BACKGROUND SHEET TEMPLATE ── */}
-                {printStudioTab === 'background' && (
+                <section id="municipality-print-background" className="municipality-print-section scroll-mt-3"><h3 className="print-section-title"><Layers className="h-4 w-4 text-primary" />خلفية الطباعة</h3>
                   <div className="space-y-5 animate-in fade-in duration-200">
                     <div className="p-4 border border-border/20 rounded-2xl bg-card space-y-3 shadow-sm">
                       <div className="space-y-0.5">
-                        <Label className="text-xs font-black text-foreground flex items-center gap-1.5">
+                        <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                           <FileSpreadsheet className="h-4 w-4 text-primary" />
                           <span>قالب ورقة الخلفية والهوية الرسمية</span>
                         </Label>
@@ -8558,17 +8482,17 @@ export default function MunicipalityBillboardOrganizer() {
                       />
                     </div>
                   </div>
-                )}
+                </section>
 
               </div>
             </div>
           </div>
 
           {/* Bottom Footer */}
-          <div className="px-6 py-3.5 border-t border-border/20 bg-card flex items-center justify-between gap-3 shrink-0">
-            <div className="text-xs font-bold text-muted-foreground flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
-              <span>جاهز لتوليد وطباعة المستند بجودة عالية</span>
+          <div className="municipality-print-footer px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] border-t border-border bg-card flex flex-wrap items-center justify-between gap-3 shrink-0">
+            <div className="hidden sm:flex text-xs font-medium text-muted-foreground items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-primary" />
+              <span>جاهز للطباعة</span>
             </div>
 
             <div className="flex items-center gap-3">
@@ -8582,10 +8506,10 @@ export default function MunicipalityBillboardOrganizer() {
               <Button
                 onClick={handlePrint}
                 disabled={printLoading}
-                className="rounded-xl h-10 px-6 bg-primary text-primary-foreground hover:bg-primary/95 font-black gap-2 text-xs shadow-md"
+                className="flex-1 sm:flex-none rounded-xl h-10 px-6 bg-primary text-primary-foreground hover:bg-primary/95 font-semibold gap-2 text-xs shadow-md"
               >
                 <Printer className="h-4 w-4" />
-                {printLoading ? 'جاري تصدير القوالب...' : 'توليد ملف الطباعة للكل'}
+                {printLoading ? 'جاري التجهيز...' : 'طباعة اللوحات'}
               </Button>
             </div>
           </div>
@@ -8705,6 +8629,8 @@ export default function MunicipalityBillboardOrganizer() {
       />
 
       <MunicipalityPrintSettingsDialog
+        onShowHeightChange={setShowHeightInPrint}
+        printImageSource={printImageSource}
         open={showPrintSettings}
         onOpenChange={setShowPrintSettings}
         backgroundUrl={customBackgroundUrl}

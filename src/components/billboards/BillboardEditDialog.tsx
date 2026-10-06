@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Upload, ClipboardPaste, Loader2, Image as ImageIcon, RefreshCw, Plus, Ruler } from 'lucide-react';
+import { Upload, ClipboardPaste, Loader2, Image as ImageIcon, RefreshCw, Plus, Ruler, ChevronDown, MapPin, SlidersHorizontal, Building2, Handshake, Save, X } from 'lucide-react';
 import { BillboardImage } from '@/components/BillboardImage';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -526,32 +526,30 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
         setEditing(null);
       }
     }}>
-      <DialogContent className="max-w-4xl max-h-[100dvh] sm:max-h-[90vh] h-[100dvh] sm:h-auto w-full rounded-none sm:rounded-lg overflow-y-auto bg-card border-border z-[9999]">
-        <DialogHeader className="pb-4 border-b border-border">
-          <DialogTitle className="text-xl font-bold text-foreground flex items-center gap-2">
-            <span className="w-2 h-6 bg-primary rounded-full" />
+      <DialogContent dir="rtl" className="billboard-edit-dialog flex flex-col gap-0 w-[calc(100vw-24px)] max-w-6xl max-h-[calc(100dvh-24px)] rounded-2xl bg-card border-border z-[9999]">
+        <DialogHeader className="shrink-0 border-b border-border bg-muted/20 px-5 py-4 pl-14">
+          <DialogTitle className="flex flex-wrap items-center gap-2 text-[18px] font-bold text-foreground">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary"><SlidersHorizontal className="h-4 w-4" /></span>
             تعديل اللوحة
-            {editForm.Billboard_Name && (
-              <span className="text-sm font-normal text-muted-foreground mr-2">
-                ({editForm.Billboard_Name})
-              </span>
-            )}
+            {editForm.Billboard_Name && <span dir="ltr" className="rounded-md border border-border bg-background px-2 py-1 text-[12px] font-medium text-muted-foreground">{editForm.Billboard_Name}</span>}
           </DialogTitle>
-          <DialogDescription className="text-xs text-muted-foreground">تعديل بيانات اللوحة المختارة</DialogDescription>
+          <DialogDescription className="text-xs text-muted-foreground">بيانات اللوحة وموقعها ومواصفاتها في مكان واحد</DialogDescription>
         </DialogHeader>
-        
-        <div className="space-y-6 py-4">
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
+          <div className="grid min-w-0 grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-4">
           {/* معلومات أساسية */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-              <span className="w-1.5 h-1.5 bg-primary rounded-full" />
-              المعلومات الأساسية
+          <section className="edit-section">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <SlidersHorizontal className="h-4 w-4 text-primary" />
+              البيانات الأساسية
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 p-4 rounded-lg bg-muted/30 border border-border">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs text-muted-foreground mb-1.5 block">اسم اللوحة</Label>
+                <Label htmlFor="billboard-edit-name" className="text-xs text-muted-foreground mb-1.5 block">اسم اللوحة</Label>
                 <div className="flex gap-1.5">
-                  <Input 
+                  <Input id="billboard-edit-name"
                     value={editForm.Billboard_Name || ''} 
                     disabled 
                     className="bg-muted/50 cursor-not-allowed text-sm font-medium text-muted-foreground border-border flex-1"
@@ -596,10 +594,10 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                 </div>
               </div>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1.5 block">المدينة</Label>
+                <Label htmlFor="billboard-edit-city" className="text-xs text-muted-foreground mb-1.5 block">المدينة</Label>
                 <div className="flex gap-1 items-center">
                   <Select value={editForm.City || ''} onValueChange={(v) => setEditForm((p: any) => ({ ...p, City: v }))}>
-                    <SelectTrigger className="text-sm bg-background border-border text-foreground h-9 flex-1">
+                    <SelectTrigger id="billboard-edit-city" className="text-sm bg-background border-border text-foreground h-9 flex-1">
                       <SelectValue placeholder="اختر المدينة" />
                     </SelectTrigger>
                     <SelectContent className="bg-popover border-border">
@@ -621,10 +619,10 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                 </div>
               </div>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1.5 block">البلدية</Label>
+                <Label htmlFor="billboard-edit-municipality" className="text-xs text-muted-foreground mb-1.5 block">البلدية</Label>
                 <div className="flex gap-1 items-center">
                   <Select value={editForm.Municipality || ''} onValueChange={(v) => setEditForm((p: any) => ({ ...p, Municipality: v }))}>
-                    <SelectTrigger className="text-sm bg-background border-border text-foreground h-9 flex-1">
+                    <SelectTrigger id="billboard-edit-municipality" className="text-sm bg-background border-border text-foreground h-9 flex-1">
                       <SelectValue placeholder="اختر البلدية">
                         {editForm.Municipality || 'اختر البلدية'}
                       </SelectValue>
@@ -660,8 +658,8 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                 </div>
               </div>
               <div className="relative">
-                <Label className="text-xs text-muted-foreground mb-1.5 block">المنطقة</Label>
-                <Input 
+                <Label htmlFor="billboard-edit-district" className="text-xs text-muted-foreground mb-1.5 block">المنطقة</Label>
+                <Input id="billboard-edit-district"
                   className="text-sm bg-background border-border text-foreground h-9" 
                   value={districtInput} 
                   onChange={(e) => handleDistrictInputChange(e.target.value)}
@@ -684,18 +682,18 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                 )}
               </div>
             </div>
-          </div>
+          </section>
 
           {/* الموقع */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-              <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
+          <section className="edit-section">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <MapPin className="h-4 w-4 text-primary" />
               الموقع
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-lg bg-muted/30 border border-border">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs text-muted-foreground mb-1.5 block">أقرب معلم</Label>
-                <Input 
+                <Label htmlFor="billboard-edit-landmark" className="text-xs text-muted-foreground mb-1.5 block">أقرب معلم</Label>
+                <Input id="billboard-edit-landmark"
                   className="text-sm bg-background border-border text-foreground h-9" 
                   value={editForm.Nearest_Landmark || ''} 
                   onChange={(e) => setEditForm((p: any) => ({ ...p, Nearest_Landmark: e.target.value }))} 
@@ -703,8 +701,8 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                 />
               </div>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1.5 block">الإحداثيات GPS</Label>
-                <Input 
+                <Label htmlFor="billboard-edit-coordinates" className="text-xs text-muted-foreground mb-1.5 block">الإحداثيات GPS</Label>
+                <Input id="billboard-edit-coordinates"
                   className="text-sm bg-background border-border text-foreground h-9 font-mono" 
                   value={editForm.GPS_Coordinates || ''} 
                   onChange={(e) => setEditForm((p: any) => ({ ...p, GPS_Coordinates: e.target.value }))} 
@@ -713,17 +711,17 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                 />
               </div>
             </div>
-          </div>
+          </section>
 
           {/* المواصفات الفنية */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-              <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />
+          <section className="edit-section">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Ruler className="h-4 w-4 text-primary" />
               المواصفات الفنية
             </h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 rounded-lg bg-muted/30 border border-border">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs text-muted-foreground mb-1.5 block">المقاس</Label>
+                <Label htmlFor="billboard-edit-size" className="text-xs text-muted-foreground mb-1.5 block">المقاس</Label>
                 <div className="flex gap-1 items-center">
                   <Select value={editForm.Size || ''} onValueChange={(v) => {
                     const selectedSize = sizes.find(s => s.name === v);
@@ -736,7 +734,7 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                       ...(isSousset ? { Level: 'B' } : {})
                     }));
                   }}>
-                    <SelectTrigger className="text-sm bg-background border-border text-foreground h-9 flex-1">
+                    <SelectTrigger id="billboard-edit-size" className="text-sm bg-background border-border text-foreground h-9 flex-1">
                       <SelectValue placeholder="اختر المقاس">
                         {editForm.Size || 'اختر المقاس'}
                       </SelectValue>
@@ -777,7 +775,6 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                     <Ruler className="h-3.5 w-3.5 text-primary" />
                     <span>مقاس الطباعة (متر)</span>
                   </Label>
-                  <span className="text-[10px] text-muted-foreground">لمعرفة الهوامش بدقة</span>
                 </div>
                 <div className="flex gap-1.5 items-center">
                   <Input 
@@ -820,30 +817,29 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                     sizes
                   );
                   if (!marginCalc.hasValidPrintSize) {
-                    return (
-                      <p className="text-[11px] text-muted-foreground mt-1">
-                        أدخل مقاس الطباعة لمعرفة هوامش الزيادة
-                      </p>
-                    );
+                    return null;
                   }
                   return (
-                    <div className="mt-1.5 p-2 rounded-lg bg-amber-500/10 border border-amber-500/25 text-xs space-y-1">
-                      <div className="flex items-center justify-between text-amber-700 dark:text-amber-300 font-bold text-[11px]">
-                        <span>هوامش الطباعة المحسوبة:</span>
-                        <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-background/80 border border-amber-500/30">
+                    <details className="group mt-1 min-w-0">
+                      <summary className="flex min-h-8 cursor-pointer list-none items-center gap-1.5 rounded-md px-1 text-[11px] text-muted-foreground transition-all duration-200 hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 [&::-webkit-details-marker]:hidden">
+                        <span className="shrink-0">هوامش الطباعة</span>
+                        <span className="min-w-0 flex-1 truncate text-[10px]" title={marginCalc.summaryText}>{marginCalc.shortSummary}</span>
+                        <ChevronDown className="h-3 w-3 shrink-0 transition-transform duration-200 group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
+                      </summary>
+                      <div className="mt-1 space-y-1.5 rounded-md border border-border/60 bg-background/60 p-2">
+                        <span className="block font-mono text-[10px] text-muted-foreground" dir="ltr">
                           {marginCalc.printWidth} × {marginCalc.printHeight} م
                         </span>
-                      </div>
-                      <div className="text-[11px] text-foreground font-medium leading-tight">
+                      <div className="space-y-1 text-[11px] text-foreground leading-relaxed">
                         {marginCalc.marginWidthCm !== null && (
                           <div>
-                            • العرض: <strong className="text-amber-600 dark:text-amber-400">{marginCalc.marginWidthCm > 0 ? `+${marginCalc.marginWidthCm}` : marginCalc.marginWidthCm} سم</strong>
+                            العرض: <strong>{marginCalc.marginWidthCm > 0 ? `+${marginCalc.marginWidthCm}` : marginCalc.marginWidthCm} سم</strong>
                             <span className="text-muted-foreground"> ({marginCalc.marginPerSideWidthCm! > 0 ? `+${marginCalc.marginPerSideWidthCm}` : marginCalc.marginPerSideWidthCm} سم لكل جانب)</span>
                           </div>
                         )}
                         {marginCalc.marginHeightCm !== null && (
                           <div>
-                            • الارتفاع: <strong className="text-amber-600 dark:text-amber-400">{marginCalc.marginHeightCm > 0 ? `+${marginCalc.marginHeightCm}` : marginCalc.marginHeightCm} سم</strong>
+                            الارتفاع: <strong>{marginCalc.marginHeightCm > 0 ? `+${marginCalc.marginHeightCm}` : marginCalc.marginHeightCm} سم</strong>
                             <span className="text-muted-foreground"> ({marginCalc.marginPerSideHeightCm! > 0 ? `+${marginCalc.marginPerSideHeightCm}` : marginCalc.marginPerSideHeightCm} سم لكل جانب)</span>
                           </div>
                         )}
@@ -853,15 +849,16 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                           </div>
                         )}
                       </div>
-                    </div>
+                      </div>
+                    </details>
                   );
                 })()}
               </div>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1.5 block">عدد الأوجه</Label>
+                <Label htmlFor="billboard-edit-faces" className="text-xs text-muted-foreground mb-1.5 block">عدد الأوجه</Label>
                 <div className="flex gap-1 items-center">
                   <Select value={String(editForm.Faces_Count || '')} onValueChange={(v) => setEditForm((p: any) => ({ ...p, Faces_Count: v }))}>
-                    <SelectTrigger className="text-sm bg-background border-border text-foreground h-9 flex-1">
+                    <SelectTrigger id="billboard-edit-faces" className="text-sm bg-background border-border text-foreground h-9 flex-1">
                       <SelectValue placeholder="اختر">
                         {editForm.Faces_Count ? 
                           faces.find(f => String(f.count) === String(editForm.Faces_Count) || String(f.face_count) === String(editForm.Faces_Count))?.name || editForm.Faces_Count
@@ -893,10 +890,10 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                 </div>
               </div>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1.5 block">المستوى</Label>
+                <Label htmlFor="billboard-edit-level" className="text-xs text-muted-foreground mb-1.5 block">المستوى</Label>
                 <div className="flex gap-1 items-center">
                   <Select value={editForm.Level || ''} onValueChange={(v) => setEditForm((p: any) => ({ ...p, Level: v }))}>
-                    <SelectTrigger className="text-sm bg-background border-border text-foreground h-9 flex-1">
+                    <SelectTrigger id="billboard-edit-level" className="text-sm bg-background border-border text-foreground h-9 flex-1">
                       <SelectValue placeholder="اختر المستوى">
                         {editForm.Level || "اختر المستوى"}
                       </SelectValue>
@@ -926,10 +923,10 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                 </div>
               </div>
               <div>
-                <Label className="text-xs text-muted-foreground mb-1.5 block">نوع اللوحة</Label>
+                <Label htmlFor="billboard-edit-type" className="text-xs text-muted-foreground mb-1.5 block">نوع اللوحة</Label>
                 <div className="flex gap-1 items-center">
                   <Select value={editForm.billboard_type || ''} onValueChange={(v) => setEditForm((p: any) => ({ ...p, billboard_type: v }))}>
-                    <SelectTrigger className="text-sm bg-background border-border text-foreground h-9 flex-1">
+                    <SelectTrigger id="billboard-edit-type" className="text-sm bg-background border-border text-foreground h-9 flex-1">
                       <SelectValue placeholder="اختر النوع">
                         {editForm.billboard_type || "اختر النوع"}
                       </SelectValue>
@@ -959,17 +956,19 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                 </div>
               </div>
             </div>
-          </div>
+          </section>
           
+          </div>
+          <div className="min-w-0 space-y-4">
           {/* صورة اللوحة */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+          <section className="edit-section">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
               <Upload className="h-3.5 w-3.5" />
               صورة اللوحة
               {imgbbUploading && <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />}
             </h3>
             <div 
-              className={`p-4 rounded-lg border-2 border-dashed transition-colors ${pasteActive ? 'border-primary bg-primary/5' : 'border-border bg-muted/30'}`}
+              className={`p-3 rounded-xl border border-dashed cursor-pointer transition-all duration-200 ${pasteActive ? 'border-primary bg-primary/5' : 'border-border bg-muted/30'}`}
               onPaste={handleBillboardImagePaste}
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setPasteActive(true); }}
@@ -988,7 +987,7 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
               {/* معاينة الصورة - كبيرة وواضحة */}
               <div className="mb-4">
                 {(imagePreview || editForm.Image_URL) ? (
-                  <div className="w-full h-56 bg-muted rounded-lg overflow-hidden border border-border shadow-sm">
+                  <div className="w-full aspect-[16/10] max-h-[220px] bg-muted/40 rounded-lg overflow-hidden border border-border">
                     <img 
                       src={imagePreview || editForm.Image_URL}
                       alt="معاينة الصورة"
@@ -996,15 +995,15 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                     />
                   </div>
                 ) : (
-                  <div className="w-full h-40 bg-muted/50 rounded-lg border border-dashed border-border flex flex-col items-center justify-center gap-2">
+                  <div className="w-full aspect-[16/10] max-h-[220px] bg-muted/30 rounded-lg flex flex-col items-center justify-center gap-2">
                     <ImageIcon className="h-10 w-10 text-muted-foreground/30" />
-                    <span className="text-sm text-muted-foreground">لا توجد صورة - اختر أو الصق صورة</span>
+                    <span className="text-sm text-muted-foreground">أضف صورة للوحة</span>
                   </div>
                 )}
               </div>
 
               {/* أزرار الرفع */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 <div>
                   <input
                     type="file"
@@ -1027,7 +1026,7 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                 </div>
                 <div>
                   <Input
-                    placeholder="أو الصق رابط الصورة هنا https://..."
+                    aria-label="رابط صورة اللوحة" placeholder="https://... رابط الصورة"
                     value={editForm.Image_URL || ''}
                     onChange={(e) => {
                       const normalized = normalizeGoogleImageUrl(e.target.value);
@@ -1042,11 +1041,70 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                 </div>
               </div>
             </div>
-          </div>
+          </section>
 
+          {/* الشركة المالكة (شركاتنا) */}
+          <section className="edit-section">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Building2 className="h-4 w-4 text-primary" />
+              الشركة المالكة
+            </h3>
+            <div className="min-w-0">
+              <Select
+                value={editForm.own_company_id || 'none'}
+                onValueChange={(v) => setEditForm((p: any) => ({ ...p, own_company_id: v === 'none' ? null : v }))}
+              >
+                <SelectTrigger aria-label="الشركة المالكة" className="text-sm bg-background border-border text-foreground h-9">
+                  <SelectValue placeholder="اختر الشركة المالكة" />
+                </SelectTrigger>
+                <SelectContent className="bg-popover border-border">
+                  <SelectItem value="none" className="text-popover-foreground">بدون تحديد</SelectItem>
+                  {ownCompanies.map((company) => (
+                    <SelectItem
+                      key={company.id}
+                      value={company.id}
+                      className="text-popover-foreground hover:bg-accent hover:text-accent-foreground"
+                    >
+                      {company.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </section>
+
+          {/* الشركة الصديقة */}
+          <section className="edit-section">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Handshake className="h-4 w-4 text-primary" />
+              الشركة الصديقة
+            </h3>
+            <div className="min-w-0">
+              <Select
+                value={editForm.friend_company_id || 'none'}
+                onValueChange={(v) => setEditForm((p: any) => ({ ...p, friend_company_id: v === 'none' ? null : v }))}
+              >
+                <SelectTrigger aria-label="الشركة الصديقة" className="text-sm bg-background border-border text-foreground h-9">
+                  <SelectValue placeholder="اختر الشركة الصديقة" />
+                </SelectTrigger>
+                <SelectContent className="bg-popover border-border">
+                  <SelectItem value="none" className="text-popover-foreground">بدون شركة صديقة</SelectItem>
+                  {friendCompanies.map((company) => (
+                    <SelectItem
+                      key={company.id}
+                      value={company.id}
+                      className="text-popover-foreground hover:bg-accent hover:text-accent-foreground"
+                    >
+                      {company.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </section>
           {/* الشراكة */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border">
+          <section className="edit-section">
+            <div className="flex items-center gap-3">
               <input 
                 type="checkbox" 
                 id="partnership-checkbox"
@@ -1054,14 +1112,14 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                 onChange={(e)=> setEditForm((p:any)=>({...p, is_partnership: e.target.checked}))} 
                 className="w-4 h-4 accent-primary rounded"
               />
-              <Label htmlFor="partnership-checkbox" className="text-sm text-foreground cursor-pointer">
+              <Label htmlFor="partnership-checkbox" className="text-sm text-foreground cursor-pointer flex-1 py-2">
                 لوحة شراكة
               </Label>
             </div>
-          </div>
+          </section>
 
           {editForm.is_partnership && (
-            <div className="p-4 rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20 space-y-4">
+            <div className="edit-section space-y-3">
               <div className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 bg-primary rounded-full" />
                 <span className="text-sm font-semibold text-foreground">إعدادات الشراكة</span>
@@ -1109,9 +1167,9 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
                             const newPartners = editForm.partner_companies.filter((_: any, i: number) => i !== idx);
                             setEditForm((p: any) => ({ ...p, partner_companies: newPartners }));
                           }}
-                          className="ml-1 text-destructive hover:text-destructive/80 font-bold"
+                          aria-label={`إزالة الشريك ${partner}`} className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full text-destructive transition-all duration-200 hover:bg-destructive/10"
                         >
-                          ×
+                          <X className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     ))}
@@ -1122,8 +1180,8 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
               {/* رأس المال */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-xs text-muted-foreground mb-1.5 block">إجمالي رأس المال</Label>
-                  <Input 
+                  <Label htmlFor="billboard-edit-capital" className="text-xs text-muted-foreground mb-1.5 block">إجمالي رأس المال</Label>
+                  <Input id="billboard-edit-capital"
                     className="text-sm font-medium bg-background border-border text-foreground h-9" 
                     type="number" 
                     value={editForm.capital || 0} 
@@ -1159,69 +1217,12 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
             </div>
           )}
 
-          {/* الشركة المالكة (شركاتنا) */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-              <span className="w-1.5 h-1.5 bg-primary rounded-full" />
-              الشركة المالكة
-            </h3>
-            <div className="p-4 rounded-lg bg-muted/30 border border-border">
-              <Select 
-                value={editForm.own_company_id || 'none'} 
-                onValueChange={(v) => setEditForm((p: any) => ({ ...p, own_company_id: v === 'none' ? null : v }))}
-              >
-                <SelectTrigger className="text-sm bg-background border-border text-foreground h-9">
-                  <SelectValue placeholder="اختر الشركة المالكة" />
-                </SelectTrigger>
-                <SelectContent className="bg-popover border-border">
-                  <SelectItem value="none" className="text-popover-foreground">بدون تحديد</SelectItem>
-                  {ownCompanies.map((company) => (
-                    <SelectItem 
-                      key={company.id} 
-                      value={company.id}
-                      className="text-popover-foreground hover:bg-accent hover:text-accent-foreground"
-                    >
-                      {company.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
-
-          {/* الشركة الصديقة */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-              <span className="w-1.5 h-1.5 bg-purple-500 rounded-full" />
-              الشركة الصديقة
-            </h3>
-            <div className="p-4 rounded-lg bg-muted/30 border border-border">
-              <Select 
-                value={editForm.friend_company_id || 'none'} 
-                onValueChange={(v) => setEditForm((p: any) => ({ ...p, friend_company_id: v === 'none' ? null : v }))}
-              >
-                <SelectTrigger className="text-sm bg-background border-border text-foreground h-9">
-                  <SelectValue placeholder="اختر الشركة الصديقة" />
-                </SelectTrigger>
-                <SelectContent className="bg-popover border-border">
-                  <SelectItem value="none" className="text-popover-foreground">بدون شركة صديقة</SelectItem>
-                  {friendCompanies.map((company) => (
-                    <SelectItem 
-                      key={company.id} 
-                      value={company.id}
-                      className="text-popover-foreground hover:bg-accent hover:text-accent-foreground"
-                    >
-                      {company.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
         </div>
 
         {/* أزرار الحفظ */}
-        <div className="flex justify-end gap-3 pt-4 border-t border-border mt-4">
+        <div className="shrink-0 flex items-center justify-end gap-2 border-t border-border bg-muted/20 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] sm:px-5">
           <Button 
             variant="outline" 
             onClick={() => {
@@ -1229,16 +1230,18 @@ export const BillboardEditDialog: React.FC<BillboardEditDialogProps> = ({
               setImagePreview('');
               setSelectedFile(null);
             }} 
-            className="px-6"
+            disabled={saving || imgbbUploading || uploadingImage}
+            className="min-w-20 px-5"
           >
             إلغاء
           </Button>
           <Button 
             onClick={saveEdit} 
-            disabled={saving || uploadingImage} 
-            className="px-6 bg-primary text-primary-foreground hover:bg-primary/90"
+            disabled={saving || uploadingImage || imgbbUploading}
+            className="flex-1 gap-2 px-5 sm:flex-none bg-primary text-primary-foreground hover:bg-primary/90"
           >
-            {saving ? 'جارٍ الحفظ...' : uploadingImage ? 'جاري رفع الصورة...' : 'حفظ التعديلات'}
+            {(saving || uploadingImage || imgbbUploading) ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {saving ? 'جارٍ الحفظ...' : (uploadingImage || imgbbUploading) ? 'جاري رفع الصورة...' : 'حفظ التعديلات'}
           </Button>
         </div>
         {/* Quick Add Dialogs */}

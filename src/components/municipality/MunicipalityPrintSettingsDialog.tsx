@@ -32,12 +32,17 @@ import { usePrintCustomization, PrintCustomizationSettings } from '@/hooks/usePr
 import { createPinSvgUrl } from '@/hooks/useMapMarkers';
 import { generateGoogleTilesMapDataUrl } from '@/utils/googleTilesMapGenerator';
 import DOMPurify from 'dompurify';
+import { buildMunicipalityPreviewDocument } from '@/utils/municipalityPreviewDocument';
+import { parseCoordinateInput, formatPrintCoordinates } from '@/utils/coordinateInput';
+import { buildMunicipalityPhoto } from '@/utils/municipalityPhoto';
+import { buildMunicipalitySizeFields } from '@/utils/municipalitySizeFields';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   backgroundUrl: string;
   onSaveSuccess?: () => void;
+  onShowHeightChange?: (show: boolean) => void;
   sampleBillboard?: {
     name: string;
     size: string;
@@ -48,6 +53,7 @@ interface Props {
     imageUrl?: string;
   };
   items?: any[];
+  printImageSource?: 'actual_image' | 'map_pin' | 'map_only';
 }
 
 const parseMM = (val: string): number => { const n = parseFloat(val); return isNaN(n) ? 0 : n; };
@@ -60,13 +66,50 @@ const parseRaw = (val: string, defaultVal = 1): number => { const n = parseFloat
 
 const parseDimensions = (sizeStr: string) => {
   if (!sizeStr) return { length: '', width: '', height: '' };
-  const normalized = sizeStr.replace(/×/g, 'x').replace(/X/g, 'x').replace(/\*/g, 'x');
-  const parts = normalized.split('x').map(p => p.trim());
-  return {
-    length: parts[0] || '',
-    width: parts[1] || '',
-    height: parts[2] || ''
-  };
+
+  const normalized = String(sizeStr || '').trim();
+  const lower = normalized.toLowerCase();
+
+  // Specific preset mapping for non-numeric labels
+  if (lower.includes('سوسيت') || lower.includes('soussette') || lower.includes('mupi')) {
+    return { length: '2', width: '1.2', height: '' };
+  }
+
+  // Split by 'x' or 'X' or '×' or '*'
+  const parts = normalized.replace(/×/g, 'x').replace(/\*/g, 'x').split(/x/i).map(p => p.trim());
+
+  if (parts.length >= 2) {
+    const cleanNum = (str: string) => {
+      const match = str.match(/([0-9]+(?:\.[0-9]+)?)/);
+      return match ? match[1] : '';
+    };
+
+    const d1 = cleanNum(parts[0]);
+    const d2 = cleanNum(parts[1]);
+    const d3 = parts[2] ? cleanNum(parts[2]) : '';
+
+    if (d1 && d2) {
+      const num1 = parseFloat(d1);
+      const num2 = parseFloat(d2);
+      const length = Math.max(num1, num2).toString();
+      const width = Math.min(num1, num2).toString();
+      return { length, width, height: d3 };
+    }
+  }
+
+  // Fallback regex match for any 2 numbers in string
+  const nums = normalized.match(/([0-9]+(?:\.[0-9]+)?)/g);
+  if (nums && nums.length >= 2) {
+    const n1 = parseFloat(nums[0]);
+    const n2 = parseFloat(nums[1]);
+    return {
+      length: Math.max(n1, n2).toString(),
+      width: Math.min(n1, n2).toString(),
+      height: nums[2] || ''
+    };
+  }
+
+  return { length: '', width: '', height: '' };
 };
 
 const generatePrintedSizeHtml = (sizeStr: string, showHeight: boolean, showLabels: boolean = false) => {
@@ -293,8 +336,10 @@ export default function MunicipalityPrintSettingsDialog({
   onOpenChange,
   backgroundUrl,
   onSaveSuccess,
+  onShowHeightChange,
   sampleBillboard: initialSampleBillboard,
   items,
+  printImageSource = 'map_pin',
 }: Props) {
   const { settings, saveSettings, resetToDefaults, saving } = usePrintCustomization('municipality');
   const [localSettings, setLocalSettings] = useState<PrintCustomizationSettings>(settings);
@@ -451,6 +496,7 @@ export default function MunicipalityPrintSettingsDialog({
     } catch {}
     const success = await saveSettings(localSettings);
     if (success) {
+      onShowHeightChange?.(showHeightInPrint);
       if (onSaveSuccess) onSaveSuccess();
       onOpenChange(false);
     }
@@ -511,6 +557,8 @@ export default function MunicipalityPrintSettingsDialog({
   // Live preview template
   const previewHtml = useMemo(() => {
     const s = localSettings;
+    const parsedCoords = parseCoordinateInput(sb.coords);
+    const displayCoords = parsedCoords ? formatPrintCoordinates(parsedCoords.latitude, parsedCoords.longitude) : sb.coords;
     const pinSize = parseRaw(s.pin_size || '80');
     // Status preview
     const munOverrides = localSettings.status_overrides?.['municipality'] || {};
@@ -560,19 +608,12 @@ export default function MunicipalityPrintSettingsDialog({
         </div>
         ` : ''}
 
-        <!-- المقاس -->
-        <div style="position:absolute;top:${s.size_top};left:${s.size_left};transform:translateX(-50%);width:70mm;display:flex;align-items:center;justify-content:center;text-align:center;font-size:${s.size_font_size};font-weight:${s.size_font_weight || '500'};color:${s.size_color};z-index:5;margin:0;padding:0;">
-          ${generatePrintedSizeHtml(sb.size, showHeightInPrint, (s as any).show_size_dimension_labels === 'true')}
-        </div>
- 
-        <!-- عدد الأوجه -->
-        ${s.faces_count_show !== 'false' ? `
-        <div style="position:absolute;top:${s.faces_count_top};left:${s.size_left};transform:translateX(-50%);width:70mm;display:flex;align-items:center;justify-content:center;text-align:center;font-size:${s.faces_count_font_size};font-weight:${(s as any).faces_count_font_weight || '700'};color:${s.faces_count_color || '#000000'};font-family:'${(s as any).faces_count_font_family || s.coords_font_family || 'Doran'}',sans-serif;z-index:5;margin:0;padding:0;line-height:1;">
-          ${sb.faces === 1 ? 'وجه واحد' : 'وجهين'}
-        </div>
-        ` : ''}
- 
+        ${buildMunicipalitySizeFields(s,
+          generatePrintedSizeHtml(sb.size, showHeightInPrint, (s as any).show_size_dimension_labels === 'true'),
+          sb.faces === 1 ? 'وجه واحد' : 'وجهين')}
+
         <!-- الصورة / الخريطة -->
+        ${printImageSource === 'actual_image' && sb.imageUrl ? buildMunicipalityPhoto(s, sb.imageUrl) : `
         <div style="position:absolute;top:${s.main_image_top};left:${s.main_image_left};transform:translateX(-50%);width:${s.main_image_width};height:${s.main_image_height};border:2px solid #ccc;border-radius:8px;overflow:hidden;z-index:5;display:flex;flex-direction:column;">
           ${sb.imageUrl ? `
             <div style="flex:1 1 50%;min-height:0;overflow:hidden;border-bottom:1px solid #ddd;position:relative;">
@@ -601,10 +642,11 @@ export default function MunicipalityPrintSettingsDialog({
             </div>
           `}
           <div style="height:${s.coords_bar_height || '26px'};background:rgba(255,255,255,0.95);display:flex;align-items:center;justify-content:center;border-top:1px solid #ddd;flex-shrink:0;z-index:12;">
-            <span style="font-size:${s.coords_font_size || '11px'};font-weight:700;color:#222;direction:ltr;font-family:'${s.coords_font_family || 'Manrope'}',monospace;letter-spacing:0.5px;">${sb.coords}</span>
+            <span style="font-size:${s.coords_font_size || '11px'};font-weight:700;color:#222;direction:ltr;font-family:'${s.coords_font_family || 'Manrope'}',monospace;letter-spacing:0.5px;">${displayCoords}</span>
           </div>
         </div>
- 
+        `}
+
         <!-- الموقع -->
         <div style="position:absolute;top:${s.location_info_top};left:${s.location_info_left};width:${s.location_info_width};font-size:${s.location_info_font_size};color:${s.location_info_color || '#000'};z-index:5;">
           ${sb.municipality} - طريق الشط
@@ -623,7 +665,7 @@ export default function MunicipalityPrintSettingsDialog({
         ${statusFooter}
       </div>
     `;
-  }, [localSettings, backgroundUrl, pinData.url, sb, previewMapUrl, previewMapLoading, pinUrl, showHeightInPrint]);
+  }, [localSettings, backgroundUrl, pinData.url, sb, previewMapUrl, previewMapLoading, pinUrl, showHeightInPrint, printImageSource]);
 
   // Cover page preview
   const coverPreviewHtml = useMemo(() => {
@@ -1108,15 +1150,17 @@ export default function MunicipalityPrintSettingsDialog({
                   height: `calc(297mm * ${previewZoom})`,
                 }}
               >
-                <div
-                  className="origin-top-left bg-white"
+                <iframe
+                  title="معاينة طباعة البلدية"
+                  sandbox="allow-same-origin"
+                  className="origin-top-left border-0 bg-white"
                   style={{
                     width: '210mm',
                     height: '297mm',
                     transform: `scale(${previewZoom})`,
                     transformOrigin: 'top left',
                   }}
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(activeTab === 'صفحة الغلاف' ? coverPreviewHtml : previewHtml) }}
+                  srcDoc={buildMunicipalityPreviewDocument(DOMPurify.sanitize(activeTab === 'صفحة الغلاف' ? coverPreviewHtml : previewHtml), window.location.origin)}
                 />
               </div>
             </div>

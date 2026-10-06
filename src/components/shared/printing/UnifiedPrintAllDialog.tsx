@@ -11,7 +11,36 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Printer, FileDown, Users, Check, FileText, Settings2, Table2, MessageCircle, Wrench, RefreshCw, Hash, Tag } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import {
+  Printer,
+  FileDown,
+  Users,
+  Check,
+  CheckCircle2,
+  FileText,
+  Settings2,
+  Table2,
+  MessageCircle,
+  Wrench,
+  RefreshCw,
+  Hash,
+  Tag,
+  Type,
+  Image as ImageIcon,
+  SlidersHorizontal,
+  Eye,
+  EyeOff,
+  LayoutTemplate,
+  User,
+  Calendar,
+  History,
+  MapPin,
+  Activity,
+  Ruler,
+  Camera,
+  Sparkles
+} from 'lucide-react';
 import QRCode from 'qrcode';
 import browserPdf from '@/lib/browserPdf';
 import { supabase } from '@/integrations/supabase/client';
@@ -24,6 +53,7 @@ import { createPinSvgUrl, getBillboardStatus } from '@/hooks/useMapMarkers';
 import { formatFacesCountArabic } from '@/lib/utils';
 import { preparePrintWindow, writePrintWindow } from '@/utils/printWindowHelper';
 import { resolveInstallationFacesCount } from '@/lib/installationFaces';
+import { resolvePrintCardLayout, fitPrintCardText } from '@/lib/printCardLayout';
 
 export type PrintContextType = 'installation' | 'removal' | 'contract' | 'offer';
 
@@ -285,6 +315,7 @@ export function UnifiedPrintAllDialog({
   const [hideCustomerName, setHideCustomerName] = useState(true);
   const [hideInstallDate, setHideInstallDate] = useState(true);
   const [hideAdType, setHideAdType] = useState(false);
+  const [hideInstalledImages, setHideInstalledImages] = useState(false);
   const [printType, setPrintType] = useState<'client' | 'installation'>(
     contextType === 'installation' || contextType === 'removal' ? 'installation' : 'client'
   );
@@ -442,7 +473,7 @@ export function UnifiedPrintAllDialog({
     if (!dims.length && !dims.width && !dims.height) return sizeStr;
 
     const showH = showHeight && !!dims.height;
-    
+
     return `
       <div class="print-size-container">
         <div class="print-dim-col">
@@ -464,7 +495,7 @@ export function UnifiedPrintAllDialog({
       </div>
     `;
   };
-  
+
   const { settings: customSettings, loading: settingsLoading } = usePrintCustomization();
   const { 
     settings: tableSettings, 
@@ -796,9 +827,9 @@ export function UnifiedPrintAllDialog({
 
   const filteredItems = useMemo(() => {
     if (!showTeamFilter) return items;
-    
+
     let result = items;
-    
+
     // فلتر حسب الفرق المختارة
     if (selectedTeamIds.size > 0) {
       result = result.filter(item => {
@@ -808,7 +839,7 @@ export function UnifiedPrintAllDialog({
     } else {
       result = [];
     }
-    
+
     // فلتر حسب حدود مدن الفرق
     if (respectCityLimits && selectedTeamIds.size > 0) {
       result = result.filter(item => {
@@ -821,7 +852,7 @@ export function UnifiedPrintAllDialog({
         return teamCities.includes(billboard.City);
       });
     }
-    
+
     return result;
   }, [items, selectedTeamIds, showTeamFilter, respectCityLimits, teams, billboards]);
 
@@ -853,7 +884,7 @@ export function UnifiedPrintAllDialog({
       : 'تركيب جديد';
 
     const parts: string[] = [];
-    if (contextNumber) {
+    if (!hideAdType && contextNumber) {
       parts.push(`تركيب رقم: ${contextNumber}`);
     }
     if (taskShortId) {
@@ -927,10 +958,6 @@ export function UnifiedPrintAllDialog({
     ]);
     const pages: string[] = [];
     const s = customSettings || {} as Record<string, string>;
-    const toMmOffset = (value?: string) => {
-      const parsed = parseFloat(String(value ?? '0').replace(/[^0-9.-]/g, ''));
-      return Number.isFinite(parsed) && parsed !== 0 ? `${parsed}mm` : '0mm';
-    };
     const toCssLength = (value?: string) => {
       const raw = String(value ?? '').trim();
       if (!raw) return '0mm';
@@ -956,26 +983,29 @@ export function UnifiedPrintAllDialog({
                              freshPrevAds[bIdKey] || 
                              previousAdsData[item.billboard_id] || previousAdsData[bIdKey] || previousAdsData[Number(item.billboard_id)] || 
                              billboards[item.billboard_id]?.previous_ad || billboards[item.billboard_id]?.previous_ad_type || '';
-      
-      // إذا كان خيار صور التركيب مفعّل، نجلبها من البيانات المحملة
-      const fetchedInstalled = showInstalledImages ? installedImagesData[item.billboard_id] : null;
-      const installedImageFaceA = item.installed_image_face_a_url || fetchedInstalled?.face_a || null;
-      const installedImageFaceB = supportsBackFace
-        ? item.installed_image_face_b_url || fetchedInstalled?.face_b || null
+
+      // صور التركيب: يتم جلبها أو استخدامها فقط إذا لم يتم تفعيل خيار إخفاء صور التركيب
+      const allowInstalledImages = !hideInstalledImages;
+      const fetchedInstalled = (allowInstalledImages && showInstalledImages) ? installedImagesData[item.billboard_id] : null;
+      const installedImageFaceA = allowInstalledImages
+        ? (item.installed_image_face_a_url || fetchedInstalled?.face_a || null)
         : null;
-      
-      const mainImage = installedImageFaceA && !installedImageFaceB 
-        ? installedImageFaceA 
+      const installedImageFaceB = (allowInstalledImages && supportsBackFace)
+        ? (item.installed_image_face_b_url || fetchedInstalled?.face_b || null)
+        : null;
+
+      const mainImage = (installedImageFaceA || installedImageFaceB) && !(installedImageFaceA && installedImageFaceB)
+        ? (installedImageFaceA || installedImageFaceB)
         : (billboard.Image_URL || '');
 
       const coords = billboard.GPS_Coordinates || '';
       const mapLink = coords 
         ? `https://www.google.com/maps?q=${encodeURIComponent(coords)}` 
         : 'https://www.google.com/maps?q=';
-      
+
       let qrCodeDataUrl = '';
       try {
-        qrCodeDataUrl = await QRCode.toDataURL(mapLink, { width: 100 });
+        if (coords) qrCodeDataUrl = await QRCode.toDataURL(mapLink, { width: 400, margin: 1 });
       } catch (error) {
         console.error('Error generating QR code:', error);
       }
@@ -985,7 +1015,7 @@ export function UnifiedPrintAllDialog({
       const pinColor = customSettings?.pin_color || '';
       const pinTextColor = customSettings?.pin_text_color || '';
       const customPinUrl = customSettings?.custom_pin_url || '';
-      
+
       let pinSvgDataUrl: string;
       if (customPinUrl) {
         pinSvgDataUrl = customPinUrl;
@@ -1009,9 +1039,7 @@ export function UnifiedPrintAllDialog({
 
       // نص حالة اللوحة (يظهر أسفل الاسم)
       const mStatusKey = (billboard.maintenance_status || '').toString().trim();
-      const showBillboardStatus = showBillboardStatusOpt
-        && (s as any).billboard_status_enabled === 'true'
-        && mStatusKey;
+      const showBillboardStatus = showBillboardStatusOpt && mStatusKey;
       const mStatusInfo = mStatusKey ? maintenanceStatusesMap[mStatusKey] : undefined;
       const billboardStatusLabel = mStatusInfo?.label || mStatusKey;
       const billboardStatusColor = mStatusInfo?.color || '#b91c1c';
@@ -1040,13 +1068,15 @@ export function UnifiedPrintAllDialog({
       ).trim();
       const cleanAdType = !hideAdType ? rawItemAdType.replace(/^نوع\s*الإعلان\s*:\s*/, '').trim() : '';
       const customerCompanyText = !hideCustomerName ? [customerName, companyName].filter(Boolean).join(' - ') : '';
-      
+
       let contractInfoText = '';
       if (contextType === 'installation') {
-        if (cleanAdType) {
-          contractInfoText = `نوع الإعلان: ${cleanAdType}`;
-        } else if (itemContractNumber) {
-          contractInfoText = `تركيب رقم: ${itemContractNumber}`;
+        if (!hideAdType) {
+          if (cleanAdType) {
+            contractInfoText = `نوع الإعلان: ${cleanAdType}`;
+          } else if (itemContractNumber) {
+            contractInfoText = `تركيب رقم: ${itemContractNumber}`;
+          }
         }
       } else {
         const parts = [
@@ -1060,7 +1090,7 @@ export function UnifiedPrintAllDialog({
       // تحديد الصورة الرئيسية والتراكب المفرغ إن وجد
       const hasMainImage = !!mainImage;
       const showPinFallback = contextType !== 'contract' && contextType !== 'offer' && contextType !== 'installation' && contextType !== 'removal';
-      
+
       const ov = item.overlay_config || billboard?.overlay_config;
       const isImageActive = ov ? ov.show_image !== false : true;
       const isOverlayActive = ov ? ov.enabled !== false : true;
@@ -1068,18 +1098,20 @@ export function UnifiedPrintAllDialog({
       const sizeKey = size?.trim() || '';
       const sizeCutoutUrl = sizeCutoutMap[sizeKey] || sizeCutoutMap[sizeKey.replace(/×/g, 'x').replace(/X/g, 'x')] || null;
       const activeCutout = isCutoutEnabled ? (ov?.cutout_image_url || sizeCutoutUrl || null) : null;
-      
-      const isDesignsIncluded = Boolean(includeDesigns && hasDesigns);
-      const effectiveS = (!isDesignsIncluded && s.status_overrides?.['no-design'])
-        ? { ...s, ...s.status_overrides['no-design'] }
-        : s;
 
-      const allowedImageHeight = isDesignsIncluded
-        ? (effectiveS.installed_image_height || '85mm')
-        : `${Math.max(parseFloat(effectiveS.main_image_height || '140'), 140)}mm`;
-      const maxAllowedWidth = isDesignsIncluded
-        ? ((effectiveS.main_image_width && parseFloat(effectiveS.main_image_width) > 190) ? effectiveS.main_image_width : '190mm')
-        : '190mm';
+      const isDesignsIncluded = Boolean(includeDesigns && hasDesigns);
+      const layoutMode = !isDesignsIncluded ? 'no-design' : isCutoutEnabled ? 'with-cutout'
+        : !supportsBackFace ? 'one-face' : !designFaceA || !designFaceB ? 'one-design' : 'normal';
+      const effectiveS = { ...s, ...s.status_overrides?.[layoutMode] };
+
+      const layout = resolvePrintCardLayout(effectiveS, {
+        hasDesigns: isDesignsIncluded,
+        pairedImages: Boolean(installedImageFaceA && installedImageFaceB),
+        dimensionLabels: showSizeDimensionLabels,
+        size,
+      });
+      const allowedImageHeight = `${layout.imageHeight}mm`;
+      const maxAllowedWidth = `${layout.imageWidth}mm`;
 
       let imageSection = '';
       if (hasMainImage && isImageActive) {
@@ -1092,7 +1124,7 @@ export function UnifiedPrintAllDialog({
           const isV2 = ov?.anchor_version === 'v2';
           const translateY = isV2 ? '-100%' : '-50%';
           const transformOrigin = isV2 ? 'bottom center' : 'center center';
-          
+
           imageSection = `
             <div class="overlay-container" style="position: relative; width: 100%; max-width: ${maxAllowedWidth}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: inline-flex; align-items: center; justify-content: center; overflow: visible;">
               <img src="${mainImage}" alt="صورة اللوحة" class="billboard-image" style="max-height: ${allowedImageHeight}; max-width: ${maxAllowedWidth}; width: auto; height: auto; object-fit: contain; display: block;" />
@@ -1140,14 +1172,17 @@ export function UnifiedPrintAllDialog({
           </div>
           ` : ''}
 
-          <div class="absolute-field contract-number" style="top: ${s.contract_number_top}; right: ${s.contract_number_right}; font-size: ${s.contract_number_font_size}; font-weight: ${s.contract_number_font_weight}; color: ${s.contract_number_color}; text-align: ${s.contract_number_alignment}; max-width: 75%; ${s.contract_number_offset_x && s.contract_number_offset_x !== '0mm' ? `margin-right: ${s.contract_number_offset_x};` : ''}">
-            ${showPreviousAd && itemPreviousAd ? `
-              <div class="previous-ad-row" style="font-size: 0.95em; font-weight: 700; color: #b8860b; margin-bottom: 2px; line-height: 1.2;">
-                <span>الإعلان السابق: </span><span style="color: #000; font-weight: 800;">${itemPreviousAd}</span>
-              </div>
-            ` : ''}
-            <div>${contractInfoText}</div>
+          ${contractInfoText ? `
+          <div class="absolute-field contract-number" style="top: ${s.contract_number_top}; right: ${s.contract_number_right}; left: auto; width: 85mm; max-width: 85mm; font-size: ${s.contract_number_font_size}; font-weight: ${s.contract_number_font_weight}; color: ${s.contract_number_color}; text-align: right; overflow-wrap: anywhere; ${s.contract_number_offset_x && s.contract_number_offset_x !== '0mm' ? `margin-right: ${s.contract_number_offset_x};` : ''}">
+            ${contractInfoText ? `<div>${contractInfoText}</div>` : ''}
           </div>
+          ` : ''}
+          ${(showPreviousAd && itemPreviousAd) || (contextType === 'installation' && customerCompanyText) ? `
+          <div class="absolute-field print-details" style="top: 74mm; left: 12mm; width: 138mm; font-size: 12px; line-height: 1.3; text-align: right;">
+            ${showPreviousAd && itemPreviousAd ? `<div class="previous-ad-row">الإعلان السابق: ${itemPreviousAd}</div>` : ''}
+            ${contextType === 'installation' && customerCompanyText ? `<div>الزبون: ${customerCompanyText}</div>` : ''}
+          </div>
+          ` : ''}
 
           ${installationDate ? `
           <div class="absolute-field installation-date" style="top: ${s.installation_date_top}; right: ${s.installation_date_right}; font-family: '${s.primary_font}', Arial, sans-serif; font-size: ${s.installation_date_font_size}; font-weight: ${s.installation_date_font_weight || '400'}; color: ${s.installation_date_color}; text-align: ${s.installation_date_alignment}; ${s.installation_date_offset_x && s.installation_date_offset_x !== '0mm' ? `margin-right: ${s.installation_date_offset_x};` : ''}">
@@ -1155,21 +1190,21 @@ export function UnifiedPrintAllDialog({
           </div>
           ` : ''}
 
-          <div class="absolute-field billboard-name" style="top: ${toCssLength(s.billboard_name_top)}; left: calc(${s.billboard_name_left} - 60mm${s.billboard_name_offset_x && s.billboard_name_offset_x !== '0mm' ? ` + ${s.billboard_name_offset_x}` : ''}); width: 120mm; text-align: ${s.billboard_name_alignment || 'center'}; font-size: ${s.billboard_name_font_size}; font-weight: ${s.billboard_name_font_weight}; color: ${s.billboard_name_color};">
+          <div class="absolute-field billboard-name" style="top: ${toCssLength(s.billboard_name_top)}; left: ${layout.nameCenter - layout.nameWidth / 2}mm; width: ${layout.nameWidth}mm; text-align: ${s.billboard_name_alignment || 'center'}; font-size: ${s.billboard_name_font_size}; font-weight: ${s.billboard_name_font_weight}; color: ${s.billboard_name_color};">
             ${name}
           </div>
 
           ${showBillboardStatus ? `
-          <div class="absolute-field billboard-status" style="top: calc(${toCssLength(s.billboard_name_top)} + ${s.billboard_name_font_size} + ${toCssLength(billboardStatusOffsetY)}); left: calc(${s.billboard_name_left} - 60mm${s.billboard_name_offset_x && s.billboard_name_offset_x !== '0mm' ? ` + ${s.billboard_name_offset_x}` : ''}); width: 120mm; text-align: ${s.billboard_name_alignment || 'center'}; font-size: ${billboardStatusFontSize}; font-weight: 600; color: #000;">
+          <div class="absolute-field billboard-status" style="top: calc(${toCssLength(s.billboard_name_top)} + ${s.billboard_name_font_size} + ${toCssLength(billboardStatusOffsetY)}); left: ${layout.nameCenter - layout.nameWidth / 2}mm; width: ${layout.nameWidth}mm; text-align: ${s.billboard_name_alignment || 'center'}; font-size: ${billboardStatusFontSize}; font-weight: 600; color: ${billboardStatusColor};">
             ${billboardStatusLabel}
           </div>
           ` : ''}
 
-          <div class="absolute-field size" style="top: ${toCssLength(s.size_top)}; left: calc(${s.size_left} - 40mm${s.size_offset_x && s.size_offset_x !== '0mm' ? ` + ${s.size_offset_x}` : ''}); width: 80mm; text-align: ${s.size_alignment || 'center'}; font-size: ${s.size_font_size}; font-weight: ${s.size_font_weight}; color: ${s.size_color};">
+          <div class="absolute-field size" style="top: ${layout.sizeTop}mm; left: ${layout.sizeCenter - 21}mm; width: 42mm; text-align: center; font-size: ${s.size_font_size}; font-weight: ${s.size_font_weight}; color: ${s.size_color};">
             ${generatePrintedSizeHtml(size, false, showSizeDimensionLabels)}
           </div>
-          
-          <div class="absolute-field faces-count" style="top: calc(${toCssLength(s.size_top)} + ${toCssLength(s.faces_count_top)}); left: calc(${s.size_left} - 40mm${s.size_offset_x && s.size_offset_x !== '0mm' ? ` + ${s.size_offset_x}` : ''}); width: 80mm; text-align: ${s.size_alignment || 'center'}; font-size: ${s.faces_count_font_size}; color: ${s.faces_count_color};">
+
+          <div class="absolute-field faces-count" style="top: ${layout.facesTop}mm; left: ${layout.sizeCenter - 21}mm; width: 42mm; text-align: center; font-size: ${s.faces_count_font_size}; color: ${s.faces_count_color}; font-weight: 600;">
             ${isCutoutEnabled ? 'مجسم - ' : ''}${formatFacesCountArabic(facesCount)}
           </div>
 
@@ -1180,7 +1215,7 @@ export function UnifiedPrintAllDialog({
           ` : ''}
 
           ${installedImageFaceA && installedImageFaceB ? `
-            <div class="absolute-field installed-images-container" style="top: ${effectiveS.installed_images_top}; left: ${effectiveS.installed_images_left || '50%'}; transform: translateX(-50%); width: ${effectiveS.installed_images_width || '180mm'}; max-width: ${maxAllowedWidth}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: flex; gap: ${effectiveS.installed_images_gap || '5mm'}; justify-content: center; align-items: center;">
+            <div class="absolute-field installed-images-container" style="top: ${layout.imageTop}mm; left: ${layout.imageCenter}mm; transform: translateX(-50%); width: ${maxAllowedWidth}; --installed-image-height: ${allowedImageHeight}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: flex; gap: ${effectiveS.installed_images_gap || '5mm'}; justify-content: center; align-items: center;">
               <div class="installed-image-column" style="flex: 1; max-width: calc(50% - (${effectiveS.installed_images_gap || '5mm'} / 2)); height: 100%; text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center;">
                 <div style="font-size: 12px; font-weight: 600; color: #000; margin-bottom: 2mm;">الوجه الأمامي</div>
                 <div class="installed-image-box" style="height: 100%; max-height: ${allowedImageHeight}; width: 100%; display: flex; align-items: center; justify-content: center; background: transparent; border: none; overflow: visible;">
@@ -1195,16 +1230,16 @@ export function UnifiedPrintAllDialog({
               </div>
             </div>
           ` : `
-            <div class="absolute-field image-container" style="top: ${effectiveS.main_image_top}; left: ${effectiveS.main_image_left || '50%'}; transform: translateX(-50%); width: 100%; max-width: ${maxAllowedWidth}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: flex; align-items: center; justify-content: center;">
+            <div class="absolute-field image-container" style="top: ${layout.imageTop}mm; left: ${layout.imageCenter}mm; transform: translateX(-50%); width: ${maxAllowedWidth}; height: ${allowedImageHeight}; max-height: ${allowedImageHeight}; display: flex; align-items: center; justify-content: center;">
               ${imageSection}
             </div>
           `}
 
-          <div class="absolute-field location-info" style="top: ${s.location_info_top}; left: calc(${toCssLength(s.location_info_left)} + ${toMmOffset(s.location_info_offset_x)}); width: ${s.location_info_width}; font-size: ${s.location_info_font_size}; color: ${s.location_info_color}; text-align: ${s.location_info_alignment};">
+          <div class="absolute-field location-info" style="top: ${layout.locationTop}mm; left: ${layout.location.left}mm; width: ${layout.location.width}mm; font-size: ${s.location_info_font_size}; color: ${s.location_info_color}; text-align: ${s.location_info_alignment};">
             ${municipalityDistrict}
           </div>
 
-          <div class="absolute-field landmark-info" style="top: ${s.landmark_info_top}; left: calc(${toCssLength(s.landmark_info_left)} + ${toMmOffset(s.landmark_info_offset_x)}); width: ${s.landmark_info_width}; font-size: ${s.landmark_info_font_size}; color: ${s.landmark_info_color}; text-align: ${s.landmark_info_alignment};">
+          <div class="absolute-field landmark-info" style="top: ${s.landmark_info_top}; left: ${layout.landmark.left}mm; width: ${layout.landmark.width}mm; font-size: ${s.landmark_info_font_size}; color: ${s.landmark_info_color}; text-align: ${s.landmark_info_alignment};">
             ${landmark || '—'}
           </div>
 
@@ -1217,17 +1252,17 @@ export function UnifiedPrintAllDialog({
           ` : ''}
 
           ${isDesignsIncluded ? `
-            <div class="absolute-field designs-section" style="top: ${toCssLength(s.designs_top)}; left: ${s.designs_left}; width: ${s.designs_width}; display: flex; gap: ${s.designs_gap}; align-items: flex-start;">
+            <div class="absolute-field designs-section" style="top: ${layout.designsTop}mm; left: ${layout.designsLeft}mm; width: ${layout.designsWidth}mm; --design-height: ${layout.designHeight}mm; display: flex; gap: ${effectiveS.designs_gap}; align-items: flex-start;">
               ${designFaceA ? `
                 <div class="design-item">
-                  <div class="design-label">${showDesignName && itemAdType && !hideAdType ? itemAdType : 'تصميم الوجه الأمامي'}</div>
-                  <img src="${designFaceA}" alt="تصميم الوجه الأمامي" class="design-image" style="max-height: ${s.design_image_height};" />
+                  <div class="design-label">${showDesignName && cleanAdType ? cleanAdType : 'تصميم الوجه الأمامي'}</div>
+                  <img src="${designFaceA}" alt="تصميم الوجه الأمامي" class="design-image" style="max-height: var(--design-height);" />
                 </div>
               ` : ''}
               ${designFaceB ? `
                 <div class="design-item">
-                  <div class="design-label">${showDesignName && itemAdType && !hideAdType ? itemAdType : 'تصميم الوجه الخلفي'}</div>
-                  <img src="${designFaceB}" alt="تصميم الوجه الخلفي" class="design-image" style="max-height: ${s.design_image_height};" />
+                  <div class="design-label">${showDesignName && cleanAdType ? cleanAdType : 'تصميم الوجه الخلفي'}</div>
+                  <img src="${designFaceB}" alt="تصميم الوجه الخلفي" class="design-image" style="max-height: var(--design-height);" />
                 </div>
               ` : ''}
             </div>
@@ -1237,7 +1272,7 @@ export function UnifiedPrintAllDialog({
     }
 
     const baseUrl = window.location.origin;
-    
+
     return `
       <!DOCTYPE html>
       <html dir="rtl" lang="ar">
@@ -1330,7 +1365,7 @@ export function UnifiedPrintAllDialog({
           .faces-count { line-height: 1.3; }
           .print-size-container { display: inline-flex; align-items: center; justify-content: center; gap: 0.12em; direction: rtl; color: inherit; white-space: nowrap; }
           .print-dim-col { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; color: inherit; }
-          .print-dim-label { font-size: 0.6em; opacity: 0.8; margin-bottom: 2px; }
+          .print-dim-label { font-family: 'Doran', sans-serif; font-size: 9px; margin-bottom: 1mm; }
           .print-dim-value { font-weight: inherit; }
           .print-dim-separator { margin: 0 0.1em; opacity: 0.7; }
           .contract-number { font-family: 'Doran', Arial, sans-serif; font-size: 16px; font-weight: 500; line-height: 1.2; }
@@ -1351,6 +1386,21 @@ export function UnifiedPrintAllDialog({
             background: transparent;
             border: none;
             box-sizing: border-box;
+          }
+          .installed-images-container .installed-image-column {
+            min-width: 0;
+            height: auto !important;
+            max-height: 100%;
+            justify-content: flex-start;
+          }
+          .installed-images-container .installed-image-box {
+            height: auto !important;
+            max-height: calc(100% - 6mm) !important;
+            flex: 0 1 auto;
+            min-height: 0;
+          }
+          .installed-images-container .installed-image {
+            max-height: calc(var(--installed-image-height, 85mm) - 6mm) !important;
           }
 
           .billboard-image, .installed-image {
@@ -1388,9 +1438,9 @@ export function UnifiedPrintAllDialog({
             background: #f8f9fa; border: 2px dashed #ccc; border-radius: 8px;
           }
 
-          .designs-section { flex-wrap: wrap; }
-          .design-item { flex: 1; min-width: 70mm; text-align: center; display: flex; flex-direction: column; align-items: center; }
-          .design-label { font-family: 'Doran', Arial, sans-serif; font-size: 13px; font-weight: 500; margin-bottom: 2mm; color: #333; line-height: 1; white-space: nowrap; }
+          .designs-section { flex-wrap: nowrap; justify-content: center; }
+          .design-item { flex: 1 1 0; min-width: 0; text-align: center; display: flex; flex-direction: column; align-items: center; }
+          .design-label { font-family: 'Doran', Arial, sans-serif; font-size: 12px; font-weight: 500; margin-bottom: 2mm; color: #333; line-height: 1.3; white-space: normal; overflow-wrap: anywhere; max-width: 100%; min-height: 4mm; }
           .design-image {
             max-width: 100%;
             max-height: 42mm;
@@ -1431,7 +1481,9 @@ export function UnifiedPrintAllDialog({
       <body class="print-portrait" data-orientation="portrait">
         ${pages.join('\n')}
         <script>
+          var fitPrintCardText = ${fitPrintCardText.toString()};
           function adjustOverlayPositions() {
+            fitPrintCardText(document);
             var containers = document.querySelectorAll('.overlay-container');
             containers.forEach(function(container) {
               var bgImg = container.querySelector('.billboard-image');
@@ -1516,7 +1568,7 @@ export function UnifiedPrintAllDialog({
     const GOLD = '#E8CC64';
     const BLACK = '#000000';
     const WHITE = '#ffffff';
-    
+
     const s = {
       ...tableSettings,
       header_bg_color: BLACK,
@@ -1527,13 +1579,13 @@ export function UnifiedPrintAllDialog({
       row_bg_color: WHITE,
       row_text_color: BLACK,
     };
-    
+
     const selectedTeamNames = showTeamFilter
       ? Array.from(selectedTeamIds).map(id => teams[id]?.team_name).filter(Boolean).join(' - ')
       : '';
 
     const enabledColumns = [...s.columns_order]
-      .filter(c => c.enabled)
+      .filter(c => c.enabled && (!hideInstalledImages || c.id !== 'installed_images') && (!hideInstallDate || c.id !== 'installation_date') && (s.show_qr_code || c.id !== 'qr_code'))
       .sort((a, b) => a.order - b.order);
 
     const columnHasData: Record<string, boolean> = {};
@@ -1555,8 +1607,18 @@ export function UnifiedPrintAllDialog({
           case 'landmark': if (billboard.Nearest_Landmark) columnHasData[col.id] = true; break;
           case 'contract_number': if (item.contract_number || contextNumber) columnHasData[col.id] = true; break;
           case 'installation_date': if (!hideInstallDate && item.installation_date) columnHasData[col.id] = true; break;
-          case 'design_images': if (item.design_face_a || (supportsBackFace && item.design_face_b)) columnHasData[col.id] = true; break;
-          case 'installed_images': if (item.installed_image_face_a_url || (supportsBackFace && item.installed_image_face_b_url)) columnHasData[col.id] = true; break;
+          case 'design_images': {
+            const design = freshDesigns[String(item.billboard_id)] || dynamicDesignsMap[item.billboard_id];
+            if (item.design_face_a || billboard.design_face_a || billboard.installed_design_face_a || design?.design_face_a ||
+              (supportsBackFace && (item.design_face_b || billboard.design_face_b || billboard.installed_design_face_b || design?.design_face_b))) columnHasData[col.id] = true;
+            break;
+          }
+          case 'installed_images': {
+            const installed = showInstalledImages ? installedImagesData[item.billboard_id] : null;
+            if (!hideInstalledImages && (item.installed_image_face_a_url || installed?.face_a ||
+              (supportsBackFace && (item.installed_image_face_b_url || installed?.face_b)))) columnHasData[col.id] = true;
+            break;
+          }
           case 'qr_code': if (billboard.GPS_Coordinates) columnHasData[col.id] = true; break;
         }
       });
@@ -1570,15 +1632,18 @@ export function UnifiedPrintAllDialog({
     const cleanAdType = !hideAdType ? rawAdType.replace(/^نوع\s*الإعلان\s*:\s*/, '').trim() : '';
 
     const pages: string[] = [];
-    const rowsPerPage = Math.min(s.rows_per_page || 11, 11);
-    
+    const rowHeightMm = Math.max(10, parseFloat(s.row_height || '60px') * ((s.row_height || '').endsWith('mm') ? 1 : 25.4 / 96));
+    const pageHeightMm = s.page_orientation === 'landscape' ? 210 : 297;
+    const availableTableHeight = pageHeightMm - 2 * parseFloat(s.page_margin || '8mm') - parseFloat(s.table_top_margin || '10mm') - 22;
+    const rowsPerPage = Math.max(1, Math.min(s.rows_per_page || 11, Math.floor(availableTableHeight / rowHeightMm)));
+
     for (let pageIndex = 0; pageIndex < Math.ceil(sortedItems.length / rowsPerPage); pageIndex++) {
       const pageItems = sortedItems.slice(pageIndex * rowsPerPage, (pageIndex + 1) * rowsPerPage);
-      
+
       const tableRows = await Promise.all(pageItems.map(async (item, index) => {
         const billboard = billboards[item.billboard_id];
         if (!billboard) return '';
-        
+
         const globalIndex = pageIndex * rowsPerPage + index + 1;
         const name = billboard.Billboard_Name || `لوحة ${item.billboard_id}`;
         const size = billboard.Size || '';
@@ -1587,7 +1652,7 @@ export function UnifiedPrintAllDialog({
         const municipality = printCityInsteadOfMunicipality ? (billboard.City || '') : (billboard.Municipality || '');
         const itemContractNumber = item.contract_number || contextNumber;
         const itemAdType = item.ad_type || adType || '';
-        
+
         const installationDate = (!hideInstallDate && item.installation_date)
           ? new Date(item.installation_date).toLocaleDateString('ar-LY', { year: 'numeric', month: '2-digit', day: '2-digit' })
           : '-';
@@ -1598,10 +1663,10 @@ export function UnifiedPrintAllDialog({
           const coords = billboard.GPS_Coordinates || '';
           mapLink = coords ? `https://www.google.com/maps?q=${encodeURIComponent(coords)}` : '';
           if (coords) {
-            try { qrCodeDataUrl = await QRCode.toDataURL(mapLink, { width: 50 }); } catch (e) {}
+            try { qrCodeDataUrl = await QRCode.toDataURL(mapLink, { width: 200, margin: 1 }); } catch (e) {}
           }
         }
-        
+
         const bIdKey = String(item.billboard_id);
         const dynDesign = freshDesigns[bIdKey] || dynamicDesignsMap[item.billboard_id] || dynamicDesignsMap[Number(item.billboard_id)];
         const tblDesignFaceA = item.design_face_a || billboard.design_face_a || billboard.installed_design_face_a || dynDesign?.design_face_a || null;
@@ -1618,28 +1683,32 @@ export function UnifiedPrintAllDialog({
             case 'row_number':
               return `<td class="number-cell"><div class="billboard-number">${globalIndex}</div></td>`;
             case 'billboard_image':
-              const fetchedInstImg = showInstalledImages ? installedImagesData[item.billboard_id] : null;
-              const instImgA = item.installed_image_face_a_url || fetchedInstImg?.face_a || null;
-              const tblImage = instImgA || billboard.Image_URL || '';
+              const fetchedInstImg = (!hideInstalledImages && showInstalledImages) ? installedImagesData[item.billboard_id] : null;
+              const instImgA = !hideInstalledImages ? (item.installed_image_face_a_url || fetchedInstImg?.face_a || null) : null;
+              const instImgB = !hideInstalledImages && supportsBackFace ? (item.installed_image_face_b_url || fetchedInstImg?.face_b || null) : null;
+              const tblImage = instImgA || instImgB || billboard.Image_URL || '';
               return `<td class="image-cell">${tblImage 
                 ? `<img src="${tblImage}" alt="${name}" class="billboard-image" onerror="this.style.display='none'">`
                 : `<div class="image-placeholder"><span>صورة</span></div>`}</td>`;
             case 'billboard_name':
-              return `<td style="font-weight: 600; text-align: right; padding: 4px; font-size: 8px;">${name}</td>`;
+              return `<td style="font-weight: 600; text-align: right; padding: 4px; font-size: ${s.row_font_size};">${name}</td>`;
             case 'size':
-              return `<td style="font-weight: 600; font-size: 8px;">${size}</td>`;
+              return `<td style="font-weight: 600; font-size: ${s.row_font_size};">${generatePrintedSizeHtml(size, false, showSizeDimensionLabels)}</td>`;
             case 'faces_count':
               return `<td style="font-size: 9px; font-weight: 700;">${facesCount}</td>`;
             case 'location':
-              return `<td style="text-align: right; padding: 4px; font-size: 8px;">${[municipality, billboard.District].filter(Boolean).join(' - ') || '-'}</td>`;
+              return `<td style="text-align: right; padding: 4px; font-size: ${s.row_font_size};">${[municipality, billboard.District].filter(Boolean).join(' - ') || '-'}</td>`;
             case 'landmark':
-              return `<td style="text-align: right; padding: 4px; font-size: 8px;">${billboard.Nearest_Landmark || '-'}</td>`;
+              return `<td style="text-align: right; padding: 4px; font-size: ${s.row_font_size};">${billboard.Nearest_Landmark || '-'}</td>`;
             case 'contract_number':
               const rawRowAd = !hideAdType ? (item.ad_type || dynDesign?.design_name || cleanAdType || itemAdType || '').trim() : '';
               const cleanRowAd = rawRowAd.replace(/^نوع\s*الإعلان\s*:\s*/, '').trim();
-              return `<td style="font-size: 8px;">${showPreviousAd && tblPreviousAd ? `<span style="font-size:7px;color:#444;font-weight:700;">السابق: ${tblPreviousAd}</span><br/>` : ''}${contextType === 'installation' ? (cleanRowAd ? `نوع الإعلان: ${cleanRowAd}` : itemContractNumber) : `${itemContractNumber}${cleanRowAd ? '<br/><span style="font-size:7px;color:#666;">' + cleanRowAd + '</span>' : ''}`}</td>`;
+              const installCell = hideAdType
+                ? '-'
+                : (cleanRowAd ? `نوع الإعلان: ${cleanRowAd}` : (itemContractNumber ? `تركيب رقم: ${itemContractNumber}` : '-'));
+              return `<td style="font-size: ${s.row_font_size};">${showPreviousAd && tblPreviousAd ? `<span style="font-size:7px;color:#444;font-weight:700;">السابق: ${tblPreviousAd}</span><br/>` : ''}${contextType === 'installation' ? installCell : `${itemContractNumber || '-'}${cleanRowAd ? '<br/><span style="font-size:7px;color:#666;">' + cleanRowAd + '</span>' : ''}`}</td>`;
             case 'installation_date':
-              return `<td style="font-size: 8px;">${installationDate}</td>`;
+              return `<td style="font-size: ${s.row_font_size};">${installationDate}</td>`;
             case 'design_images':
               return `<td class="image-cell"><div class="img-group">
                 ${tblDesignFaceA ? `<img src="${tblDesignFaceA}" class="design-img" />` : ''}
@@ -1647,6 +1716,7 @@ export function UnifiedPrintAllDialog({
                 ${!tblDesignFaceA && !tblDesignFaceB ? '-' : ''}
               </div></td>`;
             case 'installed_images':
+              if (hideInstalledImages) return `<td class="image-cell">-</td>`;
               const fetchedInst = showInstalledImages ? installedImagesData[item.billboard_id] : null;
               const instA = item.installed_image_face_a_url || fetchedInst?.face_a || null;
               const instB = supportsBackFace
@@ -1664,8 +1734,8 @@ export function UnifiedPrintAllDialog({
             default: return '';
           }
         });
-        
-        return `<tr style="height: 60px; background: #fff;">${cells.join('')}</tr>`;
+
+        return `<tr style="height: ${s.row_height || '60px'}; background: #fff;">${cells.join('')}</tr>`;
       }));
 
       const headerCells = finalColumns.map((col, colIndex) => {
@@ -1679,13 +1749,22 @@ export function UnifiedPrintAllDialog({
       const customerCompanyText = !hideCustomerName ? [customerName, companyName].filter(Boolean).join(' - ') : '';
       const primaryTaskId = taskId ? String(taskId) : (taskIds && taskIds.length > 0 ? String(taskIds[0]) : '');
 
+      let installInfoBar = '';
+      if (!hideAdType) {
+        if (cleanAdType) {
+          installInfoBar = `نوع الإعلان: ${cleanAdType}`;
+        } else if (contextNumber) {
+          installInfoBar = `تركيب رقم: ${contextNumber}`;
+        }
+      }
+
       const infoBarText = contextType === 'installation'
-        ? (cleanAdType ? `نوع الإعلان: ${cleanAdType}` : `تركيب رقم: ${contextNumber}`)
+        ? [installInfoBar, customerCompanyText].filter(Boolean).join(' | ')
         : `${getContextLabel()} رقم: ${contextNumber}${customerCompanyText ? ' | ' + customerCompanyText : ''}${cleanAdType ? ' | نوع الإعلان: ' + cleanAdType : ''}`;
 
       pages.push(`
         <div class="info-bar">
-          <span>${infoBarText}${printType === 'installation' && showTeamInContent && selectedTeamNames ? ' | الفريق: ' + selectedTeamNames : ''} | صفحة ${pageIndex + 1} من ${Math.ceil(sortedItems.length / rowsPerPage)}</span>
+          <span>${infoBarText ? `${infoBarText} | ` : ''}${printType === 'installation' && showTeamInContent && selectedTeamNames ? 'الفريق: ' + selectedTeamNames + ' | ' : ''}صفحة ${pageIndex + 1} من ${Math.ceil(sortedItems.length / rowsPerPage)}</span>
         </div>
         <table>
           <thead><tr>${headerCells.join('')}</tr></thead>
@@ -1699,7 +1778,7 @@ export function UnifiedPrintAllDialog({
     const tableTopMargin = s.table_top_margin || '10mm';
     const rowHeight = s.row_height || '60px';
     const baseUrl = window.location.origin;
-    
+
     return `
       <!DOCTYPE html>
       <html dir="rtl" lang="ar">
@@ -1733,27 +1812,29 @@ export function UnifiedPrintAllDialog({
           .page:last-child { page-break-after: auto; }
           .page-background {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background-image: url('${baseUrl}/repo.svg');
+            background-image: ${s.table_background_enabled && s.table_background_url ? `url('${s.table_background_url}')` : 'none'};
             background-size: 100% 100%; background-repeat: no-repeat; z-index: 0;
           }
           .page-content { position: relative; z-index: 1; padding-top: ${tableTopMargin}; }
           .info-bar { margin-bottom: 8px; padding: 6px 10px; background: ${s.header_bg_color}; display: inline-block; }
           .info-bar span { font-size: 10px; color: ${s.header_text_color}; font-weight: 700; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: ${s.row_font_size}; background: #fff; }
+          table { width: 100%; table-layout: fixed; border-collapse: collapse; margin-bottom: 10px; font-size: ${s.row_font_size}; background: #fff; }
           th { background: ${s.header_bg_color}; color: ${s.header_text_color}; font-weight: 700; font-size: ${s.header_font_size}; height: 30px; border: 1px solid ${s.border_color}; padding: 4px 2px; text-align: center; }
-          td { border: 1px solid ${s.border_color}; padding: 2px; text-align: center; vertical-align: middle; background: #fff; color: #000; }
+          td { border: 1px solid ${s.border_color}; padding: 2px; text-align: center; vertical-align: middle; background: #fff; color: #000; overflow-wrap: anywhere; }
           td.number-cell { background: ${s.first_column_bg_color}; font-weight: 700; font-size: 9px; color: ${s.first_column_text_color}; width: 60px; }
           td.image-cell { background: #fff; padding: 0; width: 70px; }
-          .billboard-image { width: 100%; height: auto; max-height: ${rowHeight}; object-fit: contain; display: block; margin: 0 auto; }
+          .billboard-image { width: 100%; height: auto; max-height: min(${rowHeight}, ${s.billboard_image_size}); object-fit: contain; display: block; margin: 0 auto; }
           .billboard-number { color: ${s.first_column_text_color}; font-weight: 700; font-size: 9px; }
           td.qr-cell { width: 60px; padding: 2px; }
-          .qr-code { width: 100%; height: auto; max-height: ${rowHeight}; display: block; margin: 0 auto; cursor: pointer; }
-          .img-group { display: flex; gap: 2px; justify-content: center; align-items: center; }
-          .design-img, .installed-img { max-width: 48%; max-height: calc(${rowHeight} - 4px); object-fit: contain; }
+          .qr-code { width: 100%; height: auto; max-height: min(${rowHeight}, ${s.qr_code_size}); display: block; margin: 0 auto; cursor: pointer; }
+          .img-group { display: flex; gap: 2px; justify-content: center; align-items: center; min-width: 0; }
+          .design-img, .installed-img { min-width: 0; max-width: 48%; max-height: calc(${rowHeight} - 4px); object-fit: contain; }
+          .design-img { max-height: min(calc(${rowHeight} - 4px), ${s.design_image_size}); }
+          .installed-img { max-height: min(calc(${rowHeight} - 4px), ${s.installed_image_size}); }
           .image-placeholder { width: 100%; height: ${rowHeight}; background: #f0f0f0; display: flex; align-items: center; justify-content: center; font-size: 7px; color: #666; }
           .print-size-container { display: inline-flex; align-items: center; justify-content: center; gap: 0.12em; direction: rtl; color: inherit; white-space: nowrap; }
           .print-dim-col { display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; color: inherit; }
-          .print-dim-label { font-size: 0.6em; opacity: 0.8; margin-bottom: 2px; }
+          .print-dim-label { font-family: 'Doran', sans-serif; font-size: 7px; margin-bottom: 1px; }
           .print-dim-value { font-weight: inherit; }
           .print-dim-separator { margin: 0 0.1em; opacity: 0.7; }
           @media print {
@@ -1806,7 +1887,7 @@ export function UnifiedPrintAllDialog({
     try {
       const isLandscapeTable = printMode === 'table' && tableSettings.page_orientation === 'landscape';
       const html = printMode === 'table' ? await generateTablePrintHTML() : await generatePrintHTML();
-      
+
       // 2. كتابة المحتوى مع حقن شريط الأدوات العائم واستخدام Blob URL
       writePrintWindow(printWindow, html, {
         title: docTitle,
@@ -2019,6 +2100,7 @@ export function UnifiedPrintAllDialog({
       }));
 
       // Trigger overlay calculations if any overlay containers exist
+      fitPrintCardText(iframeDoc);
       try {
         const containers = iframeDoc.querySelectorAll('.overlay-container');
         containers.forEach(function(container: any) {
@@ -2094,7 +2176,7 @@ export function UnifiedPrintAllDialog({
 
       for (let i = 0; i < pages.length; i++) {
         const pageEl = pages[i];
-        
+
         // Canvas 2D rendering with high DPI scale (3.0 for 300 DPI print quality)
         const canvas = await browserCanvas(pageEl, {
           scale: 3.0,
@@ -2227,27 +2309,28 @@ export function UnifiedPrintAllDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" aria-describedby={undefined}>
-        <DialogHeader>
-          <DialogTitle className="flex flex-col gap-2">
-            <div className="flex items-center gap-2 text-lg font-bold">
-              <div className="p-1.5 bg-primary/20 rounded-lg">
+      <DialogContent dir="rtl" className="print-all-dialog print-controls-dialog flex w-[calc(100vw-24px)] max-w-5xl max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:p-0 [&_button]:cursor-pointer [&_button]:transition-all [&_button]:duration-200" aria-describedby={undefined}>
+        <DialogHeader className="shrink-0 border-b border-border bg-muted/20 px-4 py-4 pl-12 sm:px-5 sm:pl-14">
+          <DialogTitle className="flex flex-col gap-1">
+            <div className="flex items-center gap-2 text-lg font-semibold">
+              <div className="shrink-0 rounded-xl border border-primary/20 bg-primary/10 p-1.5">
                 {isInstallation ? (
                   isReinstall ? <RefreshCw className="h-5 w-5 text-amber-500" /> : <Wrench className="h-5 w-5 text-primary" />
                 ) : (
                   <FileText className="h-5 w-5 text-primary" />
                 )}
               </div>
-              <span>{dialogTitle}</span>
+              <span className="min-w-0 break-words">طباعة الكل</span>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-sm font-normal mr-9">
+            <p className="text-sm font-normal leading-relaxed text-muted-foreground break-words sm:mr-12">{dialogTitle}</p>
+            <div className="flex flex-wrap items-center gap-2 text-sm font-normal sm:mr-12">
               {/* رقم مهمة التركيب */}
               {isInstallation && taskShortId && (
                 <Badge variant="outline" className="font-mono text-xs font-bold bg-muted/60 border-primary/30 text-foreground flex items-center gap-1">
                   <Hash className="h-3 w-3 text-primary" />
                   <span>مهمة #{taskShortId}</span>
                   {taskIds && taskIds.length > 1 && (
-                    <span className="text-[10px] text-muted-foreground font-normal">(+{taskIds.length - 1})</span>
+                    <span className="text-[12px] text-muted-foreground font-normal">(+{taskIds.length - 1})</span>
                   )}
                 </Badge>
               )}
@@ -2297,22 +2380,173 @@ export function UnifiedPrintAllDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
-          {/* اختيار الفرق */}
-          {showTeamFilter && Object.keys(itemsByTeam).length > 0 && (
-            <div className="p-4 bg-muted/50 rounded-xl border space-y-3">
+        <div className="print-controls-options min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
+            <div className="min-w-0"><p className="text-sm font-semibold">جهّز مستند الطباعة</p><p className="mt-1 text-xs text-muted-foreground">اختر النسخة وطريقة العرض، ثم اضبط البيانات والصور.</p></div>
+            <div className="shrink-0 text-center"><span className="text-[22px] font-semibold text-primary">{filteredItems.length}</span><p className="text-xs text-muted-foreground">لوحة محددة</p></div>
+          </div>
+          {/* 1. التحديد الأساسي: نوع النسخة ونمط الإخراج */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* اختيار الجهة الموجه إليها المستند */}
+            <div className="print-control-card rounded-xl border border-border bg-card p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <Label className="text-sm font-bold flex items-center gap-2">
-                  <Users className="h-4 w-4 text-primary" />
-                  اختر الفرق للطباعة
+                <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                  <Users className="h-3.5 w-3.5 text-primary" />
+                  <span>نسخة المستند</span>
+                </Label>
+                <Badge variant="outline" className="text-[11px] h-5 px-1.5 border-primary/30 text-primary bg-primary/5">
+                  {printType === 'client' ? 'للزبون' : 'لفريق العمل'}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  aria-pressed={printType === 'client'} onClick={() => setPrintType('client')}
+                  className={`p-2.5 rounded-lg border text-right transition-all cursor-pointer flex flex-col gap-1 relative ${
+                    printType === 'client'
+                      ? 'border-primary bg-primary/10 shadow-xs ring-1 ring-primary/30'
+                      : 'border-border/60 bg-muted/20 hover:border-primary/40 hover:bg-muted/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                      <User className={`h-3.5 w-3.5 ${printType === 'client' ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <span>نسخة العميل</span>
+                    </div>
+                    {printType === 'client' && (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                    )}
+                  </div>
+
+                </button>
+
+                <button
+                  type="button"
+                  aria-pressed={printType === 'installation'} onClick={() => setPrintType('installation')}
+                  className={`p-2.5 rounded-lg border text-right transition-all cursor-pointer flex flex-col gap-1 relative ${
+                    printType === 'installation'
+                      ? 'border-primary bg-primary/10 shadow-xs ring-1 ring-primary/30'
+                      : 'border-border/60 bg-muted/20 hover:border-primary/40 hover:bg-muted/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                      <Wrench className={`h-3.5 w-3.5 ${printType === 'installation' ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <span>نسخة {contextType === 'removal' ? 'الإزالة' : 'التركيب'}</span>
+                    </div>
+                    {printType === 'installation' && (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                    )}
+                  </div>
+
+                </button>
+              </div>
+            </div>
+
+            {/* نمط العرض والصفحات */}
+            <div className="print-control-card rounded-xl border border-border bg-card p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                  <FileText className="h-3.5 w-3.5 text-primary" />
+                  <span>طريقة العرض</span>
+                </Label>
+                <Badge variant="outline" className="text-[11px] h-5 px-1.5 border-primary/30 text-primary bg-primary/5">
+                  {printMode === 'cards' ? 'صفحة لكل لوحة' : 'جدول مدمج'}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  aria-pressed={printMode === 'cards'} onClick={() => setPrintMode('cards')}
+                  className={`p-2.5 rounded-lg border text-right transition-all cursor-pointer flex flex-col gap-1 relative ${
+                    printMode === 'cards'
+                      ? 'border-primary bg-primary/10 shadow-xs ring-1 ring-primary/30'
+                      : 'border-border/60 bg-muted/20 hover:border-primary/40 hover:bg-muted/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                      <FileText className={`h-3.5 w-3.5 ${printMode === 'cards' ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <span>بطاقات منفصلة</span>
+                    </div>
+                    {printMode === 'cards' && (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                    )}
+                  </div>
+
+                </button>
+
+                <button
+                  type="button"
+                  aria-pressed={printMode === 'table'} onClick={() => setPrintMode('table')}
+                  className={`p-2.5 rounded-lg border text-right transition-all cursor-pointer flex flex-col gap-1 relative ${
+                    printMode === 'table'
+                      ? 'border-primary bg-primary/10 shadow-xs ring-1 ring-primary/30'
+                      : 'border-border/60 bg-muted/20 hover:border-primary/40 hover:bg-muted/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                      <Table2 className={`h-3.5 w-3.5 ${printMode === 'table' ? 'text-primary' : 'text-muted-foreground'}`} />
+                      <span>جدول مجمع</span>
+                    </div>
+                    {printMode === 'table' && (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                    )}
+                  </div>
+
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. شريط ملخص التكوين الحي */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-card border border-border/80 text-xs shadow-xs">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="font-bold text-muted-foreground flex items-center gap-1 pl-1">
+                <Sparkles className="h-3.5 w-3.5 text-primary" />
+                <span>ملخص الطباعة:</span>
+              </span>
+              <Badge variant="secondary" className="h-5 px-1.5 text-[11px] font-semibold border border-primary/20 bg-primary/10 text-primary">
+                {printType === 'client' ? 'نسخة الزبون' : (contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب')}
+              </Badge>
+              <Badge variant="secondary" className="h-5 px-1.5 text-[11px] font-semibold border border-border bg-muted/60 text-foreground">
+                {printMode === 'cards' ? 'بطاقات' : 'جدول مجمع'}
+              </Badge>
+              <Badge variant="secondary" className="h-5 px-1.5 text-[11px] font-semibold border border-border bg-muted/60 text-foreground">
+                {!hideInstalledImages ? 'صور التركيب' : 'صورة اللوحة'}
+              </Badge>
+              <Badge variant="outline" className={`h-5 px-1.5 text-[11px] font-semibold ${!hideAdType ? 'border-emerald-500/30 text-emerald-600 bg-emerald-500/5' : 'border-border text-muted-foreground'}`}>
+                {!hideAdType ? 'نوع الإعلان: ظاهر' : 'نوع الإعلان: مخفي'}
+              </Badge>
+              <Badge variant="outline" className={`h-5 px-1.5 text-[11px] font-semibold ${!hideCustomerName ? 'border-emerald-500/30 text-emerald-600 bg-emerald-500/5' : 'border-border text-muted-foreground'}`}>
+                {!hideCustomerName ? 'العميل: ظاهر' : 'العميل: مخفي'}
+              </Badge>
+            </div>
+            <div className="flex items-center gap-1 font-bold text-xs text-foreground">
+              <Badge className="bg-primary/20 text-primary border-0 font-bold h-5 px-2">
+                {filteredItems.length} لوحة جاهزة
+              </Badge>
+            </div>
+          </div>
+
+          {/* 3. اختيار الفرق (إن وجدت) */}
+          {showTeamFilter && Object.keys(itemsByTeam).length > 0 && (
+            <div className="p-3 bg-muted/40 rounded-xl border border-border/80 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label className="text-xs font-bold flex items-center gap-2">
+                  <Users className="h-3.5 w-3.5 text-primary" />
+                  <span>تصفية اللوحات حسب الفرق ({Object.keys(itemsByTeam).length} فرقة)</span>
                 </Label>
                 <div className="flex gap-1">
-                  <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={selectAllTeams}>الكل</Button>
-                  <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={clearTeamSelection}>مسح</Button>
+                  <Button type="button" variant="ghost" size="sm" className="h-7 text-xs px-2" onClick={selectAllTeams}>الكل</Button>
+                  <Button type="button" variant="ghost" size="sm" className="h-7 text-xs px-2" onClick={clearTeamSelection}>مسح</Button>
                 </div>
               </div>
-              
-              <div className="flex flex-wrap gap-2">
+
+              <div className="flex flex-wrap gap-1.5">
                 {Object.entries(itemsByTeam).map(([teamId, teamItems]) => {
                   const isSelected = selectedTeamIds.has(teamId);
                   const team = teams[teamId];
@@ -2323,26 +2557,26 @@ export function UnifiedPrintAllDialog({
                         return billboard && teamCities.includes(billboard.City);
                       }).length
                     : teamItems.length;
-                  
+
                   return (
                     <button
                       key={teamId}
                       type="button"
                       onClick={() => toggleTeam(teamId)}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 transition-all ${
+                      aria-pressed={isSelected}
+                      className={`flex h-8 items-center gap-1.5 px-2.5 rounded-lg border text-xs transition-all duration-200 cursor-pointer ${
                         isSelected
-                          ? 'border-primary bg-primary/10 shadow-sm'
+                          ? 'border-primary bg-primary/10 font-bold shadow-xs'
                           : 'border-border bg-card hover:border-primary/50'
                       }`}
                     >
-                      <div className={`h-4 w-4 rounded border-2 flex items-center justify-center ${
+                      <div className={`h-3.5 w-3.5 rounded border flex items-center justify-center ${
                         isSelected ? 'border-primary bg-primary' : 'border-muted-foreground'
                       }`}>
-                        {isSelected && <Check className="h-3 w-3 text-primary-foreground" />}
+                        {isSelected && <Check className="h-2.5 w-2.5 text-primary-foreground" />}
                       </div>
-                      <Users className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium text-sm">{teams[teamId]?.team_name || (teamId === 'unknown' ? 'بدون فرقة محددة' : 'غير محدد')}</span>
-                      <Badge variant="secondary" className="text-xs">
+                      <span>{teams[teamId]?.team_name || (teamId === 'unknown' ? 'بدون فرقة' : 'غير محدد')}</span>
+                      <Badge variant="secondary" className="text-[11px] h-4 px-1">
                         {respectCityLimits && cityFilteredCount !== teamItems.length
                           ? `${cityFilteredCount}/${teamItems.length}`
                           : teamItems.length}
@@ -2352,394 +2586,419 @@ export function UnifiedPrintAllDialog({
                 })}
               </div>
 
-              <div className="pt-2 border-t space-y-2">
-                <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-                  <Checkbox
+              <div className="pt-2 border-t border-border/50 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Switch
                     id="respectCityLimits"
                     checked={respectCityLimits}
                     onCheckedChange={(c) => setRespectCityLimits(!!c)}
                   />
-                  <Label htmlFor="respectCityLimits" className="cursor-pointer flex-1 text-sm">
-                    الالتزام بحدود مدن الفرق (تجاهل اللوحات خارج نطاق المدينة)
+                  <Label htmlFor="respectCityLimits" className="cursor-pointer text-xs font-medium">
+                    الالتزام بحدود مدن الفرق
                   </Label>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">اللوحات المحددة:</span>
-                  <Badge className="text-sm font-bold">{filteredItems.length} لوحة</Badge>
+                <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <span>اللوحات المحددة:</span>
+                  <Badge variant="outline" className="text-xs font-bold">{filteredItems.length} لوحة</Badge>
                 </div>
               </div>
 
-              {/* خيارات عرض اسم الفريق في المستند - بارزة في قسم الفرق */}
-              <div className="pt-3 border-t border-amber-500/20 space-y-2.5 bg-amber-500/5 -mx-4 -mb-4 p-4 rounded-b-xl">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400">
-                  <Users className="h-4 w-4" />
-                  <span>خيارات عرض اسم {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'} في الطباعة:</span>
+              <div className="pt-2 border-t border-border/40 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="flex items-center justify-between p-2 rounded-lg border border-border/60 bg-card/60">
+                  <Label htmlFor="showTeamInContent_teamSec" className="cursor-pointer text-xs">
+                    إظهار اسم {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'} داخل الطباعة
+                  </Label>
+                  <Switch
+                    id="showTeamInContent_teamSec"
+                    checked={showTeamInContent}
+                    onCheckedChange={(c) => setShowTeamInContent(!!c)}
+                  />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div className="flex items-center gap-2 p-2.5 rounded-lg border border-amber-500/30 bg-background/80 hover:bg-muted/50 transition-colors">
-                    <Checkbox
-                      id="showTeamInContent_teamSec"
-                      checked={showTeamInContent}
-                      onCheckedChange={(c) => setShowTeamInContent(!!c)}
-                    />
-                    <Label htmlFor="showTeamInContent_teamSec" className="cursor-pointer flex-1 text-xs font-medium">
-                      إظهار اسم {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'} داخل الطباعة
-                    </Label>
-                  </div>
 
-                  <div className="flex items-center gap-2 p-2.5 rounded-lg border border-amber-500/30 bg-background/80 hover:bg-muted/50 transition-colors">
-                    <Checkbox
-                      id="showTeamInHeader_teamSec"
-                      checked={showTeamInHeader}
-                      onCheckedChange={(c) => setShowTeamInHeader(!!c)}
-                    />
-                    <Label htmlFor="showTeamInHeader_teamSec" className="cursor-pointer flex-1 text-xs font-medium">
-                      إظهار اسم {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'} في ترويسة نافذة الطباعة
-                    </Label>
-                  </div>
+                <div className="flex items-center justify-between p-2 rounded-lg border border-border/60 bg-card/60">
+                  <Label htmlFor="showTeamInHeader_teamSec" className="cursor-pointer text-xs">
+                    إظهار اسم الفريق في ترويسة النافذة
+                  </Label>
+                  <Switch
+                    id="showTeamInHeader_teamSec"
+                    checked={showTeamInHeader}
+                    onCheckedChange={(c) => setShowTeamInHeader(!!c)}
+                  />
                 </div>
               </div>
             </div>
           )}
 
-          {/* نوع الطباعة (بطاقات / جدول) */}
-          <div className="p-4 bg-muted/50 rounded-xl border space-y-3">
-            <Label className="text-sm font-bold flex items-center gap-2">
-              <FileText className="h-4 w-4 text-primary" />
-              نوع الطباعة
-            </Label>
-            <div className="flex gap-2">
-              <Button
-                variant={printMode === 'cards' ? 'default' : 'outline'}
-                onClick={() => setPrintMode('cards')}
-                className="flex-1 flex items-center gap-2"
-              >
-                <FileText className="h-4 w-4" />
-                بطاقات (صفحة لكل لوحة)
-              </Button>
-              <Button
-                variant={printMode === 'table' ? 'default' : 'outline'}
-                onClick={() => setPrintMode('table')}
-                className="flex-1 flex items-center gap-2"
-              >
-                <Table2 className="h-4 w-4" />
-                جدول
-              </Button>
-            </div>
-          </div>
+          {/* جميع الخيارات في صفحة واحدة */}
+          <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-2">
 
-          {/* قسم مطوي: اختيار قالب الخلفية والشعار والإعدادات المتقدمة */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 overflow-hidden shadow-md">
-            <button
-              type="button"
-              onClick={() => setShowBackgroundOptions(!showBackgroundOptions)}
-              className="w-full p-3.5 flex items-center justify-between bg-slate-900/90 text-right hover:bg-slate-850 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Settings2 className="h-4 w-4 text-amber-400" />
-                <span className="text-xs font-black text-slate-200">
-                  خيارات قالب الخلفية والشعار والإعدادات المتقدمة {showBackgroundOptions ? '' : '(مطوية)'}
-                </span>
+            {/* تبويب 1: النصوص والبيانات */}
+            <section aria-labelledby="print-content-heading" className="print-control-card md:row-span-2 space-y-2 rounded-xl border border-border bg-card p-4"><h3 id="print-content-heading" className="flex items-center gap-2 border-b border-border pb-3 text-sm font-semibold"><Type className="h-4 w-4 text-primary" />النصوص والبيانات</h3>
+              <div className="grid grid-cols-1 gap-0">
+                {/* نوع الإعلان ورقم التركيب */}
+                <div className="flex min-h-[40px] items-center justify-between gap-3 border-b border-border/50 px-2 py-1.5 last:border-b-0 hover:bg-muted/30 transition-colors"><Label htmlFor="hideAdType" className="flex min-h-[32px] flex-1 items-center gap-2 cursor-pointer text-xs font-medium text-foreground"><Tag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />نوع الإعلان ورقم التركيب</Label><Switch
+                      id="hideAdType"
+                      checked={!hideAdType}
+                      onCheckedChange={(checked) => setHideAdType(!checked)}
+                    /></div>
+
+                {/* اسم الزبون والشركة */}
+                <div className="flex min-h-[40px] items-center justify-between gap-3 border-b border-border/50 px-2 py-1.5 last:border-b-0 hover:bg-muted/30 transition-colors"><Label htmlFor="hideCustomerName" className="flex min-h-[32px] flex-1 items-center gap-2 cursor-pointer text-xs font-medium text-foreground"><User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />اسم العميل والشركة</Label><Switch
+                      id="hideCustomerName"
+                      checked={!hideCustomerName}
+                      onCheckedChange={(checked) => setHideCustomerName(!checked)}
+                    /></div>
+
+                {/* تاريخ العملية */}
+                <div className="flex min-h-[40px] items-center justify-between gap-3 border-b border-border/50 px-2 py-1.5 last:border-b-0 hover:bg-muted/30 transition-colors"><Label htmlFor="hideInstallDate" className="flex min-h-[32px] flex-1 items-center gap-2 cursor-pointer text-xs font-medium text-foreground"><Calendar className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />تاريخ {contextType === 'removal' ? 'الإزالة' : 'التركيب'}</Label><Switch
+                      id="hideInstallDate"
+                      checked={!hideInstallDate}
+                      onCheckedChange={(checked) => setHideInstallDate(!checked)}
+                    /></div>
+
+                {/* الإعلان السابق */}
+                <div className="flex min-h-[40px] items-center justify-between gap-3 border-b border-border/50 px-2 py-1.5 last:border-b-0 hover:bg-muted/30 transition-colors"><Label htmlFor="showPreviousAd" className="flex min-h-[32px] flex-1 items-center gap-2 cursor-pointer text-xs font-medium text-foreground"><History className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />الإعلان السابق</Label><Switch
+                      id="showPreviousAd"
+                      checked={showPreviousAd}
+                      onCheckedChange={(checked) => setShowPreviousAd(checked)}
+                    /></div>
+
+                {/* مسمى المدينة بدل البلدية */}
+                <div className="flex min-h-[40px] items-center justify-between gap-3 border-b border-border/50 px-2 py-1.5 last:border-b-0 hover:bg-muted/30 transition-colors"><Label htmlFor="printCityInsteadOfMunicipality" className="flex min-h-[32px] flex-1 items-center gap-2 cursor-pointer text-xs font-medium text-foreground"><MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />مسمى المدينة بدل البلدية</Label><Switch
+                      id="printCityInsteadOfMunicipality"
+                      checked={printCityInsteadOfMunicipality}
+                      onCheckedChange={(checked) => setPrintCityInsteadOfMunicipality(checked)}
+                    /></div>
+
+                {/* خيارات الفريق إذا لم تكن التصفية ظاهرة */}
+                {(!showTeamFilter || Object.keys(itemsByTeam).length === 0) && (
+                  <>
+                    <div className="flex min-h-[40px] items-center justify-between gap-3 border-b border-border/50 px-2 py-1.5 last:border-b-0 hover:bg-muted/30 transition-colors"><Label htmlFor="showTeamInContent" className="flex min-h-[32px] flex-1 items-center gap-2 cursor-pointer text-xs font-medium text-foreground"><Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />اسم الفريق في المحتوى</Label><Switch
+                          id="showTeamInContent"
+                          checked={showTeamInContent}
+                          onCheckedChange={(checked) => setShowTeamInContent(checked)}
+                        /></div>
+
+                    <div className="flex min-h-[40px] items-center justify-between gap-3 border-b border-border/50 px-2 py-1.5 last:border-b-0 hover:bg-muted/30 transition-colors"><Label htmlFor="showTeamInHeader" className="flex min-h-[32px] flex-1 items-center gap-2 cursor-pointer text-xs font-medium text-foreground"><Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />اسم الفريق في الترويسة</Label><Switch
+                          id="showTeamInHeader"
+                          checked={showTeamInHeader}
+                          onCheckedChange={(checked) => setShowTeamInHeader(checked)}
+                        /></div>
+                  </>
+                )}
               </div>
-              <Badge variant="outline" className="text-[10px] text-amber-400 border-amber-500/30">
-                {showBackgroundOptions ? 'إخفاء الخيارات' : 'إظهار والتعديل'}
-              </Badge>
-            </button>
+            </section>
 
-            {showBackgroundOptions && (
-              <div className="p-4 border-t border-slate-800/80 space-y-3.5 bg-slate-950/60">
+            {/* تبويب 2: الصور والتصاميم */}
+            <section aria-labelledby="print-images-heading" className="print-control-card space-y-2 rounded-xl border border-border bg-card p-4"><h3 id="print-images-heading" className="flex items-center gap-2 border-b border-border pb-3 text-sm font-semibold"><ImageIcon className="h-4 w-4 text-primary" />الصور والتصاميم</h3>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                  <ImageIcon className="h-3.5 w-3.5 text-primary" />
+                  <span>مصدر صور اللوحات في الطباعة:</span>
+                </Label>
+                <div className="grid grid-cols-1 gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHideInstalledImages(false);
+                      setShowInstalledImages(true);
+                    }}
+                    className={`p-3 rounded-xl border text-right transition-all cursor-pointer flex items-center gap-3 relative ${
+                      !hideInstalledImages
+                        ? 'border-primary bg-primary/10 shadow-xs ring-1 ring-primary/30'
+                        : 'border-border/70 bg-card hover:border-primary/40'
+                    }`}
+                  >
+                    <div className={`p-2 rounded-lg shrink-0 ${!hideInstalledImages ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                      <Camera className="h-4 w-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-bold flex items-center gap-1.5">
+                        <span>صور التركيب الفعلية</span>
+                        {!hideInstalledImages && <CheckCircle2 className="h-3.5 w-3.5 text-primary" />}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5 leading-tight">
+                        عرض صور الواجهات الحقيقية بعد التركيب في الموقع
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHideInstalledImages(true);
+                      setShowInstalledImages(false);
+                    }}
+                    className={`p-3 rounded-xl border text-right transition-all cursor-pointer flex items-center gap-3 relative ${
+                      hideInstalledImages
+                        ? 'border-primary bg-primary/10 shadow-xs ring-1 ring-primary/30'
+                        : 'border-border/70 bg-card hover:border-primary/40'
+                    }`}
+                  >
+                    <div className={`p-2 rounded-lg shrink-0 ${hideInstalledImages ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
+                      <EyeOff className="h-4 w-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-bold flex items-center gap-1.5">
+                        <span>صورة اللوحة الأصلية</span>
+                        {hideInstalledImages && <CheckCircle2 className="h-3.5 w-3.5 text-primary" />}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5 leading-tight">
+                        إخفاء صور التركيب وعرض صورة اللوحة النظيفة فقط
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {printMode === 'cards' && (
+                <div className="p-3.5 rounded-xl border border-border/70 bg-card/70 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-start gap-2.5 min-w-0 pr-1">
+                      <div className="p-1.5 rounded-lg bg-primary/10 text-primary mt-0.5 shrink-0">
+                        <Sparkles className="h-3.5 w-3.5" />
+                      </div>
+                      <div className="space-y-0.5 min-w-0">
+                        <Label htmlFor="includeDesigns" className="text-xs font-bold cursor-pointer text-foreground block">
+                          تضمين صور التصاميم الإعلانية
+                        </Label>
+                        <p className="text-[11px] text-muted-foreground leading-tight">
+                          إدراج صورة التصميم المعتمد أسفل صورة اللوحة في البطاقة
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {includeDesigns ? (
+                        <Badge className="bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 text-[10px] h-5 px-1.5 font-semibold">
+                          مضمن
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-muted-foreground text-[10px] h-5 px-1.5 font-semibold">
+                          مستبعد
+                        </Badge>
+                      )}
+                      <Switch
+                        id="includeDesigns"
+                        checked={includeDesigns}
+                        onCheckedChange={(c) => setIncludeDesigns(!!c)}
+                      />
+                    </div>
+                  </div>
+
+                  {includeDesigns && (
+                    <div className="pt-2.5 border-t border-border/40 flex items-center justify-between mr-6">
+                      <div className="space-y-0.5 min-w-0">
+                        <Label htmlFor="showDesignName" className="text-xs font-medium cursor-pointer text-foreground block">
+                          عرض اسم التصميم الفعلي
+                        </Label>
+                        <p className="text-[11px] text-muted-foreground leading-tight">
+                          استبدال عبارة "تصميم الوجه" باسم الحملة أو الملف الفعلي
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {showDesignName ? (
+                          <Badge className="bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 text-[10px] h-5 px-1.5 font-semibold">
+                            الاسم الفعلي
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-muted-foreground text-[10px] h-5 px-1.5 font-semibold">
+                            افتراضي
+                          </Badge>
+                        )}
+                        <Switch
+                          id="showDesignName"
+                          checked={showDesignName}
+                          onCheckedChange={(c) => setShowDesignName(!!c)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+
+            {/* تبويب 3: المظهر والتنسيق */}
+            <section aria-labelledby="print-settings-heading" className="print-control-card space-y-2 rounded-xl border border-border bg-card p-4"><h3 id="print-settings-heading" className="flex items-center gap-2 border-b border-border pb-3 text-sm font-semibold"><SlidersHorizontal className="h-4 w-4 text-primary" />المظهر والتنسيق</h3>
+              <div className="grid grid-cols-1 gap-0">
                 {printMode === 'cards' && (
-                  <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex min-h-[40px] items-center justify-between gap-3 border-b border-border/50 px-2 py-1.5 last:border-b-0 hover:bg-muted/30 transition-colors"><Label htmlFor="showBillboardStatusOpt" className="flex min-h-[32px] flex-1 items-center gap-2 cursor-pointer text-xs font-medium text-foreground"><Activity className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />إظهار حالة اللوحة</Label><Switch
+                        id="showBillboardStatusOpt"
+                        checked={showBillboardStatusOpt}
+                        onCheckedChange={(c) => setShowBillboardStatusOpt(!!c)}
+                      /></div>
+                )}
+
+                <div className="flex min-h-[40px] items-center justify-between gap-3 border-b border-border/50 px-2 py-1.5 last:border-b-0 hover:bg-muted/30 transition-colors"><Label htmlFor="showSizeDimensionLabels" className="flex min-h-[32px] flex-1 items-center gap-2 cursor-pointer text-xs font-medium text-foreground"><Ruler className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />مسميات المقاس والأبعاد</Label><Switch
+                      id="showSizeDimensionLabels"
+                      checked={showSizeDimensionLabels}
+                      onCheckedChange={(c) => setShowSizeDimensionLabels(!!c)}
+                    /></div>
+              </div>
+
+              {/* إعدادات القالب والغلاف المتقدمة */}
+              <div className="p-3.5 rounded-xl border border-border/80 bg-muted/20 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-start gap-2.5">
+                    <div className="p-1.5 rounded-lg bg-primary/10 text-primary mt-0.5 shrink-0">
+                      <LayoutTemplate className="h-4 w-4" />
+                    </div>
+                    <div className="space-y-0.5">
+                      <div className="text-xs font-bold text-foreground">
+                        {printMode === 'cards' ? 'قالب الخلفية ومواضع الحقول' : 'مظهر وتنسيق جدول الطباعة'}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground leading-tight">
+                        {printMode === 'cards' ? 'تخصيص صورة الغلاف الخلفية وتنسيقات الحقول' : 'التحكم في أعمدة الجدول، الألوان، وارتفاع الصفوف'}
+                      </div>
+                    </div>
+                  </div>
+                  {printMode === 'cards' ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCustomizationDialogOpen(true)}
+                      className="h-8 gap-1.5 text-xs font-bold border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer"
+                    >
+                      <Settings2 className="h-3.5 w-3.5" />
+                      إعدادات الغلاف
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setTableSettingsDialogOpen(true)}
+                      className="h-8 gap-1.5 text-xs font-bold border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer"
+                    >
+                      <Settings2 className="h-3.5 w-3.5" />
+                      إعدادات الجدول
+                    </Button>
+                  )}
+                </div>
+                {printMode === 'cards' && (
+                  <div className="pt-2 border-t border-border/40">
                     <BackgroundSelector
                       value={customBackgroundUrl}
                       onChange={setCustomBackgroundUrl}
                     />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCustomizationDialogOpen(true)}
-                      className="flex items-center gap-2 rounded-xl text-xs font-bold border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800"
-                    >
-                      <Settings2 className="h-4 w-4 text-amber-400" />
-                      إعدادات الغلاف والطباعة
-                    </Button>
-                  </div>
-                )}
-
-                {printMode === 'table' && (
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <div className="text-xs text-slate-400">
-                      تعديل ألوان وتصميم وأعمدة جدول طباعة اللوحات
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setTableSettingsDialogOpen(true)}
-                      className="flex items-center gap-2 rounded-xl text-xs font-bold border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800"
-                    >
-                      <Settings2 className="h-4 w-4 text-amber-400" />
-                      إعدادات مظهر الجدول
-                    </Button>
                   </div>
                 )}
               </div>
-            )}
+            </section>
           </div>
-
-          {/* خيارات الطباعة */}
-          <div className="space-y-3">
-            {printMode === 'cards' && (
-              <>
-                <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-                  <Checkbox
-                    id="includeDesigns"
-                    checked={includeDesigns}
-                    onCheckedChange={(c) => setIncludeDesigns(!!c)}
-                  />
-                  <Label htmlFor="includeDesigns" className="cursor-pointer flex-1">تضمين التصاميم</Label>
-                </div>
-                {includeDesigns && (
-                  <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors mr-6">
-                    <Checkbox
-                      id="showDesignName"
-                      checked={showDesignName}
-                      onCheckedChange={(c) => setShowDesignName(!!c)}
-                    />
-                    <Label htmlFor="showDesignName" className="cursor-pointer flex-1 text-xs">إظهار اسم التصميم بدلاً من كلمة "التصميم"</Label>
-                  </div>
-                )}
-              </>
-            )}
-
-            <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-              <Checkbox
-                id="hideAdType"
-                checked={hideAdType}
-                onCheckedChange={(c) => setHideAdType(!!c)}
-              />
-              <Label htmlFor="hideAdType" className="cursor-pointer flex-1">
-                إخفاء نوع الإعلان
-              </Label>
-            </div>
-
-            <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-              <Checkbox
-                id="showPreviousAd"
-                checked={showPreviousAd}
-                onCheckedChange={(c) => setShowPreviousAd(!!c)}
-              />
-              <Label htmlFor="showPreviousAd" className="cursor-pointer flex-1">
-                إظهار الإعلان السابق فوق نوع الإعلان
-              </Label>
-            </div>
-
-            <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-              <Checkbox
-                id="showInstalledImages"
-                checked={showInstalledImages}
-                onCheckedChange={(c) => setShowInstalledImages(!!c)}
-              />
-              <Label htmlFor="showInstalledImages" className="cursor-pointer flex-1">إظهار صور التركيب الفعلية (إن وجدت)</Label>
-            </div>
-
-            <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-              <Checkbox
-                id="hideInstallDate"
-                checked={hideInstallDate}
-                onCheckedChange={(c) => setHideInstallDate(!!c)}
-              />
-              <Label htmlFor="hideInstallDate" className="cursor-pointer flex-1">
-                إخفاء تاريخ التركيب
-              </Label>
-            </div>
-
-            <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-              <Checkbox
-                id="hideCustomerName"
-                checked={hideCustomerName}
-                onCheckedChange={(c) => setHideCustomerName(!!c)}
-              />
-              <Label htmlFor="hideCustomerName" className="cursor-pointer flex-1">
-                إخفاء اسم الزبون (مفعل افتراضياً)
-              </Label>
-            </div>
-
-            <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 space-y-2.5">
-              <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
-                <Users className="h-4 w-4" />
-                <span>خيارات اسم {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'} في الطباعة:</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div className="flex items-center gap-2 p-2.5 rounded-lg border border-amber-500/20 bg-background/80 hover:bg-muted/50 transition-colors">
-                  <Checkbox
-                    id="showTeamInContent"
-                    checked={showTeamInContent}
-                    onCheckedChange={(c) => setShowTeamInContent(!!c)}
-                  />
-                  <Label htmlFor="showTeamInContent" className="cursor-pointer flex-1 text-xs font-medium">
-                    إظهار اسم {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'} داخل الطباعة
-                  </Label>
-                </div>
-
-                <div className="flex items-center gap-2 p-2.5 rounded-lg border border-amber-500/20 bg-background/80 hover:bg-muted/50 transition-colors">
-                  <Checkbox
-                    id="showTeamInHeader"
-                    checked={showTeamInHeader}
-                    onCheckedChange={(c) => setShowTeamInHeader(!!c)}
-                  />
-                  <Label htmlFor="showTeamInHeader" className="cursor-pointer flex-1 text-xs font-medium">
-                    إظهار اسم {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'} في ترويسة نافذة الطباعة
-                  </Label>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors bg-amber-500/10 border border-amber-500/20">
-              <Checkbox
-                id="showSizeDimensionLabels"
-                checked={showSizeDimensionLabels}
-                onCheckedChange={(c) => setShowSizeDimensionLabels(!!c)}
-              />
-              <Label htmlFor="showSizeDimensionLabels" className="cursor-pointer flex-1 text-xs font-bold text-amber-200">
-                إظهار الكلمات فوق المقاس (طول، عرض، ارتفاع) - معطّل افتراضياً
-              </Label>
-            </div>
-
-            <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-              <Checkbox
-                id="printCityInsteadOfMunicipality"
-                checked={printCityInsteadOfMunicipality}
-                onCheckedChange={(c) => setPrintCityInsteadOfMunicipality(!!c)}
-              />
-              <Label htmlFor="printCityInsteadOfMunicipality" className="cursor-pointer flex-1">
-                طباعة اسم المدينة بدل البلدية
-              </Label>
-            </div>
-
-            {printMode === 'cards' && (
-              <div className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors">
-                <Checkbox
-                  id="showBillboardStatusOpt"
-                  checked={showBillboardStatusOpt}
-                  onCheckedChange={(c) => setShowBillboardStatusOpt(!!c)}
-                />
-                <Label htmlFor="showBillboardStatusOpt" className="cursor-pointer flex-1">
-                  إظهار حالة اللوحة أسفل الاسم
-                </Label>
-              </div>
-            )}
-
-            <div className="flex gap-2">
+        </div>
+          {/* تبقى إجراءات الطباعة ظاهرة أثناء تمرير الخيارات */}
+          <div className="shrink-0 border-t border-border bg-muted/30 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2 flex-wrap [&_button]:min-h-10 [&_input]:min-h-10">
               <Button
-                variant={printType === 'client' ? 'default' : 'outline'}
-                onClick={() => setPrintType('client')}
-                className="flex-1 cursor-pointer"
+                type="button"
+                variant="ghost"
+                onClick={() => onOpenChange(false)}
+                className="cursor-pointer text-muted-foreground hover:text-foreground text-xs h-9 px-3"
               >
-                نسخة العميل
+                إلغاء
               </Button>
-              <Button
-                variant={printType === 'installation' ? 'default' : 'outline'}
-                onClick={() => setPrintType('installation')}
-                className="flex-1 cursor-pointer"
-              >
-                نسخة {contextType === 'removal' ? 'فريق الإزالة' : 'فريق التركيب'}
-              </Button>
-            </div>
-          </div>
 
-          {/* أزرار التحكم */}
-          <div className="flex gap-2 pt-4 border-t flex-wrap">
-            <Button variant="outline" onClick={() => onOpenChange(false)} className="flex-1 min-w-[80px] cursor-pointer">
-              إلغاء
-            </Button>
-            <Button 
-              onClick={handlePrint} 
-              disabled={loading || settingsLoading || (printMode === 'table' && tableSettingsLoading) || filteredItems.length === 0} 
-              className="flex-1 min-w-[80px] cursor-pointer"
-            >
-              <Printer className="h-4 w-4 ml-2" />
-              طباعة {printMode === 'table' ? 'جدول' : 'بطاقات'}
-            </Button>
-            <Button 
-              onClick={handleDownloadPDF} 
-              disabled={loading || settingsLoading || filteredItems.length === 0} 
-              variant="secondary" 
-              className="flex-1 min-w-[80px] cursor-pointer"
-            >
-              <FileDown className="h-4 w-4 ml-2" />
-              PDF
-            </Button>
-            {selectedTeamIds.size > 0 && (() => {
-              const teamsWithPhone = Array.from(selectedTeamIds)
-                .map(id => teams[id])
-                .filter(t => t?.phone_number || t?.phone);
-              const firstTeam = teamsWithPhone[0];
-              const savedPhone = firstTeam?.phone_number || firstTeam?.phone;
-              
-              return (
-                <div className="flex-1 min-w-[120px] flex flex-col gap-2">
-                  {showWhatsAppInput && !savedPhone ? (
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="أدخل رقم واتساب الفريق"
-                        value={manualPhone}
-                        onChange={(e) => setManualPhone(e.target.value)}
-                        className="flex-1 text-right"
-                        dir="ltr"
-                      />
+              {/* أزرار الواتساب */}
+              {selectedTeamIds.size > 0 && (() => {
+                const teamsWithPhone = Array.from(selectedTeamIds)
+                  .map(id => teams[id])
+                  .filter(t => t?.phone_number || t?.phone);
+                const firstTeam = teamsWithPhone[0];
+                const savedPhone = firstTeam?.phone_number || firstTeam?.phone;
+
+                return (
+                  <div className="inline-flex">
+                    {showWhatsAppInput && !savedPhone ? (
+                      <div className="flex items-center gap-1.5">
+                        <Input
+                          placeholder="رقم الواتساب"
+                          value={manualPhone}
+                          onChange={(e) => setManualPhone(e.target.value)}
+                          className="h-8 w-32 text-xs text-left"
+                          dir="ltr"
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => {
+                            if (manualPhone.trim()) {
+                              handleSendWhatsAppUpload(manualPhone.trim());
+                              setShowWhatsAppInput(false);
+                              setManualPhone('');
+                            } else {
+                              toast.error('أدخل رقم الهاتف أولاً');
+                            }
+                          }}
+                          variant="outline"
+                          className="h-8 text-xs border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10 cursor-pointer"
+                          disabled={loading || filteredItems.length === 0}
+                        >
+                          إرسال
+                        </Button>
+                      </div>
+                    ) : (
                       <Button
+                        type="button"
+                        size="sm"
                         onClick={() => {
-                          if (manualPhone.trim()) {
-                            handleSendWhatsAppUpload(manualPhone.trim());
-                            setShowWhatsAppInput(false);
-                            setManualPhone('');
+                          if (savedPhone) {
+                            handleSendWhatsAppUpload(savedPhone);
                           } else {
-                            toast.error('أدخل رقم الهاتف أولاً');
+                            setShowWhatsAppInput(true);
                           }
                         }}
                         variant="outline"
-                        className="gap-2 border-green-500/40 text-green-600 hover:bg-green-500/10 cursor-pointer"
+                        className="h-8 text-xs gap-1.5 border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10 cursor-pointer"
                         disabled={loading || filteredItems.length === 0}
                       >
-                        <MessageCircle className="h-4 w-4" />
-                        إرسال
+                        <MessageCircle className="h-3.5 w-3.5" />
+                        واتساب الفريق
                       </Button>
-                    </div>
-                  ) : (
-                    <Button
-                      onClick={() => {
-                        if (savedPhone) {
-                          handleSendWhatsAppUpload(savedPhone);
-                        } else {
-                          setShowWhatsAppInput(true);
-                        }
-                      }}
-                      variant="outline"
-                      className="w-full gap-2 border-green-500/40 text-green-600 hover:bg-green-500/10 cursor-pointer"
-                      disabled={loading || filteredItems.length === 0}
-                    >
-                      <MessageCircle className="h-4 w-4" />
-                      واتساب الفريق
-                    </Button>
-                  )}
-                </div>
-              );
-            })()}
-            {customerPhone && (
+                    )}
+                  </div>
+                );
+              })()}
+
+              {customerPhone && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleSendWhatsAppUpload(customerPhone)}
+                  variant="outline"
+                  className="h-8 text-xs gap-1.5 border-sky-500/40 text-sky-600 hover:bg-sky-500/10 cursor-pointer"
+                  disabled={loading || filteredItems.length === 0}
+                >
+                  <MessageCircle className="h-3.5 w-3.5" />
+                  واتساب العميل
+                </Button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
               <Button
-                onClick={() => handleSendWhatsAppUpload(customerPhone)}
+                type="button"
+                onClick={handleDownloadPDF}
+                disabled={loading || settingsLoading || filteredItems.length === 0}
                 variant="outline"
-                className="flex-1 min-w-[120px] gap-2 border-blue-500/40 text-blue-600 hover:bg-blue-500/10 cursor-pointer"
-                disabled={loading || filteredItems.length === 0}
+                className="cursor-pointer gap-2 text-xs font-bold border-primary/30 text-primary hover:bg-primary/10 h-10 px-4"
               >
-                <MessageCircle className="h-4 w-4" />
-                واتساب العميل
+                <FileDown className="h-4 w-4" />
+                <span>تصدير PDF</span>
               </Button>
-            )}
+              <Button
+                type="button"
+                onClick={handlePrint}
+                disabled={loading || settingsLoading || (printMode === 'table' && tableSettingsLoading) || filteredItems.length === 0}
+                className="cursor-pointer gap-2 text-xs font-bold h-10 px-5 shadow-sm motion-safe:active:scale-95 bg-primary hover:bg-primary/90 text-primary-foreground"
+              >
+                <Printer className="h-4 w-4" />
+                <span>طباعة {printMode === 'table' ? 'الجدول' : 'البطاقات'} ({filteredItems.length} لوحة)</span>
+              </Button>
+            </div>
           </div>
-        </div>
       </DialogContent>
-      
+
       <PrintCustomizationDialog
         open={customizationDialogOpen}
         onOpenChange={setCustomizationDialogOpen}

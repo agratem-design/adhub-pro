@@ -12,3 +12,9 @@ export function parseCoordinateInput(value: string): { latitude: number | null; 
 export function formatCoordinateInput(latitude?: number | null, longitude?: number | null): string {
   return latitude != null && longitude != null ? `${latitude}, ${longitude}` : '';
 }
+
+/** Short display only; keep original coordinates in map links and stored data. */
+export function formatPrintCoordinates(latitude?: number | null, longitude?: number | null): string {
+  if (latitude == null || longitude == null || !Number.isFinite(latitude) || !Number.isFinite(longitude)) return '';
+  return `${Number(latitude.toFixed(6))}, ${Number(longitude.toFixed(6))}`;
+}

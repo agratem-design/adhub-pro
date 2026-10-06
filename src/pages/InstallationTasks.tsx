@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { usePersistedFilters } from '@/hooks/usePersistedFilters';
 import { generateFallbackPath } from '@/utils/fallbackPathGenerator';
@@ -44,7 +45,7 @@ import {
   AlertTriangle,
   Link as LinkIcon
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { ar } from 'date-fns/locale';
@@ -138,6 +139,7 @@ function findCorrectTeam(sortedTeams: any[], billboardSize: string | null, billb
 }
 
 export default function InstallationTasks() {
+  const reduceMotion = useReducedMotion();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -2248,7 +2250,7 @@ export default function InstallationTasks() {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 30 }}
             transition={{ duration: 0.22, ease: 'easeOut' }}
-            className="flex flex-col min-h-full"
+            className={`flex flex-col min-h-full ${showCompletionDialog || selectedItemsForDate.length > 0 ? 'pb-64 sm:pb-44 lg:pb-32' : ''}`}
           >
             <InstallationTaskDetail
               task={selectedTaskObj}
@@ -2355,7 +2357,7 @@ export default function InstallationTasks() {
                 setSelectedTaskIdForBulk(null);
                 setShowCompletionDialog(true);
               }}
-              onSetInstallationDate={() => { setSelectedTaskIdForBulk(selectedTaskId); setSelectedItemsForDate(selectedTaskItemsList.map(i => i.id)); }}
+              onSetInstallationDate={() => { setShowCompletionDialog(false); setSelectedItemsForCompletion([]); setSelectedTaskIdForCompletion(null); setSelectedTaskIdForBulk(selectedTaskId); setSelectedItemsForDate(selectedTaskItemsList.map(i => i.id)); }}
               onAddBillboards={() => { setSelectedTaskForAddBillboards({ taskId: selectedTaskId, contractId: selectedTaskObj.contract_id, contractIds: selectedDerivedContractIds, existingBillboardIds: selectedTaskItemsList.map(i => i.billboard_id), customerName: selectedTaskContract?.['Customer Name'] || '' }); setAddBillboardsDialogOpen(true); }}
               onCreateCompositeTask={selectedTaskObj.task_type === 'reinstallation' ? () => { setSelectedTaskForComposite({ taskId: selectedTaskId, contractId: selectedTaskObj.contract_id, customerName: selectedTaskContract?.['Customer Name'] || 'غير محدد', customerId: (selectedTaskContract as any)?.customer_id || null }); setCreateCompositeDialogOpen(true); } : undefined}
               onUnmerge={selectedIsMergedTask ? async () => {
@@ -2438,18 +2440,19 @@ export default function InstallationTasks() {
             />
 
             {/* Floating Selection Bar for Completion */}
+            {createPortal(<>
             <AnimatePresence>
               {showCompletionDialog && selectedTaskIdForCompletion === selectedTaskId && (() => {
                 const pendingItems = selectedTaskItemsList.filter(i => i.status !== 'completed');
                 const allSelected = pendingItems.length > 0 && pendingItems.every(i => selectedItemsForCompletion.includes(i.id));
                 return (
-                <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
-                  className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50">
-                  <div className="bg-emerald-600 text-white px-6 py-4 shadow-2xl rounded-2xl flex items-center gap-4 flex-wrap justify-center">
-                    <Badge variant="secondary" className="bg-white text-emerald-700 text-lg px-4 py-2">{selectedItemsForCompletion.length} / {pendingItems.length}</Badge>
+                <motion.div initial={{ y: reduceMotion ? 0 : 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: reduceMotion ? 0 : 100, opacity: 0 }}
+                  dir="rtl" className="fixed inset-x-3 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-[60] mx-auto max-w-3xl lg:bottom-[calc(1rem+env(safe-area-inset-bottom))]">
+                  <div className="relative grid max-h-[calc(100dvh-8rem-env(safe-area-inset-bottom))] grid-cols-2 items-center gap-2 overflow-y-auto rounded-2xl border border-emerald-500 bg-emerald-700 p-3 pl-14 text-white shadow-2xl sm:flex sm:flex-wrap sm:justify-center sm:gap-3 sm:p-4 sm:pl-14 [&_button]:min-h-[44px] [&_button]:cursor-pointer [&_button]:transition-all [&_button]:duration-200">
+                    <Badge variant="secondary" className="justify-center bg-white text-emerald-800 text-[13px] px-3 py-2 tabular-nums">{selectedItemsForCompletion.length} / {pendingItems.length} لوحة</Badge>
                     <Button 
                       variant="ghost" 
-                      className="text-white hover:bg-white/20 gap-2 text-sm"
+                      className="text-white hover:bg-white/20 gap-2 text-[13px]"
                       onClick={() => {
                         if (allSelected) {
                           setSelectedItemsForCompletion([]);
@@ -2463,12 +2466,12 @@ export default function InstallationTasks() {
                     </Button>
                     <Popover>
                       <PopoverTrigger asChild>
-                        <Button variant="secondary" className="gap-2 bg-white/20 hover:bg-white/30 text-white border-0">
+                        <Button variant="secondary" className="w-full min-w-0 gap-1.5 bg-white/10 hover:bg-white/20 text-white border border-white/20 text-[13px] sm:w-auto">
                           <CalendarIcon className="h-4 w-4 text-white" />
                           {completionInstallationDate ? format(completionInstallationDate, 'dd MMM yyyy', { locale: ar }) : 'تاريخ التركيب'}
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="center">
+                      <PopoverContent className="z-[70] w-auto p-0" side="top" align="center">
                         <Calendar mode="single" selected={completionInstallationDate} onSelect={setCompletionInstallationDate} locale={ar} className="pointer-events-auto" />
                       </PopoverContent>
                     </Popover>
@@ -2482,11 +2485,11 @@ export default function InstallationTasks() {
                         handleCompleteMultiple('completed', '', undefined, dateStr);
                       }} 
                       disabled={selectedItemsForCompletion.length === 0} 
-                      className="gap-2 bg-white text-emerald-700 hover:bg-white/90"
+                      className="gap-1.5 bg-white text-emerald-800 hover:bg-white/90 text-[13px] motion-safe:active:scale-95"
                     >
                       <CheckCircle2 className="h-4 w-4" />إكمال اللوحات
                     </Button>
-                    <Button variant="ghost" size="icon" className="text-white hover:bg-white/20" onClick={() => { setShowCompletionDialog(false); setSelectedItemsForCompletion([]); setSelectedTaskIdForCompletion(null); setCompletionInstallationDate(new Date()); }}>
+                    <Button variant="ghost" size="icon" aria-label="إلغاء تحديد اللوحات" className="absolute left-2 top-2 text-white hover:bg-white/20" onClick={() => { setShowCompletionDialog(false); setSelectedItemsForCompletion([]); setSelectedTaskIdForCompletion(null); setCompletionInstallationDate(new Date()); }}>
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
@@ -2498,18 +2501,18 @@ export default function InstallationTasks() {
             {/* Floating Selection Bar for Installation Date */}
             <AnimatePresence>
               {selectedItemsForDate.length > 0 && (
-                <motion.div initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
-                  className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50">
-                  <div className="bg-primary text-primary-foreground px-6 py-4 shadow-2xl rounded-2xl flex items-center gap-4 flex-wrap justify-center">
-                    <Badge variant="secondary" className="bg-white text-primary text-lg px-4 py-2">{selectedItemsForDate.length} لوحة محددة</Badge>
+                <motion.div initial={{ y: reduceMotion ? 0 : 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: reduceMotion ? 0 : 100, opacity: 0 }}
+                  dir="rtl" className="fixed inset-x-3 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-[60] mx-auto max-w-3xl lg:bottom-[calc(1rem+env(safe-area-inset-bottom))]">
+                  <div className="relative grid max-h-[calc(100dvh-8rem-env(safe-area-inset-bottom))] grid-cols-2 items-center gap-2 overflow-y-auto bg-primary text-primary-foreground p-3 pl-14 shadow-2xl rounded-2xl sm:flex sm:flex-wrap sm:justify-center sm:gap-3 sm:p-4 sm:pl-14 [&_button]:min-h-[44px] [&_button]:cursor-pointer [&_button]:transition-all [&_button]:duration-200">
+                    <Badge variant="secondary" className="justify-center bg-background text-foreground text-[13px] px-3 py-2">{selectedItemsForDate.length} لوحة محددة</Badge>
                     <Popover>
                       <PopoverTrigger asChild>
-                        <Button variant="secondary" className="gap-2 bg-white/20 hover:bg-white/30 text-white border-0">
-                          <CalendarIcon className="h-4 w-4 text-white" />
+                        <Button variant="secondary" className="w-full min-w-0 gap-1.5 bg-background/80 hover:bg-background text-foreground border-0 text-[13px] sm:w-auto">
+                          <CalendarIcon className="h-4 w-4" />
                           {floatingInstallationDate ? format(floatingInstallationDate, 'dd MMM yyyy', { locale: ar }) : 'تاريخ التركيب'}
                         </Button>
                       </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="center"><Calendar mode="single" selected={floatingInstallationDate} onSelect={setFloatingInstallationDate} locale={ar} /></PopoverContent>
+                      <PopoverContent className="z-[70] w-auto p-0" side="top" align="center"><Calendar mode="single" selected={floatingInstallationDate} onSelect={setFloatingInstallationDate} locale={ar} /></PopoverContent>
                     </Popover>
                     <Button onClick={async () => {
                       if (!floatingInstallationDate || selectedItemsForDate.length === 0) { toast.error('يرجى تحديد التاريخ واللوحات'); return; }
@@ -2522,16 +2525,17 @@ export default function InstallationTasks() {
                         setSelectedItemsForDate([]); setFloatingInstallationDate(undefined); setSelectedTaskIdForBulk(null); refetchTaskItems();
                         queryClient.invalidateQueries({ queryKey: ['printer-print-tasks'] });
                       } catch { toast.error('فشل في تحديد تاريخ التركيب'); }
-                    }} disabled={!floatingInstallationDate} className="gap-2 bg-white text-primary hover:bg-white/90">
+                    }} disabled={!floatingInstallationDate} className="col-span-2 gap-2 bg-background text-foreground hover:bg-background/90">
                       <CheckCircle2 className="h-4 w-4" />تأكيد التركيب
                     </Button>
-                    <Button variant="ghost" size="icon" className="text-white hover:bg-white/20" onClick={() => { setSelectedItemsForDate([]); setFloatingInstallationDate(undefined); setSelectedTaskIdForBulk(null); }}>
+                    <Button variant="ghost" size="icon" aria-label="إلغاء تحديد تاريخ التركيب" className="absolute left-2 top-2 hover:bg-background/20" onClick={() => { setSelectedItemsForDate([]); setFloatingInstallationDate(undefined); setSelectedTaskIdForBulk(null); }}>
                       <X className="h-4 w-4" />
                     </Button>
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
+            </>, document.body)}
           </motion.div>
         ) : (
           /* ── TABLE VIEW ── */

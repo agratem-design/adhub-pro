@@ -893,3 +893,122 @@ body[data-scroll-locked] [data-radix-dialog-content] {
     font-size: 68% !important;
   }
 }
+
+/* Keep the print actions outside the scrolling options on compact screens. */
+[role="dialog"].print-all-dialog {
+  padding: 0 !important;
+  overflow: hidden !important;
+  max-height: calc(100dvh - 2rem) !important;
+}
+
+.print-all-dialog .text-xs {
+  font-size: 12px;
+}
+
+.print-all-dialog .text-sm {
+  font-size: 13px;
+}
+
+.print-all-dialog .text-lg {
+  font-size: 16px;
+}
+
+.print-all-dialog button:not([role="checkbox"]):not([role="switch"]):not(.absolute) {
+  min-height: 40px;
+}
+
+.print-all-dialog [role="switch"] {
+  direction: ltr;
+}
+/* Billboard editing: one scrolling form with persistent actions. */
+[role="dialog"].billboard-edit-dialog {
+  padding: 0 !important;
+  overflow: hidden !important;
+  max-height: calc(100dvh - 24px) !important;
+}
+.billboard-edit-dialog .edit-section {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  background: hsl(var(--background) / 0.55);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.billboard-edit-dialog .text-xs { font-size: 12px; }
+.billboard-edit-dialog .text-sm { font-size: 13px; }
+.billboard-edit-dialog input:not([type="checkbox"]),
+.billboard-edit-dialog button:not(.absolute) {
+  min-height: 42px;
+}
+.billboard-edit-dialog input,
+.billboard-edit-dialog button[role="combobox"] { min-width: 0; }
+.billboard-edit-dialog button {
+  cursor: pointer;
+  transition: background-color 150ms, color 150ms, border-color 150ms;
+}
+.billboard-edit-dialog button:disabled { cursor: not-allowed; }
+.billboard-edit-dialog button[role="combobox"] > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 639px) {
+  .billboard-edit-dialog .edit-section { padding: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .billboard-edit-dialog button { transition: none; }
+}
+/* Shared print controls: readable options, compact sections, persistent actions. */
+[role="dialog"].municipality-print-dialog {
+  padding: 0 !important;
+  overflow: hidden !important;
+  max-height: calc(100dvh - 24px) !important;
+}
+.print-controls-dialog .text-xs,
+.municipality-print-dialog .text-xs { font-size: 12px; }
+.print-controls-dialog .text-sm,
+.municipality-print-dialog .text-sm { font-size: 13px; }
+.municipality-print-dialog .text-base { font-size: 17px; }
+.municipality-print-dialog button:not(.absolute):not([role="switch"]):not([role="checkbox"]),
+.municipality-print-dialog input:not([type="checkbox"]) { min-height: 40px; }
+.municipality-print-dialog button,
+.municipality-print-dialog a { cursor: pointer; }
+.municipality-print-dialog [role="switch"] { direction: ltr; flex-shrink: 0; }
+.municipality-print-options > section {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  background: hsl(var(--card));
+}
+.print-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid hsl(var(--border));
+  font-size: 14px;
+  font-weight: 600;
+}
+.municipality-print-section > div > div {
+  box-shadow: none;
+  border-color: hsl(var(--border) / 0.65);
+  border-radius: 10px;
+}
+.municipality-print-options input,
+.municipality-print-options button[role="combobox"] { min-width: 0; }
+.municipality-print-options .text-\[10px\],
+.municipality-print-options .text-\[11px\] { font-size: 12px; line-height: 1.6; }
+.municipality-print-options .grid { min-width: 0; }
+.municipality-print-options .grid > * { min-width: 0; }
+@media (max-width: 639px) {
+  .municipality-print-options > section { padding: 12px; }
+  .municipality-print-options .grid.grid-cols-2 { grid-template-columns: minmax(0,1fr); }
+  .print-controls-dialog .print-control-card { padding: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .municipality-print-dialog *, .print-controls-dialog * { transition-duration: 0s !important; animation-duration: 0s !important; }
+}

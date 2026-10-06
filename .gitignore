@@ -16,6 +16,7 @@ dist/
 dist-ssr/
 build/
 out/
+output/
 .vite/
 
 # Desktop / Electron Packaging & Binary Outputs
