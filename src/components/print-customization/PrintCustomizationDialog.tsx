@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { PrintCustomizationPanel } from './PrintCustomizationPanel';
 import { PrintPreviewPane } from './PrintPreviewPane';
@@ -15,6 +17,7 @@ export function PrintCustomizationDialog({
   onOpenChange,
   backgroundUrl = '/ipg.svg'
 }: PrintCustomizationDialogProps) {
+  const [mobilePane, setMobilePane] = useState<'controls' | 'preview'>('controls');
   const {
     settings,
     loading,
@@ -47,14 +50,18 @@ export function PrintCustomizationDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl h-[90vh] p-0 gap-0">
-        <DialogHeader className="p-4 pb-2 border-b">
-          <DialogTitle>تخصيص طباعة اللوحات</DialogTitle>
+      <DialogContent dir="rtl" className="print-position-dialog flex flex-col max-w-6xl w-[calc(100vw-24px)] h-[calc(100dvh-24px)] p-0 gap-0 overflow-hidden">
+        <DialogHeader className="shrink-0 p-4 pl-12 border-b border-border bg-muted/20">
+          <DialogTitle>مواضع عناصر الطباعة وأحجامها</DialogTitle>
         </DialogHeader>
         
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex shrink-0 gap-2 border-b border-border px-4 py-3 md:hidden">
+          <Button size="sm" variant={mobilePane === 'controls' ? 'default' : 'outline'} onClick={() => setMobilePane('controls')}>تعديل العناصر</Button>
+          <Button size="sm" variant={mobilePane === 'preview' ? 'default' : 'outline'} onClick={() => setMobilePane('preview')}>المعاينة</Button>
+        </div>
+        <div className="min-h-0 flex-1 flex overflow-hidden">
           {/* لوحة التحكم */}
-          <div className="w-[400px] border-l overflow-hidden">
+          <div className={`${mobilePane === 'controls' ? 'block' : 'hidden'} md:block w-full md:w-[400px] shrink-0 border-l overflow-hidden`}>
             <PrintCustomizationPanel
               settings={settings}
               onSettingChange={updateSetting}
@@ -65,7 +72,7 @@ export function PrintCustomizationDialog({
           </div>
           
           {/* المعاينة */}
-          <div className="flex-1 overflow-auto" style={{ backgroundColor: settings.preview_background || '#ffffff' }}>
+          <div className={`${mobilePane === 'preview' ? 'block' : 'hidden'} md:block min-w-0 flex-1 overflow-auto`} style={{ backgroundColor: settings.preview_background || '#ffffff' }}>
             <PrintPreviewPane
               settings={settings}
               backgroundUrl={backgroundUrl}

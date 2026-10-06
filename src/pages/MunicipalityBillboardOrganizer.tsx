@@ -4576,8 +4576,9 @@ export default function MunicipalityBillboardOrganizer() {
                 <FileSpreadsheet className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Excel</span>
               </Button>
-              <Button size="sm" variant="outline" className="h-8 rounded-lg text-xs gap-1 border-border/20" onClick={() => setShowPrintSettings(true)}>
+              <Button aria-label="مواضع وأحجام عناصر الطباعة" title="مواضع وأحجام عناصر الطباعة" size="sm" variant="outline" className="h-8 rounded-lg text-xs gap-1 border-border/20" onClick={() => setShowPrintSettings(true)}>
                 <Settings2 className="h-3.5 w-3.5" />
+                <span>مواضع وأحجام الطباعة</span>
               </Button>
               <Button size="sm" className="h-8 rounded-lg text-xs gap-1.5 bg-gradient-primary hover:opacity-90 text-primary-foreground shadow shadow-primary/20" onClick={() => { setPrintImageSource('map_pin'); setShowPrintDialog(true); }} disabled={currentCollection.items.length === 0}>
                 <Printer className="h-3.5 w-3.5" />
@@ -7517,11 +7518,11 @@ export default function MunicipalityBillboardOrganizer() {
             <div className="lg:col-span-8 flex flex-col min-h-0 overflow-hidden bg-background">
               
               <nav aria-label="أقسام إعدادات الطباعة" className="municipality-print-nav flex shrink-0 gap-2 overflow-x-auto border-b border-border bg-card px-4 py-3">
-                <a href="#municipality-print-cover" className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">الغلاف</a>
-                <a href="#municipality-print-signatures" className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">الترويسة والتوقيعات</a>
-                <a href="#municipality-print-layout" className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">المحتوى وتخطيط الصفحات</a>
-                <a href="#municipality-print-status" className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">الحالة والمظهر</a>
-                <a href="#municipality-print-background" className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">خلفية الطباعة</a>
+                <button type="button" onClick={() => document.getElementById('municipality-print-cover')?.scrollIntoView({ block: 'start', behavior: 'auto' })} className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">الغلاف</button>
+                <button type="button" onClick={() => document.getElementById('municipality-print-signatures')?.scrollIntoView({ block: 'start', behavior: 'auto' })} className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">الترويسة والتوقيعات</button>
+                <button type="button" onClick={() => document.getElementById('municipality-print-layout')?.scrollIntoView({ block: 'start', behavior: 'auto' })} className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">المحتوى وتخطيط الصفحات</button>
+                <button type="button" onClick={() => document.getElementById('municipality-print-status')?.scrollIntoView({ block: 'start', behavior: 'auto' })} className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">الحالة والمظهر</button>
+                <button type="button" onClick={() => document.getElementById('municipality-print-background')?.scrollIntoView({ block: 'start', behavior: 'auto' })} className="shrink-0 rounded-lg border border-border px-3 py-2 text-xs text-muted-foreground transition-all duration-200 hover:border-primary/40 hover:bg-primary/5 hover:text-foreground">خلفية الطباعة</button>
               </nav>
 
               {/* Tab Contents (Spacious Scroll Area) */}
@@ -8488,6 +8489,9 @@ export default function MunicipalityBillboardOrganizer() {
             </div>
           </div>
 
+          <div className="shrink-0 border-t border-border bg-muted/20 px-4 py-2">
+            <Button type="button" variant="outline" size="sm" className="cursor-pointer gap-2 text-primary" onClick={() => { setShowPrintSettings(true); }}><SlidersHorizontal className="h-4 w-4" />مواضع عناصر الطباعة وأحجامها</Button>
+          </div>
           {/* Bottom Footer */}
           <div className="municipality-print-footer px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))] border-t border-border bg-card flex flex-wrap items-center justify-between gap-3 shrink-0">
             <div className="hidden sm:flex text-xs font-medium text-muted-foreground items-center gap-2">

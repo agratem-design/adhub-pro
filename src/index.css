@@ -1012,3 +1012,11 @@ body[data-scroll-locked] [data-radix-dialog-content] {
 @media (prefers-reduced-motion: reduce) {
   .municipality-print-dialog *, .print-controls-dialog * { transition-duration: 0s !important; animation-duration: 0s !important; }
 }
+[role="dialog"].print-position-dialog { padding:0 !important; overflow:hidden !important; max-height:calc(100dvh - 24px) !important; }
+.print-position-dialog .text-xs { font-size:12px; }
+.print-position-dialog .text-sm { font-size:13px; }
+.print-position-dialog button { cursor:pointer; }
+.print-position-dialog button:not(.absolute):not([role="switch"]):not([role="checkbox"]),
+.print-position-dialog input:not([type="checkbox"]) { min-height:40px; }
+.print-position-dialog [role="tablist"] { flex-wrap:wrap; width:100%; }
+.print-position-dialog [role="switch"] { direction:ltr; }

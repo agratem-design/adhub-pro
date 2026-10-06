@@ -9,22 +9,22 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { 
-  Save, 
-  RotateCcw, 
-  Type, 
-  Image as ImageIcon, 
-  MapPin, 
-  QrCode, 
-  Hash, 
-  Map, 
-  ZoomIn, 
-  ZoomOut, 
-  BookOpen, 
+import {
+  Save,
+  RotateCcw,
+  Type,
+  Image as ImageIcon,
+  MapPin,
+  QrCode,
+  Hash,
+  Map,
+  ZoomIn,
+  ZoomOut,
+  BookOpen,
   Sliders,
   Check
 } from 'lucide-react';
@@ -118,7 +118,7 @@ const generatePrintedSizeHtml = (sizeStr: string, showHeight: boolean, showLabel
   if (!dims.length && !dims.width && !dims.height) return '';
 
   const showH = showHeight && !!dims.height;
-  
+
   return `
     <div class="print-size-container">
       <div class="print-dim-col">
@@ -384,10 +384,11 @@ export default function MunicipalityPrintSettingsDialog({
 
   const [previewZoom, setPreviewZoom] = useState(1.0);
   const [activeTab, setActiveTab] = useState('الترقيم');
+  const [mobilePane, setMobilePane] = useState<'controls' | 'preview'>('controls');
   const [sampleBillboard, setSampleBillboard] = useState<{
     name: string; size: string; faces: number; municipality: string; landmark: string; coords: string; imageUrl: string;
   } | null>(null);
-  
+
   const [previewMapUrl, setPreviewMapUrl] = useState<string>('');
   const [previewMapLoading, setPreviewMapLoading] = useState(false);
   const mapDebounceRef = useRef<number | null>(null);
@@ -570,7 +571,7 @@ export default function MunicipalityPrintSettingsDialog({
     const statusTop = munOverrides.mun_status_top || '12mm';
     const statusLeft = munOverrides.mun_status_left || '50%';
     const statusText = 'متاحة';
-    
+
     const statusHtml = showStatus
       ? `<span style="font-size:${statusPos === 'custom' ? statusFontSize : '14px'};font-weight:700;color:${statusPos === 'custom' ? statusColor : '#000'};">${statusText}</span>`
       : '';
@@ -583,7 +584,7 @@ export default function MunicipalityPrintSettingsDialog({
       ? `<div style="position:absolute;bottom:${statusGap};left:50%;transform:translateX(-50%);text-align:center;z-index:50;">${statusHtml}</div>` : '';
     const statusCustom = showStatus && statusPos === 'custom'
       ? `<div style="position:absolute;top:${statusTop};left:${statusLeft};transform:translateX(-50%);text-align:center;z-index:50;">${statusHtml}</div>` : '';
-    
+
     return `
       <div style="position:relative;width:210mm;height:297mm;background-color:#fff;background-image:url('${backgroundUrl}');background-size:210mm 297mm;background-repeat:no-repeat;font-family:'Doran',Arial,sans-serif;direction:rtl;overflow:hidden;">
         <style>
@@ -600,7 +601,7 @@ export default function MunicipalityPrintSettingsDialog({
           <div style="font-family: '${s.coords_font_family || 'Manrope'}', sans-serif;">${sb.name}${statusBeside}</div>
           ${statusBelow}
         </div>
- 
+
         <!-- الشركة أعلى المقاس -->
         ${(s as any).show_company_in_print === 'true' ? `
         <div style="position:absolute;top:${s.contract_number_top || '39.869mm'};right:${s.contract_number_right || '22mm'};font-size:${s.contract_number_font_size || '16px'};font-weight:${s.contract_number_font_weight || '500'};color:${s.contract_number_color || '#333333'};text-align:${s.contract_number_alignment || 'right'};max-width:65%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${s.contract_number_offset_x && s.contract_number_offset_x !== '0mm' ? `margin-right:${s.contract_number_offset_x};` : ''}z-index:5;">
@@ -651,12 +652,12 @@ export default function MunicipalityPrintSettingsDialog({
         <div style="position:absolute;top:${s.location_info_top};left:${s.location_info_left};width:${s.location_info_width};font-size:${s.location_info_font_size};color:${s.location_info_color || '#000'};z-index:5;">
           ${sb.municipality} - طريق الشط
         </div>
- 
+
         <!-- أقرب معلم -->
         <div style="position:absolute;top:${s.landmark_info_top};left:${s.landmark_info_left};width:${s.landmark_info_width};font-size:${s.landmark_info_font_size};color:${s.landmark_info_color || '#000'};z-index:5;">
           ${sb.landmark}
         </div>
- 
+
         <!-- QR Code -->
         <div style="position:absolute;top:${s.qr_top};left:${s.qr_left};width:${s.qr_size};text-align:center;z-index:5;">
           <div style="width:${s.qr_size};height:${s.qr_size};background:#f0f0f0;border:2px solid #999;display:flex;align-items:center;justify-content:center;font-size:10px;color:#666;border-radius:4px;">QR</div>
@@ -732,22 +733,26 @@ export default function MunicipalityPrintSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[1400px] w-[95vw] p-0 overflow-hidden h-[92vh] rounded-3xl border border-emerald-500/20 shadow-2xl bg-slate-950/95 backdrop-blur-2xl">
+      <DialogContent dir="rtl" className="print-position-dialog flex flex-col gap-0 max-w-[1400px] w-[calc(100vw-24px)] p-0 overflow-hidden h-[calc(100dvh-24px)] rounded-2xl border border-border bg-background">
         <DialogTitle className="sr-only">إعدادات الطباعة</DialogTitle>
-        <DialogDescription className="sr-only">تعديل مواضع وتصميم لوحة البلدية</DialogDescription>
-        <div className="flex h-full overflow-hidden">
-          
+        <DialogDescription className="sr-only">اختر العنصر واضبط موقعه وحجمه مع معاينة مباشرة</DialogDescription>
+        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/20 px-4 py-3 pl-12 md:hidden">
+          <Button size="sm" variant={mobilePane === 'controls' ? 'default' : 'outline'} onClick={() => setMobilePane('controls')}>مواضع العناصر وأحجامها</Button>
+          <Button size="sm" variant={mobilePane === 'preview' ? 'default' : 'outline'} onClick={() => setMobilePane('preview')}>معاينة الطباعة</Button>
+        </div>
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+
           {/* Settings Sidebar Panel */}
-          <div className="w-[390px] border-l border-white/5 flex flex-col bg-slate-900/40 backdrop-blur-3xl overflow-hidden shrink-0">
-            
+          <div className={`${mobilePane === 'controls' ? 'flex' : 'hidden'} md:flex w-full md:w-[390px] border-l border-border flex-col bg-card overflow-hidden shrink-0`}>
+
             {/* Header & Saving State Indicator */}
-            <div className="p-5 border-b border-white/5 bg-slate-900/20 flex items-center justify-between">
+            <div className="p-5 border-b border-border bg-muted/20 flex items-center justify-between">
               <div>
-                <h2 className="text-base font-bold text-white tracking-wide">إعدادات الطباعة</h2>
-                <p className="text-[10.5px] text-slate-400 mt-0.5">تعديل مواضع وتصميم لوحة البلدية</p>
+                <h2 className="text-base font-bold text-foreground tracking-wide">مواضع العناصر وأحجامها</h2>
+                <p className="text-[10.5px] text-muted-foreground mt-0.5">اختر العنصر واضبط موقعه وحجمه مع معاينة مباشرة</p>
               </div>
               {saving && (
-                <span className="text-[10px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
+                <span className="text-[10px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
                   <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
                   جاري الحفظ...
                 </span>
@@ -755,52 +760,47 @@ export default function MunicipalityPrintSettingsDialog({
             </div>
 
             <Tabs defaultValue="الترقيم" value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-              
-              {/* Tab Categories - Horizontal pill scroll list */}
-              <div className="px-4 py-3 bg-slate-900/10 border-b border-white/5 shrink-0 overflow-x-auto no-scrollbar">
-                <TabsList className="flex gap-1.5 bg-transparent p-0 justify-start h-auto w-max">
-                  {settingGroups.map(g => (
-                    <TabsTrigger 
-                      key={g.label} 
-                      value={g.label} 
-                      className="text-[11.5px] font-semibold gap-1.5 px-3 py-1.5 rounded-xl border border-white/5 text-slate-300 data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:border-indigo-500/20 transition-all hover:bg-white/5"
-                    >
-                      {g.icon}
-                      {g.label}
-                    </TabsTrigger>
-                  ))}
-                  <TabsTrigger 
-                    value="حالة اللوحة" 
-                    className="text-[11.5px] font-semibold gap-1.5 px-3 py-1.5 rounded-xl border border-white/5 text-slate-300 data-[state=active]:bg-indigo-600 data-[state=active]:text-white data-[state=active]:border-indigo-500/20 transition-all hover:bg-white/5"
-                  >
-                    <Hash className="h-3.5 w-3.5" />
-                    حالة اللوحة
-                  </TabsTrigger>
-                </TabsList>
+
+              <div className="shrink-0 space-y-3 border-b border-border bg-muted/20 px-4 py-3">
+                <Label htmlFor="municipality-print-element" className="text-xs font-semibold">العنصر المراد تعديله</Label>
+                <Select value={activeTab} onValueChange={setActiveTab}>
+                  <SelectTrigger id="municipality-print-element" className="h-11 bg-background text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {settingGroups.map(group => <SelectItem key={group.label} value={group.label}><span className="flex items-center gap-2">{group.icon}{group.label}</span></SelectItem>)}
+                    <SelectItem value="حالة اللوحة">حالة اللوحة</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="grid grid-cols-3 gap-2">
+                  {['المقاس', 'عدد الأوجه', 'الصورة'].map(element => <Button key={element} type="button" size="sm" variant={activeTab === element ? 'default' : 'outline'} aria-pressed={activeTab === element} onClick={() => setActiveTab(element)} className="text-xs">{element}</Button>)}
+                </div>
               </div>
 
               {/* Scrollable control settings list */}
-              <ScrollArea className="flex-1 overflow-y-auto px-5 py-4" style={{ maxHeight: 'calc(90vh - 170px)' }}>
-                
+              <ScrollArea className="flex-1 overflow-y-auto px-5 py-4" >
+
                 {/* Dynamically render fields for normal settings */}
                 {settingGroups.map(group => (
                   <TabsContent key={group.label} value={group.label} className="space-y-4 m-0 outline-none animate-in fade-in duration-200">
-                    <div className="flex items-center gap-2 pb-2 mb-3 border-b border-white/5">
-                      <div className="p-1.5 bg-indigo-500/15 text-indigo-400 rounded-lg">
+                    <div className="flex items-center gap-2 pb-2 mb-3 border-b border-border">
+                      <div className="p-1.5 bg-primary/15 text-primary rounded-lg">
                         {group.icon}
                       </div>
-                      <h3 className="font-bold text-xs text-white">
+                      <h3 className="font-bold text-xs text-foreground">
                         {group.label}
                       </h3>
+                      <Button type="button" variant="ghost" size="sm" className="mr-auto gap-1 text-xs text-muted-foreground"
+                        onClick={() => setLocalSettings(prev => ({ ...prev, ...Object.fromEntries(group.fields.map(field => [field.key, settings[field.key]])) }))}>
+                        <RotateCcw className="h-3.5 w-3.5" />تراجع عن تعديل العنصر
+                      </Button>
                     </div>
-                    
+
                     <div className="space-y-4 pt-1">
                       {group.fields.map(field => (
-                        <div key={field.key} className="space-y-2 p-3.5 rounded-2xl bg-white/[0.02] border border-white/[0.04] hover:bg-white/[0.03] hover:border-white/[0.06] transition-all duration-300">
+                        <div key={field.key} className="space-y-3 p-3 rounded-xl bg-background border border-border transition-all duration-200 hover:border-primary/30">
                           <div className="flex justify-between items-center">
-                            <Label className="text-[11.5px] font-semibold text-slate-300">{field.label}</Label>
+                            <Label htmlFor={`print-element-${field.key}`} className="text-xs font-semibold text-foreground">{field.label}</Label>
                             {field.type !== 'text' && field.type !== 'select' && (
-                              <span className="text-[10px] text-slate-400 font-mono bg-white/5 px-2 py-0.5 rounded-md border border-white/5">
+                              <span className="text-[10px] text-muted-foreground font-mono bg-muted/40 px-2 py-0.5 rounded-md border border-border">
                                 {field.key === 'map_label_scale'
                                   ? `${localSettings[field.key] || '1'}x`
                                   : (localSettings[field.key] as string)}
@@ -812,7 +812,7 @@ export default function MunicipalityPrintSettingsDialog({
                             <>
                               {(field.key === 'pin_color' || field.key === 'pin_text_color') ? (
                                 <div className="flex items-center gap-2">
-                                  <div className="relative w-9 h-9 rounded-xl border border-white/10 overflow-hidden shrink-0 bg-slate-950">
+                                  <div className="relative w-9 h-9 rounded-xl border border-border overflow-hidden shrink-0 bg-slate-950">
                                     <Input
                                       type="color"
                                       value={localSettings[field.key] as string || '#000000'}
@@ -823,7 +823,7 @@ export default function MunicipalityPrintSettingsDialog({
                                   <Input
                                     value={localSettings[field.key] as string || ''}
                                     onChange={e => updateLocal(field.key, e.target.value)}
-                                    className="h-9 text-xs flex-1 rounded-xl bg-slate-950/40 border-white/5 focus:border-indigo-500/30 text-white placeholder-slate-500"
+                                    className="h-9 text-xs flex-1 rounded-xl bg-background border-border focus:border-primary/30 text-foreground placeholder-slate-500"
                                     placeholder="اتركه فارغاً للتلقائي"
                                   />
                                 </div>
@@ -831,14 +831,14 @@ export default function MunicipalityPrintSettingsDialog({
                                 <Input
                                   value={localSettings[field.key] as string || ''}
                                   onChange={e => updateLocal(field.key, e.target.value)}
-                                  className="h-9 text-xs rounded-xl bg-slate-950/40 border-white/5 focus:border-indigo-500/30 text-white placeholder-slate-500"
+                                  className="h-9 text-xs rounded-xl bg-background border-border focus:border-primary/30 text-foreground placeholder-slate-500"
                                   placeholder={field.key === 'custom_pin_url' ? 'رابط ملف SVG للدبوس المخصص' : field.key === 'cover_logo_url' ? 'رابط ملف الشعار (SVG / PNG)' : 'اكتب القيمة هنا'}
                                 />
                               )}
 
                               {field.key === 'cover_logo_url' && (
                                 <div className="space-y-1.5 mt-2">
-                                  <div className="text-[10px] font-bold text-slate-400">اختر شعاراً سريعاً:</div>
+                                  <div className="text-[10px] font-bold text-muted-foreground">اختر شعاراً سريعاً:</div>
                                   <div className="grid grid-cols-4 gap-2">
                                     {[
                                       { name: 'الشعار الذهبي', url: '/logofaresgold.svg' },
@@ -852,8 +852,8 @@ export default function MunicipalityPrintSettingsDialog({
                                         onClick={() => updateLocal('cover_logo_url', item.url)}
                                         className={`p-1.5 rounded-xl border text-[9.5px] flex flex-col items-center gap-1 transition-all ${
                                           (localSettings.cover_logo_url || '/logofaresgold.svg') === item.url
-                                            ? 'border-indigo-500 bg-indigo-500/20 text-white font-bold'
-                                            : 'border-white/5 bg-slate-950/40 text-slate-400 hover:text-white'
+                                            ? 'border-primary bg-primary/20 text-foreground font-bold'
+                                            : 'border-border bg-background text-muted-foreground hover:text-foreground'
                                         }`}
                                       >
                                         <div className="h-6 w-full flex items-center justify-center p-0.5">
@@ -867,11 +867,11 @@ export default function MunicipalityPrintSettingsDialog({
                               )}
 
                               {field.key === 'custom_pin_url' && (
-                                <div className="text-[9.5px] leading-relaxed text-slate-400 bg-slate-950/50 p-2.5 rounded-xl border border-white/5 space-y-1 mt-2">
-                                  <p className="font-semibold text-indigo-400">شروط الدبوس القابل للتلوين:</p>
+                                <div className="text-[9.5px] leading-relaxed text-muted-foreground bg-muted/30 p-2.5 rounded-xl border border-border space-y-1 mt-2">
+                                  <p className="font-semibold text-primary">شروط الدبوس القابل للتلوين:</p>
                                   <ul className="list-disc mr-3 space-y-0.5">
-                                    <li>يجب أن يكون بصيغة <span className="text-white">SVG</span></li>
-                                    <li>استخدم <code className="bg-white/10 px-1 rounded text-white">currentColor</code> لتلوين الدبوس تلقائياً</li>
+                                    <li>يجب أن يكون بصيغة <span className="text-foreground">SVG</span></li>
+                                    <li>استخدم <code className="bg-muted/40 px-1 rounded text-foreground">currentColor</code> لتلوين الدبوس تلقائياً</li>
                                   </ul>
                                 </div>
                               )}
@@ -881,12 +881,12 @@ export default function MunicipalityPrintSettingsDialog({
                               value={localSettings[field.key] as string}
                               onValueChange={v => updateLocal(field.key, v)}
                             >
-                              <SelectTrigger className="h-9 text-xs rounded-xl bg-slate-950/40 border-white/5 focus:ring-0 text-white">
+                              <SelectTrigger className="h-9 text-xs rounded-xl bg-background border-border focus:ring-0 text-foreground">
                                 <SelectValue />
                               </SelectTrigger>
-                              <SelectContent className="bg-slate-900 border-white/10 text-white rounded-xl">
+                              <SelectContent className="bg-popover border-border text-foreground rounded-xl">
                                 {field.options?.map(opt => (
-                                  <SelectItem key={opt.value} value={opt.value} className="text-xs focus:bg-indigo-600 focus:text-white rounded-lg">{opt.label}</SelectItem>
+                                  <SelectItem key={opt.value} value={opt.value} className="text-xs focus:bg-primary focus:text-foreground rounded-lg">{opt.label}</SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
@@ -905,23 +905,34 @@ export default function MunicipalityPrintSettingsDialog({
                                 }}
                                 className="flex-1"
                               />
+                              <Input id={`print-element-${field.key}`} type="number" dir="ltr" aria-label={`${group.label}: ${field.label}`}
+                                value={getValue(field.key, field.type)} min={field.min ?? 0} max={field.max ?? 300} step={field.step ?? 1}
+                                className="w-20 shrink-0 bg-background text-center text-xs"
+                                onChange={event => {
+                                  if (!event.target.value.trim()) return;
+                                  const value = Number(event.target.value);
+                                  if (!Number.isFinite(value)) return;
+                                  const v = Math.max(field.min ?? 0, Math.min(field.max ?? 300, value));
+                                  updateLocal(field.key, field.type === 'mm' ? toMM(v) : field.type === 'px' ? toPX(v) : field.type === 'percent' ? toPercent(v) : String(v));
+                                }} />
+                              <span className="text-[11px] text-muted-foreground">{field.type === 'mm' ? 'مم' : field.type === 'px' ? 'px' : field.type === 'percent' ? '%' : ''}</span>
                             </div>
                           )}
                         </div>
                       ))}
-                      
+
                       {/* Premium Dimension Height Custom Switch inside the 'المقاس' Tab */}
                       {group.label === 'المقاس' && (
-                        <div className="flex items-center justify-between p-4 border border-white/5 rounded-2xl bg-white/[0.02] mt-4 animate-in fade-in duration-300 hover:bg-white/[0.03] transition-all">
+                        <div className="flex items-center justify-between p-4 border border-border rounded-2xl bg-white/[0.02] mt-4 animate-in fade-in duration-300 hover:bg-white/[0.03] transition-all">
                           <div className="space-y-0.5">
-                            <Label htmlFor="preview_show_height_in_print" className="font-bold text-xs text-white">إظهار البُعد الثالث (الارتفاع)</Label>
-                            <div className="text-[9.5px] text-slate-400">تضمين ارتفاع العمود من الأرض في المقاس والمعاينة</div>
+                            <Label htmlFor="preview_show_height_in_print" className="font-bold text-xs text-foreground">إظهار البُعد الثالث (الارتفاع)</Label>
+                            <div className="text-[9.5px] text-muted-foreground">تضمين ارتفاع العمود من الأرض في المقاس والمعاينة</div>
                           </div>
-                          <Switch 
-                            id="preview_show_height_in_print" 
-                            checked={showHeightInPrint} 
-                            onCheckedChange={setShowHeightInPrint} 
-                            className="data-[state=checked]:bg-indigo-600"
+                          <Switch
+                            id="preview_show_height_in_print"
+                            checked={showHeightInPrint}
+                            onCheckedChange={setShowHeightInPrint}
+                            className="data-[state=checked]:bg-primary"
                           />
                         </div>
                       )}
@@ -932,41 +943,41 @@ export default function MunicipalityPrintSettingsDialog({
 
                 {/* Status custom tab */}
                 <TabsContent value="حالة اللوحة" className="space-y-4 m-0 outline-none animate-in fade-in duration-200">
-                  <div className="flex items-center gap-2 pb-2 mb-3 border-b border-white/5">
-                    <div className="p-1.5 bg-indigo-500/15 text-indigo-400 rounded-lg">
+                  <div className="flex items-center gap-2 pb-2 mb-3 border-b border-border">
+                    <div className="p-1.5 bg-primary/15 text-primary rounded-lg">
                       <Hash className="h-3.5 w-3.5" />
                     </div>
-                    <h3 className="font-bold text-xs text-white">إعدادات حالة اللوحة</h3>
+                    <h3 className="font-bold text-xs text-foreground">إعدادات حالة اللوحة</h3>
                   </div>
 
-                  <div className="flex items-center justify-between p-3.5 border border-white/5 rounded-2xl bg-white/[0.02] hover:bg-white/[0.03] transition-all">
-                    <Label className="text-[11.5px] font-semibold text-slate-300">إظهار حالة اللوحة في الطباعة</Label>
-                    <Switch 
+                  <div className="flex items-center justify-between p-3.5 border border-border rounded-2xl bg-white/[0.02] hover:bg-white/[0.03] transition-all">
+                    <Label className="text-[11.5px] font-semibold text-muted-foreground">إظهار حالة اللوحة في الطباعة</Label>
+                    <Switch
                       checked={localSettings.status_overrides?.['municipality']?.mun_show_status !== 'false'}
                       onCheckedChange={(v) => updateLocalStatusOverride('mun_show_status', v ? 'true' : 'false')}
-                      className="data-[state=checked]:bg-indigo-600"
+                      className="data-[state=checked]:bg-primary"
                     />
                   </div>
 
                   {localSettings.status_overrides?.['municipality']?.mun_show_status !== 'false' && (
                     <div className="space-y-4 pt-1">
-                      
+
                       <div className="space-y-2 p-3.5 rounded-2xl bg-white/[0.02] border border-white/[0.04]">
-                        <Label className="text-[11.5px] font-semibold text-slate-300">موضع ظهور الحالة</Label>
-                        <Select 
-                          value={localSettings.status_overrides?.['municipality']?.mun_status_position || 'below_number'} 
+                        <Label className="text-[11.5px] font-semibold text-muted-foreground">موضع ظهور الحالة</Label>
+                        <Select
+                          value={localSettings.status_overrides?.['municipality']?.mun_status_position || 'below_number'}
                           onValueChange={v => updateLocalStatusOverride('mun_status_position', v)}
                         >
-                          <SelectTrigger className="h-9 text-xs rounded-xl bg-slate-950/40 border-white/5 text-white">
+                          <SelectTrigger className="h-9 text-xs rounded-xl bg-background border-border text-foreground">
                             <SelectValue />
                           </SelectTrigger>
-                          <SelectContent className="bg-slate-900 border-white/10 text-white rounded-xl">
-                            <SelectItem value="below_number" className="text-xs rounded-lg focus:bg-indigo-600 focus:text-white">تحت رقم اللوحة</SelectItem>
-                            <SelectItem value="above_number" className="text-xs rounded-lg focus:bg-indigo-600 focus:text-white">فوق رقم اللوحة</SelectItem>
-                            <SelectItem value="beside_number" className="text-xs rounded-lg focus:bg-indigo-600 focus:text-white">بجانب رقم اللوحة</SelectItem>
-                            <SelectItem value="header" className="text-xs rounded-lg focus:bg-indigo-600 focus:text-white">في رأس الصفحة</SelectItem>
-                            <SelectItem value="footer" className="text-xs rounded-lg focus:bg-indigo-600 focus:text-white">في تذييل الصفحة</SelectItem>
-                            <SelectItem value="custom" className="text-xs rounded-lg focus:bg-indigo-600 focus:text-white">موضع مخصص بالكامل</SelectItem>
+                          <SelectContent className="bg-popover border-border text-foreground rounded-xl">
+                            <SelectItem value="below_number" className="text-xs rounded-lg focus:bg-primary focus:text-foreground">تحت رقم اللوحة</SelectItem>
+                            <SelectItem value="above_number" className="text-xs rounded-lg focus:bg-primary focus:text-foreground">فوق رقم اللوحة</SelectItem>
+                            <SelectItem value="beside_number" className="text-xs rounded-lg focus:bg-primary focus:text-foreground">بجانب رقم اللوحة</SelectItem>
+                            <SelectItem value="header" className="text-xs rounded-lg focus:bg-primary focus:text-foreground">في رأس الصفحة</SelectItem>
+                            <SelectItem value="footer" className="text-xs rounded-lg focus:bg-primary focus:text-foreground">في تذييل الصفحة</SelectItem>
+                            <SelectItem value="custom" className="text-xs rounded-lg focus:bg-primary focus:text-foreground">موضع مخصص بالكامل</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -974,11 +985,11 @@ export default function MunicipalityPrintSettingsDialog({
                       {['below_number', 'above_number', 'beside_number', 'header', 'footer'].includes(localSettings.status_overrides?.['municipality']?.mun_status_position || 'below_number') && (
                         <div className="space-y-2 p-3.5 rounded-2xl bg-white/[0.02] border border-white/[0.04]">
                           <div className="flex justify-between items-center">
-                            <Label className="text-[11.5px] font-semibold text-slate-300">
-                              {(localSettings.status_overrides?.['municipality']?.mun_status_position === 'header') ? 'البُعد من أعلى الصفحة' : 
+                            <Label className="text-[11.5px] font-semibold text-muted-foreground">
+                              {(localSettings.status_overrides?.['municipality']?.mun_status_position === 'header') ? 'البُعد من أعلى الصفحة' :
                                (localSettings.status_overrides?.['municipality']?.mun_status_position === 'footer') ? 'البُعد من أسفل الصفحة' : 'البُعد عن الرقم'}
                             </Label>
-                            <span className="text-[10px] text-slate-400 font-mono bg-white/5 px-2 py-0.5 rounded-md">
+                            <span className="text-[10px] text-muted-foreground font-mono bg-muted/40 px-2 py-0.5 rounded-md">
                               {localSettings.status_overrides?.['municipality']?.mun_status_gap || '2mm'}
                             </span>
                           </div>
@@ -999,44 +1010,44 @@ export default function MunicipalityPrintSettingsDialog({
                         <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/[0.04] space-y-3">
                           <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1.5">
-                              <Label className="text-[10.5px] text-slate-300">أعلى (مثل 12mm)</Label>
-                              <Input 
-                                value={localSettings.status_overrides?.['municipality']?.mun_status_top || '12mm'} 
-                                onChange={e => updateLocalStatusOverride('mun_status_top', e.target.value)} 
-                                className="h-8.5 text-xs rounded-xl bg-slate-950/40 border-white/5 text-white" 
+                              <Label className="text-[10.5px] text-muted-foreground">أعلى (مثل 12mm)</Label>
+                              <Input
+                                value={localSettings.status_overrides?.['municipality']?.mun_status_top || '12mm'}
+                                onChange={e => updateLocalStatusOverride('mun_status_top', e.target.value)}
+                                className="h-8.5 text-xs rounded-xl bg-background border-border text-foreground"
                               />
                             </div>
                             <div className="space-y-1.5">
-                              <Label className="text-[10.5px] text-slate-300">يسار (مثل 50%)</Label>
-                              <Input 
-                                value={localSettings.status_overrides?.['municipality']?.mun_status_left || '50%'} 
-                                onChange={e => updateLocalStatusOverride('mun_status_left', e.target.value)} 
-                                className="h-8.5 text-xs rounded-xl bg-slate-950/40 border-white/5 text-white" 
+                              <Label className="text-[10.5px] text-muted-foreground">يسار (مثل 50%)</Label>
+                              <Input
+                                value={localSettings.status_overrides?.['municipality']?.mun_status_left || '50%'}
+                                onChange={e => updateLocalStatusOverride('mun_status_left', e.target.value)}
+                                className="h-8.5 text-xs rounded-xl bg-background border-border text-foreground"
                               />
                             </div>
                             <div className="space-y-1.5">
-                              <Label className="text-[10.5px] text-slate-300">حجم الخط (مثل 14px)</Label>
-                              <Input 
-                                value={localSettings.status_overrides?.['municipality']?.mun_status_font_size || '14px'} 
-                                onChange={e => updateLocalStatusOverride('mun_status_font_size', e.target.value)} 
-                                className="h-8.5 text-xs rounded-xl bg-slate-950/40 border-white/5 text-white" 
+                              <Label className="text-[10.5px] text-muted-foreground">حجم الخط (مثل 14px)</Label>
+                              <Input
+                                value={localSettings.status_overrides?.['municipality']?.mun_status_font_size || '14px'}
+                                onChange={e => updateLocalStatusOverride('mun_status_font_size', e.target.value)}
+                                className="h-8.5 text-xs rounded-xl bg-background border-border text-foreground"
                               />
                             </div>
                             <div className="space-y-1.5">
-                              <Label className="text-[10.5px] text-slate-300">لون الخط</Label>
+                              <Label className="text-[10.5px] text-muted-foreground">لون الخط</Label>
                               <div className="flex gap-2">
-                                <div className="w-8 h-8 rounded-lg overflow-hidden border border-white/10 shrink-0 relative bg-slate-950">
-                                  <Input 
-                                    type="color" 
-                                    value={localSettings.status_overrides?.['municipality']?.mun_status_color || '#000000'} 
-                                    onChange={e => updateLocalStatusOverride('mun_status_color', e.target.value)} 
-                                    className="absolute inset-0 w-full h-full p-0 cursor-pointer scale-150" 
+                                <div className="w-8 h-8 rounded-lg overflow-hidden border border-border shrink-0 relative bg-slate-950">
+                                  <Input
+                                    type="color"
+                                    value={localSettings.status_overrides?.['municipality']?.mun_status_color || '#000000'}
+                                    onChange={e => updateLocalStatusOverride('mun_status_color', e.target.value)}
+                                    className="absolute inset-0 w-full h-full p-0 cursor-pointer scale-150"
                                   />
                                 </div>
-                                <Input 
-                                  value={localSettings.status_overrides?.['municipality']?.mun_status_color || '#000000'} 
-                                  onChange={e => updateLocalStatusOverride('mun_status_color', e.target.value)} 
-                                  className="h-8 text-[11px] rounded-lg bg-slate-950/40 border-white/5 text-white flex-1" 
+                                <Input
+                                  value={localSettings.status_overrides?.['municipality']?.mun_status_color || '#000000'}
+                                  onChange={e => updateLocalStatusOverride('mun_status_color', e.target.value)}
+                                  className="h-8 text-[11px] rounded-lg bg-background border-border text-foreground flex-1"
                                 />
                               </div>
                             </div>
@@ -1052,21 +1063,21 @@ export default function MunicipalityPrintSettingsDialog({
             </Tabs>
 
             {/* Sidebar Dialog Footer Actions */}
-            <div className="p-4 border-t border-white/5 bg-slate-900/40 flex gap-3 shrink-0">
-              <Button 
-                size="sm" 
-                variant="outline" 
-                onClick={handleReset} 
-                className="flex-1 h-10 rounded-2xl border-white/10 hover:bg-white/5 text-slate-300 font-semibold"
+            <div className="p-4 border-t border-border bg-muted/20 flex gap-3 shrink-0">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleReset}
+                className="flex-1 h-10 rounded-2xl border-border hover:bg-muted/40 text-muted-foreground font-semibold"
               >
                 <RotateCcw className="h-3.5 w-3.5 ml-1.5" />
                 إعادة ضبط الافتراضي
               </Button>
-              <Button 
-                size="sm" 
-                onClick={handleSave} 
-                disabled={saving} 
-                className="flex-1 h-10 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold transition-all hover:shadow-lg hover:shadow-indigo-500/20"
+              <Button
+                size="sm"
+                onClick={handleSave}
+                disabled={saving}
+                className="flex-1 h-10 rounded-2xl bg-primary hover:bg-primary/90 text-primary-foreground font-semibold transition-all hover:shadow-lg hover:shadow-indigo-500/20"
               >
                 <Save className="h-3.5 w-3.5 ml-1.5" />
                 {saving ? 'جاري الحفظ...' : 'حفظ الإعدادات'}
@@ -1075,13 +1086,13 @@ export default function MunicipalityPrintSettingsDialog({
           </div>
 
           {/* Live Preview Panel */}
-          <div className="flex-1 bg-slate-950 overflow-hidden flex flex-col relative">
-            
+          <div className={`${mobilePane === 'preview' ? 'flex' : 'hidden'} md:flex min-w-0 flex-1 bg-muted/30 overflow-hidden flex-col relative`}>
+
             {/* Live Preview Header Toolbar */}
-            <div className="flex items-center justify-between px-6 py-3.5 bg-slate-900/60 border-b border-white/5 shrink-0 backdrop-blur-md">
+            <div className="flex items-center justify-between px-6 py-3.5 bg-popover/60 border-b border-border shrink-0 backdrop-blur-md">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                <h3 className="text-xs font-bold text-slate-200">المعاينة الحية التفاعلية</h3>
+                <h3 className="text-xs font-bold text-foreground">المعاينة الحية التفاعلية</h3>
                 {items && items.length > 0 ? (
                   <Select
                     value={sb?.name || ''}
@@ -1090,53 +1101,53 @@ export default function MunicipalityPrintSettingsDialog({
                       if (idx !== -1) loadSampleBillboard(idx);
                     }}
                   >
-                    <SelectTrigger className="h-7 text-[11px] bg-white/10 border-white/15 text-slate-200 w-44 font-semibold rounded-lg focus:ring-0">
+                    <SelectTrigger className="h-7 text-[11px] bg-muted/40 border-border text-foreground w-44 font-semibold rounded-lg focus:ring-0">
                       <SelectValue placeholder="اختر عينة اللوحة" />
                     </SelectTrigger>
-                    <SelectContent className="bg-slate-900 border-white/10 text-white text-xs">
+                    <SelectContent className="bg-popover border-border text-foreground text-xs">
                       {items.map((it) => (
-                        <SelectItem key={it.sequence_number} value={String(it.sequence_number).padStart(2, '0')} className="text-xs focus:bg-indigo-600">
+                        <SelectItem key={it.sequence_number} value={String(it.sequence_number).padStart(2, '0')} className="text-xs focus:bg-primary">
                           عينة #{String(it.sequence_number).padStart(2, '0')} - {it.location_text || 'بدون اسم'}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 ) : sb ? (
-                  <span className="text-[10px] bg-white/5 border border-white/10 text-slate-400 px-2 py-0.5 rounded-md font-mono">
+                  <span className="text-[10px] bg-muted/40 border border-border text-muted-foreground px-2 py-0.5 rounded-md font-mono">
                     عينة اللوحة: #{sb.name}
                   </span>
                 ) : null}
               </div>
               <div className="flex items-center gap-2">
-                <Button 
-                  size="sm" 
-                  variant="outline" 
+                <Button
+                  size="sm"
+                  variant="outline"
                   onClick={() => setPreviewZoom(z => Math.max(0.15, z - 0.05))}
-                  className="w-8 h-8 p-0 rounded-lg border-white/10 hover:bg-white/10 text-slate-300"
+                  className="w-8 h-8 p-0 rounded-lg border-border hover:bg-muted/40 text-muted-foreground"
                   title="تصغير (-)"
                 >
                   <ZoomOut className="h-4 w-4" />
                 </Button>
-                <span className="text-[11px] font-mono w-14 text-center text-slate-200 bg-white/10 px-2 py-1 rounded-md border border-white/10 font-bold">
+                <span className="text-[11px] font-mono w-14 text-center text-foreground bg-muted/40 px-2 py-1 rounded-md border border-border font-bold">
                   {Math.round(previewZoom * 100)}%
                 </span>
-                <Button 
-                  size="sm" 
-                  variant="outline" 
+                <Button
+                  size="sm"
+                  variant="outline"
                   onClick={() => setPreviewZoom(z => Math.min(1.2, z + 0.05))}
-                  className="w-8 h-8 p-0 rounded-lg border-white/10 hover:bg-white/10 text-slate-300"
+                  className="w-8 h-8 p-0 rounded-lg border-border hover:bg-muted/40 text-muted-foreground"
                   title="تكبير (+)"
                 >
                   <ZoomIn className="h-4 w-4" />
                 </Button>
-                <Button 
-                  size="sm" 
-                  variant="secondary" 
-                  onClick={fitZoomToContainer} 
-                  className="h-8 text-xs text-emerald-300 hover:text-white px-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 font-semibold gap-1"
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={fitZoomToContainer}
+                  className="h-8 text-xs text-emerald-300 hover:text-foreground px-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 font-semibold gap-1"
                   title="احتواء الورقة بالكامل داخل الشاشة تلقائياً"
                 >
-                  🎯 احتواء تلقائي
+                  احتواء الصفحة
                 </Button>
               </div>
             </div>
@@ -1144,7 +1155,7 @@ export default function MunicipalityPrintSettingsDialog({
             {/* Scrollable Container with centered interactive document preview */}
             <div ref={previewPaneRef} className="flex-1 overflow-auto p-6 flex items-center justify-center bg-slate-950 no-scrollbar">
               <div
-                className="relative shadow-2xl rounded-xl bg-white overflow-hidden transition-all duration-200 my-auto shrink-0 border border-white/10"
+                className="relative shadow-2xl rounded-xl bg-white overflow-hidden transition-all duration-200 my-auto shrink-0 border border-border"
                 style={{
                   width: `calc(210mm * ${previewZoom})`,
                   height: `calc(297mm * ${previewZoom})`,

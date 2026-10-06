@@ -2860,7 +2860,7 @@ export function UnifiedPrintAllDialog({
                       className="h-8 gap-1.5 text-xs font-bold border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer"
                     >
                       <Settings2 className="h-3.5 w-3.5" />
-                      إعدادات الغلاف
+                      المواضع والأحجام
                     </Button>
                   ) : (
                     <Button
