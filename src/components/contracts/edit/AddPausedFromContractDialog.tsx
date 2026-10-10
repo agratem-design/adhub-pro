@@ -422,7 +422,7 @@ export const AddPausedFromContractDialog: React.FC<Props> = ({
                     key={r.billboard_id}
                     className={`group relative overflow-hidden cursor-pointer transition-all duration-200 ${
                       isAdded
-                        ? 'ring-4 ring-emerald-500 ring-offset-2 ring-offset-background shadow-2xl scale-[1.02] border-emerald-500'
+                        ? 'ring-4 ring-emerald-500 ring-offset-2 ring-offset-background shadow-md scale-[1.02] border-emerald-500'
                         : 'hover:ring-1 hover:ring-primary/30 hover:shadow-md'
                     } ${r.saving ? 'opacity-70 pointer-events-none' : ''}`}
                   >
@@ -435,7 +435,7 @@ export const AddPausedFromContractDialog: React.FC<Props> = ({
                       onClick={() => isAdded ? handleRemoveRow(idx) : handleAddRow(idx)}
                       className="absolute inset-0 z-10 cursor-pointer"
                     />
-                    <div className="relative h-36 overflow-hidden bg-gradient-to-br from-muted to-muted/50 pointer-events-none">
+                    <div className="relative h-36 overflow-hidden bg-muted/30 pointer-events-none">
                       <BillboardImage
                         billboard={r.raw}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
@@ -458,7 +458,7 @@ export const AddPausedFromContractDialog: React.FC<Props> = ({
                       )}
                       {isAdded && !r.saving && (
                         <div className="absolute inset-0 bg-emerald-500/30 backdrop-blur-[1px] flex items-center justify-center">
-                          <div className="bg-emerald-500 rounded-full p-2.5 shadow-2xl ring-4 ring-white/40">
+                          <div className="bg-emerald-500 rounded-full p-2.5 shadow-md ring-4 ring-white/40">
                             <Check className="h-7 w-7 text-white" strokeWidth={3} />
                           </div>
                         </div>

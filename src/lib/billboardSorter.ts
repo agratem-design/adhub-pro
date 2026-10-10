@@ -154,6 +154,12 @@ export function getSizeRankFromMap(raw: string, customMap?: Map<string, number>)
   if (map.has(norm)) return map.get(norm)!;
   const compact = norm.replace(/\s+/g, '');
   if (map.has(compact)) return map.get(compact)!;
+  // المقاس قد يُكتب بالأبعاد معكوسة (4x12 بدل 12x4، 3x8-T بدل 8x3-T)
+  const dims = compact.match(/^(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)(.*)$/);
+  if (dims) {
+    const swapped = `${dims[2]}x${dims[1]}${dims[3]}`;
+    if (map.has(swapped)) return map.get(swapped)!;
+  }
   const base = compact.split('-')[0];
   for (const [key, rank] of map.entries()) {
     const kNorm = key.toLowerCase().replace(/[×*]/g, 'x').replace(/\s+/g, '').split('-')[0];
@@ -178,8 +184,8 @@ export function getMuniRankFromMap(raw: string, customMap?: Map<string, number>)
  * Strict Multi-Level Billboard Sorter:
  * 1. Size sort_order from Settings (رتبة المقاس من جدول المقاسات)
  * 2. Size Area DESCENDING as fallback (المساحة الأكبر أولاً)
- * 3. Municipality / City sort_order (من جدول البلديات)
- * 4. Billboard Level Rank (S > A > B > C > D من جدول المستويات)
+ * 3. Billboard Level Rank (S > A > B > C > D من جدول المستويات)
+ * 4. Municipality / City sort_order (من جدول البلديات)
  * 5. Billboard ID
  */
 export function sortBillboardsStandardSync<T extends Record<string, any>>(
@@ -257,20 +263,20 @@ export function sortBillboardsStandardSync<T extends Record<string, any>>(
       return areaB - areaA;
     }
 
-    // 3. Municipality / City Rank (from DB municipalities table sort_order)
+    // 3. المستوى (S > A > B > C > D من جدول المستويات)
+    const levelRankA = getLevelRank((a as any).Level ?? (a as any).level ?? (a as any).billboard_level, levelMap);
+    const levelRankB = getLevelRank((b as any).Level ?? (b as any).level ?? (b as any).billboard_level, levelMap);
+    if (levelRankA !== levelRankB) {
+      return levelRankA - levelRankB;
+    }
+
+    // 4. البلدية (ترتيب جدول البلديات)
     const munA = String((a as any).Municipality || (a as any).municipality || (a as any).City || (a as any).city || '').trim();
     const munB = String((b as any).Municipality || (b as any).municipality || (b as any).City || (b as any).city || '').trim();
     const munOrderA = getMuniRankFromMap(munA, muniMap);
     const munOrderB = getMuniRankFromMap(munB, muniMap);
     if (munOrderA !== munOrderB) {
       return munOrderA - munOrderB;
-    }
-
-    // 4. Billboard Level (S = 1 > A = 2 > B = 4 > C = 5)
-    const levelRankA = getLevelRank((a as any).Level ?? (a as any).level ?? (a as any).billboard_level, levelMap);
-    const levelRankB = getLevelRank((b as any).Level ?? (b as any).level ?? (b as any).billboard_level, levelMap);
-    if (levelRankA !== levelRankB) {
-      return levelRankA - levelRankB;
     }
 
     // 5. Billboard ID

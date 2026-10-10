@@ -249,14 +249,21 @@ export function BillboardSwapDialog({
 
       if (mode === 'move') {
         // === One-way move via Atomic Transfer RPC ===
+        // نقرأ نسخة العقدين لحظة النقل لمنع التعارض مع تعديلات متزامنة
+        const { data: versionRows } = await supabase
+          .from('Contract')
+          .select('Contract_Number, version')
+          .in('Contract_Number', [sourceContractNum, targetContractNum]);
+        const versionOf = (n: number) => Number((versionRows || []).find((r: any) => Number(r.Contract_Number) === n)?.version || 1);
+
         await removeBillboardFromAllTasks(sourceContractNum, sourceBbId);
-        
+
         await transferBillboardBetweenContracts(
           sourceContractNum,
           targetContractNum,
           sourceBbId,
-          Number((contract as any)?.version || 1),
-          Number(selectedContract.version || 1),
+          versionOf(sourceContractNum),
+          versionOf(targetContractNum),
           {
             startDate: startDate || selectedContract['Contract Date'] || '',
             endDate: endDate || selectedContract['End Date'] || '',
@@ -353,7 +360,7 @@ export function BillboardSwapDialog({
                 </Badge>
                 {/* Show linked tasks badges */}
                 {taskLabels.filter(t => linkedTasks[t.key]).map(t => (
-                  <Badge key={t.key} variant="outline" className="text-[10px] gap-1 border-blue-400/50 text-blue-600 dark:text-blue-400">
+                  <Badge key={t.key} variant="outline" className="text-[10px] gap-1 border-blue-400/50 text-primary">
                     {t.icon} {t.label}
                   </Badge>
                 ))}
@@ -441,7 +448,7 @@ export function BillboardSwapDialog({
               )}
 
               {selectedTargetBillboard && selectedTargetSizeMismatch && (
-                <div className="p-3 rounded-lg border-2 border-destructive bg-destructive/10 space-y-2">
+                <div className="p-3 rounded-lg border border-destructive bg-destructive/10 space-y-2">
                   <div className="flex items-center gap-2 font-bold text-sm text-destructive">
                     <AlertTriangle className="h-5 w-5" />
                     تحذير: اختلاف في المقاس!
@@ -512,14 +519,14 @@ export function BillboardSwapDialog({
 
           {/* Confirmation for SWAP mode */}
           {showConfirmation && mode === 'swap' && selectedTargetBillboard && (
-            <div className="p-4 rounded-lg border-2 border-primary/50 bg-primary/5 space-y-3">
+            <div className="p-4 rounded-lg border border-primary/50 bg-primary/5 space-y-3">
               <div className="flex items-center gap-2 font-bold text-sm">
                 <ArrowLeftRight className="h-5 w-5 text-primary" />
                 تأكيد التبديل بين اللوحتين
               </div>
               
               {selectedTargetSizeMismatch && (
-                <div className="p-3 rounded-lg border-2 border-destructive bg-destructive/10 flex items-start gap-2">
+                <div className="p-3 rounded-lg border border-destructive bg-destructive/10 flex items-start gap-2">
                   <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
                   <div className="text-xs space-y-1">
                     <p className="font-bold text-destructive">تحذير: المقاسات مختلفة!</p>
@@ -544,10 +551,10 @@ export function BillboardSwapDialog({
 
               {(hasAnyLinkedTask || hasAnyTargetLinkedTask) && (
                 <div className="text-xs space-y-1 bg-blue-50/50 dark:bg-blue-950/20 p-2 rounded border border-blue-300/30">
- <p className="font-semibold text-blue-700 dark:text-blue-300"> سيتم تبديل المهام تلقائياً:</p>
+ <p className="font-semibold text-primary"> سيتم تبديل المهام تلقائياً:</p>
                   <div className="flex flex-wrap gap-1">
                     {taskLabels.filter(t => linkedTasks[t.key] || targetLinkedTasks[t.key]).map(t => (
-                      <Badge key={t.key} className="text-[10px] gap-1 bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200">
+                      <Badge key={t.key} className="text-[10px] gap-1 bg-blue-100 text-primary dark:bg-blue-900 dark:text-blue-200">
                         {t.icon} {t.label}
                       </Badge>
                     ))}
@@ -569,7 +576,7 @@ export function BillboardSwapDialog({
 
           {/* Confirmation for MOVE mode */}
           {showConfirmation && mode === 'move' && selectedContract && (
-            <div className="p-4 rounded-lg border-2 border-primary/50 bg-primary/5 space-y-3">
+            <div className="p-4 rounded-lg border border-primary/50 bg-primary/5 space-y-3">
               <div className="flex items-center gap-2 font-bold text-sm">
                 <MoveRight className="h-5 w-5 text-primary" />
                 تأكيد نقل اللوحة
@@ -582,10 +589,10 @@ export function BillboardSwapDialog({
 
               {hasAnyLinkedTask && (
                 <div className="text-xs space-y-1 bg-blue-50/50 dark:bg-blue-950/20 p-2 rounded border border-blue-300/30">
- <p className="font-semibold text-blue-700 dark:text-blue-300"> سيتم نقل المهام تلقائياً:</p>
+ <p className="font-semibold text-primary"> سيتم نقل المهام تلقائياً:</p>
                   <div className="flex flex-wrap gap-1">
                     {taskLabels.filter(t => linkedTasks[t.key]).map(t => (
-                      <Badge key={t.key} className="text-[10px] gap-1 bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200">
+                      <Badge key={t.key} className="text-[10px] gap-1 bg-blue-100 text-primary dark:bg-blue-900 dark:text-blue-200">
                         {t.icon} حذف من {t.label} ← إضافة للعقد #{selectedContract.Contract_Number}
                       </Badge>
                     ))}

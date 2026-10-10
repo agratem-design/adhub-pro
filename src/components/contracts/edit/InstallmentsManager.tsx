@@ -1,3 +1,4 @@
+import { toast } from 'sonner';
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -247,7 +248,7 @@ export function InstallmentsManager({
     onFirstPaymentTypeChange?.(value);
   };
 
-  const handlePaymentModeChange = (value: 'single' | 'multiple') => {
+  const handlePaymentModeChange = (value: 'single' | 'multiple' | 'periods') => {
     setPaymentMode(value);
     onDistributionTypeChange?.(value);
   };
@@ -546,9 +547,9 @@ export function InstallmentsManager({
 
 
   return (
-    <Card className="bg-card border-border shadow-xl overflow-hidden">
-      <CardHeader className="bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border-b border-border pb-4">
-        <CardTitle className="flex items-center gap-3 text-lg">
+    <Card className="bg-card border-border shadow-sm overflow-hidden">
+      <CardHeader className="bg-primary/10 border-b border-border pb-4">
+        <CardTitle className="flex items-center gap-3 text-base">
           <div className="p-2 rounded-lg bg-primary/20">
             <DollarSign className="h-5 w-5 text-primary" />
           </div>
@@ -569,7 +570,7 @@ export function InstallmentsManager({
                   type="button"
                   onClick={() => handlePaymentModeChange('single')}
                   className={cn(
-                    "p-2.5 rounded-xl border-2 text-center transition-all duration-200 cursor-pointer flex flex-col items-center justify-center min-h-[90px]",
+                    "p-2.5 rounded-xl border text-center transition-all duration-200 cursor-pointer flex flex-col items-center justify-center min-h-[90px]",
                     paymentMode === 'single' 
                       ? "border-primary bg-primary/10 shadow-lg shadow-primary/20" 
                       : "border-border hover:border-primary/50"
@@ -582,7 +583,7 @@ export function InstallmentsManager({
                   type="button"
                   onClick={() => handlePaymentModeChange('multiple')}
                   className={cn(
-                    "p-2.5 rounded-xl border-2 text-center transition-all duration-200 cursor-pointer flex flex-col items-center justify-center min-h-[90px]",
+                    "p-2.5 rounded-xl border text-center transition-all duration-200 cursor-pointer flex flex-col items-center justify-center min-h-[90px]",
                     paymentMode === 'multiple' 
                       ? "border-primary bg-primary/10 shadow-lg shadow-primary/20" 
                       : "border-border hover:border-primary/50"
@@ -595,7 +596,7 @@ export function InstallmentsManager({
                   type="button"
                   onClick={() => handlePaymentModeChange('periods')}
                   className={cn(
-                    "p-2.5 rounded-xl border-2 text-center transition-all duration-200 cursor-pointer flex flex-col items-center justify-center min-h-[90px]",
+                    "p-2.5 rounded-xl border text-center transition-all duration-200 cursor-pointer flex flex-col items-center justify-center min-h-[90px]",
                     paymentMode === 'periods' 
                       ? "border-primary bg-primary/10 shadow-lg shadow-primary/20" 
                       : "border-border hover:border-primary/50"
@@ -729,11 +730,11 @@ export function InstallmentsManager({
                         <div className="flex items-center justify-between p-3 rounded-lg bg-primary/10 border border-primary/20">
                           <div className="space-y-0.5 text-right">
                             <p className="text-xs text-muted-foreground">الدفعة الأولى</p>
-                            <p className="text-lg font-bold text-primary font-manrope">{actualFirstPayment.toLocaleString('ar-LY')} د.ل</p>
+                            <p className="text-base font-bold text-primary font-manrope">{actualFirstPayment.toLocaleString('ar-LY')} د.ل</p>
                           </div>
                           <div className="text-left space-y-0.5">
                             <p className="text-xs text-muted-foreground">المتبقي للأقساط</p>
-                            <p className="text-lg font-bold text-foreground font-manrope">{remainingAfterFirst.toLocaleString('ar-LY')} د.ل</p>
+                            <p className="text-base font-bold text-foreground font-manrope">{remainingAfterFirst.toLocaleString('ar-LY')} د.ل</p>
                           </div>
                         </div>
                       )}
@@ -758,7 +759,7 @@ export function InstallmentsManager({
                         type="button"
                         variant="outline"
                         onClick={handleTwoPaymentMode}
-                        className="w-full border-2 border-amber-500/50 text-amber-600 hover:bg-amber-500/10 font-bold"
+                        className="w-full border border-amber-500/50 text-amber-600 hover:bg-amber-500/10 font-bold"
                         disabled={actualFirstPayment <= 0 || !startDate}
                       >
                         <CheckCircle2 className="h-4 w-4 mr-2" />
@@ -914,7 +915,7 @@ export function InstallmentsManager({
                 setUnequalDistributionOpen(true);
               }}
               size="sm"
-              className="text-xs border-purple-500/50 text-purple-600 hover:bg-purple-500/10"
+              className="text-xs border-purple-500/50 text-primary hover:bg-purple-500/10"
             >
               <Pen className="h-3 w-3 mr-1" />
               توزيع يدوي
@@ -959,7 +960,7 @@ export function InstallmentsManager({
                 <div
                   key={index}
                   className={cn(
-                    "p-3 rounded-lg border-2 transition-all",
+                    "p-3 rounded-lg border transition-all",
                     index === 0 
                       ? "bg-primary/5 border-primary/30" 
                       : "bg-card border-border hover:border-primary/20"
@@ -1122,18 +1123,18 @@ export function InstallmentsManager({
 
         {/* الملخص */}
         <div className={cn(
-          "p-4 rounded-xl border-2 space-y-2",
+          "p-4 rounded-xl border space-y-2",
           isBalanced 
             ? "bg-green-500/5 border-green-500/30" 
             : "bg-amber-500/5 border-amber-500/30"
         )}>
           <div className="flex justify-between items-center">
             <span className="text-sm text-muted-foreground">إجمالي العقد</span>
-            <span className="font-bold text-lg font-manrope">{finalTotal.toLocaleString('ar-LY')} د.ل</span>
+            <span className="font-bold text-base font-manrope">{finalTotal.toLocaleString('ar-LY')} د.ل</span>
           </div>
           <div className="flex justify-between items-center">
             <span className="text-sm text-muted-foreground">مجموع الدفعات</span>
-            <span className="font-bold text-lg font-manrope">{totalInstallments.toLocaleString('ar-LY')} د.ل</span>
+            <span className="font-bold text-base font-manrope">{totalInstallments.toLocaleString('ar-LY')} د.ل</span>
           </div>
           <div className="border-t border-border/50 pt-2 flex justify-between items-center">
             <span className="text-sm font-medium">الفرق</span>
@@ -1144,7 +1145,7 @@ export function InstallmentsManager({
                 <AlertCircle className="h-5 w-5 text-amber-500" />
               )}
               <span className={cn(
-                "font-bold text-lg font-manrope",
+                "font-bold text-base font-manrope",
                 isBalanced ? "text-green-500" : "text-amber-500"
               )}>
                 {difference.toLocaleString('ar-LY')} د.ل

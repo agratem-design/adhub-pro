@@ -11,6 +11,7 @@ import { OSM_TILE_LAYERS, SATELLITE_TILE_URLS, SATELLITE_PROVIDERS } from '@/typ
 import { getBillboardStatus, getSizeColor, getDaysRemaining } from '@/hooks/useMapMarkers';
 import { createCompactPopupContent } from './MapPopupContent';
 import { createUnifiedPin } from './unifiedPin';
+import { STATUS_PALETTE } from '@/lib/billboardStatusPalette';
 import { useMapNavigation, calculateDistance } from '@/hooks/useMapNavigation';
 import MapHeader from './MapHeader';
 import MapLegend from './MapLegend';
@@ -27,7 +28,7 @@ import FieldPhotoUpload from './FieldPhotoUpload';
 import { supabase } from '@/integrations/supabase/client';
 import { useAllActiveBillboardStatuses } from '@/hooks/useBillboardStatuses';
 import { Slider } from '@/components/ui/slider';
-import { Circle, Target } from 'lucide-react';
+import { Circle, Target, Copy } from 'lucide-react';
 
 interface GoogleHomeMapProps {
   billboards: Billboard[];
@@ -54,6 +55,16 @@ interface GoogleHomeMapProps {
   calcMetersByFaces?: boolean;
   externalSelectedIds?: Set<number>;
   onLocationChange?: (billboardId: number | string, newLat: number, newLng: number) => void;
+  /** وضع الاختيار (العقود والعروض): زر إضافة/إزالة وسعر اللوحة في بطاقة الدبوس */
+  selectionActions?: {
+    isSelected: (billboard: Billboard) => boolean;
+    onToggle: (billboard: Billboard) => void;
+    priceLabel?: (billboard: Billboard) => string | null;
+    addLabel?: string;
+    removeLabel?: string;
+  };
+  /** السماح بسحب الدبابيس لتعديل مواقع اللوحات (يُعطّل في صفحات الاختيار) */
+  allowLocationEdit?: boolean;
 }
 
 import { parseCoords, getJitteredCoords } from '@/utils/parseCoords';
@@ -83,7 +94,9 @@ export default function GoogleHomeMap({
   showStatsOverlay = false,
   calcMetersByFaces = false,
   externalSelectedIds,
-  onLocationChange
+  onLocationChange,
+  selectionActions,
+  allowLocationEdit = true,
 }: GoogleHomeMapProps) {
 
 
@@ -104,6 +117,9 @@ export default function GoogleHomeMap({
   const googleSmartRouteMarkersRef = useRef<google.maps.Marker[]>([]);
   const prevFilterKeyRef = useRef<string>('');
   const hasFitBoundsRef = useRef(false);
+  const lastLeafletBoundsRef = useRef<L.LatLngBounds | null>(null);
+  const pendingFitRef = useRef(false);
+  const userMovedMapRef = useRef(false);
   
   const [isDraggingPin, setIsDraggingPin] = useState(false);
   const [draggingPinName, setDraggingPinName] = useState('');
@@ -240,7 +256,7 @@ export default function GoogleHomeMap({
                  [...externalSelectedIds].every(id => selectedBillboardIds.has(id));
     if (!same) {
       setSelectedBillboardIds(new Set(externalSelectedIds));
-      if (externalSelectedIds.size > 0 && !isMultiSelectMode) setIsMultiSelectMode(true);
+      if (externalSelectedIds.size > 0 && !isMultiSelectMode && !selectionActions) setIsMultiSelectMode(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalSelectedIds]);
@@ -1312,7 +1328,7 @@ export default function GoogleHomeMap({
     const isTorn = tornSet.has(Number((billboard as any).ID || (billboard as any).id));
     const enriched = isTorn ? { ...(billboard as any), maintenance_status: 'متضررة اللوحة' } : billboard;
     return createUnifiedPin(enriched as any, isSelected);
-  }, [tornSet, zoomLevel]);
+  }, [tornSet]);
 
   // Initialize Leaflet map
   useEffect(() => {
@@ -1423,12 +1439,7 @@ export default function GoogleHomeMap({
         const displayCount = count > 999 ? '999+' : count > 99 ? '99+' : String(count);
         const tier = count > 100 ? 3 : count > 30 ? 2 : count > 10 ? 1 : 0;
         const size = [48, 54, 62, 72][tier];
-        const colors = [
-          { ring: '#3b82f6', core: '#1e40af', glow: 'rgba(59,130,246,0.3)' },
-          { ring: '#8b5cf6', core: '#5b21b6', glow: 'rgba(139,92,246,0.3)' },
-          { ring: '#f59e0b', core: '#b45309', glow: 'rgba(245,158,11,0.3)' },
-          { ring: '#ef4444', core: '#991b1b', glow: 'rgba(239,68,68,0.3)' },
-        ][tier];
+        const colors = { ring: '#d6ac40', core: '#8a6a1c', glow: 'rgba(0,0,0,0.35)' };
         
         return L.divIcon({
           html: `
@@ -1441,11 +1452,11 @@ export default function GoogleHomeMap({
                   </linearGradient>
                 </defs>
                 <circle cx="30" cy="30" r="28" fill="url(#cg${count})" opacity="0.9"/>
-                <circle cx="30" cy="30" r="21" fill="rgba(0,0,0,0.5)"/>
+                <circle cx="30" cy="30" r="21" fill="#0f172a"/>
                 <circle cx="30" cy="30" r="20" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="1"/>
               </svg>
               <div style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1;">
-                <span style="color: #fff; font-weight: 900; font-size: ${tier >= 2 ? 15 : 14}px; font-family: Tajawal, sans-serif; text-shadow: 0 1px 4px rgba(0,0,0,0.5);">${displayCount}</span>
+                <span style="color: #f4c25a; font-weight: 800; font-size: ${tier >= 2 ? 15 : 14}px; font-family: Manrope, Tajawal, sans-serif;">${displayCount}</span>
               </div>
             </div>
           `,
@@ -1506,6 +1517,7 @@ export default function GoogleHomeMap({
     if (mapProvider !== 'openstreetmap' || !leafletMapInstanceRef.current || !leafletClusterRef.current) return;
 
     leafletClusterRef.current.clearLayers();
+    leafletMarkerMapRef.current.clear();
 
     const bounds = L.latLngBounds([]);
     let hasMarkers = false;
@@ -1526,13 +1538,13 @@ export default function GoogleHomeMap({
         popupAnchor: [0, -pinData.anchorY]
       });
 
-      const marker = L.marker([coords.lat, coords.lng], { icon, draggable: isPinDragEnabled && !directMarkerClickRef.current });
+      const marker = L.marker([coords.lat, coords.lng], { icon, draggable: allowLocationEdit && isPinDragEnabled && !directMarkerClickRef.current });
 
       let pressTimer: any = null;
       marker.on('mousedown touchstart', () => {
         if (directMarkerClickRef.current) return;
         pressTimer = setTimeout(() => {
-          if (!isPinDragEnabled) {
+          if (!isPinDragEnabled && allowLocationEdit) {
             setIsPinDragEnabled(true);
             const name = (b as any).Billboard_Name || (b as any).location_text || `لوحة #${billboardId}`;
  toast.info(` تم تفعيل وضع السحب والتحريك للوحة: "${name}"`, { duration: 3000 });
@@ -1608,17 +1620,72 @@ export default function GoogleHomeMap({
       });
 
       leafletClusterRef.current?.addLayer(marker);
+      leafletMarkerMapRef.current.set(String(billboardId), marker);
+      (marker as any).__billboard = b;
 
       bounds.extend([coords.lat, coords.lng]);
       hasMarkers = true;
     });
 
     // ✅ Only fitBounds on initial load, not every re-render
+    if (hasMarkers && bounds.isValid()) lastLeafletBoundsRef.current = bounds;
     if (hasMarkers && bounds.isValid() && !hasFitBoundsRef.current) {
       hasFitBoundsRef.current = true;
-      leafletMapInstanceRef.current.fitBounds(bounds, { padding: [60, 60], maxZoom: 13 });
+      const el = leafletMapRef.current;
+      // إذا كانت الخريطة مخفية (عرض صفر) نؤجل الملاءمة حتى تظهر
+      if (el && el.clientWidth > 0 && el.clientHeight > 0) {
+        leafletMapInstanceRef.current.fitBounds(bounds, { padding: [60, 60], maxZoom: 13, animate: false });
+      } else {
+        pendingFitRef.current = true;
+      }
     }
-  }, [filteredBillboards, mapProvider, onBillboardClick, directMarkerClick, createPinWithLabel, passedBillboardIds, tornSet, selectedBillboardForCard, zoomLevel, isPinDragEnabled]);
+  }, [filteredBillboards, mapProvider, onBillboardClick, directMarkerClick, createPinWithLabel, passedBillboardIds, tornSet, isPinDragEnabled]);
+
+  // ✅ تمييز الدبوس المفتوح وتحديثه منفرداً بدل إعادة بناء كل الدبابيس
+  const prevCardIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (mapProvider !== 'openstreetmap') return;
+    const cur = selectedBillboardForCard ? String((selectedBillboardForCard as any).ID || (selectedBillboardForCard as any).id || '') : null;
+    const ids = new Set<string>();
+    if (prevCardIdRef.current) ids.add(prevCardIdRef.current);
+    if (cur) ids.add(cur);
+    prevCardIdRef.current = cur;
+    ids.forEach(id => {
+      const marker: any = leafletMarkerMapRef.current.get(id);
+      if (!marker?.__billboard) return;
+      const sel = id === cur || selectedBillboardIdsRef.current.has(Number(id));
+      const pin = createPinWithLabel(marker.__billboard, sel, passedBillboardIds.has(Number(id)));
+      marker.setIcon(L.icon({ iconUrl: pin.url, iconSize: [pin.width, pin.height], iconAnchor: [pin.anchorX, pin.anchorY], popupAnchor: [0, -pin.anchorY] }));
+    });
+  }, [selectedBillboardForCard, mapProvider, createPinWithLabel, passedBillboardIds]);
+
+  // ✅ الخريطة داخل أقسام/تبويبات مخفية: عند ظهورها أو تغير حجمها نعيد حساب الحجم والملاءمة
+  useEffect(() => {
+    const el = leafletMapRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const map = leafletMapInstanceRef.current;
+        if (!map || el.clientWidth === 0 || el.clientHeight === 0) return;
+        map.invalidateSize();
+        if ((pendingFitRef.current || !userMovedMapRef.current) && lastLeafletBoundsRef.current?.isValid()) {
+          pendingFitRef.current = false;
+          map.fitBounds(lastLeafletBoundsRef.current, { padding: [60, 60], maxZoom: 13, animate: false });
+        }
+      });
+    });
+    ro.observe(el);
+    const markUser = () => { userMovedMapRef.current = true; };
+    el.addEventListener('wheel', markUser, { passive: true });
+    el.addEventListener('pointerdown', markUser);
+    return () => {
+      cancelAnimationFrame(raf); ro.disconnect();
+      el.removeEventListener('wheel', markUser);
+      el.removeEventListener('pointerdown', markUser);
+    };
+  }, []);
 
   // Leaflet: User/Live location markers
   useEffect(() => {
@@ -2022,7 +2089,7 @@ export default function GoogleHomeMap({
           scaledSize: new google.maps.Size(pinData.width, pinData.height),
           anchor: new google.maps.Point(pinData.anchorX, pinData.anchorY)
         },
-        draggable: !directMarkerClickRef.current,
+        draggable: allowLocationEdit && !directMarkerClickRef.current,
         optimized: false
       });
 
@@ -2214,7 +2281,7 @@ export default function GoogleHomeMap({
       });
       marker.setZIndex(isSelected ? 2000 : (isVisited ? 1 : 10));
     });
-  }, [zoomLevel, selectedBillboardForCard, selectedBillboardIds, passedBillboardIds, filteredBillboards, createPinWithLabel, mapProvider]);
+  }, [selectedBillboardForCard, selectedBillboardIds, passedBillboardIds, filteredBillboards, createPinWithLabel, mapProvider]);
 
   // Google: Live location marker - Refined design with smooth movement
   const googleLiveMarkerPrevPos = useRef<{ lat: number; lng: number } | null>(null);
@@ -2955,7 +3022,7 @@ export default function GoogleHomeMap({
 
   const outerBB: any = selectedBillboardForCard;
   const isCompareMode = outerBB ? (!!outerBB.comparisonMatch || outerBB.isComparison) : false;
-  const cardWidth = isCompareMode ? 940 : 740;
+  const cardWidth = isCompareMode ? 940 : 360;
   const halfWidth = cardWidth / 2;
   const activeCardScreenPos = cardScreenPos || (selectedBillboardForCard as any)?.cardScreenPos;
   const containerW = containerRef.current?.clientWidth || (typeof window !== 'undefined' ? window.innerWidth : 1200);
@@ -3033,16 +3100,16 @@ export default function GoogleHomeMap({
                       </span>
                     )}
                     {[
-                      { key: 'available', label: 'متاح', color: 'bg-green-500/20 text-green-400 border-green-500/30' },
-                      { key: 'rented',    label: 'مؤجر', color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-                      { key: 'reserved',  label: 'محجوز', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
-                      { key: 'maintenance',label:'صيانة', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
+                      { key: 'available', label: 'متاح', color: STATUS_PALETTE.available.chip },
+                      { key: 'rented',    label: 'مؤجر', color: STATUS_PALETTE.rented.chip },
+                      { key: 'reserved',  label: 'محجوز', color: STATUS_PALETTE.reserved.chip },
+                      { key: 'maintenance',label:'صيانة', color: STATUS_PALETTE.maintenance.chip },
                     ].map(chip => {
                       const isActive = localStatusFilter.includes(chip.key);
                       return (
                         <button key={chip.key}
                           onClick={() => setLocalStatusFilter(prev => prev.includes(chip.key) ? prev.filter(k => k !== chip.key) : [...prev, chip.key])}
-                          className={`px-3 py-1 rounded-full text-[10px] font-bold border transition-all shrink-0 ${ isActive ? 'bg-amber-600 border-amber-500 text-white' : `${chip.color} hover:bg-white/5` }`}
+                          className={`px-3 py-1 rounded-full text-[10px] font-bold border transition-all shrink-0 ${ isActive ? 'bg-primary border-primary text-primary-foreground' : `${chip.color} hover:bg-white/5` }`}
                           style={{ fontFamily: 'Tajawal, sans-serif' }}
                         >{chip.label}</button>
                       );
@@ -3128,16 +3195,16 @@ export default function GoogleHomeMap({
                       </span>
                     )}
                     {[
-                      { key: 'available',   label: 'متاح',  color: 'bg-green-500/20 text-green-400 border-green-500/30' },
-                      { key: 'rented',      label: 'مؤجر',  color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-                      { key: 'reserved',    label: 'محجوز', color: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
-                      { key: 'maintenance', label: 'صيانة', color: 'bg-red-500/20 text-red-400 border-red-500/30' },
+                      { key: 'available',   label: 'متاح',  color: STATUS_PALETTE.available.chip },
+                      { key: 'rented',      label: 'مؤجر',  color: STATUS_PALETTE.rented.chip },
+                      { key: 'reserved',    label: 'محجوز', color: STATUS_PALETTE.reserved.chip },
+                      { key: 'maintenance', label: 'صيانة', color: STATUS_PALETTE.maintenance.chip },
                     ].map(chip => {
                       const isActive = localStatusFilter.includes(chip.key);
                       return (
                         <button key={chip.key}
                           onClick={() => setLocalStatusFilter(prev => prev.includes(chip.key) ? prev.filter(k => k !== chip.key) : [...prev, chip.key])}
-                          className={`px-3 py-1 rounded-full text-[10px] font-bold border transition-all shrink-0 cursor-pointer ${ isActive ? 'bg-amber-600 border-amber-500 text-white shadow-md' : `${chip.color} hover:bg-white/5` }`}
+                          className={`px-3 py-1 rounded-full text-[10px] font-bold border transition-all shrink-0 cursor-pointer ${ isActive ? 'bg-primary border-primary text-primary-foreground shadow-md' : `${chip.color} hover:bg-white/5` }`}
                           style={{ fontFamily: 'Tajawal, sans-serif' }}
                         >{chip.label}</button>
                       );
@@ -3156,6 +3223,7 @@ export default function GoogleHomeMap({
               {/* Col-3 RIGHT: action buttons */}
               <div className="flex items-center justify-end gap-2 pointer-events-auto">
                 {/* Pin Lock/Unlock toggle for movement protection */}
+                {allowLocationEdit && (
                 <button
                   onClick={() => {
                     const next = !isPinDragEnabled;
@@ -3177,6 +3245,7 @@ export default function GoogleHomeMap({
                   {isPinDragEnabled ? <Unlock className="w-4 h-4 text-white" /> : <Lock className="w-4 h-4 text-amber-500" />}
                   <span>{isPinDragEnabled ? 'تعديل المواقع مفعّل' : 'قفل المواقع'}</span>
                 </button>
+                )}
 
                 {/* Multi-select toggle */}
                 <button
@@ -3467,9 +3536,9 @@ export default function GoogleHomeMap({
               onZoomOut={handleZoomOut}
               onToggleLayers={() => setShowLayers(!showLayers)}
               onFitAll={fitAllMarkers}
-              onCenterOnUser={handleCenterOnUser}
+              onCenterOnUser={selectionActions ? undefined : handleCenterOnUser}
               isSimpleTracking={isSimpleTracking}
-              onToggleSimpleTracking={toggleSimpleTracking}
+              onToggleSimpleTracking={selectionActions ? undefined : toggleSimpleTracking}
               isMobile={isMobile}
             />
           </div>
@@ -3858,8 +3927,8 @@ export default function GoogleHomeMap({
             isMobile
               ? 'bottom-2 left-2 right-2 max-h-[60vh]'
               : !cardScreenPos
-                ? (isCompareMode ? 'bottom-6 right-6 w-[940px]' : 'bottom-6 right-6 w-[740px]')
-                : (isCompareMode ? 'w-[940px]' : 'w-[740px]')
+                ? (isCompareMode ? 'bottom-6 right-6 w-[940px]' : 'bottom-6 right-6 w-[360px]')
+                : (isCompareMode ? 'w-[940px]' : 'w-[360px]')
           }`}
           style={
             !isMobile && cardScreenPos
@@ -3871,7 +3940,7 @@ export default function GoogleHomeMap({
               : undefined
           }
         >
-          <div className={`relative ${isMobile ? 'rounded-2xl max-h-[60vh] overflow-y-auto' : 'rounded-[24px] overflow-hidden'} bg-gradient-to-br from-[#0b0b16]/95 via-[#0f0e16]/95 to-[#15110a]/95 backdrop-blur-2xl border border-[#d6ac40]/30 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.9),0_0_0_1px_rgba(214,172,64,0.05)] text-slate-100 animate-in fade-in zoom-in-95 duration-200`} dir="rtl" style={{ fontFamily: 'Tajawal, sans-serif' }}>
+          <div className={`relative ${isMobile ? 'rounded-xl max-h-[60vh] overflow-y-auto' : 'rounded-xl overflow-hidden'} bg-[#15130f]/95 backdrop-blur-xl border border-white/10 shadow-2xl text-slate-100 animate-in fade-in zoom-in-95 duration-200`} dir="rtl" style={{ fontFamily: 'Tajawal, sans-serif' }}>
             {/* Arrow pointer to pin */}
             {!isMobile && cardScreenPos && (
               <div
@@ -3881,9 +3950,9 @@ export default function GoogleHomeMap({
                   bottom: -7,
                   width: 14,
                   height: 14,
-                  background: 'linear-gradient(135deg, #15110a, #0b0b16)',
-                  borderRight: '1px solid rgba(214,172,64,0.3)',
-                  borderBottom: '1px solid rgba(214,172,64,0.3)',
+                  background: '#15130f',
+                  borderRight: '1px solid rgba(255,255,255,0.1)',
+                  borderBottom: '1px solid rgba(255,255,255,0.1)',
                   transform: 'rotate(45deg)',
                 }}
               />
@@ -3898,8 +3967,9 @@ export default function GoogleHomeMap({
                 bb.isComparison ? { dot: 'bg-slate-400', text: 'text-slate-300 animate-pulse', bg: 'bg-slate-500/25', bd: 'border-slate-400/30' } :
                 isHidden ? { dot: 'bg-slate-400', text: 'text-slate-300', bg: 'bg-slate-500/15', bd: 'border-slate-400/30' } :
                 statusLabel === 'متاحة' || statusLabel === 'متاح' ? { dot: 'bg-emerald-400', text: 'text-emerald-300', bg: 'bg-emerald-500/15', bd: 'border-emerald-400/30' } :
-                statusLabel === 'مؤجرة' || statusLabel === 'مؤجر' || statusLabel === 'محجوزة' || statusLabel === 'محجوز' ? { dot: 'bg-rose-400', text: 'text-rose-300', bg: 'bg-rose-500/15', bd: 'border-rose-400/30' } :
-                statusLabel === 'صيانة' || statusLabel === 'تحتاج صيانة' || statusLabel === 'قيد الصيانة' || statusLabel === 'متضررة اللوحة' ? { dot: 'bg-amber-400', text: 'text-amber-300', bg: 'bg-amber-500/15', bd: 'border-amber-400/30' } :
+                statusLabel === 'محجوزة' || statusLabel === 'محجوز' || statusLabel === 'قريباً' ? { dot: 'bg-amber-400', text: 'text-amber-300', bg: 'bg-amber-500/15', bd: 'border-amber-400/30' } :
+                statusLabel === 'مؤجرة' || statusLabel === 'مؤجر' ? { dot: 'bg-rose-400', text: 'text-rose-300', bg: 'bg-rose-500/15', bd: 'border-rose-400/30' } :
+                statusLabel === 'صيانة' || statusLabel === 'تحتاج صيانة' || statusLabel === 'قيد الصيانة' || statusLabel === 'متضررة اللوحة' ? { dot: 'bg-slate-400', text: 'text-slate-300', bg: 'bg-slate-500/20', bd: 'border-slate-400/40' } :
                 statusLabel === 'إزالة' ? { dot: 'bg-gray-400', text: 'text-gray-300', bg: 'bg-gray-500/15', bd: 'border-gray-400/30' } :
                 statusLabel === 'خارج الخدمة' ? { dot: 'bg-neutral-400', text: 'text-neutral-300', bg: 'bg-neutral-500/15', bd: 'border-neutral-400/30' } :
                 { dot: 'bg-blue-400', text: 'text-blue-300', bg: 'bg-blue-500/15', bd: 'border-blue-400/30' };
@@ -3966,9 +4036,30 @@ export default function GoogleHomeMap({
                 }
               }
 
+              const selectionPrice = selectionActions?.priceLabel ? selectionActions.priceLabel(selectedBillboardForCard) : null;
+              const selectionOn = selectionActions ? selectionActions.isSelected(selectedBillboardForCard) : false;
               const actionsSection = (
                 <div className="grid grid-cols-5 gap-1.5 pt-2 border-t border-white/5">
-                  {bb.isComparison ? (
+                  {selectionActions ? (
+                    <>
+                      {selectionPrice && (
+                        <div className="col-span-5 flex items-center justify-between rounded-lg bg-white/5 px-3 py-1.5 text-xs">
+                          <span className="text-slate-400">السعر للمدة</span>
+                          <span className="font-bold text-[#d6ac40]">{selectionPrice}</span>
+                        </div>
+                      )}
+                      <button
+                        onClick={() => {
+                          selectionActions.onToggle(selectedBillboardForCard);
+                          setSelectedBillboardForCard(null);
+                        }}
+                        className={`col-span-5 py-2.5 rounded-lg text-xs font-bold border flex items-center justify-center gap-1.5 transition-all cursor-pointer ${selectionOn ? 'bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30 text-rose-400' : 'bg-[#d6ac40]/20 hover:bg-[#d6ac40]/30 border-[#d6ac40]/50 text-[#f0cf73]'}`}
+                      >
+                        {selectionOn ? <Trash2 className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                        <span>{selectionOn ? (selectionActions.removeLabel || 'إزالة من الاختيار') : (selectionActions.addLabel || 'إضافة للاختيار')}</span>
+                      </button>
+                    </>
+                  ) : bb.isComparison ? (
                     <button
                       onClick={() => {
                         if (onAddToList) {
@@ -4421,15 +4512,19 @@ export default function GoogleHomeMap({
                   );
                 }
               } else {
-                if (isMobile) {
+                  // بطاقة موحدة مدمجة للحاسوب والجوال
+                  const loc = [bb.Municipality, bb.District, bb.City].filter((v: any, i: number, arr: any[]) => v && arr.indexOf(v) === i);
+                  const priceValue = isAvailable ? Number(bb.Price || bb.price || 0) : Number(billboardContractPrice || 0);
+                  const elapsedPct = (() => {
+                    const s = startRaw ? new Date(startRaw).getTime() : NaN;
+                    const e = endRaw ? new Date(endRaw).getTime() : NaN;
+                    if (isNaN(s) || isNaN(e) || e <= s) return null;
+                    return Math.max(0, Math.min(100, Math.round(((Date.now() - s) / (e - s)) * 100)));
+                  })();
                   return (
-                    <>
-                      {/* Header: hero image with overlays */}
-                      <div className="relative h-28 bg-gradient-to-br from-slate-900 to-slate-800 overflow-hidden">
-                        {/* Loading skeleton */}
-                        {cardImageState === 'loading' && heroSrc && (
-                          <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(255,255,255,0.04)_30%,rgba(214,172,64,0.08)_50%,rgba(255,255,255,0.04)_70%)] bg-[length:200%_100%] animate-[shimmer_1.6s_linear_infinite]" />
-                        )}
+                    <div className={isMobile ? 'max-h-[60vh] overflow-y-auto' : 'w-[360px]'}>
+                      {/* الصورة والحالة */}
+                      <div className="relative h-36 overflow-hidden bg-slate-900">
                         {heroSrc ? (
                           <img
                             src={heroSrc}
@@ -4439,178 +4534,109 @@ export default function GoogleHomeMap({
                             onLoad={() => setCardImageState('loaded')}
                             onError={() => setCardImageState('error')}
                             onClick={() => cardImageState === 'loaded' && setLightboxImage(heroSrc)}
-                            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${cardImageState === 'loaded' ? 'opacity-100 cursor-zoom-in' : 'opacity-0'}`}
+                            className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${cardImageState === 'loaded' ? 'cursor-zoom-in opacity-100' : 'opacity-0'}`}
                           />
                         ) : null}
                         {(cardImageState === 'error' || !heroSrc) && (
-                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-500">
-                            <ImageOff className="w-10 h-10 opacity-50" strokeWidth={1.5} />
-                            <span className="text-[11px] font-bold">لا توجد صورة للوحة</span>
+                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-slate-500">
+                            <ImageOff className="h-7 w-7 opacity-50" strokeWidth={1.5} />
+                            <span className="text-xs">لا توجد صورة</span>
                           </div>
                         )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#0b0b16] via-[#0b0b16]/40 to-transparent pointer-events-none" />
-
-                        {/* Close */}
+                        <span className={`absolute right-2 top-2 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-bold backdrop-blur-md ${statusTone.bg} ${statusTone.text} ${statusTone.bd}`}>
+                          <span className={`h-1.5 w-1.5 rounded-full ${statusTone.dot}`} />{statusLabel}
+                        </span>
+                        {(bb.Size || bb.size) && (
+                          <span dir="ltr" className="absolute bottom-2 right-2 rounded-md bg-black/70 px-2 py-0.5 font-manrope text-xs font-bold text-[#f4c25a]">{bb.Size || bb.size}</span>
+                        )}
                         <button
                           onClick={() => setSelectedBillboardForCard(null)}
-                          className="absolute top-3 left-3 z-10 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-md text-white/90 border border-white/15 flex items-center justify-center transition-colors cursor-pointer"
+                          className="absolute left-2 top-2 flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border border-white/15 bg-black/60 text-white/90 hover:bg-black/80"
                           aria-label="إغلاق"
                         >
-                          <X className="w-4 h-4" />
+                          <X className="h-3.5 w-3.5" />
                         </button>
-
-                        {/* Status pill */}
-                        <div className={`absolute top-3 right-3 ${statusTone.bg} ${statusTone.text} border ${statusTone.bd} backdrop-blur-md px-3 py-1.5 rounded-full text-[11px] font-extrabold flex items-center gap-1.5 shadow-lg`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${statusTone.dot} animate-pulse`} />
-                          {statusLabel}
-                        </div>
-
-                        {/* Title at bottom of hero */}
-                        <div className="absolute bottom-0 left-0 right-0 px-4 pb-3 pt-6 z-10">
-                          <div className="flex items-end justify-between gap-2">
-                            <div className="min-w-0">
-                              <h3 className="text-base font-extrabold text-white truncate">{bb.Billboard_Name || 'لوحة إعلانية'}</h3>
-                              <p className="text-[10px] text-[#f4c25a] font-mono font-bold mt-0.5">{code}</p>
-                            </div>
-                            <button
-                              onClick={() => { navigator.clipboard.writeText(code); toast.success('تم نسخ رمز اللوحة'); }}
-                              className="flex-shrink-0 w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center text-white/80 hover:text-white transition-colors cursor-pointer"
-                              title="نسخ الرمز"
-                            >
-                              <CheckSquare className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
                       </div>
 
-                      {/* Body */}
-                      <div className="p-3 space-y-2">
-                        {infoSection}
-
-                        {/* Front face design preview */}
-                        {bb.design_face_a && (
-                          <div className="pt-1">
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span className="text-[10px] text-slate-400 font-extrabold">التصميم الحالي (الوجه الأمامي)</span>
-                              <Camera className="w-3 h-3 text-[#d6ac40]" />
-                            </div>
-                            <div
-                              className="relative h-20 rounded-xl overflow-hidden border border-[#d6ac40]/25 bg-slate-950 cursor-zoom-in group"
-                              onClick={() => setLightboxImage(bb.design_face_a)}
+                      <div className="space-y-2.5 p-3">
+                        {/* العنوان والموقع */}
+                        <div>
+                          <div className="flex items-center justify-between gap-2">
+                            <h3 className="truncate text-sm font-bold text-white">{bb.Nearest_Landmark || bb.Billboard_Name || 'لوحة إعلانية'}</h3>
+                            <button
+                              onClick={() => { navigator.clipboard.writeText(code); toast.success('تم نسخ رمز اللوحة'); }}
+                              className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md border border-white/10 px-1.5 py-0.5 font-mono text-xs text-[#f4c25a] hover:bg-white/5"
+                              title="نسخ الرمز"
                             >
-                              <img src={bb.design_face_a} alt="" aria-hidden="true" className="absolute inset-0 w-full h-full object-cover scale-110 blur-md opacity-50" referrerPolicy="no-referrer" />
-                              <img src={bb.design_face_a} alt="التصميم الحالي" className="relative w-full h-full object-contain" referrerPolicy="no-referrer" />
-                              <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center pb-2">
-                                <span className="text-[10px] text-white font-bold">اضغط للتكبير</span>
-                              </div>
+                              {bb.Billboard_Name && bb.Nearest_Landmark ? bb.Billboard_Name : code}
+                              <Copy className="h-3 w-3" />
+                            </button>
+                          </div>
+                          {loc.length > 0 && (
+                            <p className="mt-1 flex items-center gap-1 text-xs text-slate-400">
+                              <MapPinned className="h-3.5 w-3.5 shrink-0 text-[#d6ac40]" />
+                              <span className="truncate">{loc.join(' · ')}</span>
+                            </p>
+                          )}
+                        </div>
+
+                        {/* بيانات العقد للوحة المؤجرة */}
+                        {!isAvailable && (contractNum || customer || showRental) && (
+                          <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.03] p-2.5 text-xs">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="flex min-w-0 items-center gap-1.5 text-slate-200">
+                                <User className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                <span className="truncate font-semibold">{customer || '—'}</span>
+                              </span>
+                              <span className="flex items-center gap-1 font-mono text-[#d6ac40]">
+                                {contractLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+                                {contractNum ? `#${contractNum}` : ''}
+                              </span>
                             </div>
+                            {adType && <p className="truncate text-slate-400">{adType}</p>}
+                            {showRental && (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between text-slate-400">
+                                  <span>{fmt(startRaw)} ← {fmt(endRaw)}</span>
+                                  <span className={days !== null && days > 0 ? 'font-semibold text-[#f4c25a]' : 'text-slate-500'}>
+                                    {days !== null && days > 0 ? `${days} يوم متبقي` : 'منتهي'}
+                                  </span>
+                                </div>
+                                {elapsedPct !== null && (
+                                  <div className="h-1 overflow-hidden rounded-full bg-white/10">
+                                    <div className="h-full rounded-full bg-[#d6ac40]" style={{ width: `${elapsedPct}%` }} />
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         )}
 
-                        {actionsSection}
-                      </div>
-                    </>
-                  );
-                } else {
-                  return (
-                    <div className="flex flex-row items-stretch min-h-[380px] w-[740px]">
-                      {/* Right Column (Info / details) */}
-                      <div className="flex-1 p-4 space-y-3 flex flex-col justify-between order-2 md:order-1">
-                        <div className="space-y-3">
-                          {/* Title and Code */}
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <h3 className="text-base md:text-lg font-extrabold text-white truncate">{bb.Billboard_Name || 'لوحة إعلانية'}</h3>
-                              <p className="text-[10px] md:text-xs text-[#f4c25a] font-mono font-bold mt-0.5">{code}</p>
-                            </div>
-                            <button
-                              onClick={() => { navigator.clipboard.writeText(code); toast.success('تم نسخ رمز اللوحة'); }}
-                              className="flex-shrink-0 w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center text-white/80 hover:text-white transition-colors cursor-pointer"
-                              title="نسخ الرمز"
-                            >
-                              <CheckSquare className="w-3.5 h-3.5" />
-                            </button>
+                        {/* السعر */}
+                        {priceValue > 0 && !selectionActions && (
+                          <div className="flex items-center justify-between rounded-lg bg-white/[0.04] px-2.5 py-1.5 text-xs">
+                            <span className="text-slate-400">{isAvailable ? 'الإيجار الشهري' : 'قيمة اللوحة في العقد'}</span>
+                            <span className="font-manrope font-bold text-[#f4c25a]">{priceValue.toLocaleString('en-US')} د.ل</span>
                           </div>
+                        )}
 
-                          {infoSection}
-                        </div>
-                      </div>
-
-                      {/* Vertical divider */}
-                      <div className="w-px bg-white/10 self-stretch my-4 order-2" />
-
-                      {/* Left Column (Visuals & Actions) */}
-                      <div className="w-[340px] p-4 flex flex-col justify-between space-y-3 order-1 md:order-3">
-                        <div className="flex-1 flex flex-col space-y-3">
-                          {/* Hero Image Section */}
-                          <div className="relative flex-1 min-h-[200px] rounded-xl border border-white/10 bg-gradient-to-br from-slate-900 to-slate-800 overflow-hidden">
-                            {/* Loading skeleton */}
-                            {cardImageState === 'loading' && heroSrc && (
-                              <div className="absolute inset-0 bg-[linear-gradient(110deg,rgba(255,255,255,0.04)_30%,rgba(214,172,64,0.08)_50%,rgba(255,255,255,0.04)_70%)] bg-[length:200%_100%] animate-[shimmer_1.6s_linear_infinite]" />
-                            )}
-                            {heroSrc ? (
-                              <img
-                                src={heroSrc}
-                                alt={code}
-                                loading="lazy"
-                                referrerPolicy="no-referrer"
-                                onLoad={() => setCardImageState('loaded')}
-                                onError={() => setCardImageState('error')}
-                                onClick={() => cardImageState === 'loaded' && setLightboxImage(heroSrc)}
-                                className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-500 ${cardImageState === 'loaded' ? 'opacity-100 cursor-zoom-in' : 'opacity-0'}`}
-                              />
-                            ) : null}
-                            {(cardImageState === 'error' || !heroSrc) && (
-                              <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-500">
-                                <ImageOff className="w-10 h-10 opacity-50" strokeWidth={1.5} />
-                                <span className="text-[11px] font-bold">لا توجد صورة للوحة</span>
-                              </div>
-                            )}
-                            <div className="absolute inset-0 bg-gradient-to-t from-[#0b0b16] via-[#0b0b16]/40 to-transparent pointer-events-none" />
-
-                            {/* Close button */}
-                            <button
-                              onClick={() => setSelectedBillboardForCard(null)}
-                              className="absolute top-2 left-2 z-10 w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-md text-white/90 border border-white/15 flex items-center justify-center transition-colors cursor-pointer"
-                              aria-label="إغلاق"
-                            >
-                              <X className="w-3.5 h-3.5" />
-                            </button>
-
-                            {/* Status pill */}
-                            <div className={`absolute top-2 right-2 ${statusTone.bg} ${statusTone.text} border ${statusTone.bd} backdrop-blur-md px-2.5 py-1 rounded-full text-[10px] font-extrabold flex items-center gap-1 shadow-lg`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${statusTone.dot} animate-pulse`} />
-                              {statusLabel}
-                            </div>
-                          </div>
-
-                          {/* Front face design preview */}
-                          {bb.design_face_a && (
-                            <div className="pt-0.5">
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-[10px] text-slate-400 font-extrabold">التصميم الحالي (الوجه الأمامي)</span>
-                                <Camera className="w-3 h-3 text-[#d6ac40]" />
-                              </div>
-                              <div
-                                className="relative h-36 rounded-xl overflow-hidden border border-[#d6ac40]/25 bg-slate-950 cursor-zoom-in group"
-                                onClick={() => setLightboxImage(bb.design_face_a)}
-                              >
-                                <img src={bb.design_face_a} alt="" aria-hidden="true" className="absolute inset-0 w-full h-full object-cover scale-110 blur-md opacity-50" referrerPolicy="no-referrer" />
-                                <img src={bb.design_face_a} alt="التصميم الحالي" className="relative w-full h-full object-contain" referrerPolicy="no-referrer" />
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-center pb-1">
-                                  <span className="text-[9px] text-white font-bold">اضغط للتكبير</span>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                        {/* التصميم الحالي */}
+                        {bb.design_face_a && (
+                          <button
+                            type="button"
+                            onClick={() => setLightboxImage(bb.design_face_a)}
+                            className="flex w-full cursor-zoom-in items-center gap-2 rounded-lg border border-white/10 p-1.5 text-right hover:bg-white/5"
+                          >
+                            <img src={bb.design_face_a} alt="" className="h-10 w-16 shrink-0 rounded object-cover" referrerPolicy="no-referrer" />
+                            <span className="text-xs text-slate-300">التصميم الحالي — اضغط للتكبير</span>
+                          </button>
+                        )}
 
                         {actionsSection}
                       </div>
                     </div>
                   );
                 }
-              }
             })()}
           </div>
         </div>

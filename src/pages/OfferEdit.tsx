@@ -4,7 +4,7 @@ import { buildPricingSnapshot, parsePricingSnapshot, shouldRefreshSnapshot } fro
 import { durationPrice, durationName, durationEnd } from '@/utils/pricingDuration';
 // @ts-nocheck
 import { isBillboardAvailable } from '@/utils/contractUtils';
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { toast } from '@/components/ui/sonner';
 import { supabase } from '@/integrations/supabase/client';
@@ -27,6 +27,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import type { Billboard } from '@/types';
 import { ArrowLeft, Save, Map as MapIcon, Wrench, FileText, List, DollarSign, Printer, Trash2, RefreshCw, Calculator, AlertTriangle, Layers, Plus, Filter, ChevronDown } from 'lucide-react';
 import { ContractEditHeader } from '@/components/contracts/edit/ContractEditHeader';
+import { EditWorkspaceShell, EditSummaryPanel, EditMobileSummary } from '@/components/contracts/edit/EditWorkspaceShell';
+import { Info as OfIconInfo, LayoutGrid as OfIconBoards, PlusCircle as OfIconAdd, Calculator as OfIconMoney } from 'lucide-react';
 import { PendingChangesBanner } from '@/components/contracts/edit/PendingChangesBanner';
 import { rescaleInstallmentsToTotal, installmentsMatchTotal } from '@/utils/rescaleInstallments';
 import { getBillboardDimensions } from '@/lib/billboardDimensions';
@@ -1434,9 +1436,8 @@ export default function OfferEdit() {
   const save = async () => {
     try {
       if (!customerName || selected.length === 0) { toast.error('يرجى تعبئة البيانات المطلوبة واختيار لوحات'); return; }
-      if (pendingBillboardChanges) {
-        toast.error('تم تعديل لوحات العرض — اضغط «معالجة التعديلات» لإعادة توزيع الدفعات قبل الحفظ');
-        setWorkspaceSection('pricing');
+      if (zeroPricedAddedNames.length > 0) {
+        toast.error(`حدّد سعر اللوحات بدون سعر أولاً: ${zeroPricedAddedNames.join('، ')}`);
         return;
       }
       if (generalDiscountExceedsBase) {
@@ -1592,16 +1593,24 @@ export default function OfferEdit() {
       const bb: any = billboards.find((b) => String((b as any).ID) === id);
       return bb?.Billboard_Name || bb?.name || `#${id}`;
     });
-  const processBillboardChanges = () => {
-    if (zeroPricedAddedNames.length > 0) {
-      toast.error(`حدّد سعر اللوحات بدون سعر أولاً: ${zeroPricedAddedNames.join('، ')}`);
-      return;
-    }
-    setInstallments((prev: any[]) => rescaleInstallmentsToTotal(prev, finalTotal));
-    setInstallmentsLoaded(true);
-    setBillboardBaseline({ ids: [...selected], total: finalTotal });
-    toast.success('تمت معالجة التعديلات: أُعيد توزيع الدفعات على الإجمالي الجديد');
-  };
+
+  // تعديل اللوحات أو الأسعار يُطبَّق فوراً: الدفعات المتطابقة مع الإجمالي تتبعه تلقائياً (المعدّلة يدوياً لا تُلمس)
+  const syncedTotalRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!billboardBaseline || finalTotal <= 0) return;
+    const prevTotal = syncedTotalRef.current ?? billboardBaseline.total;
+    if (pendingBillboardChanges) setBillboardBaseline({ ids: [...selected], total: finalTotal });
+    syncedTotalRef.current = finalTotal;
+    if (Math.abs(prevTotal - finalTotal) < 0.01) return;
+    setInstallments((cur: any[]) => {
+      if (!cur.length) return cur;
+      const sum = cur.reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+      if (Math.abs(sum - prevTotal) > 1) return cur;
+      return rescaleInstallmentsToTotal(cur, finalTotal);
+    });
+    if (pendingBillboardChanges) setInstallmentsLoaded(true);
+  }, [finalTotal, pendingBillboardChanges, billboardBaseline]);
+
 
   const handlePrintOffer = () => {
     if (!isEditing || !currentOffer) {
@@ -1626,7 +1635,8 @@ export default function OfferEdit() {
                     Duration: pricingMode === 'months' ? durationName(durationMonths, durations) : `${durationDays} يوم`,
                     Total: finalTotal,
                     'Total Rent': finalTotal,
-                    Discount: generalDiscountAmount,
+                    Discount: discountAmount,
+                    discount: discountAmount,
                     installation_cost: actualInstallationCost,
                     installation_enabled: installationEnabled,
                     include_installation_in_price: includeInstallationInPrice,
@@ -1643,7 +1653,7 @@ export default function OfferEdit() {
                     single_face_billboards: singleFaceBillboards.size > 0 ? JSON.stringify(Array.from(singleFaceBillboards)) : null,
                     level_discounts: Object.keys(levelDiscounts).length > 0 ? levelDiscounts : null,
                     billboard_prices: JSON.stringify(offerBillboardPriceRows),
-                    billboards_data: currentOffer.billboards_data,
+                    billboards_data: JSON.stringify(selectedBBs),
                   };
                   setPdfContractData(mappedContract);
                   setPdfOpen(true);
@@ -1657,71 +1667,73 @@ export default function OfferEdit() {
       Ad_Type: (b as any).Ad_Type || adType || '',
     })) as Billboard[];
 
+  const ofInstallmentsSum = installments.reduce((sum, row: any) => sum + Number(row.amount || 0), 0);
+  const ofInstallmentsGap = Math.round((ofInstallmentsSum - finalTotal) * 100) / 100;
+  const ofSections = [
+    { key: 'basics', label: 'بيانات العرض', hint: 'الزبون والتواريخ', icon: OfIconInfo },
+    { key: 'boards', label: 'لوحات العرض', hint: `${selected.length} لوحة`, icon: OfIconBoards },
+    { key: 'catalog', label: 'إضافة لوحات', hint: 'بحث وخريطة', icon: OfIconAdd },
+    { key: 'pricing', label: 'الأسعار والدفعات', hint: `${Number(finalTotal || 0).toLocaleString('ar-LY')} د.ل`, icon: OfIconMoney },
+  ] as const;
+  const ofStatus = !isEditing
+    ? { label: 'عرض جديد', tone: 'info' as const }
+    : currentOffer?.status === 'approved' ? { label: 'معتمد', tone: 'saved' as const }
+    : currentOffer?.status === 'rejected' ? { label: 'مرفوض', tone: 'dirty' as const }
+    : { label: 'قيد الانتظار', tone: 'info' as const };
+
   return (
-    <div className="min-h-screen bg-muted/20 text-foreground p-3 md:p-4" dir="rtl">
-      <div className="max-w-[1440px] mx-auto space-y-3">
-        <div className="sticky top-0 z-30 space-y-2 bg-background/95 pb-2 backdrop-blur">
-        <ContractEditHeader
-          contractNumber={String(currentOffer?.offer_number || '')}
-          title={isEditing ? `تعديل عرض سعر #${currentOffer?.offer_number || ''}` : 'إنشاء عرض سعر جديد'}
-          subtitle="العرض لا يحجز اللوحات — راجع الأسعار والدفعات قبل حفظ العرض"
-          printLabel="طباعة العرض"
-          saveLabel={isEditing ? 'حفظ التعديلات' : 'حفظ العرض'}
-          hidePrint={!isEditing || !currentOffer}
-          onBack={() => navigate('/admin/offers')}
-          onPrint={handlePrintOffer}
-          onSave={save}
-          saving={saving}
-          extraActions={
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRecalculateAll}
-              disabled={refreshingPrices || saving}
-              className="border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 gap-2"
-              title="إعادة احتساب جميع أسعار وتكاليف العرض من جديد وفق جدول التسعير الحالي"
-            >
-              <RefreshCw className={`h-4 w-4 ${refreshingPrices ? 'animate-spin' : ''}`} />
-              إعادة الاحتساب
-            </Button>
-          }
+    <>
+    <EditWorkspaceShell
+      title={isEditing ? `عرض سعر #${currentOffer?.offer_number || ''}` : 'عرض سعر جديد'}
+      subtitle={`${customerName || 'بدون زبون'}${adType ? ` · ${adType}` : ''} · العرض لا يحجز اللوحات`}
+      status={ofStatus}
+      onBack={() => navigate('/admin/offers')}
+      onPrint={handlePrintOffer}
+      printLabel="طباعة العرض"
+      hidePrint={!isEditing || !currentOffer}
+      onSave={save}
+      saveLabel={isEditing ? 'حفظ التعديلات' : 'حفظ العرض'}
+      saving={saving}
+      extraActions={
+        <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={handleRecalculateAll} disabled={refreshingPrices || saving}
+          title="إعادة احتساب أسعار وتكاليف العرض وفق جدول التسعير الحالي">
+          <RefreshCw className={`h-4 w-4 ${refreshingPrices ? 'animate-spin' : ''}`} />إعادة الاحتساب
+        </Button>
+      }
+      sections={ofSections}
+      active={workspaceSection}
+      onSectionChange={k => setWorkspaceSection(k as typeof workspaceSection)}
+      navLabel="أقسام تعديل العرض"
+      mobileSummary={
+        <EditMobileSummary items={[
+          { label: 'اللوحات', value: String(selected.length) },
+          { label: 'إجمالي العرض', value: Number(finalTotal || 0).toLocaleString('ar-LY'), tone: 'primary' },
+          { label: 'فرق الدفعات', value: Math.abs(ofInstallmentsGap) > 0.5 ? ofInstallmentsGap.toLocaleString('ar-LY') : 'مطابقة', tone: Math.abs(ofInstallmentsGap) > 0.5 ? 'bad' : 'good' },
+        ]} />
+      }
+      summary={
+        <EditSummaryPanel
+          currency="د.ل"
+          totalLabel="إجمالي العرض"
+          finalTotal={Number(finalTotal || 0)}
+          originalTotal={isEditing ? Number(originalTotal || 0) : undefined}
+          discount={Number(discountAmount || 0)}
+          installmentsSum={ofInstallmentsSum}
+          boardsCount={selected.length}
+          durationLabel={pricingMode === 'days' ? `${durationDays} يوم` : `${durationMonths} شهر`}
+          startDate={startDate}
+          endDate={endDate}
+          includeInstallation={includeInstallationInPrice}
+          includePrint={includePrintInPrice}
+          onReviewPayments={() => { setWorkspaceSection('pricing'); setTimeout(() => document.getElementById('offer-payments')?.scrollIntoView({ behavior: 'smooth' }), 50); }}
+          quickActions={[
+            { label: 'إضافة لوحات جديدة', icon: OfIconAdd, onClick: () => setWorkspaceSection('catalog') },
+            { label: 'إعادة احتساب الأسعار', icon: RefreshCw, onClick: handleRecalculateAll },
+          ]}
+          note="العرض لا يحجز اللوحات. عند تحويله إلى عقد يُتحقق من توفرها."
         />
-        <nav aria-label="أقسام تعديل العرض" className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1.5">
-          {([
-            ['basics', 'بيانات العرض'],
-            ['boards', `لوحات العرض (${selected.length})`],
-            ['catalog', 'اختيار لوحات جديدة'],
-            ['pricing', 'الأسعار والدفعات'],
-          ] as const).map(([section, label]) => (
-            <button key={section} type="button" aria-pressed={workspaceSection === section}
-              onClick={() => setWorkspaceSection(section)}
-              className={`min-h-11 flex-1 cursor-pointer whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${workspaceSection === section ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
-              {label}
-            </button>
-          ))}
-        </nav>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card px-3 py-2 sm:grid-cols-4" aria-live="polite">
-          <div><span className="text-xs text-muted-foreground">حالة العرض</span><p className="text-sm font-semibold">{isEditing ? (currentOffer?.status === 'approved' ? 'معتمد' : currentOffer?.status === 'rejected' ? 'مرفوض' : 'قيد الانتظار') : 'عرض جديد'}</p></div>
-          <div><span className="text-xs text-muted-foreground">الإجمالي السابق</span><p className="font-semibold">{Number(originalTotal || 0).toLocaleString('ar-LY')} د.ل</p></div>
-          <div><span className="text-xs text-muted-foreground">الإجمالي الحالي</span><p className="font-semibold text-primary">{Number(finalTotal || 0).toLocaleString('ar-LY')} د.ل</p></div>
-          <div><span className="text-xs text-muted-foreground">عدد اللوحات</span><p className="font-semibold">{selected.length}</p></div>
-        </div>
-
-        {pendingBillboardChanges && billboardBaseline && (
-          <PendingChangesBanner
-            added={addedSinceBaseline.length}
-            removed={removedSinceBaseline.length}
-            previousTotal={billboardBaseline.total}
-            newTotal={finalTotal}
-            installmentsMatch={installmentsMatchTotal(installments, finalTotal)}
-            entityLabel="العرض"
-            zeroPricedNames={zeroPricedAddedNames}
-            onProcess={processBillboardChanges}
-            onReview={() => setWorkspaceSection('pricing')}
-          />
-        )}
+      }
+    >
 
         <section className={`${workspaceSection === 'basics' ? 'grid' : 'hidden'} scroll-mt-40 items-start gap-5 lg:grid-cols-2`} aria-label="بيانات العرض">
             {/* معلومات العميل */}
@@ -2389,13 +2401,14 @@ export default function OfferEdit() {
             </div>
           </div>
         </div>
-      </div>
+    </EditWorkspaceShell>
 
       {pdfOpen && pdfContractData && (
         <ContractPDFDialog
           contract={pdfContractData}
           open={pdfOpen}
           onOpenChange={setPdfOpen}
+          liveBillboardPrices={offerBillboardPriceRows}
         />
       )}
 
@@ -2434,6 +2447,6 @@ export default function OfferEdit() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

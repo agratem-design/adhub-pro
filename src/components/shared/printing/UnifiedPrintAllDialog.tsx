@@ -53,7 +53,7 @@ import { createPinSvgUrl, getBillboardStatus } from '@/hooks/useMapMarkers';
 import { formatFacesCountArabic } from '@/lib/utils';
 import { preparePrintWindow, writePrintWindow } from '@/utils/printWindowHelper';
 import { resolveInstallationFacesCount } from '@/lib/installationFaces';
-import { resolvePrintCardLayout, fitPrintCardText } from '@/lib/printCardLayout';
+import { resolvePrintCardLayout, fitPrintCardText, isTemplateBackground } from '@/lib/printCardLayout';
 
 export type PrintContextType = 'installation' | 'removal' | 'contract' | 'offer';
 
@@ -222,30 +222,41 @@ export const resolveBillboardPreviousAds = async (
 // دالة مساعدة لجلب تصاميم اللوحات المتوفرة
 export const resolveBillboardDesigns = async (
   items: BillboardPrintItem[],
-  billboardsMap: Record<number, any> = {}
+  billboardsMap: Record<number, any> = {},
+  opts: { contractNumber?: number | string | null } = {}
 ): Promise<Record<string, { design_face_a?: string; design_face_b?: string; design_name?: string }>> => {
   const result: Record<string, { design_face_a?: string; design_face_b?: string; design_name?: string }> = {};
   if (!items || items.length === 0) return result;
 
   const billboardIds = [...new Set(items.map(i => Number(i.billboard_id)).filter(id => !isNaN(id) && id > 0))];
   if (billboardIds.length === 0) return result;
+  const set = (id: string, v: { design_face_a?: string; design_face_b?: string; design_name?: string }) => {
+    result[id] = v;
+    result[String(Number(id))] = v;
+  };
 
-  // 1. فحص الحقول المباشرة
+  // 1. الحقول المباشرة (تصاميم العقد أو المهمة الممرّرة)
   items.forEach(item => {
     const idKey = String(item.billboard_id);
     const b = billboardsMap[item.billboard_id] || billboardsMap[Number(item.billboard_id)];
     const faceA = item.design_face_a || b?.design_face_a || b?.installed_design_face_a || undefined;
     const faceB = item.design_face_b || b?.design_face_b || b?.installed_design_face_b || undefined;
     const dName = item.ad_type || b?.ad_type || b?.design_name || b?.ad_name || b?.current_ad || undefined;
-    if (faceA || faceB || dName) {
-      result[idKey] = { design_face_a: faceA, design_face_b: faceB, design_name: dName };
-      result[String(Number(idKey))] = result[idKey];
-    }
+    if (faceA || faceB || dName) set(idKey, { design_face_a: faceA, design_face_b: faceB, design_name: dName });
   });
 
   try {
-    // 2. استعلام من installation_task_items و task_designs
-    const { data: taskDesigns } = await supabase
+    // 2. التصاميم المطبّقة في مهام التركيب.
+    // في طباعة العقد: مهام هذا العقد فقط، والأحدث لكل لوحة له الأولوية على تصاميم العقد.
+    // في غيرها: تُكمل الناقص فقط، والأحدث أولاً — ولا تُستخدم تصاميم عقود أخرى قديمة.
+    const contractNumber = opts.contractNumber != null && String(opts.contractNumber).trim() !== '' ? Number(opts.contractNumber) : null;
+    let taskIds: string[] | null = null;
+    if (contractNumber && !isNaN(contractNumber)) {
+      const { data: tasks } = await supabase.from('installation_tasks').select('id').eq('contract_id', contractNumber);
+      taskIds = (tasks || []).map((t: any) => t.id);
+      if (!taskIds.length) return result;
+    }
+    let query = supabase
       .from('installation_task_items')
       .select(`
         billboard_id,
@@ -262,20 +273,24 @@ export const resolveBillboardDesigns = async (
       .in('billboard_id', billboardIds)
       .or('design_face_a.not.is.null,design_face_b.not.is.null,selected_design_id.not.is.null')
       .order('created_at', { ascending: false });
+    if (taskIds) query = query.in('task_id', taskIds);
+    const { data: taskDesigns } = await query;
 
-    if (taskDesigns && taskDesigns.length > 0) {
-      taskDesigns.forEach((row: any) => {
-        const idKey = String(row.billboard_id);
-        const prev = result[idKey] || {};
-        const faceA = row.design_face_a || row.task_designs?.design_face_a_url || prev.design_face_a || undefined;
-        const faceB = row.design_face_b || row.task_designs?.design_face_b_url || prev.design_face_b || undefined;
-        const dName = row.task_designs?.design_name || prev.design_name || undefined;
-        if (faceA || faceB || dName) {
-          result[idKey] = { design_face_a: faceA, design_face_b: faceB, design_name: dName };
-          result[String(Number(idKey))] = result[idKey];
-        }
-      });
-    }
+    const taken = new Set<string>();
+    (taskDesigns || []).forEach((row: any) => {
+      const idKey = String(row.billboard_id);
+      if (taken.has(idKey)) return; // الأحدث فقط
+      const faceA = row.design_face_a || row.task_designs?.design_face_a_url || undefined;
+      const faceB = row.design_face_b || row.task_designs?.design_face_b_url || undefined;
+      if (!faceA && !faceB) return;
+      taken.add(idKey);
+      const prev = result[idKey];
+      if (taskIds) {
+        set(idKey, { design_face_a: faceA || prev?.design_face_a, design_face_b: faceB || prev?.design_face_b, design_name: row.task_designs?.design_name || prev?.design_name });
+      } else if (!prev?.design_face_a && !prev?.design_face_b) {
+        set(idKey, { design_face_a: faceA, design_face_b: faceB, design_name: row.task_designs?.design_name || prev?.design_name });
+      }
+    });
   } catch (err) {
     console.error('Error resolving billboard designs:', err);
   }
@@ -954,8 +969,17 @@ export function UnifiedPrintAllDialog({
     const sortedItems = await sortBillboardsBySize(filteredItems);
     const [freshPrevAds, freshDesigns] = await Promise.all([
       resolveBillboardPreviousAds(sortedItems, contextNumber, billboards),
-      resolveBillboardDesigns(sortedItems, billboards)
+      resolveBillboardDesigns(sortedItems, billboards, { contractNumber: contextType === 'contract' ? contextNumber : null })
     ]);
+    // في طباعة العقد: التصميم المطبّق في مهام التركيب (المهام المجمعة) له الأولوية على تصميم العقد
+    if (contextType === 'contract') {
+      sortedItems.forEach((it: any, k: number) => {
+        const d = freshDesigns[String(it.billboard_id)];
+        if (d && (d.design_face_a || d.design_face_b)) {
+          (sortedItems as any[])[k] = { ...it, design_face_a: d.design_face_a || it.design_face_a, design_face_b: d.design_face_b || it.design_face_b };
+        }
+      });
+    }
     const pages: string[] = [];
     const s = customSettings || {} as Record<string, string>;
     const toCssLength = (value?: string) => {
@@ -1105,6 +1129,7 @@ export function UnifiedPrintAllDialog({
       const effectiveS = { ...s, ...s.status_overrides?.[layoutMode] };
 
       const layout = resolvePrintCardLayout(effectiveS, {
+        templateZones: isTemplateBackground(customBackgroundUrl),
         hasDesigns: isDesignsIncluded,
         pairedImages: Boolean(installedImageFaceA && installedImageFaceB),
         dimensionLabels: showSizeDimensionLabels,
@@ -1163,7 +1188,7 @@ export function UnifiedPrintAllDialog({
       }
 
       pages.push(`
-        <div class="page" data-print-page>
+        <div class="page" data-print-page data-template-zones="${layout.zones ? '1' : '0'}">
           <div class="background"><img src="${customBackgroundUrl}" alt="" /></div>
 
           ${contextType !== 'contract' && contextType !== 'offer' && contextType !== 'installation' && contextType !== 'removal' ? `
@@ -1173,7 +1198,7 @@ export function UnifiedPrintAllDialog({
           ` : ''}
 
           ${contractInfoText ? `
-          <div class="absolute-field contract-number" style="top: ${s.contract_number_top}; right: ${s.contract_number_right}; left: auto; width: 85mm; max-width: 85mm; font-size: ${s.contract_number_font_size}; font-weight: ${s.contract_number_font_weight}; color: ${s.contract_number_color}; text-align: right; overflow-wrap: anywhere; ${s.contract_number_offset_x && s.contract_number_offset_x !== '0mm' ? `margin-right: ${s.contract_number_offset_x};` : ''}">
+          <div class="absolute-field contract-number" style="top: ${layout.contractTop}mm; right: ${s.contract_number_right}; left: auto; width: 85mm; max-width: 85mm; font-size: ${s.contract_number_font_size}; font-weight: ${s.contract_number_font_weight}; color: ${s.contract_number_color}; text-align: right; overflow-wrap: anywhere; ${s.contract_number_offset_x && s.contract_number_offset_x !== '0mm' ? `margin-right: ${s.contract_number_offset_x};` : ''}">
             ${contractInfoText ? `<div>${contractInfoText}</div>` : ''}
           </div>
           ` : ''}
@@ -1185,12 +1210,12 @@ export function UnifiedPrintAllDialog({
           ` : ''}
 
           ${installationDate ? `
-          <div class="absolute-field installation-date" style="top: ${s.installation_date_top}; right: ${s.installation_date_right}; font-family: '${s.primary_font}', Arial, sans-serif; font-size: ${s.installation_date_font_size}; font-weight: ${s.installation_date_font_weight || '400'}; color: ${s.installation_date_color}; text-align: ${s.installation_date_alignment}; ${s.installation_date_offset_x && s.installation_date_offset_x !== '0mm' ? `margin-right: ${s.installation_date_offset_x};` : ''}">
+          <div class="absolute-field installation-date" style="top: ${layout.dateTop}mm; right: ${s.installation_date_right}; font-family: '${s.primary_font}', Arial, sans-serif; font-size: ${s.installation_date_font_size}; font-weight: ${s.installation_date_font_weight || '400'}; color: ${s.installation_date_color}; text-align: ${s.installation_date_alignment}; ${s.installation_date_offset_x && s.installation_date_offset_x !== '0mm' ? `margin-right: ${s.installation_date_offset_x};` : ''}">
             ${contextType === 'removal' ? 'تاريخ الإزالة' : 'تاريخ التركيب'}: ${installationDate}
           </div>
           ` : ''}
 
-          <div class="absolute-field billboard-name" style="top: ${toCssLength(s.billboard_name_top)}; left: ${layout.nameCenter - layout.nameWidth / 2}mm; width: ${layout.nameWidth}mm; text-align: ${s.billboard_name_alignment || 'center'}; font-size: ${s.billboard_name_font_size}; font-weight: ${s.billboard_name_font_weight}; color: ${s.billboard_name_color};">
+          <div class="absolute-field billboard-name" style="top: ${layout.nameTop}mm; left: ${layout.nameCenter - layout.nameWidth / 2}mm; width: ${layout.nameWidth}mm; text-align: ${s.billboard_name_alignment || 'center'}; font-size: ${s.billboard_name_font_size}; font-weight: ${s.billboard_name_font_weight}; color: ${s.billboard_name_color};">
             ${name}
           </div>
 
@@ -1200,11 +1225,11 @@ export function UnifiedPrintAllDialog({
           </div>
           ` : ''}
 
-          <div class="absolute-field size" style="top: ${layout.sizeTop}mm; left: ${layout.sizeCenter - 21}mm; width: 42mm; text-align: center; font-size: ${s.size_font_size}; font-weight: ${s.size_font_weight}; color: ${s.size_color};">
+          <div class="absolute-field size" style="top: ${layout.sizeTop}mm; left: ${layout.sizeCenter - layout.sizeWidth / 2}mm; width: ${layout.sizeWidth}mm; text-align: center; font-size: ${s.size_font_size}; font-weight: ${s.size_font_weight}; color: ${s.size_color};">
             ${generatePrintedSizeHtml(size, false, showSizeDimensionLabels)}
           </div>
 
-          <div class="absolute-field faces-count" style="top: ${layout.facesTop}mm; left: ${layout.sizeCenter - 21}mm; width: 42mm; text-align: center; font-size: ${s.faces_count_font_size}; color: ${s.faces_count_color}; font-weight: 600;">
+          <div class="absolute-field faces-count" style="top: ${layout.facesTop}mm; left: ${layout.facesCenter - layout.sizeWidth / 2}mm; width: ${layout.sizeWidth}mm; text-align: center; font-size: ${s.faces_count_font_size}; color: ${s.faces_count_color}; font-weight: 600;">
             ${isCutoutEnabled ? 'مجسم - ' : ''}${formatFacesCountArabic(facesCount)}
           </div>
 
@@ -1239,12 +1264,12 @@ export function UnifiedPrintAllDialog({
             ${municipalityDistrict}
           </div>
 
-          <div class="absolute-field landmark-info" style="top: ${s.landmark_info_top}; left: ${layout.landmark.left}mm; width: ${layout.landmark.width}mm; font-size: ${s.landmark_info_font_size}; color: ${s.landmark_info_color}; text-align: ${s.landmark_info_alignment};">
+          <div class="absolute-field landmark-info" style="top: ${layout.landmarkTop}mm; left: ${layout.landmark.left}mm; width: ${layout.landmark.width}mm; font-size: ${s.landmark_info_font_size}; color: ${s.landmark_info_color}; text-align: ${s.landmark_info_alignment};">
             ${landmark || '—'}
           </div>
 
           ${qrCodeDataUrl ? `
-            <div class="absolute-field qr-container" style="top: ${s.qr_top}; left: ${s.qr_left}; width: ${s.qr_size}; height: ${s.qr_size};">
+            <div class="absolute-field qr-container" style="top: ${layout.qrTop}mm; left: ${layout.qrLeft}mm; width: ${layout.qrSize}mm; height: ${layout.qrSize}mm;">
               <a href="${mapLink}" target="_blank" style="display:block;width:100%;height:100%;" title="اضغط لفتح الموقع على الخريطة">
                 <img src="${qrCodeDataUrl}" alt="QR" class="qr-code" style="cursor:pointer;" />
               </a>
@@ -1563,8 +1588,17 @@ export function UnifiedPrintAllDialog({
     const sortedItems = await sortBillboardsBySize(filteredItems);
     const [freshPrevAds, freshDesigns] = await Promise.all([
       resolveBillboardPreviousAds(sortedItems, contextNumber, billboards),
-      resolveBillboardDesigns(sortedItems, billboards)
+      resolveBillboardDesigns(sortedItems, billboards, { contractNumber: contextType === 'contract' ? contextNumber : null })
     ]);
+    // في طباعة العقد: التصميم المطبّق في مهام التركيب (المهام المجمعة) له الأولوية على تصميم العقد
+    if (contextType === 'contract') {
+      sortedItems.forEach((it: any, k: number) => {
+        const d = freshDesigns[String(it.billboard_id)];
+        if (d && (d.design_face_a || d.design_face_b)) {
+          (sortedItems as any[])[k] = { ...it, design_face_a: d.design_face_a || it.design_face_a, design_face_b: d.design_face_b || it.design_face_b };
+        }
+      });
+    }
     const GOLD = '#E8CC64';
     const BLACK = '#000000';
     const WHITE = '#ffffff';

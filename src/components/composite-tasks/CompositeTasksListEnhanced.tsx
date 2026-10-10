@@ -39,6 +39,7 @@ import {
   filterTaskContractIdsByCustomer,
   matchContractIdsForTaskBillboards,
   normalizeContractId,
+  parseContractBillboardIds,
   resolveTaskContractAdTypes,
   resolveTaskContractCustomerInfo,
 } from '@/lib/compositeTaskContractIdentity';
@@ -79,7 +80,9 @@ import {
 import { isEnabledContractFlag, normalizeForSearch, fetchInstallationWorkflowData, STATUS_CONFIG, extractDualPaletteFromImage, type InstallationWorkflowData } from './list/shared';
 import { DesignPanel, SkeletonCard } from './list/DesignPanel';
 import { TaskCardRow } from './list/TaskCardRow';
-import { ContractGroupCard } from './list/ContractGroupCard';
+import { HubContractRow } from './list/HubContractRow';
+import { HubContractDetail } from './list/HubContractDetail';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 
 interface CompositeTasksListEnhancedProps {
   customerId?: string;
@@ -103,6 +106,15 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
   const [filterStatus, _setFilterStatus] = useState(persistedFilters.filterStatus);
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'unpaid' | 'partial' | 'paid' | 'free'>('all');
   const [page, _setPage] = useState(persistedFilters.page as number);
+  const [typeFilter, setTypeFilter] = useState<'all' | 'new' | 'reinstall' | 'multi'>('all');
+  const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null);
+  const [isWide, setIsWide] = useState(() => typeof window !== 'undefined' && window.matchMedia('(min-width: 1280px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1280px)');
+    const onChange = () => setIsWide(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   // تحديث البحث بتأخير زمني لتفادي تجميد الواجهة أثناء الكتابة (Smooth instant typing)
   useEffect(() => {
@@ -548,6 +560,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       const extras: Record<string, { 
         designUrls: string[]; 
         contractIds: number[];
+        printEnabledContractIds: number[];
         adTypes: string[];
         adType: string; 
         teamName: string; 
@@ -712,7 +725,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
             (chunk) =>
               supabase
                 .from('Contract')
-                .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price, "Company"')
+                .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price, print_cost_enabled, "Company"')
                 .in('customer_id', chunk)
           );
         } else {
@@ -722,7 +735,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
             (chunk) =>
               supabase
                 .from('Contract')
-                .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price, "Company"')
+                .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price, print_cost_enabled, "Company"')
                 .in('Customer Name', chunk)
           );
         }
@@ -737,7 +750,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           (chunk) =>
             supabase
               .from('Contract')
-              .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price, "Company"')
+              .select('"Contract_Number", "Ad Type", "Customer Name", customer_id, billboard_ids, "Contract Date", "End Date", include_installation_in_price, include_print_in_billboard_price, print_cost_enabled, "Company"')
               .in('Contract_Number', chunk)
         );
         const combinedContracts = [...(contractsData || []), ...customerContracts];
@@ -959,13 +972,36 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
               .filter((url: unknown): url is string => typeof url === 'string' && url.trim().length > 0)
           : [];
 
+        // توزيع لوحات المهمة على العقود عندما تجمع أكثر من عقد لنفس الزبون
+        const breakdownBillboardIds: number[] = task.installation_task_id
+          ? installDesigns.filter((i: any) => i.task_id === task.installation_task_id).map((i: any) => Number(i.billboard_id)).filter(Boolean)
+          : [];
+        let contractBreakdown: { contractId: number; count: number; adType?: string }[] = [];
+        let unmatchedBillboards = 0;
+        if (candidateContractIds.length > 1 && breakdownBillboardIds.length > 0) {
+          const claimed = new Set<number>();
+          // العقد الأحدث يأخذ اللوحة أولاً عند تكرارها في أكثر من عقد
+          contractBreakdown = [...candidateContractIds].sort((a, b) => b - a).map(cid => {
+            const c: any = contracts.find((x: any) => Number(x.Contract_Number) === cid);
+            const ids = new Set(parseContractBillboardIds(c?.billboard_ids));
+            const mine = breakdownBillboardIds.filter(b => ids.has(b) && !claimed.has(b));
+            mine.forEach(b => claimed.add(b));
+            return { contractId: cid, count: mine.length, adType: c?.['Ad Type'] || '' };
+          }).sort((a, b) => a.contractId - b.contractId);
+          unmatchedBillboards = breakdownBillboardIds.filter(b => !claimed.has(b)).length;
+        }
+
         extras[task.id] = {
+          contractBreakdown,
+          unmatchedBillboards,
           customerName: customerInfo.customerName,
           companyName: customerInfo.companyName,
           customerId: customerInfo.customerId,
           designUrls: urls.slice(0, 4),
           installationImages: [...new Set(installationImages)],
           contractIds: candidateContractIds,
+          printEnabledContractIds: candidateContractIds.filter(id => contracts.some((c: any) =>
+            Number(c.Contract_Number) === id && isEnabledContractFlag(c.print_cost_enabled))),
           adTypes: taskAdTypes,
           adType: taskAdTypes.length > 0 ? taskAdTypes.join(' / ') : '',
           teamName: task.installation_task_id ? teamNameMap.get(task.installation_task_id) || '' : '',
@@ -1038,7 +1074,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
   // 4. Enrich tasks with full relational properties
   const enriched = useMemo(() => compositeTasks.map((task: any) => {
     const extra = taskExtras[task.id] || {
-      designUrls: [], contractIds: [], adTypes: [], adType: '', teamName: '',
+      designUrls: [], contractIds: [], printEnabledContractIds: [], adTypes: [], adType: '', teamName: '',
       reinstallationNumber: null, printerName: '', realInstallCost: 0,
       taskDesignCount: 0, installationItemCount: 0, assignedDesignCount: 0,
       installationImages: [], contractInclusion: { includeInstall: false, includePrint: false },
@@ -1089,7 +1125,10 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       installationProgressPercentage: extra.installationProgressPercentage || 0,
       designUrls: extra.designUrls,
       installationImages: extra.installationImages || [],
+      contractBreakdown: (extra as any).contractBreakdown || [],
+      unmatchedBillboards: (extra as any).unmatchedBillboards || 0,
       contractInclusion: extra.contractInclusion || { includeInstall: false, includePrint: false },
+      printEnabledContractIds: extra.printEnabledContractIds || [],
       adTypes: extra.adTypes || (extra.adType ? [extra.adType] : []),
       adType: extra.adType || '',
       teamName: extra.teamName || '',
@@ -1291,10 +1330,13 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           
           const operationProgressPercentage = operationTotalBillboards > 0 ? Math.round((operationCompletedBillboards / operationTotalBillboards) * 100) : 0;
           const isReinstall = orderedOperationTasks.some(t => isReinstallationOperation(t));
+          const opContractIds = [...new Set(orderedOperationTasks.flatMap((t: any) => t.contractIds || []).map(Number).filter(Boolean))].sort((a, b) => a - b);
 
           return {
             key: operationKey,
             isReinstall,
+            contractIds: opContractIds,
+            isMultiContract: opContractIds.length > 1,
             createdAt: orderedOperationTasks[0]?.created_at || null,
             tasks: orderedOperationTasks,
             operationTotalBillboards,
@@ -1324,12 +1366,32 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
       // عرض الأحدث أولاً
       const operations = sequencedOperations.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
 
-      groups.push({
+      const breakdownMap = new Map<number, { contractId: number; count: number; adType?: string }>();
+      let unmatchedBillboards = 0;
+      const seenBreakdownTasks = new Set<string>();
+      ((operations[0]?.tasks || []) as any[]).forEach((t: any) => {
+        const tid = t.installation_task_id || t.id;
+        if (seenBreakdownTasks.has(tid)) return;
+        seenBreakdownTasks.add(tid);
+        (t.contractBreakdown || []).forEach((b: any) => {
+          const cur = breakdownMap.get(b.contractId) || { contractId: b.contractId, count: 0, adType: b.adType };
+          cur.count += b.count;
+          breakdownMap.set(b.contractId, cur);
+        });
+        unmatchedBillboards += t.unmatchedBillboards || 0;
+      });
+      const hasReinstall = operations.some((op: any) => op.isReinstall);
+
+      (groups as any[]).push({
         key,
         label,
         isMultiContract,
+        contractBreakdown: [...breakdownMap.values()].sort((a, b) => a.contractId - b.contractId),
+        unmatchedBillboards,
+        hasReinstall,
         contractId: first.contract_id,
         contractIds: allGroupContractIds.length > 0 ? allGroupContractIds : [first.contract_id],
+        printEnabledContractIds: [...new Set(orderedTasks.flatMap((t: any) => t.printEnabledContractIds || []))],
         customerName,
         companyName,
         adTypes: uniqueAdTypes,
@@ -1347,11 +1409,23 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     return groups.sort((a, b) => new Date(b.latestActivity || 0).getTime() - new Date(a.latestActivity || 0).getTime());
   }, [sorted]);
 
-  const totalPages = Math.ceil(grouped.length / PAGE_SIZE);
+  const typeCounts = useMemo(() => ({
+    all: grouped.length,
+    new: grouped.filter((g: any) => !g.hasReinstall).length,
+    reinstall: grouped.filter((g: any) => g.hasReinstall).length,
+    multi: grouped.filter((g: any) => g.isMultiContract).length,
+  }), [grouped]);
+  const visibleGroups = useMemo(() => grouped.filter((g: any) => (
+    typeFilter === 'all' ? true
+      : typeFilter === 'new' ? !g.hasReinstall
+        : typeFilter === 'reinstall' ? g.hasReinstall
+          : g.isMultiContract
+  )), [grouped, typeFilter]);
+  const totalPages = Math.ceil(visibleGroups.length / PAGE_SIZE);
   
   const paginatedGroups = useMemo(() => {
-    const sliced = grouped.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-    return sliced.map(g => {
+    const sliced = visibleGroups.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    return sliced.map((g: any) => {
       const groupTotal = g.tasks.reduce((s: number, t: any) => s + (t.customer_total || 0), 0);
       const groupProfit = g.tasks.reduce((s: number, t: any) => s + (t.operating_profit ?? (t.net_profit || 0)), 0);
       const groupCost = g.tasks.reduce((s: number, t: any) => s + (t.operating_cost ?? (t.company_total || 0)), 0);
@@ -1376,7 +1450,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
         groupProgressPercentage,
       };
     });
-  }, [grouped, page]);
+  }, [visibleGroups, page]);
 
   const toggleGroupCollapse = useCallback((key: string) => {
     setCollapsedGroups(prev => {
@@ -1553,22 +1627,22 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     const endPage = Math.min(totalPages, startPage + visiblePages - 1);
     const pageNumbers = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
     return (
-      <div className="bg-card/45 backdrop-blur-md border border-border/25 px-4 py-1.5 flex items-center gap-4 text-[11px] text-muted-foreground rounded-2xl shrink-0 shadow-sm w-fit mr-auto">
+      <div className="bg-card/45 backdrop-blur-md border border-border/25 px-4 py-1.5 flex items-center gap-4 text-xs text-muted-foreground rounded-2xl shrink-0 shadow-sm w-fit mr-auto">
         <div className="flex items-center gap-2 font-bold text-muted-foreground/80 select-none">
           <span>{sorted.length > 0 ? `عرض ${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, sorted.length)} من ${sorted.length} مهمة` : 'لا توجد نتائج'}</span>
-          <span className="text-[10px] text-muted-foreground/35 font-normal">|</span>
-          <span className="text-[10px] text-muted-foreground/50 font-normal">الصفحة {page} من {totalPages}</span>
+          <span className="text-xs text-muted-foreground/35 font-normal">|</span>
+          <span className="text-xs text-muted-foreground/50 font-normal">الصفحة {page} من {totalPages}</span>
         </div>
         <div className="flex items-center gap-1">
-          <Button variant="outline" size="sm" className="h-7 px-2 border-border/30 rounded-xl text-[10px] gap-1 font-bold text-muted-foreground/80 hover:text-foreground hover:bg-muted/50" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+          <Button variant="outline" size="sm" className="h-7 px-2 border-border/30 rounded-xl text-xs gap-1 font-bold text-muted-foreground/80 hover:text-foreground hover:bg-muted/50" disabled={page <= 1} onClick={() => setPage(page - 1)}>
             <ChevronRight className="h-3 w-3" />السابق
           </Button>
-          {startPage > 1 && (<><Button size="sm" className="h-7 w-7 p-0 text-[10px] rounded-xl bg-transparent hover:bg-muted/50 text-muted-foreground border border-transparent" onClick={() => setPage(1)}>1</Button>{startPage > 2 && <span className="text-muted-foreground/40 px-1 text-[10px]">...</span>}</>)}
+          {startPage > 1 && (<><Button size="sm" className="h-7 w-7 p-0 text-xs rounded-xl bg-transparent hover:bg-muted/50 text-muted-foreground border border-transparent" onClick={() => setPage(1)}>1</Button>{startPage > 2 && <span className="text-muted-foreground/40 px-1 text-xs">...</span>}</>)}
           {pageNumbers.map(p => (
-            <Button key={p} size="sm" className={`h-7 w-7 p-0 text-[10px] rounded-xl transition-all ${p === page ? 'bg-primary hover:bg-primary/90 text-primary-foreground font-black shadow-md shadow-primary/10' : 'bg-transparent hover:bg-muted/50 text-muted-foreground border border-transparent'}`} onClick={() => setPage(p)}>{p}</Button>
+            <Button key={p} size="sm" className={`h-7 w-7 p-0 text-xs rounded-xl transition-all ${p === page ? 'bg-primary hover:bg-primary/90 text-primary-foreground font-black shadow-md shadow-primary/10' : 'bg-transparent hover:bg-muted/50 text-muted-foreground border border-transparent'}`} onClick={() => setPage(p)}>{p}</Button>
           ))}
-          {endPage < totalPages && (<>{endPage < totalPages - 1 && <span className="text-muted-foreground/40 px-1 text-[10px]">...</span>}<Button size="sm" className="h-7 w-7 p-0 text-[10px] rounded-xl bg-transparent hover:bg-muted/50 text-muted-foreground border border-transparent" onClick={() => setPage(totalPages)}>{totalPages}</Button></>)}
-          <Button variant="outline" size="sm" className="h-7 px-2 border-border/30 rounded-xl text-[10px] gap-1 font-bold text-muted-foreground/80 hover:text-foreground hover:bg-muted/50" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
+          {endPage < totalPages && (<>{endPage < totalPages - 1 && <span className="text-muted-foreground/40 px-1 text-xs">...</span>}<Button size="sm" className="h-7 w-7 p-0 text-xs rounded-xl bg-transparent hover:bg-muted/50 text-muted-foreground border border-transparent" onClick={() => setPage(totalPages)}>{totalPages}</Button></>)}
+          <Button variant="outline" size="sm" className="h-7 px-2 border-border/30 rounded-xl text-xs gap-1 font-bold text-muted-foreground/80 hover:text-foreground hover:bg-muted/50" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
             التالي<ChevronLeft className="h-3 w-3" />
           </Button>
         </div>
@@ -1576,336 +1650,208 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
     );
   };
 
+  const groupActionProps = {
+    expandedOperations,
+    toggleOperationExpansion,
+    zipDownloadingGroup,
+    handleDownloadGroupZip,
+    handleCreatePrintTasksForGroup,
+    handleCreateReinstallationForGroup,
+    reinstallCreatingGroup,
+    discountPopoverGroup,
+    setDiscountPopoverGroup,
+    discountAmount,
+    setDiscountAmount,
+    discountReason,
+    setDiscountReason,
+    discountTarget,
+    setDiscountTarget,
+    discountSaving,
+    handleSaveDiscount,
+    setGroupInvoiceTasks,
+    setGroupInvoiceOpen,
+    setEditingOperationTasks,
+    setEditingTask,
+    setEditDialogOpen,
+    setDeleteTask,
+    setInvoiceTask,
+    setInvoiceType,
+    setInvoiceOpen,
+    navigate,
+    handleOpenCreatePrintTask,
+    loadInstallationWorkflow,
+    workflowLoadingTaskId,
+  };
+
+  const selectedGroup = paginatedGroups.find(g => g.key === selectedGroupKey) || (isWide ? paginatedGroups[0] : undefined);
+
+  const statTiles = [
+    { label: 'العقود والمهام', value: `${grouped.length} / ${stats.total}`, tone: 'text-foreground' },
+    { label: 'قيد التنفيذ', value: stats.pending, tone: 'text-warning' },
+    { label: 'مكتملة', value: stats.completed, tone: 'text-success' },
+    { label: 'الإيرادات', value: `${stats.totalRevenue.toLocaleString('ar-LY')}`, tone: 'text-foreground' },
+    { label: 'المحصل', value: `${stats.totalPaid.toLocaleString('ar-LY')}`, tone: 'text-success' },
+    { label: 'المتبقي', value: `${stats.totalRemaining.toLocaleString('ar-LY')}`, tone: 'text-destructive' },
+    { label: 'صافي الربح', value: `${stats.totalProfit.toLocaleString('ar-LY')}`, tone: stats.totalProfit >= 0 ? 'text-success' : 'text-destructive' },
+  ];
+
+  const typeOptions: { key: typeof typeFilter; label: string; count: number }[] = [
+    { key: 'all', label: 'الكل', count: typeCounts.all },
+    { key: 'new', label: 'تركيب أول', count: typeCounts.new },
+    { key: 'reinstall', label: 'إعادة تركيب', count: typeCounts.reinstall },
+    { key: 'multi', label: 'من عدة عقود', count: typeCounts.multi },
+  ];
+
+  const paymentOptions: { key: typeof paymentFilter; label: string; count: number; tone: string }[] = [
+    { key: 'all', label: 'كل الحالات المالية', count: stats.total, tone: 'data-[on=true]:bg-foreground/10 data-[on=true]:text-foreground' },
+    { key: 'unpaid', label: 'غير مسددة', count: stats.unpaidCount, tone: 'data-[on=true]:bg-rose-500/20 data-[on=true]:text-rose-300' },
+    { key: 'partial', label: 'جزئياً', count: stats.partialCount, tone: 'data-[on=true]:bg-amber-500/20 data-[on=true]:text-amber-300' },
+    { key: 'paid', label: 'مسددة', count: stats.paidCount, tone: 'data-[on=true]:bg-emerald-500/20 data-[on=true]:text-emerald-300' },
+    { key: 'free', label: 'مجانية', count: stats.freeCount, tone: 'data-[on=true]:bg-slate-500/20 data-[on=true]:text-slate-300' },
+  ];
+
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="flex flex-col h-full gap-4.5" dir="rtl">
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7 gap-3.5 shrink-0">
-          {[
-            {
-              label: 'إجمالي المهام',
-              value: stats.total,
-              color: 'text-violet-400',
-              icon: LayoutList,
-              bg: 'bg-violet-500/10',
-              border: 'border-violet-500/20 hover:border-violet-500/40',
-              accent: 'bg-violet-500',
-              pct: 100,
-              pctLabel: 'المهام المسجلة'
-            },
-            {
-              label: 'قيد التنفيذ',
-              value: stats.pending,
-              color: 'text-amber-400',
-              icon: Clock,
-              bg: 'bg-amber-500/10',
-              border: 'border-amber-500/20 hover:border-amber-500/40',
-              accent: 'bg-amber-500',
-              pct: stats.total > 0 ? Math.round((stats.pending / stats.total) * 100) : 0,
-              pctLabel: 'قيد المتابعة والتنفيذ'
-            },
-            {
-              label: 'مكتملة',
-              value: stats.completed,
-              color: 'text-emerald-400',
-              icon: CheckCircle2,
-              bg: 'bg-emerald-500/10',
-              border: 'border-emerald-500/20 hover:border-emerald-500/40',
-              accent: 'bg-emerald-500',
-              pct: stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0,
-              pctLabel: 'نسبة الإنجاز الفعلي'
-            },
-            {
-              label: 'الإيرادات',
-              value: `${stats.totalRevenue.toLocaleString('ar-LY')} د.ل`,
-              color: 'text-primary',
-              icon: DollarSign,
-              bg: 'bg-primary/10',
-              border: 'border-primary/20 hover:border-primary/40',
-              accent: 'bg-primary',
-              pct: stats.totalRevenue > 0 ? 100 : 0,
-              pctLabel: 'إجمالي القيمة التعاقدية'
-            },
-            {
-              label: 'المبالغ المدفوعة',
-              value: `${stats.totalPaid.toLocaleString('ar-LY')} د.ل`,
-              color: 'text-teal-400',
-              icon: Coins,
-              bg: 'bg-teal-500/10',
-              border: 'border-teal-500/20 hover:border-teal-500/40',
-              accent: 'bg-teal-500',
-              pct: stats.totalRevenue > 0 ? Math.min(100, Math.round((stats.totalPaid / stats.totalRevenue) * 100)) : 0,
-              pctLabel: 'نسبة التحصيل والمدفوع'
-            },
-            {
-              label: 'المبالغ المتبقية',
-              value: `${stats.totalRemaining.toLocaleString('ar-LY')} د.ل`,
-              color: 'text-rose-400',
-              icon: Wallet,
-              bg: 'bg-rose-500/10',
-              border: 'border-rose-500/20 hover:border-rose-500/40',
-              accent: 'bg-rose-500',
-              pct: stats.totalRevenue > 0 ? Math.round((stats.totalRemaining / stats.totalRevenue) * 100) : 0,
-              pctLabel: 'المتبقي غير المحصل'
-            },
-            {
-              label: 'صافي الربح',
-              value: `${stats.totalProfit.toLocaleString('ar-LY')} د.ل`,
-              color: stats.totalProfit >= 0 ? 'text-emerald-400' : 'text-rose-400',
-              icon: stats.totalProfit >= 0 ? TrendingUp : TrendingDown,
-              bg: stats.totalProfit >= 0 ? 'bg-emerald-500/10' : 'bg-rose-500/10',
-              border: stats.totalProfit >= 0 ? 'border-emerald-500/20 hover:border-emerald-500/40' : 'border-rose-500/20 hover:border-rose-500/40',
-              accent: stats.totalProfit >= 0 ? 'bg-emerald-500' : 'bg-rose-500',
-              pct: stats.totalRevenue > 0 ? Math.max(0, Math.min(100, Math.round((stats.totalProfit / stats.totalRevenue) * 100))) : 0,
-              pctLabel: 'هامش الربح الإجمالي'
-            },
-          ].map(({ label, value, color, icon: Icon, bg, border, accent, pct, pctLabel }) => (
-            <div
-              key={label}
-              className={`bg-card/40 backdrop-blur-xl border ${border} rounded-[22px] p-4 flex flex-col justify-between min-h-[140px] shadow-sm hover:shadow-md transition-all duration-200 select-none relative overflow-hidden group`}
-            >
-              <div className={`absolute top-0 right-0 left-0 h-[3px] ${accent} opacity-70 group-hover:opacity-100 transition-opacity duration-300`} />
-              <div className="flex items-start justify-between relative z-10">
-                <div className="text-right space-y-1">
-                  <p className="text-[11px] font-bold text-muted-foreground/75 leading-none">{label}</p>
-                  <p className={`text-lg sm:text-xl font-black tracking-tight ${color}`}>{value}</p>
-                </div>
-                <div className={`p-2 rounded-xl ${bg} ${color} border border-white/5 shadow-inner shrink-0`}>
-                  <Icon className="h-4 w-4" />
-                </div>
+      <div className="flex h-full flex-col gap-3" dir="rtl">
+        <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+          <div className="grid grid-cols-3 gap-3">
+            {statTiles.slice(0, 3).map(s => (
+              <div key={s.label} className="rounded-xl border border-border bg-card px-3 py-3 sm:px-4">
+                <p className="text-[11px] text-muted-foreground">{s.label}</p>
+                <p className={cn('mt-1 text-xl font-bold tabular-nums', s.tone)}>{s.value}</p>
               </div>
-              <div className="mt-3 space-y-1 relative z-10">
-                <div className="flex items-center justify-between text-[9px] font-bold text-muted-foreground/50">
-                  <span>{pctLabel}</span>
-                  <span>{pct}%</span>
-                </div>
-                <div className="h-1.5 w-full bg-muted/20 rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full ${accent} rounded-full transition-all duration-300`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
+            ))}
+          </div>
+          <details className="self-start rounded-xl border border-border bg-card lg:min-w-64">
+            <summary className="min-h-12 cursor-pointer px-4 py-3 text-[12px] font-semibold text-muted-foreground transition-colors hover:text-foreground">ملخص الأداء المالي</summary>
+            <div className="grid grid-cols-2 gap-4 border-t border-border p-4">
+              {statTiles.slice(3).map(s => <div key={s.label}><p className="text-[11px] text-muted-foreground">{s.label}</p><p className={cn('mt-1 text-[14px] font-bold tabular-nums',s.tone)}>{s.value} د.ل</p></div>)}
             </div>
-          ))}
+          </details>
         </div>
 
-        {/* Quick Payment Status Filter Pills */}
-        <div className="flex items-center gap-2 flex-wrap pb-1">
-          <button
-            type="button"
-            onClick={() => { setPaymentFilter('all'); setPage(1); }}
-            className={cn(
-              "px-3.5 py-1.5 rounded-xl text-xs font-black border transition-all cursor-pointer flex items-center gap-2",
-              paymentFilter === 'all'
-                ? "bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm"
-                : "bg-card/40 text-muted-foreground border-border/20 hover:bg-card/60"
-            )}
-          >
-            <span>جميع الحالات المالية</span>
-            <span className="font-mono bg-white/10 px-1.5 py-0.2 rounded-md text-[10px]">{stats.total}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => { setPaymentFilter('unpaid'); setPage(1); }}
-            className={cn(
-              "px-3.5 py-1.5 rounded-xl text-xs font-black border transition-all cursor-pointer flex items-center gap-2",
-              paymentFilter === 'unpaid'
-                ? "bg-rose-500/25 text-rose-300 border-rose-500/50 shadow-md ring-2 ring-rose-500/20"
-                : "bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20"
-            )}
-          >
-            <AlertCircle className="h-3.5 w-3.5" />
-            <span>غير مسددة</span>
-            <span className="font-mono bg-rose-500/30 px-1.5 py-0.2 rounded-md text-[10px]">{stats.unpaidCount}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => { setPaymentFilter('partial'); setPage(1); }}
-            className={cn(
-              "px-3.5 py-1.5 rounded-xl text-xs font-black border transition-all cursor-pointer flex items-center gap-2",
-              paymentFilter === 'partial'
-                ? "bg-amber-500/25 text-amber-300 border-amber-500/50 shadow-md ring-2 ring-amber-500/20"
-                : "bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-amber-500/20"
-            )}
-          >
-            <Clock className="h-3.5 w-3.5" />
-            <span>مسددة جزئياً</span>
-            <span className="font-mono bg-amber-500/30 px-1.5 py-0.2 rounded-md text-[10px]">{stats.partialCount}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => { setPaymentFilter('paid'); setPage(1); }}
-            className={cn(
-              "px-3.5 py-1.5 rounded-xl text-xs font-black border transition-all cursor-pointer flex items-center gap-2",
-              paymentFilter === 'paid'
-                ? "bg-emerald-500/25 text-emerald-300 border-emerald-500/50 shadow-md ring-2 ring-emerald-500/20"
-                : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20"
-            )}
-          >
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            <span>مسددة بالكامل</span>
-            <span className="font-mono bg-emerald-500/30 px-1.5 py-0.2 rounded-md text-[10px]">{stats.paidCount}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => { setPaymentFilter('free'); setPage(1); }}
-            className={cn(
-              "px-3.5 py-1.5 rounded-xl text-xs font-black border transition-all cursor-pointer flex items-center gap-2",
-              paymentFilter === 'free'
-                ? "bg-slate-500/25 text-slate-300 border-slate-500/50 shadow-md"
-                : "bg-slate-500/10 text-slate-400 border-slate-500/20 hover:bg-slate-500/20"
-            )}
-          >
-            <Gift className="h-3.5 w-3.5" />
-            <span>مجانية (0 د.ل)</span>
-            <span className="font-mono bg-slate-500/30 px-1.5 py-0.2 rounded-md text-[10px]">{stats.freeCount}</span>
-          </button>
-        </div>
-
-        {/* Toolbar Control Center */}
-        <div className="bg-card/45 backdrop-blur-md border border-border/30 rounded-[22px] p-3.5 flex flex-wrap gap-3 items-center shrink-0 shadow-sm">
-          <div className="relative flex-1 min-w-[140px] sm:min-w-[220px]">
-            <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50 pointer-events-none" />
-            <Input 
-              placeholder="بحث بالاسم، الشركة، رقم العقد، نوع الإعلان، الفريق..." 
-              value={searchInput} 
-              onChange={e => setSearchInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') {
-                  handleImmediateSearch(searchInput);
-                }
-              }}
-              className="pr-10 pl-9 bg-background/50 border-border/30 h-10 text-xs text-foreground placeholder:text-muted-foreground/65 focus-visible:ring-indigo-500/50 rounded-xl" 
-            />
-            {isSearching ? (
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none">
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />
-              </div>
-            ) : searchInput ? (
-              <button
-                type="button"
-                onClick={() => handleImmediateSearch('')}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-foreground p-1 rounded-md cursor-pointer transition-colors"
-                title="مسح البحث"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            ) : null}
-          </div>
-          
-          <Select value={filterStatus} onValueChange={v => { setFilterStatus(v); setPage(1); }}>
-            <SelectTrigger className="w-[145px] h-10 bg-background/50 border-border/30 text-xs font-bold rounded-xl">
-              <SelectValue placeholder="الحالة" />
-            </SelectTrigger>
-            <SelectContent className="font-tajawal">
-              <SelectItem value="all">جميع الحالات</SelectItem>
-              <SelectItem value="pending">معلقة</SelectItem>
-              <SelectItem value="in_progress">قيد التنفيذ</SelectItem>
-              <SelectItem value="completed">مكتملة</SelectItem>
-              <SelectItem value="cancelled">ملغاة</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={() => refetch()} 
-            className="h-10 gap-2 border-border/30 bg-background/50 hover:bg-muted/40 text-xs font-bold rounded-xl cursor-pointer"
-          >
-            <RefreshCw className="h-3.5 w-3.5 text-indigo-500" />
-            تحديث البيانات
-          </Button>
-
-          <div className="hidden lg:flex items-center gap-2 bg-amber-500/8 border border-amber-500/20 rounded-xl px-3 h-10 shrink-0 text-[11px] font-bold text-amber-300">
-            <CalendarDays className="h-3.5 w-3.5" />
-            الأحدث أولًا تلقائيًا
-          </div>
-
-          <div className="flex items-center gap-2 mr-auto">
-            <PaginationBar />
-          </div>
-        </div>
-
-        {/* Card list - grouped by contract */}
-        <div className="flex flex-col gap-3.5 flex-1 overflow-y-auto pb-4 min-h-0">
-          {isLoading ? (
-            Array.from({ length: 4 }).map((_, i) => (
-              <motion.div key={i} initial={{ opacity: 0 }} animate={{ opacity: 1 - i * 0.15 }} transition={{ delay: i * 0.05 }}>
-                <SkeletonCard />
-              </motion.div>
-            ))
-          ) : paginatedGroups.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground bg-card/20 rounded-3xl border border-border/20 text-center px-4">
-              <Package className="h-14 w-14 opacity-20" />
-              <span className="text-sm font-bold opacity-70">
-                {search ? `لا توجد نتائج مطابقة للبحث عن «${search}»` : 'لا توجد مهام تركيب شاملة مطابقة لمعايير التصفية'}
-              </span>
-              {search && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleImmediateSearch('')}
-                  className="mt-2 h-8 text-xs gap-1.5 border-amber-500/30 text-amber-400 hover:bg-amber-500/10 cursor-pointer rounded-xl"
-                >
+        {/* أدوات البحث والتصفية */}
+        <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-card p-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[200px] flex-1">
+              <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" />
+              <Input
+                placeholder="بحث بالزبون، الشركة، رقم العقد، نوع الإعلان، الفريق..."
+                value={searchInput}
+                onChange={e => setSearchInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleImmediateSearch(searchInput); }}
+                className="h-10 rounded-lg pl-9 pr-9 text-xs"
+              />
+              {isSearching ? (
+                <Loader2 className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-primary" />
+              ) : searchInput ? (
+                <button type="button" onClick={() => handleImmediateSearch('')} className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer rounded p-1 text-muted-foreground hover:text-foreground" title="مسح البحث">
                   <X className="h-3.5 w-3.5" />
-                  إلغاء البحث وعرض كل المهام
-                </Button>
+                </button>
+              ) : null}
+            </div>
+            <Select value={filterStatus} onValueChange={v => { setFilterStatus(v); setPage(1); }}>
+              <SelectTrigger className="h-10 w-[130px] rounded-lg text-xs"><SelectValue placeholder="الحالة" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">كل الحالات</SelectItem>
+                <SelectItem value="pending">معلقة</SelectItem>
+                <SelectItem value="in_progress">قيد التنفيذ</SelectItem>
+                <SelectItem value="completed">مكتملة</SelectItem>
+                <SelectItem value="cancelled">ملغاة</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" onClick={() => refetch()} className="h-10 gap-1.5 rounded-lg text-xs">
+              <RefreshCw className="h-3.5 w-3.5" />تحديث
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex flex-wrap items-center gap-1 rounded-lg bg-muted/40 p-0.5" role="group" aria-label="نوع العملية">
+              {typeOptions.map(o => (
+                <button
+                  key={o.key}
+                  type="button"
+                  data-on={typeFilter === o.key}
+                  onClick={() => { setTypeFilter(o.key); setPage(1); }}
+                  className={cn(
+                    'inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground',
+                    'data-[on=true]:bg-card data-[on=true]:text-foreground data-[on=true]:shadow-sm',
+                    o.key === 'multi' && 'data-[on=true]:text-primary',
+                  )}
+                >
+                  {o.key === 'multi' && <Layers className="h-3 w-3" />}
+                  {o.label}<span className="tabular-nums opacity-60">{o.count}</span>
+                </button>
+              ))}
+            </div>
+            <Select value={paymentFilter} onValueChange={v => { setPaymentFilter(v as typeof paymentFilter); setPage(1); }}>
+              <SelectTrigger className="h-10 w-full rounded-lg text-xs sm:w-52" aria-label="حالة السداد"><SelectValue /></SelectTrigger>
+              <SelectContent>{paymentOptions.map(o => <SelectItem key={o.key} value={o.key}>{o.label} ({o.count})</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* قائمة + تفاصيل */}
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-5 xl:grid-cols-[320px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)]">
+          <div className="flex min-h-0 flex-col gap-2">
+            <div className="flex items-center justify-between px-1 text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">العقود ({visibleGroups.length})</span>
+              {totalPages > 1 && (
+                <span className="flex items-center gap-1">
+                  <button type="button" disabled={page <= 1} onClick={() => setPage(page - 1)} className="cursor-pointer rounded p-1 hover:bg-muted disabled:opacity-40" aria-label="السابق"><ChevronRight className="h-4 w-4" /></button>
+                  <span className="tabular-nums">{page} / {totalPages}</span>
+                  <button type="button" disabled={page >= totalPages} onClick={() => setPage(page + 1)} className="cursor-pointer rounded p-1 hover:bg-muted disabled:opacity-40" aria-label="التالي"><ChevronLeft className="h-4 w-4" /></button>
+                </span>
               )}
             </div>
-          ) : (
-            paginatedGroups.map((group) => (
-              <ContractGroupCard
-                key={group.key}
-                group={group}
-                isCollapsed={collapsedGroups.has(group.key)}
-                toggleGroupCollapse={toggleGroupCollapse}
-                activeOperation={group.operations[0]}
-                expandedOperations={expandedOperations}
-                toggleOperationExpansion={toggleOperationExpansion}
-                zipDownloadingGroup={zipDownloadingGroup}
-                handleDownloadGroupZip={handleDownloadGroupZip}
-                handleCreatePrintTasksForGroup={handleCreatePrintTasksForGroup}
-                handleCreateReinstallationForGroup={handleCreateReinstallationForGroup}
-                reinstallCreatingGroup={reinstallCreatingGroup}
-                discountPopoverGroup={discountPopoverGroup}
-                setDiscountPopoverGroup={setDiscountPopoverGroup}
-                discountAmount={discountAmount}
-                setDiscountAmount={setDiscountAmount}
-                discountReason={discountReason}
-                setDiscountReason={setDiscountReason}
-                discountTarget={discountTarget}
-                setDiscountTarget={setDiscountTarget}
-                discountSaving={discountSaving}
-                handleSaveDiscount={handleSaveDiscount}
-                setGroupInvoiceTasks={setGroupInvoiceTasks}
-                setGroupInvoiceOpen={setGroupInvoiceOpen}
-                setEditingOperationTasks={setEditingOperationTasks}
-                setEditingTask={setEditingTask}
-                setEditDialogOpen={setEditDialogOpen}
-                setDeleteTask={setDeleteTask}
-                setInvoiceTask={setInvoiceTask}
-                setInvoiceType={setInvoiceType}
-                setInvoiceOpen={setInvoiceOpen}
-                navigate={navigate}
-                handleOpenCreatePrintTask={handleOpenCreatePrintTask}
-                loadInstallationWorkflow={loadInstallationWorkflow}
-                workflowLoadingTaskId={workflowLoadingTaskId}
-              />
-            ))
+            <div className="flex flex-col gap-3 xl:max-h-[calc(100vh-300px)] xl:overflow-y-auto xl:pl-1">
+              {isLoading ? (
+                Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[90px] rounded-xl" />)
+              ) : paginatedGroups.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border/60 py-16 text-center text-muted-foreground">
+                  <Package className="h-10 w-10 opacity-30" />
+                  <span className="text-sm">{search ? `لا نتائج لـ «${search}»` : 'لا توجد مهام مطابقة للتصفية'}</span>
+                  {search && <Button variant="outline" size="sm" onClick={() => handleImmediateSearch('')} className="h-8 text-xs">إلغاء البحث</Button>}
+                </div>
+              ) : (
+                paginatedGroups.map(group => (
+                  <HubContractRow
+                    key={group.key}
+                    group={group}
+                    selected={selectedGroup?.key === group.key}
+                    onSelect={() => setSelectedGroupKey(group.key)}
+                    onOpenTask={() => {
+                      const task = group.operations?.[0]?.tasks.find((t: any) => t.installation_task_id);
+                      if (task) navigate(`/admin/installation-tasks?task=${encodeURIComponent(task.installation_task_id)}&from=hub`);
+                    }}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+
+          {isWide && (
+            <div className="min-w-0 xl:max-h-[calc(100vh-270px)] xl:overflow-y-auto xl:pl-1">
+              {selectedGroup ? (
+                <HubContractDetail group={selectedGroup} {...groupActionProps} />
+              ) : !isLoading ? (
+                <div className="flex h-full min-h-[300px] items-center justify-center rounded-xl border border-dashed border-border/60 text-sm text-muted-foreground">
+                  اختر عقداً من القائمة لعرض عملياته
+                </div>
+              ) : null}
+            </div>
           )}
         </div>
-
-        {/* Bottom Pagination */}
-        <div className="flex justify-center mt-2 shrink-0">
-          <PaginationBar />
-        </div>
       </div>
+
+      {/* الشاشات الصغيرة: التفاصيل في لوحة جانبية */}
+      {!isWide && (
+        <Sheet open={Boolean(selectedGroupKey && selectedGroup)} onOpenChange={(open) => { if (!open) setSelectedGroupKey(null); }}>
+          <SheetContent side="right" className="w-full overflow-y-auto p-4 sm:max-w-2xl" dir="rtl">
+            <SheetHeader className="mb-4 border-b border-border pb-3 pl-10 text-right"><SheetTitle>تفاصيل العقد</SheetTitle></SheetHeader>
+            {selectedGroup && <HubContractDetail group={selectedGroup} {...groupActionProps} />}
+          </SheetContent>
+        </Sheet>
+      )}
 
       {/* Edit Costs Dialog */}
       <EnhancedEditCompositeTaskCostsDialog
@@ -2001,7 +1947,7 @@ export const CompositeTasksListEnhanced: React.FC<CompositeTasksListEnhancedProp
           <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto border-amber-500/20" dir="rtl">
             <DialogHeader className="text-right">
               <DialogTitle className="flex items-center gap-2 text-right">
-                <ImagePlus className="h-5 w-5 text-amber-400" />
+                <ImagePlus className="h-5 w-5 text-warning" />
                 إدارة تصاميم مهمة التركيب
               </DialogTitle>
             </DialogHeader>

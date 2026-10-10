@@ -107,34 +107,29 @@ interface QuickStatusProps {
 }
 
 const QuickStatus: React.FC<QuickStatusProps> = ({ label, icon, isActive, onClick, variant }) => {
-  const variants = {
-    success: 'border-emerald-500/20 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-    warning: 'border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10 text-amber-600 dark:text-amber-400',
-    danger: 'border-rose-500/20 bg-rose-500/5 hover:bg-rose-500/10 text-rose-600 dark:text-rose-400',
-    info: 'border-sky-500/20 bg-sky-500/5 hover:bg-sky-500/10 text-sky-600 dark:text-sky-400',
-    muted: 'border-slate-500/20 bg-slate-500/5 hover:bg-slate-500/10 text-slate-600 dark:text-slate-400',
+  // لون الأيقونة فقط يدل على الحالة؛ الخلفية محايدة، والمفعّل باللون الأساسي
+  const iconTone = {
+    success: 'text-emerald-500',
+    warning: 'text-amber-500',
+    danger: 'text-rose-500',
+    info: 'text-slate-400',
+    muted: 'text-muted-foreground',
   };
-
-  const activeVariants = {
-    success: 'border-emerald-500/50 bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-[0_8px_20px_-4px_rgba(16,185,129,0.4)]',
-    warning: 'border-amber-500/50 bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-[0_8px_20px_-4px_rgba(245,158,11,0.4)]',
-    danger: 'border-rose-500/50 bg-gradient-to-br from-rose-500 to-red-600 text-white shadow-[0_8px_20px_-4px_rgba(244,63,94,0.4)]',
-    info: 'border-sky-500/50 bg-gradient-to-br from-sky-500 to-indigo-600 text-white shadow-[0_8px_20px_-4px_rgba(14,165,233,0.4)]',
-    muted: 'border-slate-500/50 bg-gradient-to-br from-slate-500 to-slate-700 text-white shadow-[0_8px_20px_-4px_rgba(100,116,139,0.4)]',
-  };
-
   return (
     <button
+      type="button"
       onClick={onClick}
+      aria-pressed={isActive}
       className={cn(
-        "flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl border text-[11px] sm:text-xs md:text-sm font-bold transition-all duration-300",
-        "hover:scale-[1.02] active:scale-[0.98] shadow-sm select-none",
-        isActive ? activeVariants[variant] : variants[variant]
+        "inline-flex h-8 cursor-pointer select-none items-center gap-1.5 rounded-lg border px-3 text-xs font-semibold transition-colors",
+        isActive
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-border bg-card text-foreground/85 hover:bg-muted"
       )}
     >
-      {icon}
+      <span className={cn('[&_svg]:h-3.5 [&_svg]:w-3.5', isActive ? 'text-primary-foreground' : iconTone[variant])}>{icon}</span>
       <span>{label}</span>
-      {isActive && <Check className="h-3 w-3 sm:h-3.5 sm:w-3.5" />}
+      {isActive && <Check className="h-3.5 w-3.5" />}
     </button>
   );
 };

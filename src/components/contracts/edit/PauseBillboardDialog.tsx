@@ -183,7 +183,7 @@ export function PauseBillboardDialog({
                 سعر اللوحة - (الإيجار المستهلك + الطباعة والتركيب)
               </p>
             </div>
-            <p className="text-2xl font-extrabold text-primary" dir="ltr">
+            <p className="text-xl font-extrabold text-primary" dir="ltr">
               {formatAmount(result.unusedRefund)}
             </p>
           </div>

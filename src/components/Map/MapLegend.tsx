@@ -13,10 +13,10 @@ interface MapLegendProps {
 
 // الحالات الثابتة المحسنة مع تأثيرات التوهج المتطابقة مع نظام التصميم
 const STATUS_ITEMS = [
-  { label: 'متاح', color: '#22c55e', glow: 'rgba(34,197,94,0.4)', key: 'available' },
-  { label: 'مؤجر', color: '#3b82f6', glow: 'rgba(59,130,246,0.4)', key: 'rented' },
-  { label: 'محجوز', color: '#f59e0b', glow: 'rgba(245,158,11,0.4)', key: 'reserved' },
-  { label: 'صيانة', color: '#ef4444', glow: 'rgba(239,68,68,0.4)', key: 'maintenance' },
+  { label: 'متاح', color: '#16a34a', glow: 'rgba(22,163,74,0.4)', key: 'available' },
+  { label: 'مؤجر', color: '#dc2626', glow: 'rgba(220,38,38,0.4)', key: 'rented' },
+  { label: 'محجوز', color: '#d97706', glow: 'rgba(217,119,6,0.4)', key: 'reserved' },
+  { label: 'صيانة', color: '#64748b', glow: 'rgba(100,116,139,0.4)', key: 'maintenance' },
 ];
 
 const MapLegend = memo(function MapLegend({ 
@@ -118,7 +118,7 @@ const MapLegend = memo(function MapLegend({
                     boxShadow: isActive ? `0 0 8px ${item.glow}` : 'none'
                   }} 
                 >
-                  {isActive && <span className="absolute inset-0 rounded-full animate-ping opacity-30" style={{ background: item.color }} />}
+                  
                 </div>
               </button>
             );
@@ -134,31 +134,6 @@ const MapLegend = memo(function MapLegend({
           )}
         </div>
       </div>
-
-      {/* ألوان المقاسات */}
-      {sizes.length > 0 && (
-        <div className="border-t border-white/5 pt-2">
-          <h4 className="text-amber-500/80 text-[9px] font-extrabold mb-1 text-right">ألوان المقاسات</h4>
-          <div className="space-y-1 max-h-[160px] overflow-y-auto custom-scrollbar pr-0.5">
-            {sizes.map((size) => {
-              const colors = getSizeColor(size);
-              return (
-                <div key={size} className="flex items-center justify-end gap-1.5 py-0.5">
-                  <span className="text-[8px] text-slate-300 font-semibold truncate max-w-[80px]" dir="ltr">{size}</span>
-                  <div 
-                    className="w-2.5 h-2.5 rounded-sm flex-shrink-0 border"
-                    style={{ 
-                      background: colors.bg,
-                      borderColor: colors.border || 'transparent',
-                      boxShadow: `0 1px 3px rgba(0,0,0,0.3)`
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* رموز المعالم الهامة */}
       <div className="border-t border-white/5 pt-2 mt-2">

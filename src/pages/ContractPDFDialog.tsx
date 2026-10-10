@@ -1,3 +1,4 @@
+import { sortBillboardsStandardSync } from '@/lib/billboardSorter';
 import React, { useEffect, useState } from 'react';
 import { generateContractInvoiceHTML, ContractInvoiceData } from '@/lib/contractInvoiceGenerator';
 import { Button } from '@/components/ui/button';
@@ -837,8 +838,11 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
             String(item.billboardId ?? item.billboard_id ?? item.ID ?? item.id ?? '') === id
           );
           if (priceItem) {
+            const rawBefore = Number(priceItem.priceBeforeDiscount ?? priceItem.basePriceBeforeDiscount ?? 0);
             const itemDiscount = getItemDiscountAmount(priceItem);
-            if (itemDiscount > 0 && priceNum > 0) {
+            if (rawBefore > 0 && (!priceNum || rawBefore > priceNum)) {
+              origPriceNumResolved = rawBefore;
+            } else if (itemDiscount > 0 && priceNum > 0) {
               // السعر المعروض قد يشمل الطباعة/التركيب، لذا نضيف الخصم عليه مباشرة
               origPriceNumResolved = priceNum + itemDiscount;
             }
@@ -1405,24 +1409,32 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
             if (!id) return;
 
             // Try multiple price fields in order of preference
-            const originalFinalPrice = item.finalPrice ?? item.netRentalAfterDiscount ?? item.priceAfterDiscount ??
+            const originalFinalPrice = item.finalPrice ?? item.priceAfterDiscount ?? item.netRentalAfterDiscount ??
               item.calculatedPrice ?? item.price ??
               item.contractPrice ?? item.priceBeforeDiscount ??
               item.billboard_rent_price ?? item.billboardPrice ?? 0;
             
             let price = Number(originalFinalPrice);
 
-            // ✅ Dynamic recalculation to bypass database clamping bugs on older contracts
-            const baseRental = Number(item.basePriceBeforeDiscount ?? item.baseRental ?? item.priceBeforeDiscount ?? item.contractPrice ?? 0);
-            const discount = Number(item.discountPerBillboard ?? 0);
-            const extraPrint = (printCostEnabled && !includePrint) ? Number(item.printCost ?? item.includedPrintCost ?? 0) : 0;
-            const extraInstall = (installationEnabled && !includeInstall) ? Number(item.installationCost ?? item.includedInstallCost ?? 0) : 0;
+            // ✅ For modern rows (schemaVersion: 2 or when finalPrice / priceAfterDiscount is explicitly provided),
+            // trust the authoritative price computed by calculateAllBillboardPrices.
+            const hasAuthoritativePrice = item.schemaVersion === 2 || 
+              (item.finalPrice !== undefined && item.finalPrice !== null && !isNaN(Number(item.finalPrice))) ||
+              (item.priceAfterDiscount !== undefined && item.priceAfterDiscount !== null && !isNaN(Number(item.priceAfterDiscount)));
 
-            const recalculatedPrice = Math.max(0, baseRental - discount) + extraPrint + extraInstall;
+            if (!hasAuthoritativePrice) {
+              // ✅ Dynamic recalculation for older contracts to bypass database clamping bugs
+              const baseRental = Number(item.basePriceBeforeDiscount ?? item.baseRental ?? item.priceBeforeDiscount ?? item.contractPrice ?? 0);
+              const totalDiscountOnItem = Number(item.discountPerBillboard ?? 0) + Number(item.individualDiscountAmt ?? 0);
+              const extraPrint = (printCostEnabled && !includePrint) ? Number(item.printCost ?? item.includedPrintCost ?? 0) : 0;
+              const extraInstall = (installationEnabled && !includeInstall) ? Number(item.installationCost ?? item.includedInstallCost ?? 0) : 0;
 
-            // If we have valid baseRental and discount fields, prefer the recalculated price
-            if (item.basePriceBeforeDiscount !== undefined || item.baseRental !== undefined || item.priceBeforeDiscount !== undefined) {
-              price = recalculatedPrice;
+              const recalculatedPrice = Math.max(0, baseRental - totalDiscountOnItem) + extraPrint + extraInstall;
+
+              // If we have valid baseRental and discount fields, prefer the recalculated price
+              if (item.basePriceBeforeDiscount !== undefined || item.baseRental !== undefined || item.priceBeforeDiscount !== undefined) {
+                price = recalculatedPrice;
+              }
             }
 
             if (!Number.isNaN(price)) {
@@ -1827,6 +1839,10 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
               );
               if (priceItem) {
                 itemDiscountAmount = getItemDiscountAmount(priceItem);
+                const rawBefore = Number(priceItem.priceBeforeDiscount ?? priceItem.basePriceBeforeDiscount ?? 0);
+                if (rawBefore > 0 && (!num || rawBefore > num)) {
+                  originalPriceBeforeDiscount = rawBefore;
+                }
               }
             }
           }
@@ -1842,8 +1858,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         // Try to get price using different ID formats
         const historicalPrice = billboardPrices[id] ?? billboardPrices[Number(id)];
         const num = Number(historicalPrice || 0);
-        // السعر المعروض قد يشمل الطباعة/التركيب، لذا نضيف الخصم عليه مباشرة
-        if (itemDiscountAmount > 0 && num > 0) {
+        // السعر المعروض قد يشمل الطباعة/التركيب، لذا نضيف الخصم عليه مباشرة كحل احتياطي
+        if (originalPriceBeforeDiscount == null && itemDiscountAmount > 0 && num > 0) {
           originalPriceBeforeDiscount = num + itemDiscountAmount;
         }
 
@@ -1934,10 +1950,11 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         };
       });
       // ترتيب اللوحات: المقاس أولاً، ثم البلدية، ثم المستوى
+      // الترتيب الموحد: المقاس ← المستوى ← البلدية
       const sortedBillboards = normalizedWithSortRanks.sort((a, b) => {
         if (a.size_order !== b.size_order) return a.size_order - b.size_order;
-        if (a.municipality_order !== b.municipality_order) return a.municipality_order - b.municipality_order;
-        return a.level_order - b.level_order;
+        if (a.level_order !== b.level_order) return a.level_order - b.level_order;
+        return a.municipality_order - b.municipality_order;
       });
       const ROWS_PER_PAGE = templateSettings.tableSettings.maxRows || 12;
 
@@ -2380,7 +2397,6 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
           <div class="template-container first-page page">
             <img src="${templateBgUrl}" alt="${contractData.isOffer ? 'عرض سعر' : 'عقد إيجار لوحات إعلانية'}" class="template-image" 
                  onerror="console.warn('Failed to load contract template image')" />
-                   onerror="console.warn('Failed to load contract template image')" />
             <svg class="overlay-svg" viewBox="0 0 2480 3508" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
               ${templateSettings.header.visible ? `
               <text x="${templateSettings.header.x}" y="${templateSettings.header.y}" font-family="Doran, sans-serif" font-weight="bold" font-size="${templateSettings.header.fontSize}" fill="#000" text-anchor="${templateSettings.header.textAlign || 'end'}" dominant-baseline="middle" style="direction: rtl; text-align: right">${contractData.isOffer ? `عرض سعر رقم: ${contractData.contractNumber} - صالح لمدة 24 ساعة` : `عقد إيجار مواقع إعلانية رقم: ${contractData.contractNumber} سنة ${contractData.year}`}</text>
@@ -2571,14 +2587,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         mapBillboardForPrint(b, billboardPrices)
       );
 
-      const sortedBillboards = normalizedBillboards.sort((a, b) => {
-        const sizeA = sizesData.find(s => s.name === a.size)?.sort_order ?? 999;
-        const sizeB = sizesData.find(s => s.name === b.size)?.sort_order ?? 999;
-        if (sizeA !== sizeB) return sizeA - sizeB;
-        const munA = municipalitiesData.find(m => m.name === a.municipality)?.sort_order ?? 999;
-        const munB = municipalitiesData.find(m => m.name === b.municipality)?.sort_order ?? 999;
-        return munA - munB;
-      });
+      // الترتيب الموحد: المقاس ← المستوى ← البلدية
+      const sortedBillboards = sortBillboardsStandardSync(normalizedBillboards, sizesData, municipalitiesData);
 
       const printCostEnabled = Boolean(
         contract?.print_cost_enabled === true ||
@@ -2693,14 +2703,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         mapBillboardForPrint(b, billboardPrices)
       );
 
-      const sortedBillboards = normalizedBillboards.sort((a, b) => {
-        const sizeA = sizesData.find(s => s.name === a.size)?.sort_order ?? 999;
-        const sizeB = sizesData.find(s => s.name === b.size)?.sort_order ?? 999;
-        if (sizeA !== sizeB) return sizeA - sizeB;
-        const munA = municipalitiesData.find(m => m.name === a.municipality)?.sort_order ?? 999;
-        const munB = municipalitiesData.find(m => m.name === b.municipality)?.sort_order ?? 999;
-        return munA - munB;
-      });
+      // الترتيب الموحد: المقاس ← المستوى ← البلدية
+      const sortedBillboards = sortBillboardsStandardSync(normalizedBillboards, sizesData, municipalitiesData);
 
       const printCostEnabled = Boolean(
         contract?.print_cost_enabled === true ||
@@ -2981,14 +2985,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         mapBillboardForPrint(b, billboardPrices)
       );
 
-      const sortedBillboards = normalizedBillboards.sort((a, b) => {
-        const sizeA = sizesData.find(s => s.name === a.size)?.sort_order ?? 999;
-        const sizeB = sizesData.find(s => s.name === b.size)?.sort_order ?? 999;
-        if (sizeA !== sizeB) return sizeA - sizeB;
-        const munA = municipalitiesData.find(m => m.name === a.municipality)?.sort_order ?? 999;
-        const munB = municipalitiesData.find(m => m.name === b.municipality)?.sort_order ?? 999;
-        return munA - munB;
-      });
+      // الترتيب الموحد: المقاس ← المستوى ← البلدية
+      const sortedBillboards = sortBillboardsStandardSync(normalizedBillboards, sizesData, municipalitiesData);
 
       const printCostEnabled = Boolean(
         contract?.print_cost_enabled === true ||
@@ -3288,14 +3286,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
         mapBillboardForPrint(b, billboardPrices)
       );
 
-      const sortedBillboards = normalizedBillboards.sort((a, b) => {
-        const sizeA = sizesData.find(s => s.name === a.size)?.sort_order ?? 999;
-        const sizeB = sizesData.find(s => s.name === b.size)?.sort_order ?? 999;
-        if (sizeA !== sizeB) return sizeA - sizeB;
-        const munA = municipalitiesData.find(m => m.name === a.municipality)?.sort_order ?? 999;
-        const munB = municipalitiesData.find(m => m.name === b.municipality)?.sort_order ?? 999;
-        return munA - munB;
-      });
+      // الترتيب الموحد: المقاس ← المستوى ← البلدية
+      const sortedBillboards = sortBillboardsStandardSync(normalizedBillboards, sizesData, municipalitiesData);
 
       const printCostEnabled = Boolean(contract?.print_cost_enabled === true || contract?.print_cost_enabled === 1 || contract?.print_cost_enabled === "true" || contract?.print_cost_enabled === "1");
       const installationEnabled = contract?.installation_enabled !== false && contract?.installation_enabled !== 0;
@@ -3484,14 +3476,8 @@ export default function ContractPDFDialog({ open, onOpenChange, contract, liveBi
       );
 
       // Sort billboards
-      const sortedBillboards = normalizedBillboards.sort((a, b) => {
-        const sizeA = sizesData.find(s => s.name === a.size)?.sort_order ?? 999;
-        const sizeB = sizesData.find(s => s.name === b.size)?.sort_order ?? 999;
-        if (sizeA !== sizeB) return sizeA - sizeB;
-        const munA = municipalitiesData.find(m => m.name === a.municipality)?.sort_order ?? 999;
-        const munB = municipalitiesData.find(m => m.name === b.municipality)?.sort_order ?? 999;
-        return munA - munB;
-      });
+      // الترتيب الموحد: المقاس ← المستوى ← البلدية
+      const sortedBillboards = sortBillboardsStandardSync(normalizedBillboards, sizesData, municipalitiesData);
 
       // Build payments HTML
       const printCostEnabled = Boolean(

@@ -59,7 +59,7 @@ export function FriendBillboardsBulkRental({ friendBillboards, friendBillboardCo
   return (
     <Card className="border-border bg-card shadow-sm [&_button]:min-h-10 [&_button]:cursor-pointer [&_button]:transition-all [&_button]:duration-200 [&_input]:min-h-10">
       <CardHeader className="border-b border-border bg-primary/5">
-        <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-lg">
+        <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-base">
           <span className="flex items-center gap-2"><Building2 className="h-5 w-5 text-primary" />إيجارات الشركات الصديقة</span>
           <span className="text-primary tabular-nums">{total.toLocaleString('ar-LY')} {currencySymbol}</span>
         </CardTitle>

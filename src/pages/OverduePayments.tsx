@@ -1,3 +1,4 @@
+import { OverdueWorkspace } from '@/components/billing/OverdueWorkspace';
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { computeOverdueData } from '@/utils/overdueCalculations';
@@ -10,7 +11,8 @@ import {
   AlertTriangle, AlertCircle, Clock, DollarSign, FileText, 
   TrendingDown, User, CreditCard, Receipt, Printer, 
   MessageCircle, Send, Search, SlidersHorizontal, Loader2, 
-  ChevronDown, X, Phone, ArrowUpRight, Scale, Check, Copy
+  ChevronDown, X, Phone, ArrowUpRight, Scale, Check, Copy,
+  Calendar
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
@@ -22,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SendOverdueRemindersDialog } from '@/components/billing/SendOverdueRemindersDialog';
 import { OverduePaymentsPrintDialog } from '@/components/billing/OverduePaymentsPrintDialog';
 import { useSendWhatsApp } from '@/hooks/useSendWhatsApp';
+import { getCalendarConfig, generateGoogleCalendarWebUrl } from '@/services/googleCalendarService';
 
 interface OverdueInstallment {
   contractNumber: number;
@@ -376,449 +379,33 @@ export default function OverduePayments() {
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-4 md:p-6" dir="rtl">
-      {/* Premium Executive Header */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-l from-destructive/10 via-destructive/5 to-transparent border border-destructive/10 p-6 md:p-8">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="flex items-start gap-4">
-            <div className="w-12 h-12 md:w-14 md:h-14 bg-destructive/15 rounded-2xl flex items-center justify-center border border-destructive/20 shrink-0">
-              <AlertCircle className="h-6 w-6 md:h-7 md:w-7 text-destructive" />
-            </div>
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight text-foreground">دفعات العقود المتأخرة</h1>
-              <p className="text-muted-foreground text-sm mt-1 max-w-lg">
-                لوحة المراقبة المالية والمتابعة المباشرة لأقساط العقود المتأخرة، وإرسال التنبيهات الموحدة.
-              </p>
-            </div>
+    <div dir="rtl">
+      <OverdueWorkspace title="دفعات العقود المتأخرة" description="اختر الزبون لمراجعة الأقساط المستحقة، والتسديد أو فتح كشف الحساب." itemLabel="أقساط متأخرة" totalAmount={totalOverdue} totalItems={totalInstallments}
+        search={searchTerm} onSearch={setSearchTerm} minDays={minDays} onMinDays={setMinDays} minAmount={minAmount} onMinAmount={setMinAmount} sort={sortBy} onSort={setSortBy} onRefresh={loadOverduePayments}
+        headerAction={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/admin/google-calendar')}
+              className="cursor-pointer gap-1.5 border-primary/40 text-primary hover:bg-primary/10 rounded-lg h-9"
+            >
+              <Calendar className="h-4 w-4" />
+              تقويم جوجل والتنبيهات
+            </Button>
+            <SendOverdueRemindersDialog customerOverdues={customerOverdues}/>
           </div>
-          <div className="shrink-0 flex items-center">
-            <SendOverdueRemindersDialog customerOverdues={customerOverdues} />
-          </div>
-        </div>
-      </div>
-
-      {/* Styled Filters Panel */}
-      <Card className="border-muted shadow-sm">
-        <CardContent className="p-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 items-end">
-            <div className="space-y-1.5">
-              <Label htmlFor="search-term" className="text-xs font-semibold">بحث بالاسم</Label>
-              <div className="relative">
-                <Search className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <SearchInputWithHistory 
-                  id="search-term" 
-                  historyKey="overdue_payments"
-                  value={searchTerm} 
-                  onChange={(e) => setSearchTerm(e.target.value.slice(0, 100))} 
-                  placeholder="ابحث باسم الزبون..." 
-                  maxLength={100}
-                  className="pr-9 h-9 text-xs"
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">الحد الأدنى لأيام التأخير</Label>
-              <Select value={String(minDays)} onValueChange={(v) => setMinDays(parseInt(v, 10) || 0)}>
-                <SelectTrigger className="w-full h-9 text-xs bg-background">
-                  <span className="flex items-center gap-1.5">
-                    <Clock className="h-3.5 w-3.5 opacity-60 text-primary" />
-                    <SelectValue placeholder="كل التأخيرات" />
-                  </span>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="0">كل التأخيرات</SelectItem>
-                  <SelectItem value="7">7+ أيام</SelectItem>
-                  <SelectItem value="30">30+ يوم</SelectItem>
-                  <SelectItem value="60">60+ يوم</SelectItem>
-                  <SelectItem value="90">90+ يوم</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="min-amount" className="text-xs font-semibold">الحد الأدنى للمبلغ (د.ل)</Label>
-              <div className="relative">
-                <DollarSign className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input 
-                  id="min-amount" 
-                  type="number" 
-                  inputMode="decimal" 
-                  value={minAmount} 
-                  onChange={(e) => setMinAmount(e.target.value.slice(0, 12))} 
-                  placeholder="مثال: 1000..." 
-                  className="pr-9 h-9 text-xs"
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">ترتيب متأخرات التأخير</Label>
-              <Select value={sortBy} onValueChange={(v: any) => setSortBy(v)}>
-                <SelectTrigger className="w-full h-9 text-xs bg-background">
-                  <span className="flex items-center gap-1.5">
-                    <SlidersHorizontal className="h-3.5 w-3.5 opacity-60 text-primary" />
-                    <SelectValue />
-                  </span>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="oldest">التأخير الأطول أولاً (الأقدم)</SelectItem>
-                  <SelectItem value="newest">التأخير الأقل أولاً (الأحدث)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex gap-2">
-              <Button 
-                variant="outline" 
-                className="flex-1 h-9 text-xs gap-1.5" 
-                onClick={() => { setSearchTerm(''); setMinDays(0); setMinAmount(''); setSortBy('oldest'); }}
-              >
-                <X className="h-3.5 w-3.5 text-muted-foreground" />
-                إعادة تعيين
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Styled Performance Metrics Widgets */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-        <Card className="border-destructive/20 shadow-sm hover:shadow transition-all relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-destructive/5 rounded-full translate-x-8 -translate-y-8 transition-transform group-hover:scale-110" />
-          <CardHeader className="pb-3 pt-4">
-            <CardTitle className="text-xs font-bold text-muted-foreground flex items-center gap-2">
-              <User className="h-4 w-4 text-destructive" /> عدد الزبائن المتأخرين
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-extrabold text-destructive tracking-tight">{filteredOverdues.length}</div>
-            <span className="text-[10px] text-muted-foreground mt-1 block">زبون لديه أقساط مستحقة غير مدفوعة</span>
-          </CardContent>
-        </Card>
-        
-        <Card className="border-destructive/20 shadow-sm hover:shadow transition-all relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-24 h-24 bg-destructive/5 rounded-full translate-x-8 -translate-y-8 transition-transform group-hover:scale-110" />
-          <CardHeader className="pb-3 pt-4">
-            <CardTitle className="text-xs font-bold text-muted-foreground flex items-center gap-2">
-              <FileText className="h-4 w-4 text-destructive" /> إجمالي الدفعات المتأخرة
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-extrabold text-destructive tracking-tight">{totalInstallments}</div>
-            <span className="text-[10px] text-muted-foreground mt-1 block">قسط مستحق السداد حالياً</span>
-          </CardContent>
-        </Card>
-        
-        <Card className="border-destructive/30 shadow-luxury relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-28 h-28 bg-destructive/10 rounded-full translate-x-8 -translate-y-8 transition-transform group-hover:scale-110" />
-          <CardHeader className="pb-3 pt-4">
-            <CardTitle className="text-xs font-bold text-muted-foreground flex items-center gap-2">
-              <DollarSign className="h-4 w-4 text-destructive animate-pulse" /> مجموع المبالغ المتأخرة
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-black text-destructive tracking-tight">
-              {totalOverdue.toLocaleString('en-US')} <span className="text-base font-normal">د.ل</span>
-            </div>
-            <span className="text-[10px] text-muted-foreground mt-1 block">مجموع المديونية المتأخرة للأقساط</span>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Overdue list */}
-      {filteredOverdues.length === 0 ? (
-        <Card className="border-green-500/30 bg-green-500/[0.02] py-10 text-center">
-          <CardContent className="space-y-3">
-            <div className="w-14 h-14 rounded-full bg-green-500/10 flex items-center justify-center mx-auto">
-              <Check className="h-7 w-7 text-green-600" />
-            </div>
-            <p className="text-lg font-bold text-green-700">لا توجد دفعات عقود متأخرة!</p>
-            <p className="text-xs text-muted-foreground max-w-sm mx-auto">جميع أقساط العقود مسددة بالكامل أو محدثة لتاريخ اليوم.</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card className="border-muted shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <TrendingDown className="h-5 w-5 text-destructive" />
-              قائمة العملاء المتأخرين في السداد
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0 sm:p-6">
-            <Accordion type="multiple" className="space-y-4 px-4 pb-4">
-              {filteredOverdues.map((customer, index) => {
-                const overdueContractNumbers = new Set(customer.installments.map(i => i.contractNumber));
-                const relevantSummaries = customer.contractSummaries.filter(s => overdueContractNumbers.has(s.contractNumber));
-                const urgency = getUrgencyTheme(customer.oldestDaysOverdue);
-
-                // Compute overall payment progress percentage for active contracts
-                const totalContractVal = customer.contractSummaries.reduce((sum, s) => sum + s.contractTotal, 0);
-                const totalPaidVal = customer.contractSummaries.reduce((sum, s) => sum + s.totalPaid, 0);
-                const paidPercentage = totalContractVal > 0 ? Math.round((totalPaidVal / totalContractVal) * 100) : 0;
-
-                return (
-                  <AccordionItem
-                    key={`${customer.customerId || customer.customerName}-${index}`}
-                    value={`customer-${index}`}
-                    className={`border rounded-xl transition-all overflow-hidden ${urgency.border} ${urgency.background}`}
-                  >
-                    <div className="flex flex-col">
-                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-4 border-b bg-card">
-                        {/* Customer overview info */}
-                        <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                          <div className="w-10 h-10 shrink-0 bg-primary/10 rounded-full flex items-center justify-center font-bold text-primary text-sm shadow-sm">
-                            {customer.customerName.charAt(0)}
-                          </div>
-                          <div className="min-w-0 flex-1 space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-extrabold text-base truncate">{customer.customerName}</span>
-                              <Badge className={`text-[9px] font-bold py-0.5 border ${urgency.badge}`}>
-                                {urgency.label}
-                              </Badge>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3.5 w-3.5 text-muted-foreground/60" /> 
-                                أقدم تأخير: {customer.oldestDaysOverdue} يوم
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <FileText className="h-3.5 w-3.5 text-muted-foreground/60" /> 
-                                {customer.overdueCount} قسط متأخر
-                              </span>
-                              {getCustomerPhone(customer) && (
-                                <span className="flex items-center gap-1 font-mono text-[11px]">
-                                  <Phone className="h-3 w-3 text-muted-foreground/60" />
-                                  {getCustomerPhone(customer)}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Customer actions and progress bar */}
-                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
-                          {/* Payment progress */}
-                          {totalContractVal > 0 && (
-                            <div className="w-full sm:w-36 space-y-1 px-1 shrink-0">
-                              <div className="flex justify-between text-[10px] text-muted-foreground">
-                                <span>المدفوع الكلي</span>
-                                <span className="font-bold text-primary">{paidPercentage}%</span>
-                              </div>
-                              <Progress value={paidPercentage} className="h-1.5" />
-                            </div>
-                          )}
-
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Button 
-                              size="sm" 
-                              variant="outline" 
-                              className="h-8 text-xs gap-1 border-muted hover:border-primary/30"
-                              onClick={(e) => { 
-                                e.preventDefault(); 
-                                e.stopPropagation(); 
-                                setSelectedCustomerForPrint(customer); 
-                                setPrintDialogOpen(true); 
-                              }}
-                            >
-                              <Printer className="h-3.5 w-3.5 text-muted-foreground" /> 
-                              كشف شامل
-                            </Button>
-                            
-                            <Button 
-                              size="sm" 
-                              variant="outline" 
-                              className="h-8 text-xs gap-1 border-muted hover:border-green-600 hover:text-green-600"
-                              disabled={!getCustomerPhone(customer)}
-                              onClick={(e) => {
-                                e.preventDefault(); 
-                                e.stopPropagation();
-                                if (!getCustomerPhone(customer)) { toast.error('لا يوجد رقم هاتف مسجل لهذا الزبون'); return; }
-                                setReminderDialog({ open: true, customer });
-                              }}
-                            >
-                              <MessageCircle className="h-3.5 w-3.5 text-green-600" /> 
-                              تنبيه واتساب
-                            </Button>
-                            
-                            <Button 
-                              size="sm" 
-                              variant="outline" 
-                              className="h-8 text-xs gap-1 border-muted hover:border-primary"
-                              onClick={(e) => {
-                                e.preventDefault(); 
-                                e.stopPropagation();
-                                const name = encodeURIComponent(customer.customerName || '');
-                                if (customer.customerId) navigate(`/admin/customer-billing?id=${customer.customerId}&name=${name}`);
-                                else navigate(`/admin/customer-billing?name=${name}`);
-                              }}
-                            >
-                              <Receipt className="h-3.5 w-3.5 text-primary" /> 
-                              الفواتير
-                            </Button>
-
-                            <Badge variant="destructive" className="text-sm font-bold px-3 py-1 bg-red-500 text-white rounded-lg shadow-sm">
-                              {customer.totalOverdue.toLocaleString('en-US')} د.ل
-                            </Badge>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <AccordionTrigger className="px-4 py-2 hover:no-underline flex justify-center text-xs font-semibold text-muted-foreground gap-1 hover:text-foreground border-b border-dashed border-muted/40 bg-muted/10">
-                        عرض التفاصيل وجدول الأقساط
-                      </AccordionTrigger>
-                    </div>
-
-                    <AccordionContent className="p-4 bg-card space-y-4">
-                      {/* Comparison table: Contract summary mismatch checks */}
-                      {relevantSummaries.length > 0 && (
-                        <div className="space-y-2">
-                          <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                            <Scale className="h-3.5 w-3.5 text-primary" />
-                            مطابقة أرصدة العقود الإجمالية
-                          </h4>
-                          <div className="rounded-xl border overflow-x-auto bg-muted/10">
-                            <table className="w-full text-right border-collapse text-xs min-w-[700px]">
-                              <thead>
-                                <tr className="bg-muted/40 border-b">
-                                  <th className="p-2 font-bold text-muted-foreground">رقم العقد</th>
-                                  <th className="p-2 font-bold text-muted-foreground">نوع الإعلان</th>
-                                  <th className="p-2 font-bold text-muted-foreground">تاريخ البداية</th>
-                                  <th className="p-2 font-bold text-muted-foreground">تاريخ النهاية</th>
-                                  <th className="p-2 font-bold text-muted-foreground">قيمة العقد</th>
-                                  <th className="p-2 font-bold text-muted-foreground">المدفوع منه</th>
-                                  <th className="p-2 font-bold text-muted-foreground">المتبقي التعاقدي</th>
-                                  <th className="p-2 font-bold text-muted-foreground">الأقساط المتبقية</th>
-                                  <th className="p-2 font-bold text-muted-foreground">حالة التطابق</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {relevantSummaries.map((s) => {
-                                  const mismatch = Math.abs(s.diff) > 0.5;
-                                  return (
-                                    <tr key={s.contractNumber} className="border-b hover:bg-muted/10">
-                                      <td className="p-2 font-semibold">#{s.contractNumber}</td>
-                                      <td className="p-2">{s.adType || '—'}</td>
-                                      <td className="p-2 font-mono text-[10px]">{s.contractDate ? new Date(s.contractDate).toLocaleDateString('ar-LY') : '—'}</td>
-                                      <td className="p-2 font-mono text-[10px]">{s.endDate ? new Date(s.endDate).toLocaleDateString('ar-LY') : '—'}</td>
-                                      <td className="p-2 font-mono">{s.contractTotal.toLocaleString('en-US')} د.ل</td>
-                                      <td className="p-2 text-green-600 font-mono">{s.totalPaid.toLocaleString('en-US')} د.ل</td>
-                                      <td className="p-2 font-bold font-mono">{s.contractRemaining.toLocaleString('en-US')} د.ل</td>
-                                      <td className="p-2 font-bold font-mono text-destructive">{s.installmentsRemainingSum.toLocaleString('en-US')} د.ل</td>
-                                      <td className="p-2">
-                                        {mismatch ? (
-                                          <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20 text-[10px]">
-                                            فرق: {s.diff > 0 ? `+${s.diff.toLocaleString('en-US')}` : s.diff.toLocaleString('en-US')} د.ل
-                                          </Badge>
-                                        ) : (
-                                          <Badge className="bg-green-500/10 text-green-700 border-green-500/20 text-[10px]">
- مطابق
-                                          </Badge>
-                                        )}
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                            {relevantSummaries.some(s => Math.abs(s.diff) > 0.5) && (
-                              <div className="px-3 py-2 text-[10px] text-amber-700 bg-amber-500/5 border-t border-amber-500/10 flex items-center gap-1.5">
-                                <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
-                                تنبيه: يوجد تباين بين الرصيد المتبقي الإجمالي للعقد وجدول الأقساط. يرجى مراجعة تفاصيل العقد.
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Detailed overdue installments list */}
-                      <div className="space-y-2">
-                        <h4 className="text-xs font-bold text-destructive flex items-center gap-1.5">
-                          <Clock className="h-3.5 w-3.5" />
-                          الدفعات والأقساط المستحقة المتأخرة
-                        </h4>
-                        
-                        <div className="grid grid-cols-1 gap-3">
-                          {customer.installments.map((installment, idx) => {
-                            const instUrgency = getUrgencyTheme(installment.daysOverdue);
-                            return (
-                              <div 
-                                key={idx} 
-                                className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 border rounded-xl bg-muted/10 hover:bg-muted/20 transition-all border-muted/50"
-                              >
-                                <div className="space-y-2">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <Badge variant="outline" className="text-[10px] font-bold">عقد #{installment.contractNumber}</Badge>
-                                    {installment.adType && <Badge variant="secondary" className="text-[10px]">{installment.adType}</Badge>}
-                                    <Badge className={`text-[10px] border font-bold ${instUrgency.badge}`}>{installment.daysOverdue} يوم تأخير</Badge>
-                                  </div>
-                                  
-                                  <div className="text-xs text-muted-foreground space-y-1">
-                                    <div className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-                                      <span>قيمة القسط المتأخر:</span>
-                                      <span className="text-destructive font-bold font-mono">{installment.installmentAmount.toLocaleString('en-US')} د.ل</span>
-                                    </div>
-                                    
-                                    {((installment.originalAmount || 0) > 0 && installment.originalAmount !== installment.installmentAmount) && (
-                                      <div className="text-[10px] bg-background/50 rounded-lg p-2 border border-muted/40 space-y-0.5 max-w-sm mt-1.5 font-mono">
-                                        <div className="flex justify-between"><span>القسط الأصلي:</span><span>{(installment.originalAmount || 0).toLocaleString('en-US')} د.ل</span></div>
-                                        {(installment.contractPaymentApplied || 0) > 0 && (
-                                          <div className="flex justify-between text-blue-600"><span>المدفوع من العقد:</span><span>−{(installment.contractPaymentApplied || 0).toLocaleString('en-US')} د.ل</span></div>
-                                        )}
-                                        {(installment.accountCreditApplied || 0) > 0 && (
-                                          <div className="flex justify-between text-amber-600"><span>رصيد الحساب المطبق:</span><span>−{(installment.accountCreditApplied || 0).toLocaleString('en-US')} د.ل</span></div>
-                                        )}
-                                        <div className="flex justify-between font-bold text-destructive border-t pt-0.5 mt-0.5"><span>المتبقي المستحق:</span><span>{installment.installmentAmount.toLocaleString('en-US')} د.ل</span></div>
-                                      </div>
-                                    )}
-                                    
-                                    <div className="flex flex-wrap gap-x-4 pt-1">
-                                      <span><strong>تاريخ الاستحقاق:</strong> {new Date(installment.dueDate).toLocaleDateString('ar-LY')}</span>
-                                      <span><strong>البيان:</strong> {installment.description}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                                
-                                {/* Installment quick actions */}
-                                <div className="flex flex-wrap gap-2 shrink-0 md:self-center">
-                                  <Button 
-                                    size="sm" 
-                                    className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-1"
-                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); openPaymentDialog(installment); }}
-                                  >
-                                    <CreditCard className="h-3.5 w-3.5" />
-                                    تسديد
-                                  </Button>
-                                  
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    className="h-8 text-xs gap-1 border-muted hover:border-destructive hover:text-destructive rounded-lg bg-card"
-                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); printOverdueNotice(installment); }}
-                                  >
-                                    <Printer className="h-3.5 w-3.5" />
-                                    طباعة إشعار
-                                  </Button>
-                                  
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    className="h-8 text-xs gap-1 border-muted hover:border-green-600 hover:text-green-600 rounded-lg bg-card"
-                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setWhatsappChoiceDialog({ open: true, installment }); }}
-                                  >
-                                    <MessageCircle className="h-3.5 w-3.5 text-green-600" />
-                                    تذكير واتساب
-                                  </Button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </AccordionContent>
-                  </AccordionItem>
-                );
-              })}
-            </Accordion>
-          </CardContent>
-        </Card>
-      )}
+        }
+        customers={filteredOverdues.map(customer=>({key:customer.customerId || customer.customerName,name:customer.customerName,amount:customer.totalOverdue,count:customer.overdueCount,days:customer.oldestDaysOverdue,phone:getCustomerPhone(customer),
+          onAccount:()=>navigate(`/admin/customer-billing?${customer.customerId?`id=${customer.customerId}&`:''}name=${encodeURIComponent(customer.customerName)}`),
+          onPrint:()=>{setSelectedCustomerForPrint(customer);setPrintDialogOpen(true);},
+          onReminder:()=>setReminderDialog({open:true,customer}),reminderDisabled:!getCustomerPhone(customer),
+          extra:customer.contractSummaries.length>0?<details className="rounded-lg border border-border p-3"><summary className="cursor-pointer text-xs font-semibold">أرصدة عقود الزبون</summary><div className="mt-3 grid gap-2 sm:grid-cols-2">{customer.contractSummaries.filter(summary=>customer.installments.some(i=>i.contractNumber===summary.contractNumber)).map(summary=><div key={summary.contractNumber} className="rounded-lg bg-muted/30 p-3 text-xs"><h4 className="mb-2 font-bold">عقد #{summary.contractNumber}</h4><dl className="space-y-1"><div className="flex justify-between gap-2"><dt>قيمة العقد</dt><dd>{summary.contractTotal.toLocaleString('ar-LY')} د.ل</dd></div><div className="flex justify-between gap-2"><dt>المدفوع</dt><dd>{summary.totalPaid.toLocaleString('ar-LY')} د.ل</dd></div><div className="flex justify-between gap-2"><dt>المتبقي في العقد</dt><dd>{summary.contractRemaining.toLocaleString('ar-LY')} د.ل</dd></div><div className="flex justify-between gap-2"><dt>متبقي جدول الأقساط</dt><dd>{summary.installmentsRemainingSum.toLocaleString('ar-LY')} د.ل</dd></div></dl>{Math.abs(summary.diff)>1&&<p className="mt-2 text-warning">يوجد فرق بين رصيد العقد وجدول الأقساط؛ راجع العقد.</p>}</div>)}</div></details>:undefined,
+          items:customer.installments.map((installment,index)=>({key:installment.installmentId || `${installment.contractNumber}-${index}`,title:installment.description || 'قسط مستحق',subtitle:installment.adType,contract:`عقد #${installment.contractNumber}`,amount:installment.installmentAmount,date:installment.dueDate,dateLabel:'تاريخ الاستحقاق',days:installment.daysOverdue,
+            onSettle:()=>openPaymentDialog(installment),onPrint:()=>printOverdueNotice(installment),onReminder:()=>setWhatsappChoiceDialog({open:true,installment}),reminderDisabled:!getCustomerPhone(installment),
+            breakdown:installment.originalAmount&&installment.originalAmount!==installment.installmentAmount?<details className="mt-3 rounded-lg bg-muted/30 p-2 text-[11px]"><summary className="cursor-pointer text-muted-foreground">كيف حُسب المتبقي؟</summary><dl className="mt-2 space-y-1"><div className="flex justify-between gap-2"><dt>القسط الأصلي</dt><dd>{installment.originalAmount.toLocaleString('ar-LY')} د.ل</dd></div><div className="flex justify-between gap-2"><dt>المدفوع من العقد</dt><dd>{(installment.contractPaymentApplied||0).toLocaleString('ar-LY')} د.ل</dd></div><div className="flex justify-between gap-2"><dt>رصيد الحساب المطبق</dt><dd>{(installment.accountCreditApplied||0).toLocaleString('ar-LY')} د.ل</dd></div></dl></details>:undefined,
+          })),
+        }))}/>
 
       {/* Settle Installment Payment Dialog */}
       <Dialog open={paymentDialog.open} onOpenChange={(open) => !processingPayment && setPaymentDialog({ open, installment: paymentDialog.installment })}>
@@ -1025,6 +612,32 @@ export default function OverduePayments() {
                       <div>
                         <div className="font-bold text-sm text-foreground">إرسال تلقائي (عبر منصة الربط API)</div>
                         <div className="text-[10px] text-muted-foreground mt-0.5 font-sans">إرسال الرسالة تلقائياً في الخلفية باستخدام منصة الربط المدمجة</div>
+                      </div>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-16 flex items-center justify-start gap-4 border border-amber-500/30 hover:border-amber-500 bg-amber-500/[0.02] hover:bg-amber-500/[0.05] text-right px-4 rounded-xl cursor-pointer transition-all duration-200 shadow-sm"
+                      onClick={async () => {
+                        const cfg = await getCalendarConfig();
+                        const gUrl = generateGoogleCalendarWebUrl(
+                          {
+                            title: `استحقاق دفعة: ${installment.customerName} (عقد #${installment.contractNumber})`,
+                            description: messageText,
+                            startDate: installment.dueDate,
+                          },
+                          cfg.emails
+                        );
+                        window.open(gUrl, '_blank');
+                        setWhatsappChoiceDialog({ open: false, installment: null });
+                      }}
+                    >
+                      <div className="p-2 bg-amber-500/15 rounded-lg shrink-0">
+                        <Calendar className="h-6 w-6 text-amber-600" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-sm text-foreground">إضافة تذكير في تقويم Google</div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5 font-sans">فتح Google Calendar وإدراج القسط مع تنبيه الإيميلات المربوطة</div>
                       </div>
                     </Button>
                   </div>

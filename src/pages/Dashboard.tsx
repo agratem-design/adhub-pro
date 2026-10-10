@@ -1144,7 +1144,7 @@ return removalTasks.filter(t => {
       
       {/* Background neon radial glows for rich aesthetics */}
       <div className="absolute top-[-10%] right-[-10%] w-[50%] h-[400px] bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent blur-[120px] rounded-full pointer-events-none z-0" />
-      <div className="absolute top-[30%] left-[-10%] w-[55%] h-[500px] bg-gradient-to-tr from-blue-500/5 via-indigo-500/5 to-transparent blur-[140px] rounded-full pointer-events-none z-0" />
+      <div className="absolute top-[30%] left-[-10%] w-[55%] h-[500px] bg-gradient-to-tr from-primary/5 via-primary/5 to-transparent blur-[140px] rounded-full pointer-events-none z-0" />
       <div className="absolute bottom-0 right-[20%] w-[60%] h-[400px] bg-gradient-to-tr from-emerald-500/5 via-teal-500/5 to-transparent blur-[130px] rounded-full pointer-events-none z-0" />
 
       {/* Futuristic Glassmorphic Welcome Hero & Header */}
@@ -1165,7 +1165,7 @@ return removalTasks.filter(t => {
 
         <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-6">
           <div className="flex items-center gap-3 sm:gap-4.5 min-w-0">
-            <div className="shrink-0 w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-gradient-to-br from-amber-500 to-amber-600 text-white flex items-center justify-center shadow-[0_8px_25px_rgba(218,165,32,0.3)]">
+            <div className="shrink-0 w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-gradient-primary text-primary-foreground flex items-center justify-center shadow-[0_8px_25px_rgba(218,165,32,0.3)]">
               <LayoutDashboard className="h-5 w-5 sm:h-7 sm:w-7" />
             </div>
             <div className="min-w-0 space-y-1">

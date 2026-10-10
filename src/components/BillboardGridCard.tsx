@@ -1,6 +1,7 @@
 import React, { useState, useEffect, memo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { BillboardCardActions } from './billboards/BillboardCardActions';
+import { BillboardCardFrame, CardIconButton, billboardFields } from './billboards/card/BillboardCardFrame';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -956,57 +957,23 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
     return { bg: 'bg-emerald-500/20 border-emerald-500/40', text: 'text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-500', icon: CheckCircle2 };
   };
   const statusTheme = getStatusTheme();
+  const gf = billboardFields(billboard);
   const StatusIcon = statusTheme.icon;
 
 
 
   return (
     <>
-      <Card 
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-        className={`group relative overflow-hidden rounded-2xl border bg-card flex flex-col h-full transition-colors duration-200 ${
-          isTorn
-            ? 'border-destructive ring-2 ring-destructive/60 ring-offset-2 ring-offset-background shadow-[0_0_0_1px_hsl(var(--destructive)/0.4)]'
-            : 'border-border/60'
-        } ${isSelected ? 'ring-2 ring-primary ring-offset-2 ring-offset-background border-primary' : ''} ${
-          isHovered ? 'border-primary/40' : ''
-        }`}
-        style={getCardStyle()}
-      >
-        {/* ═══ شريط الحالة — صف واحد نظيف ═══ */}
-        <div className={`flex items-stretch border-b transition-all duration-500 ${statusTheme.bg}`} dir="rtl">
-
-          {/* ── اليمين: بادج المقاس الذهبي ── */}
-          <div
-            title="مقاس اللوحة"
-            className="relative flex flex-col items-center justify-center px-3 py-1.5 shrink-0 bg-primary text-primary-foreground"
-          >
-            <span className="relative text-[9px] font-semibold opacity-75 leading-none">مقاس</span>
-            <span className="relative font-black text-lg tabular-nums leading-tight tracking-tight mt-0.5">
-              {(() => {
-                const s = String(billboard.Size || '—');
-                const m = s.match(/^(\d+)\s*[x×]\s*(\d+)$/i);
-                if (m) return <>{m[1]}<span className="opacity-50 font-bold mx-[1px] text-sm">×</span>{m[2]}</>;
-                return s;
-              })()}
-            </span>
-          </div>
-
-          {/* ── الوسط: الحالة + المستوى + الأوجه + تحذيرات ── */}
-          <div className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 min-w-0 flex-wrap`}>
-
-            {/* نقطة الحالة + أيقونة + نص */}
-            <div className={`flex items-center gap-1.5 shrink-0 ${statusTheme.text}`}>
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusTheme.dot}`} />
-              <StatusIcon className="h-3.5 w-3.5 shrink-0" />
-              <span className="text-[11px] font-extrabold whitespace-nowrap">{statusLabel}</span>
-            </div>
-
-            {/* فاصل */}
-            <span className="w-px h-3.5 bg-current opacity-20 shrink-0" />
-
-            {/* شارة المستوى */}
+      <BillboardCardFrame
+        className="billboard-grid-card h-full shadow-card motion-safe:transition-[border-color,box-shadow] duration-200 hover:shadow-md"
+        compact
+        billboardType={getBillboardTypeDisplay() !== 'غير محدد' ? getBillboardTypeDisplay() : undefined}
+        tone={isTorn ? 'danger' : isSelected ? 'selected' : 'default'}
+        code={billboard.Billboard_Name || gf.code}
+        size={billboard.Size || undefined}
+        faces={getFaceCountDisplay()}
+        headerExtra={
+          <>
             {getLevelDisplay() !== 'غير حدد' && getLevelDisplay() !== 'غير محدد' && (
               <button
                 onClick={(e) => {
@@ -1029,17 +996,6 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                 {getLevelDisplay()}
               </button>
             )}
-
-            {/* عدد الأوجه */}
-            <span
-              title="عدد الأوجه"
-              className="inline-flex items-center gap-1 h-5 px-1.5 rounded-full bg-background/60 dark:bg-black/25 border border-border/40 text-foreground/75 text-[10px] font-bold shrink-0"
-            >
-              <Layers className="h-2.5 w-2.5 opacity-60 shrink-0" />
-              {getFaceCountDisplay()}
-            </span>
-
-            {/* تحذير قرب الانتهاء */}
             {isNearExpiry && !contractExpired && (
               <span className="inline-flex items-center gap-1 h-5 px-1.5 rounded-full bg-amber-500 text-white text-[9px] font-black shadow-sm shrink-0">
                 <span className="w-1 h-1 rounded-full bg-white/80 animate-pulse shrink-0" />
@@ -1054,11 +1010,15 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                 منتهي
               </span>
             )}
-
-          </div>
-
-          {/* ── اليسار: أيقونة الإعدادات ── */}
-          <div className="flex items-center px-1 shrink-0">
+          </>
+        }
+        headerActions={
+          <>
+            <CardIconButton
+              icon={Copy}
+              title="نسخ اسم اللوحة"
+              onClick={() => { navigator.clipboard.writeText(billboard.Billboard_Name || `لوحة رقم ${billboard.ID}`); toast.success('تم نسخ اسم اللوحة'); }}
+            />
             {(onEdit || onDelete || onContractAction || onMaintenance) ? (
               <BillboardCardActions
                 billboard={billboard}
@@ -1074,46 +1034,17 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                 onExtendRental={(selected) => setExtendDialogOpen(true)}
               />
             ) : (
-              <div className="w-7 h-7" />
+              null
             )}
-          </div>
-
-        </div>
-
-
-
-
-
-        
-        <div className="relative flex flex-col flex-1">
-          {/* Selection checkbox — over image only, never covers header */}
-          {isSelectable && (
-            <div
-              className={`absolute top-2 right-2 z-30 ${
-                isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 sm:opacity-0'
-              } transition-opacity duration-200`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleSelect?.();
-              }}
-            >
-              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shadow-lg backdrop-blur-md ring-1 ring-white/30 transition-colors ${
-                isSelected
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-foreground/60 text-background hover:bg-primary hover:text-primary-foreground'
-              }`}>
-                <Check className="h-4 w-4" />
-              </div>
-            </div>
-          )}
-
-          <div 
-            className="aspect-[16/10] bg-muted relative overflow-hidden cursor-pointer"
-            onClick={(e) => {
-              e.stopPropagation();
-              setPreviewOpen(true);
-            }}
-          >
+          </>
+        }
+        statusBadges={
+          <span className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card/95 px-2 py-1 text-[11px] font-semibold text-foreground shadow-sm backdrop-blur-sm">
+            <StatusIcon className={`h-3.5 w-3.5 shrink-0 ${statusTheme.text}`} />{statusLabel}
+          </span>
+        }
+        image={
+          <div role="button" tabIndex={0} aria-label={`تكبير صورة ${billboard.Billboard_Name || gf.code}`} className="absolute inset-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setPreviewOpen(true); } }} onClick={(e) => { e.stopPropagation(); setPreviewOpen(true); }}>
             <div className="absolute inset-0 z-0 transition-transform duration-700 ease-out group-hover:scale-105">
               {activeMediaView === 'design' && frontDesignUrl ? (
                 <DesignImageWithBlur
@@ -1136,12 +1067,22 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                 />
               )}
             </div>
-
+          </div>
+        }
+        imageOverlayBottom={
+          <>
+            {isSelectable && (
+              <button type="button" aria-label={`اختيار اللوحة ${billboard.Billboard_Name || gf.code}`} aria-pressed={isSelected}
+                onClick={(e) => { e.stopPropagation(); onToggleSelect?.(); }}
+                className={`absolute top-2 left-2 z-30 flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border shadow-sm backdrop-blur-sm transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${isSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-white/40 bg-black/50 text-white hover:bg-primary hover:text-primary-foreground'}`}>
+                <Check className="h-4 w-4" />
+              </button>
+            )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/10 to-transparent z-10 pointer-events-none transition-opacity duration-500 group-hover:opacity-80" />
 
             {/* Status badges over the image */}
             {activeStatuses && activeStatuses.filter((status) => status.status_type !== 'torn_ad').length > 0 && (
-              <div className="absolute top-2 left-2 z-20 pointer-events-none">
+              <div className="absolute top-10 right-2 z-20 pointer-events-none">
                 <BillboardStatusBadges
                   statuses={activeStatuses.filter((status) => status.status_type !== 'torn_ad')}
                   size="xs"
@@ -1228,202 +1169,43 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                 )}
               </div>
             )}
-          </div>
-
-          {/* Name + Location — prominent block */}
-          <div className="px-3 py-2.5 border-b border-border/30 bg-muted/20 space-y-1.5">
-            {/* Row 1: Name + Code chip + copy */}
-            <div className="flex items-center gap-1.5 min-w-0">
-              <h3 className="font-bold text-[15px] text-foreground leading-tight truncate font-manrope flex-1 min-w-0">
-                {billboard.Billboard_Name || `لوحة رقم ${billboard.ID}`}
-              </h3>
-              <span
-                title="كود اللوحة"
-                className="font-mono text-[10px] bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.5 rounded-md shrink-0 whitespace-nowrap tracking-tight"
-              >
-                {(billboard as any).Billboard_ID || billboard.ID}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-5 w-5 p-0 text-muted-foreground hover:text-primary shrink-0"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigator.clipboard.writeText(billboard.Billboard_Name || `لوحة رقم ${billboard.ID}`);
-                  toast.success('تم نسخ اسم اللوحة');
-                }}
-                title="نسخ اسم اللوحة"
-              >
-                <Copy className="h-2.5 w-2.5" />
-              </Button>
-            </div>
-
-            {/* Row 2: Landmark */}
-            {billboard.Nearest_Landmark && (
-              <p className="text-[12px] text-foreground/85 flex items-start gap-1 leading-snug">
-                <MapPin className="h-3 w-3 text-primary flex-shrink-0 mt-0.5" />
-                <span className="truncate">{billboard.Nearest_Landmark}</span>
-              </p>
-            )}
-
-            {/* Row 3: Area chips */}
-            <div className="flex items-center flex-wrap gap-1">
-              {billboard.Municipality && (
-                <span className="inline-flex items-center gap-1 bg-primary/10 text-primary text-[10px] font-semibold px-2 py-0.5 rounded-full border border-primary/20">
-                  <Building2 className="h-2.5 w-2.5" />
-                  {billboard.Municipality}
-                </span>
-              )}
-              {billboard.District && (
-                <span className="inline-flex items-center gap-1 bg-muted text-foreground text-[10px] font-medium px-2 py-0.5 rounded-full border border-border/50">
-                  <MapPinned className="h-2.5 w-2.5 opacity-70" />
-                  {billboard.District}
-                </span>
-              )}
-              {getBillboardTypeDisplay() !== 'غير محدد' && (
-                <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1">
-                  <span className="opacity-40">·</span>
-                  {getBillboardTypeDisplay()}
-                </span>
-              )}
-            </div>
-            {/* Price Row */}
-            {!hasActiveContract && Number(corporatePrice !== null ? corporatePrice : (billboard.Price || 0)) > 0 && (
-              <div className="flex items-center justify-between text-[11px] bg-primary/5 border border-primary/10 rounded-lg px-2 py-1 mt-1">
-                <span className="text-[10px] text-muted-foreground font-semibold flex items-center gap-1">
-                  <Wallet className="h-3 w-3 text-primary" /> سعر الإيجار شهرياً
-                </span>
-                <span className="flex items-baseline gap-0.5">
-                  <span className="font-extrabold text-[12px] text-primary font-manrope">
-                    {Number(corporatePrice !== null ? corporatePrice : (billboard.Price || 0)).toLocaleString()}
-                  </span>
-                  <span className="text-[9px] text-muted-foreground font-semibold">د.ل/شهرياً</span>
-                </span>
-              </div>
-            )}
-          </div>
-            <CardContent className="flex flex-col flex-1 p-2.5 sm:p-3 space-y-3">
-              {/* 1. معلومات العقد والتصميم النشط (تذكرة مثقوبة بأسلوب أوبن ديزاين رأسية) */}
+          </>
+        }
+        title={gf.title}
+        landmark={gf.landmark}
+        municipality={gf.municipality}
+        district={gf.district}
+        city={gf.city}
+      >
+            <CardContent className="flex flex-1 flex-col gap-3 p-0">
+              {/* ملخص العقد: تصميم مصغر، بيانات واضحة، وقيمة اللوحة */}
               {hasActiveContract && !contractExpired && (
-                <div 
-                  className="relative rounded-xl border border-border/50 bg-muted/25 overflow-hidden select-none"
-                >
-                  {/* الجانب العلوي (تصميم الإعلان الممدد أفقياً لمنع التشوه) */}
-                  {frontDesignUrl && (
-                    <div 
-                      className="relative w-full aspect-[21/9] bg-muted/15 border-b border-border/50 overflow-hidden cursor-pointer group/design shrink-0"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openDesignPreview(frontDesignUrl, 'التصميم الإعلاني');
-                      }}
-                      title="تكبير التصميم"
-                    >
-                      <DesignImageWithBlur 
-                        src={frontDesignUrl} 
-                        alt="التصميم الإعلاني" 
-                        className="w-full h-full"
-                      />
-                      {/* تأثير التحويم للتكبير */}
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/design:opacity-100 transition-opacity flex items-center justify-center gap-1.5 p-2">
-                        <div className="bg-black/60 rounded-full p-2 backdrop-blur-sm shadow">
-                          <ZoomIn className="h-4 w-4 text-white" />
-                        </div>
-                        <span className="text-xs text-white font-extrabold">اضغط لتكبير التصميم</span>
+                <section className="rounded-lg border border-border bg-muted/25 p-2.5 space-y-2.5">
+                  <div className="flex items-start gap-2.5">
+                    {frontDesignUrl && (
+                      <button type="button" onClick={(e) => { e.stopPropagation(); openDesignPreview(frontDesignUrl, 'التصميم الإعلاني'); }} title="تكبير التصميم الإعلاني" aria-label="تكبير التصميم الإعلاني" className="billboard-contract-thumbnail relative h-14 w-16 shrink-0 overflow-hidden rounded-md border border-border bg-muted cursor-pointer transition-all duration-200 hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                        <DesignImageWithBlur src={frontDesignUrl} alt="التصميم الإعلاني" className="h-full w-full" />
+                      </button>
+                    )}
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <div className="flex items-center justify-between gap-1.5 text-[11px]">
+                        {contractId ? <a href={`/admin/contracts/edit?contract=${contractId}`} onClick={e => e.stopPropagation()} title="فتح العقد" className="inline-flex shrink-0 items-center gap-1 text-primary cursor-pointer transition-colors hover:underline"><FileText className="h-3.5 w-3.5" /><span className="font-manrope">#{contractId}</span></a> : <span className="text-primary">العقد الحالي</span>}
+                        {yearlyContractCode && <span className="shrink-0 font-manrope text-muted-foreground" title={`رمز العقد: ${yearlyContractCode}`}>{yearlyContractCode}</span>}
                       </div>
+                      <p className="truncate text-[12px] font-semibold text-foreground" title={customerName || undefined}>{customerName || 'لم يحدد العميل'}</p>
+                      {adType && <p className="line-clamp-1 text-[11px] text-muted-foreground" title={adType}>{adType}</p>}
                     </div>
-                  )}
-
-                  {/* الجانب السفلي (تفاصيل العقد المنظمة) */}
-                  <div className="p-3 flex flex-col justify-between space-y-2.5 min-w-0">
-                    {/* رأس العقد */}
-                    <div className="flex items-center justify-between gap-1.5">
-                      <span className="flex items-center gap-1 text-xs font-bold text-primary">
-                        <FileText className="h-3.5 w-3.5 shrink-0" />
-                        عقد نشط
-                      </span>
-                      <div className="flex items-center gap-1 min-w-0">
-                        {contractId && (
-                          <Badge variant="outline" className="text-[9px] h-4.5 px-1.5 font-mono border-primary/20 truncate">
-                            #{contractId}
-                          </Badge>
-                        )}
-                        {yearlyContractCode && (
-                          <Badge className="text-[9px] h-4.5 px-1.5 bg-primary/15 text-primary border-primary/30 font-bold shrink-0">
-                            {yearlyContractCode}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* معلومات العميل في شبكة منسقة */}
-                    <div className="grid grid-cols-2 gap-3 text-xs border-b border-primary/5 pb-2">
-                      <div className="flex flex-col gap-0.5 min-w-0">
-                        <span className="text-[9px] text-muted-foreground font-medium">العميل</span>
-                        {customerName ? (
-                          <span className="flex items-center gap-1 text-foreground font-semibold truncate leading-none mt-1">
-                            <User className="h-3 w-3 text-muted-foreground/80 shrink-0" />
-                            <span className="truncate">{customerName}</span>
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground/60 mt-1">-</span>
-                        )}
-                      </div>
-
-                      <div className="flex flex-col gap-0.5 min-w-0">
-                        <span className="text-[9px] text-muted-foreground font-medium">نوع الإعلان</span>
-                        {adType ? (
-                          <div className="mt-0.5">
-                            <span className="inline-block text-[9px] font-extrabold bg-muted/80 text-foreground border border-border/50 px-1.5 py-0.5 rounded-md leading-none">
-                              {adType}
-                            </span>
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground/60 mt-1">-</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* تواريخ العقد والوقت المتبقي */}
-                    <div className="space-y-1.5 border-b border-primary/5 pb-2">
-                      <div className="flex flex-col gap-0.5 min-w-0 text-[10px]">
-                        <span className="text-[9px] text-muted-foreground font-medium">فترة العقد</span>
-                        <div className="flex items-center gap-1 text-muted-foreground font-medium mt-1">
-                          <Calendar className="h-3.5 w-3.5 shrink-0" />
-                          <div className="truncate flex items-center gap-1 flex-wrap">
-                            {startDate && <span>{formatLongArabicDate(startDate)}</span>}
-                            {startDate && endDate && <span className="opacity-55">→</span>}
-                            {endDate && <span className="font-semibold text-foreground">{formatLongArabicDate(endDate)}</span>}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* شريط التقدم */}
-                      {startDate && endDate && (
-                        <div className="space-y-1 pt-0.5">
-                          <div className="flex justify-between items-center text-[9px] text-muted-foreground font-bold leading-none">
-                            <span>المنقضي: {timeProgress}%</span>
-                            <Badge 
-                              variant={isNearExpiry ? 'destructive' : 'secondary'} 
-                              className="text-[9px] h-4.5 px-1.5 font-extrabold leading-none shrink-0"
-                            >
-                              {daysRemaining} يوم متبقي
-                            </Badge>
-                          </div>
-                          <div className="w-full h-1 bg-muted dark:bg-slate-800/80 rounded-full overflow-hidden">
-                            <div 
-                              className={`h-full rounded-full transition-all duration-500 ${
-                                isNearExpiry 
-                                  ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]' 
-                                  : 'bg-primary shadow-[0_0_6px_rgba(var(--primary-rgb),0.3)]'
-                              }`}
-                              style={{ width: `${timeProgress}%` }}
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* سطر السعر المدمج */}
+                  </div>
+                  {(startDate || endDate) && <div className="flex flex-wrap items-center justify-between gap-1.5 border-t border-border/70 pt-2 text-[11px]">
+                    <span className="inline-flex flex-wrap items-center gap-1.5 text-muted-foreground" title={[startDate && formatLongArabicDate(startDate), endDate && formatLongArabicDate(endDate)].filter(Boolean).join(' — ')}>
+                      <Calendar className="h-3.5 w-3.5 shrink-0" />
+                      {startDate && <span className="font-manrope" dir="ltr">{formatGregorianDate(startDate, 'ar-LY')}</span>}
+                      {startDate && endDate && <span>—</span>}
+                      {endDate && <span className="font-manrope text-foreground" dir="ltr">{formatGregorianDate(endDate, 'ar-LY')}</span>}
+                    </span>
+                    {endDate && <span className={isNearExpiry ? 'font-semibold text-warning' : 'text-muted-foreground'}>{daysRemaining} يوم متبقي</span>}
+                  </div>}
+                  {startDate && endDate && <div className="h-1 overflow-hidden rounded-full bg-muted" title={`المنقضي: ${timeProgress}%`}><div className={isNearExpiry ? 'h-full rounded-full bg-warning' : 'h-full rounded-full bg-primary'} style={{ width: `${timeProgress}%` }} /></div>}
                     {(activeContract?.Total || activeContract?.['Total Rent'] || contractInfo?.rent_cost || activeContract?.billboard_prices) && (() => {
                       const rentCost = Number(contractInfo?.rent_cost || 0);
                       const rentCostGross = Number((contractInfo as any)?.rent_cost_gross || rentCost);
@@ -1451,18 +1233,18 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                       const hasDiscount = discount > 0;
                       if (!netAmount && !grossAmount) return null;
                       return (
-                        <div className="flex items-center justify-between gap-1.5 pt-0.5 tabular-nums">
-                          <span className="text-[9px] text-muted-foreground font-medium">قيمة اللوحة</span>
-                          <div className="flex items-center gap-1.5">
-                            <span className="flex items-baseline gap-1">
+                        <div className="flex flex-wrap items-center justify-between gap-1.5 pt-0.5 tabular-nums">
+                          <span className="text-[11px] text-muted-foreground font-medium">قيمة اللوحة</span>
+                          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                            <span className="flex flex-wrap items-baseline gap-1">
                               {hasDiscount && (
-                                <span className="text-[9px] text-muted-foreground/60 line-through leading-none">{grossAmount.toLocaleString()}</span>
+                                <span className="text-[11px] text-muted-foreground line-through leading-none">{grossAmount.toLocaleString()}</span>
                               )}
                               <span className="font-extrabold text-[13px] text-primary font-manrope leading-none">{netAmount.toLocaleString()}</span>
-                              <span className="text-[9px] text-muted-foreground font-semibold leading-none">د.ل</span>
+                              <span className="text-[11px] text-muted-foreground font-semibold leading-none">د.ل</span>
                             </span>
                             {hasDiscount && (
-                              <Badge className="text-[9px] h-3.5 px-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-0 font-bold leading-none shrink-0">
+                              <Badge className="text-[11px] h-3.5 px-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-0 font-bold leading-none shrink-0">
                                 خصم {discount.toLocaleString()}
                               </Badge>
                             )}
@@ -1470,56 +1252,17 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
                         </div>
                       );
                     })()}
-                  </div>
-
-                  {/* حالة التركيب للمدراء مدمجة بأسفل التذكرة كشريط نحيف */}
-                  {isAdmin && latestTask && (
-                    <div className="flex items-center justify-between gap-2 px-3 py-1.5 bg-primary/[0.03] border-t border-primary/10 text-[9px] font-bold">
-                      <span className="text-muted-foreground/80">حالة تركيب الإعلان:</span>
-                      {latestTask.status === 'completed' ? (
-                        <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                          <CheckCircle2 className="h-3 w-3 shrink-0" /> مكتمل ومثبت
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-amber-600 dark:text-amber-500">
-                          <Clock className="h-3 w-3 shrink-0 animate-pulse" /> قيد المراجعة/التركيب
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
+                  {isAdmin && latestTask && <div className="flex items-center justify-between gap-2 border-t border-border/70 pt-2 text-[11px]">
+                    <span className="text-muted-foreground">تركيب الإعلان</span>
+                    {latestTask.status === 'completed' ? <span className="inline-flex items-center gap-1 text-success"><CheckCircle2 className="h-3.5 w-3.5" />مكتمل</span> : <span className="inline-flex items-center gap-1 text-warning"><Clock className="h-3.5 w-3.5" />قيد التنفيذ</span>}
+                  </div>}
+                </section>
               )}
 
-              {/* 2. بطاقة ترويج للوحات المتاحة للحجز (Available State Card) */}
-              {isAvailable && (
-                <div className="p-3.5 rounded-2xl border border-dashed border-emerald-500/25 bg-emerald-500/5/40 relative overflow-hidden space-y-2 shadow-inner animate-fade-in">
-                  <div className="flex items-center justify-between">
-                    <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                      <span className="relative flex h-2 w-2 shrink-0">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                      </span>
-                      متاحة للحجز الفوري
-                    </span>
-                    <Badge variant="outline" className="text-[9px] h-4.5 px-2 bg-emerald-500/10 text-emerald-600 border-emerald-500/20 font-bold leading-none">
-                      جاهز
-                    </Badge>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground leading-relaxed">
-                    هذه اللوحة شاغرة حالياً وممتازة لحملتكم القادمة. يمكنك حجزها فوراً أو تعديل أسعار المستويات.
-                  </p>
-                  
-                  {Number(corporatePrice !== null ? corporatePrice : (billboard.Price || 0)) > 0 && (
-                    <div className="flex items-center justify-between border-t border-emerald-500/10 pt-2 mt-2 tabular-nums">
-                      <span className="text-[10px] text-muted-foreground">السعر الأساسي:</span>
-                      <span className="flex items-baseline gap-0.5">
-                        <span className="font-extrabold text-[13px] text-emerald-600 dark:text-emerald-400 font-manrope">
-                          {Number(corporatePrice !== null ? corporatePrice : (billboard.Price || 0)).toLocaleString()}
-                        </span>
-                        <span className="text-[9px] text-muted-foreground font-semibold">د.ل/شهرياً</span>
-                      </span>
-                    </div>
-                  )}
+              {isAvailable && Number(corporatePrice !== null ? corporatePrice : (billboard.Price || 0)) > 0 && (
+                <div className="flex items-center justify-between gap-2 rounded-lg bg-muted/40 px-2.5 py-2">
+                  <span className="text-[11px] text-muted-foreground">الإيجار الشهري</span>
+                  <span className="inline-flex items-baseline gap-1 text-primary"><span className="font-manrope text-[15px] font-bold tabular-nums">{Number(corporatePrice !== null ? corporatePrice : (billboard.Price || 0)).toLocaleString()}</span><span className="text-[11px]">د.ل</span></span>
                 </div>
               )}
 
@@ -1572,12 +1315,12 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
 
               {/* 3. الشراكات وعلامة اللوحة المشتركة */}
               {isShared && (
-                <div className="p-2.5 rounded-xl bg-gradient-to-r from-violet-500/8 via-purple-500/8 to-pink-500/8 border border-violet-500/15 shadow-sm animate-fade-in">
+                <div className="p-2.5 rounded-xl bg-muted/30 border border-border">
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-[11px] font-semibold text-violet-600 dark:text-violet-400 flex items-center gap-1">
                       <Handshake className="w-3.5 h-3.5 text-violet-500" /> لوحة مشتركة
                     </span>
-                    <Badge className="bg-gradient-to-r from-violet-500 to-pink-500 text-white text-[9px] h-4.5 border-0 font-bold">
+                    <Badge className="bg-primary/10 text-primary text-[9px] h-4.5 border-0 font-bold">
                       شراكة
                     </Badge>
                   </div>
@@ -2067,6 +1810,8 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
             {/* CTA Dock — كل العناصر في صف أفقي واحد */}
             <div className="mt-auto pt-3 border-t border-border/50">
               <div className="flex items-center gap-1.5 flex-wrap">
+                {canEditBillboards && onEdit && <Button size="sm" onClick={(e) => { e.stopPropagation(); onEdit(billboard); }} className="w-full gap-1.5 cursor-pointer"><Pencil className="h-3.5 w-3.5" />تعديل اللوحة</Button>}
+                {!showBookingActions && billboard.GPS_Coordinates && <Button size="sm" variant="outline" title="فتح موقع اللوحة" aria-label="فتح موقع اللوحة" className="h-9 w-9 shrink-0 p-0 cursor-pointer" onClick={(e) => { e.stopPropagation(); window.open(`https://maps.google.com/?q=${billboard.GPS_Coordinates}`, '_blank', 'noopener,noreferrer'); }}><MapPin className="h-4 w-4" /></Button>}
 
                 {/* حجز سريع */}
                 {showBookingActions && (
@@ -2195,8 +1940,7 @@ const BillboardGridCardInner: React.FC<BillboardGridCardProps> = ({
               </div>
             </div>
         </CardContent>
-      </div>
-    </Card>
+    </BillboardCardFrame>
 
     {/* Image Preview Dialog - نافذة تكبير الصورة */}
     <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>

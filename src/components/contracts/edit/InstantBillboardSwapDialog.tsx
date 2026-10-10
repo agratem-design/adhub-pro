@@ -317,7 +317,7 @@ export function InstantBillboardSwapDialog({
     <>
       <Dialog open={open} onOpenChange={(v) => !isExecuting && onOpenChange(v)}>
         <DialogContent
-          className="max-w-4xl max-h-[92vh] flex flex-col p-0 overflow-hidden bg-background border-border shadow-2xl"
+          className="max-w-4xl max-h-[92vh] flex flex-col p-0 overflow-hidden bg-background border-border shadow-md"
           dir="rtl"
         >
           {/* Header */}

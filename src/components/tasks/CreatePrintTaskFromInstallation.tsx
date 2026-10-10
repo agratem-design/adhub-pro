@@ -25,6 +25,7 @@ import {
   ContractLookup
 } from '@/services/printTaskResolutionService';
 import { executeCreatePrintTask } from '@/services/printTaskCreationService';
+import { resolveDefaultPrinterForContracts } from '@/lib/printerDefaults';
 import { resolveInstallationFacesCount } from '@/lib/installationFaces';
 
 interface DesignGroup {
@@ -52,6 +53,7 @@ interface BillboardInfo {
   Size: string;
   has_cutout?: boolean;
   Faces_Count?: number;
+  customerPrintRate?: number;
 }
 
 interface TaskItem {
@@ -88,6 +90,8 @@ export function CreatePrintTaskFromInstallation({
   const [printerId, setPrinterId] = useState<string>('');
   const [cutoutPrinterId, setCutoutPrinterId] = useState<string>('');
   const [printers, setPrinters] = useState<Array<{ id: string; name: string }>>([]);
+  const [defaultPrinterReason, setDefaultPrinterReason] = useState('');
+  const [printerRates, setPrinterRates] = useState<Record<string, number>>({});
   const [cutoutImageUrls, setCutoutImageUrls] = useState<Record<string, string>>({});
   const hasFetchedRef = useRef(false);
   const [showPrintInvoice, setShowPrintInvoice] = useState(false);
@@ -100,8 +104,8 @@ export function CreatePrintTaskFromInstallation({
   const [useDistribution, setUseDistribution] = useState(false);
   
   // أسعار التعديل الجماعي
-  const [bulkPrinterCostPerMeter, setBulkPrinterCostPerMeter] = useState<number>(10);
-  const [bulkCustomerCostPerMeter, setBulkCustomerCostPerMeter] = useState<number>(20);
+  const [bulkPrinterCostPerMeter, setBulkPrinterCostPerMeter] = useState<number>(0);
+  const [bulkCustomerCostPerMeter, setBulkCustomerCostPerMeter] = useState<number>(0);
   const [selectedBillboardIds, setSelectedBillboardIds] = useState<number[]>([]);
   const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
 
@@ -118,8 +122,10 @@ export function CreatePrintTaskFromInstallation({
       setTotalCutoutPrinterCost(0);
       setTotalCutoutCustomerCost(0);
       setUseDistribution(false);
-      setBulkPrinterCostPerMeter(10);
-      setBulkCustomerCostPerMeter(20);
+      setBulkPrinterCostPerMeter(0);
+      setBulkCustomerCostPerMeter(0);
+      setPrinterRates({});
+      setDefaultPrinterReason('');
       hasFetchedRef.current = false;
       isSubmittingRef.current = false;
       setSelectedBillboardIds([]);
@@ -233,10 +239,13 @@ export function CreatePrintTaskFromInstallation({
       if (contractIdsSet.size > 0) {
         const { data: contractsData } = await supabase
           .from('Contract')
-          .select('Contract_Number, customer_id, "Customer Name", design_data')
+          .select('Contract_Number, customer_id, "Customer Name", design_data, print_price_per_meter')
           .in('Contract_Number', Array.from(contractIdsSet));
 
         contractsData?.forEach((c: any) => {
+          Object.values(billboardsLookupMap).filter(b => b.contractNumber === Number(c.Contract_Number)).forEach(b => {
+            if (bMap[b.id]) bMap[b.id].customerPrintRate = Number(c.print_price_per_meter ?? pricingResult.data?.print_price ?? 0);
+          });
           if (c.design_data) {
             try {
               const parsed = typeof c.design_data === 'string' ? JSON.parse(c.design_data) : c.design_data;
@@ -248,7 +257,9 @@ export function CreatePrintTaskFromInstallation({
             }
           }
         });
+        setBulkCustomerCostPerMeter(Number(contractsData?.[0]?.print_price_per_meter ?? pricingResult.data?.print_price ?? 0));
       }
+      setBillboardsMap({ ...bMap });
 
       // تعيين التصاميم الدقيقة لكل بند دون أي Cross-Contamination
       const updatedItems = taskItems.map(item => {
@@ -277,7 +288,24 @@ export function CreatePrintTaskFromInstallation({
       setSelectedBillboardIds(taskItems.map(item => item.billboard_id));
 
       if (printersResult.data && printersResult.data.length > 0) {
-        setPrinters(printersResult.data.map(p => ({ id: p.id, name: p.name })));
+        const activePrinters = printersResult.data.map(p => ({ id: p.id, name: p.name }));
+        setPrinters(activePrinters);
+        // المطبعة الافتراضية حسب العقد (يمكن تغييرها)
+        const { data: rateHistory, error: ratesError } = await supabase.from('print_tasks')
+          .select('printer_id, printer_cost_per_meter, price_per_meter').neq('status', 'cancelled').order('created_at', { ascending: false });
+        if (ratesError) { toast.error('تعذر تحميل أسعار المطابع'); return; }
+        const rates: Record<string, number> = {};
+        for (const task of rateHistory || []) {
+          if (task.printer_id && rates[task.printer_id] === undefined && (task.printer_cost_per_meter != null || task.price_per_meter != null))
+            rates[task.printer_id] = Number(task.printer_cost_per_meter ?? task.price_per_meter);
+        }
+        setPrinterRates(rates);
+        resolveDefaultPrinterForContracts(Array.from(contractIdsSet), activePrinters).then(res => {
+          if (res.printerId) {
+            setPrinterId(prev => prev || res.printerId!);
+            setDefaultPrinterReason(res.reason);
+          }
+        }).catch(() => toast.error('تعذر تحديد المطبعة الافتراضية'));
       } else {
         setPrinters([]);
       }
@@ -310,7 +338,8 @@ export function CreatePrintTaskFromInstallation({
       
       // Face A
       const designA = item.design_face_a || '';
-      const key = `${size}_${designA || 'default'}_a`;
+      const customerRate = billboard.customerPrintRate ?? 0;
+      const key = `${size}_${designA || 'default'}_a_${customerRate}`;
       if (!groups[key]) {
         const { width, height } = parseSizeDimensions(size);
         groups[key] = {
@@ -326,9 +355,9 @@ export function CreatePrintTaskFromInstallation({
           hasCutout,
           cutoutCount: 0,
           cutoutBillboards: [],
-          printerCostPerMeter: 10,
+          printerCostPerMeter: printerRates[printerId] ?? 0,
           printerCutoutCostPerUnit: 0,
-          customerCostPerMeter: 20,
+          customerCostPerMeter: customerRate,
           customerCutoutCostPerUnit: 0
         };
       }
@@ -349,7 +378,7 @@ export function CreatePrintTaskFromInstallation({
       // Face B إذا كان عدد الأوجه >= 2
       if (facesCount >= 2) {
         const designB = item.design_face_b || designA || '';
-        const keyB = `${size}_${designB || 'default'}_b`;
+        const keyB = `${size}_${designB || 'default'}_b_${customerRate}`;
         if (!groups[keyB]) {
           const { width, height } = parseSizeDimensions(size);
           groups[keyB] = {
@@ -365,9 +394,9 @@ export function CreatePrintTaskFromInstallation({
             hasCutout,
             cutoutCount: 0,
             cutoutBillboards: [],
-            printerCostPerMeter: 10,
+            printerCostPerMeter: printerRates[printerId] ?? 0,
             printerCutoutCostPerUnit: 0,
-            customerCostPerMeter: 20,
+            customerCostPerMeter: customerRate,
             customerCutoutCostPerUnit: 0
           };
         }
@@ -389,6 +418,12 @@ export function CreatePrintTaskFromInstallation({
 
     setDesignGroups(Object.values(groups));
   }, [enrichedTaskItems, billboardsMap, cutoutImageUrls, sizesMap, selectedBillboardIds]);
+
+  useEffect(() => {
+    const rate = printerRates[printerId] ?? 0;
+    setBulkPrinterCostPerMeter(rate);
+    setDesignGroups(prev => prev.map(group => ({ ...group, printerCostPerMeter: rate })));
+  }, [printerId, printerRates]);
 
   // استخدام الأبعاد الفعلية من جدول sizes
   const parseSizeDimensions = (size: string): { width: number; height: number } => {
@@ -680,8 +715,12 @@ export function CreatePrintTaskFromInstallation({
       }
 
       const primaryGroup = printGroups[0];
-      const printerPricePerM = primaryGroup?.printerCostPerMeter ?? 10;
-      const customerPricePerM = primaryGroup?.customerCostPerMeter ?? 20;
+      const printerPricePerM = primaryGroup?.printerCostPerMeter ?? 0;
+      const customerPricePerM = primaryGroup?.customerCostPerMeter ?? 0;
+      const itemPrintRates: Record<string, { printer: number; customer: number }> = {};
+      for (const group of printGroups) for (const id of group.billboards) {
+        itemPrintRates[`${id}:${group.face}`] = { printer: group.printerCostPerMeter, customer: group.customerCostPerMeter };
+      }
 
       // Fetch company installation team accounts cost
       const itemIds = taskItemsRes.data?.map(item => item.id) || [];
@@ -712,6 +751,7 @@ export function CreatePrintTaskFromInstallation({
         cutoutPrinterName: printers.find(p => p.id === (cutoutPrinterId || printerId))?.name || 'غير محدد',
         printerPricePerMeter: printerPricePerM,
         customerPricePerMeter: customerPricePerM,
+        itemPrintRates,
         cutoutGroups,
         isReinstallation,
         itemCostMap,
@@ -827,7 +867,7 @@ export function CreatePrintTaskFromInstallation({
                       <Label className="text-xs font-bold text-muted-foreground flex items-center gap-2">
                         <span>مطبعة الطباعة *</span>
                       </Label>
-                      <Select value={printerId} onValueChange={setPrinterId}>
+                      <Select value={printerId} onValueChange={(v) => { setPrinterId(v); setDefaultPrinterReason(''); }}>
                         <SelectTrigger className="h-11 bg-background border-border/60 focus:border-primary focus:ring-1 focus:ring-primary/20 rounded-xl">
                           <SelectValue placeholder="اختر مطبعة الطباعة" />
                         </SelectTrigger>
@@ -837,6 +877,9 @@ export function CreatePrintTaskFromInstallation({
                           ))}
                         </SelectContent>
                       </Select>
+                      {defaultPrinterReason && printerId && (
+                        <p className="text-[11px] text-muted-foreground">اختيار تلقائي: {defaultPrinterReason}. يمكنك تغييره.</p>
+                      )}
                     </div>
 
                     {cutoutGroups.length > 0 && (
@@ -1026,7 +1069,7 @@ export function CreatePrintTaskFromInstallation({
                       </div>
                       <Button
                         variant={useDistribution ? "default" : "outline"}
-                        size="xs"
+                        size="sm"
                         onClick={() => setUseDistribution(!useDistribution)}
                         className="h-8 rounded-lg text-xs"
                       >

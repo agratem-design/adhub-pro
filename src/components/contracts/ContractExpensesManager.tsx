@@ -174,7 +174,7 @@ export const ContractExpensesManager: React.FC<ContractExpensesManagerProps> = (
   return (
     <Card className="card-elegant border-destructive/20">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold">
           <AlertTriangle className="h-5 w-5 text-destructive" />
           المصاريف والخسائر
           {expenses.length > 0 && (

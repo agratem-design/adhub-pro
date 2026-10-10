@@ -35,6 +35,7 @@ export interface CreatePrintTaskOrchestratorParams {
   cutoutPrinterName?: string;
   printerPricePerMeter: number;
   customerPricePerMeter: number;
+  itemPrintRates?: Record<string, { printer: number; customer: number }>;
   cutoutGroups?: Array<{
     size: string;
     face: 'a' | 'b';
@@ -155,6 +156,19 @@ export async function executeCreatePrintTask(
       error: validation.errors[0]?.message || 'فشل التحقق من صحة بيانات مهمة الطباعة',
       errors: validation.errors
     };
+  }
+
+  // Keep the reviewed price of each face, including contracts with different customer rates.
+  for (const item of validation.resolvedItems) {
+    const rate = params.itemPrintRates?.[`${item.billboardId}:${item.face}`];
+    if (!rate) continue;
+    if (![rate.printer, rate.customer].every(v => Number.isFinite(v) && v >= 0)) {
+      return { success: false, error: `سعر طباعة غير صالح للوحة #${item.billboardId}` };
+    }
+    item.printerPricePerMeter = rate.printer;
+    item.customerPricePerMeter = rate.customer;
+    item.printerUnitCost = item.printerTotalCost = item.area * rate.printer;
+    item.customerUnitCost = item.customerTotalCost = item.area * rate.customer;
   }
 
   // 3. Multi-Customer Safety Check
@@ -339,6 +353,8 @@ export async function executeCreatePrintTask(
         total_cost: totals.printerPrintTotal,
         printer_total_cost: totals.printerPrintTotal,
         price_per_meter: totals.totalArea > 0 ? totals.printerPrintTotal / totals.totalArea : 0,
+        printer_cost_per_meter: totals.totalArea > 0 ? totals.printerPrintTotal / totals.totalArea : 0,
+        customer_price_per_meter: totals.totalArea > 0 ? totals.customerPrintTotal / totals.totalArea : 0,
         priority: 'normal',
         installation_task_id: installationTaskId,
         is_composite: true,

@@ -1,20 +1,13 @@
-import React, { useEffect, useState } from 'react';
-import { getDSFallbackScript } from '@/utils/printDSFallbackScript';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Input } from '@/components/ui/input';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { 
-  FileText, Calendar, User, DollarSign, Clock, Printer, CheckCircle2,
-  Image as ImageIcon, TrendingUp, BarChart3, Wallet, Tag, Wrench, Palette,
-  ArrowLeft, AlertTriangle, Hammer, RefreshCw
-} from 'lucide-react';
+import { History, Calendar, Wallet, Clock, Printer, Search, ChevronDown, Image as ImageIcon, RefreshCw } from 'lucide-react';
 import { formatGregorianDate } from '@/lib/utils';
-
 import { BillboardHistoryPrintDialog } from './BillboardHistoryPrintDialog';
-import { preparePrintWindow, writePrintWindow } from '@/utils/printWindowHelper';
+import { HistoryRecord, historyStatus, historyTotals, statusLabels } from './historyModel';
 
 interface BillboardHistoryDialogProps {
   open: boolean;
@@ -23,68 +16,35 @@ interface BillboardHistoryDialogProps {
   billboardName: string;
 }
 
-interface HistoryRecord {
-  id: string;
-  contract_number: number;
-  customer_name: string;
-  ad_type: string;
-  start_date: string;
-  end_date: string;
-  duration_days: number;
-  rent_amount: number;
-  discount_amount?: number;
-  discount_percentage?: number;
-  installation_date: string;
-  installation_cost?: number;
-  billboard_rent_price?: number;
-  total_before_discount?: number;
-  design_face_a_url: string;
-  design_face_b_url: string;
-  design_name: string;
-  installed_image_face_a_url: string;
-  installed_image_face_b_url: string;
-  team_name: string;
-  notes: string;
-  created_at: string;
-  print_cost?: number;
-  include_installation_in_price?: boolean;
-  include_print_in_price?: boolean;
-  pricing_category?: string;
-  pricing_mode?: string;
-  contract_total?: number;
-  contract_total_rent?: number;
-  contract_discount?: number;
-  individual_billboard_data?: any;
-  net_rental_amount?: number;
-  task_type?: string;
-}
+const money = (value?: number) => (Number(value) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
+const date = (value?: string) => value ? formatGregorianDate(value) : 'غير محدد';
+const interactive = 'cursor-pointer transition-all duration-200';
+const statusColors = {
+  current: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+  upcoming: 'bg-blue-500/10 text-blue-700 dark:text-blue-400',
+  paused: 'bg-red-500/10 text-red-700 dark:text-red-400',
+  completed: 'bg-muted text-muted-foreground',
+};
 
-export const BillboardHistoryDialog: React.FC<BillboardHistoryDialogProps> = ({
-  open,
-  onOpenChange,
-  billboardId,
-  billboardName
-}) => {
+export const BillboardHistoryDialog: React.FC<BillboardHistoryDialogProps> = ({ open, onOpenChange, billboardId, billboardName }) => {
   const [history, setHistory] = useState<HistoryRecord[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [totalRentals, setTotalRentals] = useState(0);
-  const [totalRevenue, setTotalRevenue] = useState(0);
-  const [totalDays, setTotalDays] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('all');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [printDialogOpen, setPrintDialogOpen] = useState(false);
+  const requestRef = useRef(0);
 
-  useEffect(() => {
-    if (open && billboardId) {
-      loadHistory();
-    }
-  }, [open, billboardId]);
-
-  const loadHistory = async () => {
+  const invalidateRequest = useCallback(() => { requestRef.current++; }, []);
+  const loadHistory = useCallback(async () => {
+    const request = ++requestRef.current;
     setLoading(true);
+    setLoadError(false);
     try {
       // جلب السجلات التاريخية
       const { data: historyData, error: historyError } = await supabase
-        .from('billboard_history' as any)
+        .from('billboard_history')
         .select('*')
         .eq('billboard_id', billboardId)
         .order('start_date', { ascending: false });
@@ -106,6 +66,7 @@ export const BillboardHistoryDialog: React.FC<BillboardHistoryDialogProps> = ({
       if (billboard?.Contract_Number && billboard?.Rent_Start_Date) {
         const endDate = billboard.Rent_End_Date ? new Date(billboard.Rent_End_Date) : null;
         const today = new Date();
+        today.setHours(0, 0, 0, 0);
         const isActive = !endDate || endDate >= today;
 
         if (isActive) {
@@ -132,7 +93,11 @@ export const BillboardHistoryDialog: React.FC<BillboardHistoryDialogProps> = ({
           let individualInstallationCost = 0;
           let pricingCategory = '';
           let pricingMode = '';
-          let individualBillboardData: any = null;
+          let individualBillboardData: (NonNullable<HistoryRecord['individual_billboard_data']> & {
+            billboardId?: number | string; priceBeforeDiscount?: number; contractPrice?: number;
+            discountPerBillboard?: number; printCost?: number; installationCost?: number;
+            pricingCategory?: string; pricingMode?: string;
+          }) | null = null;
           
           if (contractData?.billboard_prices) {
             try {
@@ -141,7 +106,7 @@ export const BillboardHistoryDialog: React.FC<BillboardHistoryDialogProps> = ({
                 : contractData.billboard_prices;
               
               const billboardPriceData = Array.isArray(prices) 
-                ? prices.find((p: any) => p.billboardId?.toString() === billboardId.toString())
+                ? (prices as NonNullable<typeof individualBillboardData>[]).find(p => p && p.billboardId?.toString() === billboardId.toString())
                 : null;
               
               if (billboardPriceData) {
@@ -224,7 +189,7 @@ export const BillboardHistoryDialog: React.FC<BillboardHistoryDialogProps> = ({
             if ((!designA || !designB) && contractData?.design_data) {
               const designs = Array.isArray(contractData.design_data) ? contractData.design_data : [contractData.design_data];
               if (designs[0] && typeof designs[0] === 'object') {
-                const design = designs[0] as any;
+                const design = designs[0] as { face_a_url?: string; faceAUrl?: string; face_b_url?: string; faceBUrl?: string };
                 designA = design.face_a_url || design.faceAUrl || designA;
                 designB = design.face_b_url || design.faceBUrl || designB;
               }
@@ -284,702 +249,108 @@ export const BillboardHistoryDialog: React.FC<BillboardHistoryDialogProps> = ({
         }
       }
 
+      if (request !== requestRef.current) return;
       setHistory(allRecords);
-      
-      // حساب الإحصائيات
-      const rentalsCount = allRecords.length;
-      const revenue = allRecords.reduce((sum, record) => sum + (Number(record.rent_amount) || 0), 0);
-      const days = allRecords.reduce((sum, record) => sum + (record.duration_days || 0), 0);
-
-      setTotalRentals(rentalsCount);
-      setTotalRevenue(revenue);
-      setTotalDays(days);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error loading history:', error);
-      toast.error('فشل تحميل السجل التاريخي');
+      if (request === requestRef.current) { setLoadError(true); setHistory([]); toast.error('فشل تحميل السجل التاريخي'); }
     } finally {
-      setLoading(false);
+      if (request === requestRef.current) setLoading(false);
     }
-  };
+  }, [billboardId]);
 
-  // Deletion is permanently disabled to preserve complete audit trail.
-
-  const printHistory = () => {
-    try {
-      const docTitle = `تقرير تاريخ اللوحة ${billboardName}`;
-      const printWindow = preparePrintWindow(docTitle);
-
-      const htmlContent = `
-        <!DOCTYPE html>
-        <html dir="rtl">
-        <head>
-          <meta charset="UTF-8">
-          <title>تقرير تاريخ اللوحة ${billboardName}</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              padding: 20px;
-              direction: rtl;
-            }
-            h1 {
-              text-align: center;
-              color: #333;
-              margin-bottom: 30px;
-            }
-            .stats {
-              display: grid;
-              grid-template-columns: repeat(3, 1fr);
-              gap: 20px;
-              margin-bottom: 30px;
-              padding: 20px;
-              background: #f5f5f5;
-              border-radius: 8px;
-            }
-            .stat-item {
-              text-align: center;
-            }
-            .stat-label {
-              color: #666;
-              font-size: 14px;
-              margin-bottom: 5px;
-            }
-            .stat-value {
-              font-size: 24px;
-              font-weight: bold;
-              color: #333;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-top: 20px;
-            }
-            th, td {
-              border: 1px solid #ddd;
-              padding: 12px;
-              text-align: right;
-            }
-            th {
-              background-color: #4CAF50;
-              color: white;
-            }
-            tr:nth-child(even) {
-              background-color: #f9f9f9;
-            }
-            .badge {
-              display: inline-block;
-              padding: 4px 8px;
-              background: #4CAF50;
-              color: white;
-              border-radius: 4px;
-              font-size: 12px;
-            }
-            .images {
-              display: flex;
-              gap: 10px;
-              flex-wrap: wrap;
-            }
-            .images img {
-              max-width: 100px;
-              max-height: 100px;
-              object-fit: cover;
-              border-radius: 4px;
-              border: 1px solid #ddd;
-            }
-            @media print {
-              body { padding: 10px; }
-              .no-print { display: none; }
-            }
-          </style>
-          ${getDSFallbackScript()}
-        </head>
-        <body>
-          <h1>تقرير تاريخ اللوحة: ${billboardName}</h1>
-          
-          <div class="stats">
-            <div class="stat-item">
-              <div class="stat-label">عدد مرات التأجير</div>
-              <div class="stat-value">${totalRentals}</div>
-            </div>
-            <div class="stat-item">
-              <div class="stat-label">إجمالي الإيرادات</div>
-              <div class="stat-value">${totalRevenue.toLocaleString()} دينار</div>
-            </div>
-            <div class="stat-item">
-              <div class="stat-label">إجمالي أيام الإيجار</div>
-              <div class="stat-value">${totalDays} يوم</div>
-            </div>
-          </div>
-
-          <table>
-            <thead>
-              <tr>
-                <th>رقم العقد</th>
-                <th>اسم الزبون</th>
-                <th>نوع الإعلان</th>
-                <th>تاريخ البداية</th>
-                <th>تاريخ النهاية</th>
-                <th>المدة</th>
-                <th>سعر اللوحة</th>
-                <th>المبلغ قبل الخصم</th>
-                <th>الخصم</th>
-                <th>نسبة الخصم</th>
-                <th>تكلفة التركيب</th>
-                <th>تكلفة الطباعة</th>
-                <th>التركيب ضمن السعر</th>
-                <th>الطباعة ضمن السعر</th>
-                <th>المبلغ النهائي</th>
-                <th>الفريق</th>
-                <th>فئة التسعير</th>
-                <th>صور التصميم</th>
-                <th>صور التركيب</th>
-                <th>ملاحظات</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${history.map(record => `
-                <tr>
-                  <td>
-                    ${record.contract_number || '-'}
-                    ${record.id.toString().startsWith('current-') ? '<span class="badge">عقد حالي</span>' : ''}
-                  </td>
-                  <td>${record.customer_name || '-'}</td>
-                  <td>${record.ad_type || '-'}</td>
-                  <td dir="ltr">${formatGregorianDate(record.start_date)}</td>
-                  <td dir="ltr">${formatGregorianDate(record.end_date)}</td>
-                  <td>${record.duration_days || 0} يوم</td>
-                  <td>${record.billboard_rent_price ? Number(record.billboard_rent_price).toLocaleString() + ' دينار' : '-'}</td>
-                  <td>${record.total_before_discount ? Number(record.total_before_discount).toLocaleString() + ' دينار' : '-'}</td>
-                  <td>${record.discount_amount ? Number(record.discount_amount).toLocaleString() + ' دينار' : '-'}</td>
-                  <td>${record.discount_percentage ? Number(record.discount_percentage).toFixed(2) + '%' : '-'}</td>
-                  <td>${record.installation_cost ? Number(record.installation_cost).toLocaleString() + ' دينار' : '-'}</td>
-                  <td>${record.print_cost ? Number(record.print_cost).toLocaleString() + ' دينار' : '-'}</td>
- <td>${record.include_installation_in_price ? ' نعم' : '-'}</td>
- <td>${record.include_print_in_price ? ' نعم' : '-'}</td>
-                  <td>${Number(record.rent_amount || 0).toLocaleString()} دينار</td>
-                  <td>${record.team_name || '-'}</td>
-                  <td>${record.pricing_category || '-'}</td>
-                  <td>
-                    <div class="images">
-                      ${record.design_face_a_url ? `<img src="${record.design_face_a_url}" alt="تصميم وجه أ" onerror="this.onerror=null;this.src='/placeholder.svg'" />` : ''}
-                      ${record.design_face_b_url ? `<img src="${record.design_face_b_url}" alt="تصميم وجه ب" onerror="this.onerror=null;this.src='/placeholder.svg'" />` : ''}
-                      ${!record.design_face_a_url && !record.design_face_b_url ? '-' : ''}
-                    </div>
-                  </td>
-                  <td>
-                    <div class="images">
-                      ${record.installed_image_face_a_url ? `<img src="${record.installed_image_face_a_url}" alt="تركيب وجه أ" onerror="this.onerror=null;this.src='/placeholder.svg'" />` : ''}
-                      ${record.installed_image_face_b_url ? `<img src="${record.installed_image_face_b_url}" alt="تركيب وجه ب" onerror="this.onerror=null;this.src='/placeholder.svg'" />` : ''}
-                      ${!record.installed_image_face_a_url && !record.installed_image_face_b_url ? '-' : ''}
-                    </div>
-                  </td>
-                  <td>${record.notes || '-'}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-
-          <div class="no-print" style="margin-top: 20px; text-align: center;">
-            <button onclick="window.print()" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px;">
-              طباعة
-            </button>
-          </div>
-        </body>
-        </html>
-      `;
-
-      writePrintWindow(printWindow, htmlContent, {
-        title: docTitle,
-        landscape: false,
-        showDownloadPdf: true,
-        showShare: true,
-        autoPrint: true,
-      });
-
-      toast.success('تم فتح نافذة الطباعة');
-    } catch (error) {
-      console.error('Print error:', error);
-      toast.error('فشل فتح نافذة الطباعة');
+  useEffect(() => {
+    if (open && billboardId) {
+      setHistory([]); setQuery(''); setFilter('all'); setPrintDialogOpen(false); setSelectedImage(null);
+      void loadHistory();
     }
-  };
+    return invalidateRequest;
+  }, [open, billboardId, loadHistory, invalidateRequest]);
 
-  const isPaused = (record: HistoryRecord) =>
-    record.notes?.includes('إيقاف') || record.individual_billboard_data?.type === 'pause';
-
-  const avgPerDay = totalDays > 0 ? Math.round(totalRevenue / totalDays) : 0;
+  const totals = historyTotals(history);
+  const filtered = history.filter(r => (filter === 'all' || historyStatus(r) === filter) &&
+    [r.contract_number, r.customer_name, r.ad_type, r.notes, r.team_name].some(v => String(v ?? '').toLowerCase().includes(query.trim().toLowerCase())));
+  const visibleTotals = historyTotals(filtered);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[95vh] overflow-hidden flex flex-col bg-card border border-border/80 shadow-2xl p-0 rounded-2xl">
-        {/* Header with beautiful styling */}
-        <div className="flex items-center justify-between p-6 border-b border-border/60 bg-gradient-to-r from-muted/50 to-card">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-primary/10 text-primary rounded-xl border border-primary/20">
-              <FileText className="h-6 w-6" />
-            </div>
-            <div>
-              <DialogTitle className="text-2xl font-black text-foreground tracking-tight">
-                سجل حركة وتأجير اللوحة
-              </DialogTitle>
-              <div className="text-sm text-muted-foreground font-medium mt-0.5">
-                اللوحة: <span className="font-bold text-foreground">{billboardName}</span> (معرف #{billboardId})
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent dir="rtl" className="max-w-6xl h-[90dvh] p-0 flex flex-col gap-0 bg-background overflow-hidden">
+          <DialogHeader className="shrink-0 border-b border-border p-4 sm:p-6 pl-12 sm:pl-14 bg-primary/5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="rounded-xl bg-primary/10 p-3 text-primary"><History className="h-6 w-6" /></div>
+                <div><DialogTitle className="text-xl sm:text-2xl font-bold">تاريخ اللوحة</DialogTitle>
+                  <DialogDescription className="mt-1 break-words">{billboardName} · لوحة رقم {billboardId}</DialogDescription></div>
               </div>
+              <Button className={`${interactive} gap-2 min-h-10`} disabled={loading || !filtered.length} onClick={() => setPrintDialogOpen(true)}>
+                <Printer className="h-4 w-4" />معاينة وطباعة
+              </Button>
+            </div>
+          </DialogHeader>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 sm:px-6 shrink-0 border-b">
+            {[
+              { label: 'سجلات الحركة', value: totals.count, unit: 'سجل', Icon: History },
+              { label: 'إجمالي قيمة السجلات', value: money(totals.revenue), unit: 'د.ل', Icon: Wallet },
+              { label: 'مجموع مدد السجلات', value: totals.days, unit: 'يوم', Icon: Calendar },
+              { label: 'السجلات الحالية', value: history.filter(r => historyStatus(r) === 'current').length, unit: 'سجل', Icon: Clock },
+            ].map(({ label, value, unit, Icon }) => <div key={label} className="rounded-xl border bg-card p-3 sm:p-4">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground"><Icon className="h-4 w-4 text-primary shrink-0" />{label}</div>
+              <div className="mt-2 font-bold text-lg sm:text-2xl break-words">{loading ? '—' : value} <span className="text-xs font-normal text-muted-foreground">{unit}</span></div>
+            </div>)}
+          </div>
+          <div className="shrink-0 p-4 sm:px-6 border-b space-y-3">
+            <div className="flex gap-2 items-center">
+              <div className="relative flex-1"><Search className="absolute right-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input aria-label="البحث في تاريخ اللوحة" placeholder="ابحث بالعقد، الزبون، الإعلان أو الفريق…" value={query} onChange={e => setQuery(e.target.value)} className="pr-10 h-10" /></div>
+              <Button variant="outline" size="icon" aria-label="تحديث السجل" disabled={loading} onClick={() => void loadHistory()} className={interactive}><RefreshCw className={`h-4 w-4 ${loading ? 'motion-safe:animate-spin' : ''}`} /></Button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {[['all', 'الكل'], ...Object.entries(statusLabels)].map(([key, label]) => <Button key={key} size="sm" variant={filter === key ? 'default' : 'outline'} aria-pressed={filter === key} onClick={() => setFilter(key)} className={`${interactive} min-h-10 rounded-full`}>{label}</Button>)}
+              <span className="text-xs text-muted-foreground sm:mr-auto">{filtered.length} من {history.length} سجل</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button
-              onClick={() => setPrintDialogOpen(true)}
-              disabled={history.length === 0}
-              variant="outline"
-              className="border-primary/30 text-primary hover:bg-primary/5 hover:border-primary/50 font-bold gap-2"
-            >
-              <Printer className="h-4 w-4" />
-              طباعة السجل بالكامل
-            </Button>
-          </div>
-        </div>
-
-        {/* 4 Stats Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 p-5 bg-muted/10 border-b border-border/50">
-          {/* Card 1: Rentals Count */}
-          <div className="bg-gradient-to-br from-indigo-500/10 via-indigo-500/5 to-transparent rounded-2xl p-4 border border-indigo-500/20 shadow-sm relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-full blur-2xl transform translate-x-4 -translate-y-4 transition-transform group-hover:scale-125" />
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-xs text-indigo-600 dark:text-indigo-400 font-bold tracking-wider uppercase">مرات التأجير</span>
-                <h4 className="text-3xl font-black text-foreground mt-1">{totalRentals}</h4>
-              </div>
-              <div className="p-2.5 bg-indigo-500/10 rounded-xl text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
-                <BarChart3 className="h-5 w-5" />
-              </div>
-            </div>
-          </div>
-
-          {/* Card 2: Total Revenue */}
-          <div className="bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-transparent rounded-2xl p-4 border border-emerald-500/20 shadow-sm relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl transform translate-x-4 -translate-y-4 transition-transform group-hover:scale-125" />
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold tracking-wider uppercase">إجمالي العوائد المجمعة</span>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <h4 className="text-3xl font-black text-emerald-600 dark:text-emerald-400">{totalRevenue.toLocaleString()}</h4>
-                  <span className="text-xs text-muted-foreground font-bold">د.ل</span>
-                </div>
-              </div>
-              <div className="p-2.5 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                <Wallet className="h-5 w-5" />
-              </div>
-            </div>
-          </div>
-
-          {/* Card 3: Rental Days */}
-          <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent rounded-2xl p-4 border border-amber-500/20 shadow-sm relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-2xl transform translate-x-4 -translate-y-4 transition-transform group-hover:scale-125" />
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-xs text-amber-600 dark:text-amber-400 font-bold tracking-wider uppercase">إجمالي أيام التشغيل</span>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <h4 className="text-3xl font-black text-amber-600 dark:text-amber-400">{totalDays}</h4>
-                  <span className="text-xs text-muted-foreground font-bold">يوم</span>
-                </div>
-              </div>
-              <div className="p-2.5 bg-amber-500/10 rounded-xl text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                <Calendar className="h-5 w-5" />
-              </div>
-            </div>
-          </div>
-
-          {/* Card 4: Daily Average Rent */}
-          <div className="bg-gradient-to-br from-blue-500/10 via-blue-500/5 to-transparent rounded-2xl p-4 border border-blue-500/20 shadow-sm relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full blur-2xl transform translate-x-4 -translate-y-4 transition-transform group-hover:scale-125" />
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-xs text-blue-600 dark:text-blue-400 font-bold tracking-wider uppercase">متوسط العائد اليومي</span>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <h4 className="text-3xl font-black text-blue-600 dark:text-blue-400">{avgPerDay.toLocaleString()}</h4>
-                  <span className="text-xs text-muted-foreground font-bold">د.ل/يوم</span>
-                </div>
-              </div>
-              <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                <TrendingUp className="h-5 w-5" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Timeline Records Container */}
-        <ScrollArea className="flex-1 overflow-y-auto bg-muted/5 p-6">
-          {loading ? (
-            <div className="flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
-              <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-              <span className="text-sm font-bold">جاري تحميل السجل التاريخي...</span>
-            </div>
-          ) : history.length === 0 ? (
-            <div className="text-center py-20 bg-card border border-dashed border-border rounded-2xl shadow-inner max-w-xl mx-auto mt-6">
-              <FileText className="h-16 w-16 text-muted-foreground/30 mx-auto mb-4" />
-              <h5 className="text-lg font-bold text-foreground mb-1">لا يوجد سجلات حتى الآن</h5>
-              <p className="text-sm text-muted-foreground">لم يتم إكمال أي مهام تركيب أو عقود سابقة لهذه اللوحة بعد.</p>
-            </div>
-          ) : (
-            <div className="relative border-r-2 border-border/80 pr-6 mr-3 space-y-6">
-              {history.map((record) => {
-                const isCurrent = record.id.toString().startsWith('current-');
-                const paused = isPaused(record);
-                
-                // Pricing calculations
-                const priceBefore = record.total_before_discount || record.billboard_rent_price || 0;
-                const discount = record.discount_amount || 0;
-                const netRent = record.net_rental_amount || (priceBefore - discount);
-                const install = record.installation_cost || 0;
-                const print = record.print_cost || 0;
-                const finalAmount = record.rent_amount || 0;
-                
-                // Paused metadata
-                const refund = record.individual_billboard_data?.refundAmount || 0;
-                const pauseDateStr = record.individual_billboard_data?.pauseDate || record.end_date;
-                const elapsed = record.individual_billboard_data?.elapsedDays || 0;
-                const totalD = record.individual_billboard_data?.totalDays || record.duration_days || 0;
-
-                return (
-                  <div key={record.id} className="relative group/timeline">
-                    {/* Timeline Node Icon */}
-                    <div className={`absolute top-6 -right-[35px] w-6 h-6 rounded-full border-4 flex items-center justify-center transition-all duration-300 ${
-                      isCurrent 
-                        ? 'bg-emerald-500 border-emerald-100 dark:border-emerald-950 scale-125 shadow-glow-green' 
-                        : paused 
-                          ? 'bg-rose-500 border-rose-100 dark:border-rose-950 shadow-glow-red' 
-                          : 'bg-muted-foreground/30 border-muted dark:border-muted/30 group-hover/timeline:bg-primary group-hover/timeline:border-primary/20'
-                    }`}>
-                      <div className="w-1.5 h-1.5 rounded-full bg-white" />
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-3">
+            {loading ? <div role="status" className="py-16 text-center text-muted-foreground"><RefreshCw className="mx-auto mb-3 h-7 w-7 text-primary motion-safe:animate-spin" />جاري تحميل تاريخ اللوحة…</div> : loadError ?
+              <div role="alert" className="text-center py-16 space-y-4"><p>تعذر تحميل السجل. حاول مرة أخرى.</p><Button className={interactive} onClick={() => void loadHistory()}>إعادة المحاولة</Button></div> : !filtered.length ?
+              <div className="rounded-xl border border-dashed text-center py-16"><History className="mx-auto h-10 w-10 text-muted-foreground mb-3" /><p className="font-bold">{history.length ? 'لا توجد نتائج مطابقة' : 'لا توجد سجلات لهذه اللوحة'}</p><p className="text-sm text-muted-foreground mt-2">{history.length ? 'غيّر البحث أو اختر حالة أخرى.' : 'ستظهر العقود وحركات التركيب هنا عند تسجيلها.'}</p></div> :
+              filtered.map(record => {
+                const status = historyStatus(record);
+                const images = [
+                  ['تصميم الوجه أ', record.design_face_a_url], ['تصميم الوجه ب', record.design_face_b_url],
+                  ['تركيب الوجه أ', record.installed_image_face_a_url], ['تركيب الوجه ب', record.installed_image_face_b_url],
+                ].filter(([, url]) => !!url);
+                return <details key={record.id} className="group rounded-xl border bg-card open:border-primary/40">
+                  <summary className={`${interactive} list-none p-4 hover:bg-muted/40 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-bold">عقد #{record.contract_number}</span><span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusColors[status]}`}>{statusLabels[status]}</span>{record.task_type === 'reinstallation' && <span className="text-xs text-muted-foreground">إعادة تركيب</span>}</div>
+                        <p className="mt-2 font-medium break-words">{record.customer_name || 'زبون غير مسجل'} <span className="text-sm text-muted-foreground">{record.ad_type ? `· ${record.ad_type}` : ''}</span></p>
+                      </div><ChevronDown className="h-4 w-4 shrink-0 mt-1 text-muted-foreground group-open:rotate-180 transition-transform motion-reduce:transition-none" />
                     </div>
-
-                    {/* Timeline Card */}
-                    <div className={`rounded-2xl border transition-all duration-300 p-5 ${
-                      isCurrent 
-                        ? 'bg-gradient-to-br from-emerald-500/5 via-emerald-500/[0.01] to-card border-emerald-500/30 dark:border-emerald-500/20 shadow-sm shadow-emerald-500/5' 
-                        : paused 
-                          ? 'bg-gradient-to-br from-rose-500/5 via-rose-500/[0.01] to-card border-rose-500/30 dark:border-rose-500/20 shadow-sm shadow-rose-500/5' 
-                          : 'bg-card border-border/80 hover:border-primary/30 hover:shadow-lg shadow-sm'
-                    }`}>
-                      {/* Row 1: Header */}
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-border/60">
-                        <div className="flex items-center gap-3">
-                          <div className={`p-2.5 rounded-xl border ${
-                            isCurrent 
-                              ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' 
-                              : paused 
-                                ? 'bg-rose-500/10 text-rose-600 border-rose-500/20' 
-                                : 'bg-muted text-muted-foreground border-border/60'
-                          }`}>
-                            <FileText className="h-5 w-5" />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-extrabold text-lg text-foreground tracking-tight">عقد رقم #{record.contract_number}</span>
-                              {isCurrent && (
-                                <Badge className="bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] py-0 px-2 rounded-full font-bold">عقد نشط حالياً</Badge>
-                              )}
-                              {paused && (
-                                <Badge className="bg-rose-500 hover:bg-rose-600 text-white text-[10px] py-0 px-2 rounded-full font-bold">تم الإيقاف مبكراً</Badge>
-                              )}
-                              {record.task_type === 'reinstallation' ? (
-                                <Badge className="bg-amber-500 hover:bg-amber-600 text-white text-[10px] py-0 px-2 rounded-full font-bold gap-1 flex items-center">
-                                  <RefreshCw className="h-2.5 w-2.5" />
-                                  إعادة تركيب
-                                </Badge>
-                              ) : (
-                                <Badge className="bg-indigo-500 hover:bg-indigo-600 text-white text-[10px] py-0 px-2 rounded-full font-bold gap-1 flex items-center">
-                                  <Hammer className="h-2.5 w-2.5" />
-                                  تركيب أولي
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="text-sm text-muted-foreground mt-0.5 font-semibold flex items-center gap-1.5">
-                              <User className="h-3.5 w-3.5" />
-                              {record.customer_name}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-4 self-end md:self-center">
-                          <div className="text-left md:text-right">
-                            <span className="text-[10px] text-muted-foreground font-black uppercase tracking-wider block">القيمة النهائية للوحة</span>
-                            <div className="flex items-baseline gap-1 mt-0.5">
-                              <span className="text-2xl font-black text-foreground">{finalAmount.toLocaleString()}</span>
-                              <span className="text-xs text-muted-foreground font-bold">د.ل</span>
-                            </div>
-                          </div>
-
-
-                        </div>
-                      </div>
-
-                      {/* Row 2: Period & Duration Timeline */}
-                      <div className="py-4 grid grid-cols-1 md:grid-cols-3 items-center gap-4 border-b border-dashed border-border/60">
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-4.5 w-4.5 text-muted-foreground" />
-                          <div>
-                            <span className="text-[10px] text-muted-foreground font-bold block">تاريخ بداية الإيجار</span>
-                            <span className="text-sm font-extrabold text-foreground" dir="ltr">{formatGregorianDate(record.start_date)}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex flex-col items-center justify-center px-4">
-                          <div className="w-full flex items-center justify-between text-[10px] text-muted-foreground font-bold mb-1 px-1">
-                            <span>البداية</span>
-                            <span className="text-primary font-black bg-primary/10 rounded-full px-2 py-0.5">
-                              {paused ? `${elapsed} من ${totalD} يوم` : `${record.duration_days} يوم`}
-                            </span>
-                            <span>النهاية</span>
-                          </div>
-                          <div className="relative w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div 
-                              className={`absolute top-0 right-0 h-full rounded-full ${paused ? 'bg-rose-500' : 'bg-primary'}`}
-                              style={{ width: paused && totalD > 0 ? `${Math.min(100, (elapsed / totalD) * 100)}%` : '100%' }}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 md:justify-end">
-                          <div className="text-right">
-                            <span className="text-[10px] text-muted-foreground font-bold block">تاريخ نهاية الإيجار {paused && '(الإيقاف)'}</span>
-                            <span className="text-sm font-extrabold text-foreground" dir="ltr">{formatGregorianDate(paused ? pauseDateStr : record.end_date)}</span>
-                          </div>
-                          <Calendar className="h-4.5 w-4.5 text-muted-foreground" />
-                        </div>
-                      </div>
-
-                      {/* Row 3: Financial Pricing Journey */}
-                      <div className="py-5">
-                        <span className="text-[10px] text-muted-foreground font-black uppercase tracking-wider block mb-3">تفاصيل الحساب المالي للوحة</span>
-                        
-                        <div className="flex flex-wrap items-center gap-3">
-                          {/* 1. Base Price */}
-                          <div className="flex-1 min-w-[120px] p-3 bg-muted/30 border border-border/50 rounded-xl">
-                            <span className="text-[10px] text-muted-foreground font-bold block">السعر الأساسي</span>
-                            <span className="text-base font-black text-foreground">{priceBefore.toLocaleString()} د.ل</span>
-                          </div>
-
-                          {/* Minus Arrow */}
-                          <div className="text-muted-foreground font-bold hidden sm:block">
-                            <ArrowLeft className="h-4 w-4" />
-                          </div>
-
-                          {/* 2. Discount */}
-                          <div className="flex-1 min-w-[120px] p-3 bg-orange-500/[0.03] border border-orange-500/10 rounded-xl">
-                            <span className="text-[10px] text-orange-600 dark:text-orange-400 font-bold block">الخصم الممنوح</span>
-                            <span className="text-base font-black text-orange-600 dark:text-orange-400">
-                              {discount > 0 ? `-${discount.toLocaleString()} د.ل` : '0 د.ل'}
-                              {discount > 0 && (
-                                <span className="text-[10px] font-bold mr-1">({(record.discount_percentage || ((discount / (priceBefore || 1)) * 100)).toFixed(1)}%)</span>
-                              )}
-                            </span>
-                          </div>
-
-                          {/* Equal Arrow */}
-                          <div className="text-muted-foreground font-bold hidden sm:block">
-                            <ArrowLeft className="h-4 w-4" />
-                          </div>
-
-                          {/* 3. Net Rent */}
-                          <div className="flex-1 min-w-[120px] p-3 bg-blue-500/[0.03] border border-blue-500/10 rounded-xl">
-                            <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold block">صافي الإيجار للوحة</span>
-                            <span className="text-base font-black text-blue-600 dark:text-blue-400">{netRent.toLocaleString()} د.ل</span>
-                          </div>
-
-                          {/* Plus Arrow */}
-                          <div className="text-muted-foreground font-bold hidden sm:block">
-                            <ArrowLeft className="h-4 w-4" />
-                          </div>
-
-                          {/* 4. Installation & Printing */}
-                          <div className="flex-1 min-w-[160px] p-3 bg-purple-500/[0.03] border border-purple-500/10 rounded-xl">
-                            <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold block flex items-center gap-1">
-                              تكاليف إضافية
-                              {(record.include_installation_in_price || record.include_print_in_price) && (
-                                <Badge variant="outline" className="text-[8px] px-1 py-0 border-purple-300 text-purple-600">
-                                  {record.include_installation_in_price && record.include_print_in_price ? 'مشمولة بالكامل' : 'مشمول جزئياً'}
-                                </Badge>
-                              )}
-                            </span>
-                            <span className="text-sm font-black text-purple-600 dark:text-purple-400 block">
-                              تركيب: {install > 0 ? `${install.toLocaleString()} د.ل ${record.include_installation_in_price ? '(مشمول)' : ''}` : record.include_installation_in_price ? '0 (مشمول)' : '0 د.ل'}
-                            </span>
-                            <span className="text-sm font-black text-purple-600 dark:text-purple-400 block mt-0.5">
-                              طباعة: {print > 0 ? `${print.toLocaleString()} د.ل ${record.include_print_in_price ? '(مشمول)' : ''}` : record.include_print_in_price ? '0 (مشمول)' : '0 د.ل'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Row 4: Design and Installation Photos */}
-                      {(record.design_face_a_url || record.design_face_b_url || record.installed_image_face_a_url || record.installed_image_face_b_url) && (
-                        <div className="py-4 border-t border-border/50 grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {/* Designs */}
-                          {(record.design_face_a_url || record.design_face_b_url) && (
-                            <div className="p-3 bg-muted/20 border border-border/40 rounded-xl">
-                              <span className="text-[10px] text-muted-foreground font-black uppercase tracking-wider block mb-2 flex items-center gap-1">
-                                <ImageIcon className="h-3.5 w-3.5 text-primary" />
-                                صور التصميم الإعلاني المعتمد
-                              </span>
-                              <div className="flex gap-2.5">
-                                {record.design_face_a_url && (
-                                  <div className="relative group/img overflow-hidden rounded-lg border border-border bg-card">
-                                    <img
-                                      src={record.design_face_a_url}
-                                      alt="وجه أ"
-                                      className="w-20 h-20 object-cover cursor-pointer transition-transform duration-300 group-hover/img:scale-110"
-                                      onClick={() => setSelectedImage(record.design_face_a_url)}
-                                    />
-                                    <span className="absolute bottom-1 right-1 bg-black/75 text-white text-[8px] px-1.5 py-0.5 rounded font-black">وجه A</span>
-                                  </div>
-                                )}
-                                {record.design_face_b_url && (
-                                  <div className="relative group/img overflow-hidden rounded-lg border border-border bg-card">
-                                    <img
-                                      src={record.design_face_b_url}
-                                      alt="وجه ب"
-                                      className="w-20 h-20 object-cover cursor-pointer transition-transform duration-300 group-hover/img:scale-110"
-                                      onClick={() => setSelectedImage(record.design_face_b_url)}
-                                    />
-                                    <span className="absolute bottom-1 right-1 bg-black/75 text-white text-[8px] px-1.5 py-0.5 rounded font-black">وجه B</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Installation Photos */}
-                          {(record.installed_image_face_a_url || record.installed_image_face_b_url) && (
-                            <div className="p-3 bg-green-500/[0.02] border border-green-500/10 rounded-xl">
-                              <span className="text-[10px] text-green-600 dark:text-green-400 font-black uppercase tracking-wider block mb-2 flex items-center gap-1">
-                                <CheckCircle2 className="h-3.5 w-3.5" />
-                                صور إثبات التركيب الميداني
-                              </span>
-                              <div className="flex gap-2.5">
-                                {record.installed_image_face_a_url && (
-                                  <div className="relative group/img overflow-hidden rounded-lg border border-border bg-card">
-                                    <img
-                                      src={record.installed_image_face_a_url}
-                                      alt="تركيب أ"
-                                      className="w-20 h-20 object-cover cursor-pointer transition-transform duration-300 group-hover/img:scale-110"
-                                      onClick={() => setSelectedImage(record.installed_image_face_a_url)}
-                                    />
-                                    <span className="absolute bottom-1 right-1 bg-black/75 text-white text-[8px] px-1.5 py-0.5 rounded font-black">وجه A</span>
-                                  </div>
-                                )}
-                                {record.installed_image_face_b_url && (
-                                  <div className="relative group/img overflow-hidden rounded-lg border border-border bg-card">
-                                    <img
-                                      src={record.installed_image_face_b_url}
-                                      alt="تركيب ب"
-                                      className="w-20 h-20 object-cover cursor-pointer transition-transform duration-300 group-hover/img:scale-110"
-                                      onClick={() => setSelectedImage(record.installed_image_face_b_url)}
-                                    />
-                                    <span className="absolute bottom-1 right-1 bg-black/75 text-white text-[8px] px-1.5 py-0.5 rounded font-black">وجه B</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Row 5: Paused warning detail or standard notes */}
-                      {paused ? (
-                        <div className="mt-4 p-4 bg-rose-500/[0.04] border border-rose-500/15 rounded-xl flex items-start gap-3">
-                          <AlertTriangle className="h-5 w-5 text-rose-500 flex-shrink-0 mt-0.5 animate-pulse" />
-                          <div className="text-sm">
-                            <span className="font-extrabold text-rose-700 dark:text-rose-400 block mb-1">تفاصيل إيقاف اللوحة الاستثنائي</span>
-                            <div className="text-muted-foreground leading-relaxed">
-                              تم إيقاف تأجير هذه اللوحة بعد انقضاء <span className="font-bold text-foreground">{elapsed} يوم</span> فقط من العقد.
-                              <span className="block mt-1">
- القيمة المالية المستردة/المخصومة للعقد: <span className="font-extrabold text-emerald-600 dark:text-emerald-400">{refund.toLocaleString()} دينار ليبي</span>.
-                              </span>
-                              {record.notes && (
-                                <span className="block mt-1 border-t border-rose-500/10 pt-1 text-xs font-semibold text-foreground">
-                                  سبب الإيقاف: {record.notes.replace(/^إيقاف مبكر — /, '').replace(/^إيقاف: /, '')}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        record.notes && record.notes !== 'عقد حالي نشط' && (
-                          <div className="mt-4 p-3 bg-muted/40 border border-border/40 rounded-xl">
-                            <span className="text-[10px] text-muted-foreground font-black block mb-1">الملاحظات المسجلة</span>
-                            <p className="text-sm text-foreground leading-relaxed">{record.notes}</p>
-                          </div>
-                        )
-                      )}
-
-                      {/* Pricing category & team footer info */}
-                      {(record.pricing_category || record.team_name) && (
-                        <div className="mt-4 flex flex-wrap gap-2 text-xs text-muted-foreground pt-3 border-t border-border/40">
-                          {record.pricing_category && (
-                            <Badge variant="outline" className="text-[10px] gap-1 px-2.5 py-0.5 rounded-full border-border/80 bg-muted/10 font-bold">
-                              <Palette className="h-3 w-3 text-muted-foreground" />
-                              فئة التسعير: {record.pricing_category}
-                            </Badge>
-                          )}
-                          {record.team_name && (
-                            <Badge variant="outline" className="text-[10px] gap-1 px-2.5 py-0.5 rounded-full border-border/80 bg-muted/10 font-bold">
-                              <User className="h-3 w-3 text-muted-foreground" />
-                              فريق التركيب: {record.team_name}
-                            </Badge>
-                          )}
-                        </div>
-                      )}
+                    <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm"><span className="text-muted-foreground"><span dir="ltr">{date(record.start_date)}</span> — <span dir="ltr">{date(record.end_date)}</span></span><span>{record.duration_days || 0} يوم</span><span className="font-bold sm:mr-auto">{money(record.rent_amount)} د.ل</span></div>
+                  </summary>
+                  <div className="border-t p-4 space-y-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+                      {[
+                        ['قبل الخصم', money(record.total_before_discount ?? record.billboard_rent_price)], ['الخصم', money(record.discount_amount)],
+                        ['صافي الإيجار', money(record.net_rental_amount ?? ((record.total_before_discount ?? record.billboard_rent_price ?? 0) - (record.discount_amount ?? 0)))],
+                        ['التركيب', `${money(record.installation_cost)}${record.include_installation_in_price ? ' · مشمول' : ''}`],
+                        ['الطباعة', `${money(record.print_cost)}${record.include_print_in_price ? ' · مشمولة' : ''}`],
+                      ].map(([label, value]) => <div key={label} className="rounded-lg bg-muted/40 p-3"><p className="text-xs text-muted-foreground mb-1">{label}</p><p className="font-semibold">{value} د.ل</p></div>)}
                     </div>
+                    <div className="flex flex-wrap gap-4 text-sm text-muted-foreground"><span>التركيب: {date(record.installation_date)}</span>{record.team_name && <span>الفريق: {record.team_name}</span>}{record.pricing_category && <span>فئة التسعير: {record.pricing_category}</span>}</div>
+                    {record.notes && <p className="text-sm rounded-lg border p-3 leading-7 whitespace-pre-wrap break-words">{record.notes}</p>}
+                    {status === 'paused' && record.individual_billboard_data && <div className="text-sm rounded-lg bg-red-500/5 border border-red-500/20 p-3 leading-7">تاريخ الإيقاف: {date(record.individual_billboard_data.pauseDate || record.end_date)} · القيمة المستردة: {money(record.individual_billboard_data.refundAmount)} د.ل{record.individual_billboard_data.elapsedDays != null && <p>الأيام المنقضية: {record.individual_billboard_data.elapsedDays} من {record.individual_billboard_data.totalDays ?? record.duration_days} يوم</p>}</div>}
+                    {images.length > 0 ? <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{images.map(([label, url]) => <button key={label} type="button" onClick={() => setSelectedImage(url!)} className={`${interactive} rounded-lg border overflow-hidden text-right hover:border-primary focus-visible:ring-2 focus-visible:ring-ring`}><img src={url} alt={label} loading="lazy" className="h-28 w-full object-contain bg-muted/30" /><span className="flex items-center gap-2 p-2 text-xs"><ImageIcon className="h-3 w-3 text-primary" />{label}</span></button>)}</div> : <p className="text-xs text-muted-foreground">لا توجد صور مسجلة لهذه الحركة.</p>}
                   </div>
-                );
+                </details>;
               })}
-            </div>
-          )}
-        </ScrollArea>
-
-        {/* Footer with close button */}
-        <div className="flex justify-end p-5 border-t border-border/80 bg-muted/20">
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            className="px-6 rounded-xl font-bold border-border/80 hover:bg-muted text-foreground"
-          >
-            إغلاق النافذة
-          </Button>
-        </div>
-      </DialogContent>
-
-      {/* نافذة طباعة التقرير المتقدمة */}
-      <BillboardHistoryPrintDialog
-        open={printDialogOpen}
-        onOpenChange={setPrintDialogOpen}
-        billboardId={billboardId}
-        billboardName={billboardName}
-        history={history}
-        totalRentals={totalRentals}
-        totalRevenue={totalRevenue}
-        totalDays={totalDays}
-      />
-
-
-
-      {/* نافذة عرض الصورة */}
-      {selectedImage && (
-        <Dialog open={!!selectedImage} onOpenChange={() => setSelectedImage(null)}>
-          <DialogContent className="max-w-4xl">
-            <DialogHeader>
-              <DialogTitle>عرض الصورة</DialogTitle>
-            </DialogHeader>
-            <div className="flex items-center justify-center">
-              <img
-                src={selectedImage}
-                alt="صورة مكبرة"
-                className="max-w-full max-h-[70vh] object-contain"
-              />
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-    </Dialog>
+          </div>
+          <div className="shrink-0 border-t p-3 sm:px-6 flex flex-wrap justify-between items-center gap-2 bg-muted/20"><p className="text-xs text-muted-foreground">الطباعة تشمل النتائج الظاهرة حسب البحث والتصفية.</p><Button variant="outline" className={interactive} onClick={() => onOpenChange(false)}>إغلاق</Button></div>
+        </DialogContent>
+      </Dialog>
+      <BillboardHistoryPrintDialog open={printDialogOpen && open} onOpenChange={setPrintDialogOpen} billboardId={billboardId} billboardName={billboardName} history={filtered} totalRentals={visibleTotals.count} totalRevenue={visibleTotals.revenue} totalDays={visibleTotals.days} />
+      <Dialog open={!!selectedImage && open} onOpenChange={value => { if (!value) setSelectedImage(null); }}><DialogContent dir="rtl" className="max-w-4xl"><DialogHeader><DialogTitle>صور اللوحة</DialogTitle><DialogDescription>{billboardName}</DialogDescription></DialogHeader>{selectedImage && <img src={selectedImage} alt="صورة اللوحة مكبرة" className="max-h-[70dvh] w-full object-contain" />}</DialogContent></Dialog>
+    </>
   );
 };

@@ -1,16 +1,17 @@
 import { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Card, CardContent } from '@/components/ui/card';
 import { toast } from 'sonner';
-import { Plus, MapPin, ChevronDown, FileText, ImageIcon, Building2, Navigation, Ruler, Layers, X, ZoomIn, Search } from 'lucide-react';
+import { Check, FileText, Image as ImageIcon, Loader2, MapPin, Plus, Search, X } from 'lucide-react';
+import ImageLightbox from '@/components/Map/ImageLightbox';
+import { cn } from '@/lib/utils';
+import { sortBillboardsStandardSync } from '@/lib/billboardSorter';
+import { parseContractBillboardIds } from '@/lib/compositeTaskContractIdentity';
+import { assignBillboardsToContracts, syncInstallationTaskContracts } from '@/services/installationTaskContracts';
 
 interface AddBillboardsToTaskDialogProps {
   open: boolean;
@@ -23,524 +24,259 @@ interface AddBillboardsToTaskDialogProps {
   onSuccess: () => void;
 }
 
+/** إضافة لوحات ناقصة لمهمة تركيب من أي عقد للزبون نفسه، مع تحديث عقود المهمة واسمها تلقائياً */
 export function AddBillboardsToTaskDialog({
-  open,
-  onOpenChange,
-  taskId,
-  contractId,
-  contractIds = [],
-  existingBillboardIds,
-  customerName,
-  onSuccess
+  open, onOpenChange, taskId, contractId, contractIds = [], existingBillboardIds, customerName, onSuccess,
 }: AddBillboardsToTaskDialogProps) {
   const queryClient = useQueryClient();
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [openContracts, setOpenContracts] = useState<Set<number>>(new Set());
-  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [search, setSearch] = useState('');
+  const [activeContract, setActiveContract] = useState<number | 'all'>('all');
+  const [zoomed, setZoomed] = useState<string | null>(null);
 
-  // Step 1: Get customer_id from the main contract
-  const { data: mainContract, isLoading: isLoadingMain } = useQuery({
-    queryKey: ['main-contract-customer', contractId],
-    enabled: open && !!contractId,
+  useEffect(() => {
+    if (open) { setSelectedIds([]); setSearch(''); setActiveContract('all'); }
+  }, [open]);
+
+  // عقود الزبون كلها (بالمعرّف، ثم بالاسم كاحتياط)
+  const { data: contracts = [], isLoading: loadingContracts } = useQuery({
+    queryKey: ['add-to-task-customer-contracts', contractId, customerName],
+    enabled: open && !!(contractId || customerName),
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('Contract')
-        .select('Contract_Number, customer_id, "Customer Name"')
-        .eq('Contract_Number', contractId)
-        .single();
+      const cols = 'Contract_Number, "Customer Name", "Ad Type", "Contract Date", "End Date", billboard_ids, customer_id';
+      const { data: main } = contractId
+        ? await supabase.from('Contract').select(cols).eq('Contract_Number', contractId).maybeSingle()
+        : { data: null as any };
+      const custId = (main as any)?.customer_id;
+      const name = customerName || (main as any)?.['Customer Name'];
+      const q = supabase.from('Contract').select(cols);
+      const { data, error } = custId ? await q.eq('customer_id', custId) : await q.eq('Customer Name', name);
       if (error) throw error;
-      return data;
-    }
+      return (data || []) as any[];
+    },
   });
 
-  const resolvedCustomerName = customerName || mainContract?.['Customer Name'];
-  const customerId = mainContract?.customer_id;
+  const contractNumbers = useMemo(() => contracts.map(c => Number(c.Contract_Number)), [contracts]);
 
-  // Step 2: Fetch ALL contracts for this customer
-  const { data: customerContracts = [], isLoading: isLoadingContracts } = useQuery({
-    queryKey: ['customer-all-contracts', customerId, resolvedCustomerName],
-    enabled: open && !!(customerId || resolvedCustomerName),
-    queryFn: async () => {
-      let query = supabase
-        .from('Contract')
-        .select('Contract_Number, "Customer Name", "Ad Type", billboard_ids');
-      
-      if (customerId) {
-        query = query.eq('customer_id', customerId);
-      } else if (resolvedCustomerName) {
-        query = query.eq('Customer Name', resolvedCustomerName);
-      }
-      
-      const { data, error } = await query;
-      if (error) throw error;
-      return data || [];
-    }
-  });
-
-  const contractNumbers = useMemo(() => {
-    return customerContracts.map(c => Number(c.Contract_Number)).filter(Boolean);
-  }, [customerContracts]);
-
-  // Fetch paused billboards for these contracts
   const { data: pausedRows = [] } = useQuery({
-    queryKey: ['paused-billboards-for-customer-contracts', contractNumbers.join(',')],
+    queryKey: ['add-to-task-paused', contractNumbers.join(',')],
     enabled: open && contractNumbers.length > 0,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('paused_billboards' as any)
-        .select('billboard_id, contract_number')
-        .in('contract_number', contractNumbers);
-      if (error) throw error;
-      return data || [];
-    }
+      const { data } = await supabase.from('paused_billboards' as any).select('billboard_id, contract_number').in('contract_number', contractNumbers);
+      return (data || []) as any[];
+    },
   });
 
-  const pausedSet = useMemo(() => {
-    return new Set<number>(pausedRows.map((r: any) => Number(r.billboard_id)));
-  }, [pausedRows]);
-
-  // Extract all billboard IDs from all customer contracts
-  const contractBillboardMap = useMemo(() => {
-    const map = new Map<number, number[]>();
-    customerContracts.forEach((c: any) => {
-      const ids: number[] = [];
-      if (c.billboard_ids) {
-        const parsed = c.billboard_ids.split(',')
-          .map((id: string) => parseInt(id.trim()))
-          .filter((n: number) => !isNaN(n) && n > 0);
-        ids.push(...parsed);
-      }
-      map.set(c.Contract_Number, ids);
-    });
-
-    // Merge paused billboards
-    pausedRows.forEach((r: any) => {
-      const cNum = Number(r.contract_number);
-      const bId = Number(r.billboard_id);
-      if (cNum && bId) {
-        const existing = map.get(cNum) || [];
-        if (!existing.includes(bId)) {
-          existing.push(bId);
-          map.set(cNum, existing);
-        }
-      }
-    });
-
-    return map;
-  }, [customerContracts, pausedRows]);
-
-  const allBillboardIds = useMemo(() => {
+  // اللوحات المرشحة: لوحات العقود + الموقوفة، ناقص الموجودة في المهمة
+  const candidateIds = useMemo(() => {
     const ids = new Set<number>();
-    contractBillboardMap.forEach(bbIds => bbIds.forEach(id => ids.add(id)));
-    return Array.from(ids);
-  }, [contractBillboardMap]);
+    contracts.forEach(c => parseContractBillboardIds(c.billboard_ids).forEach(id => ids.add(id)));
+    pausedRows.forEach(r => r.billboard_id && ids.add(Number(r.billboard_id)));
+    existingBillboardIds.forEach(id => ids.delete(Number(id)));
+    return [...ids];
+  }, [contracts, pausedRows, existingBillboardIds]);
+  const pausedSet = useMemo(() => new Set(pausedRows.map(r => Number(r.billboard_id))), [pausedRows]);
 
-  // Step 3: Fetch billboard data with design images
-  const { data: billboards = [], isLoading: isLoadingBillboards } = useQuery({
-    queryKey: ['billboards-for-add-customer', allBillboardIds.join(',')],
-    enabled: open && allBillboardIds.length > 0,
+  const { data: billboards = [], isLoading: loadingBoards } = useQuery({
+    queryKey: ['add-to-task-billboards', candidateIds.join(',')],
+    enabled: open && candidateIds.length > 0,
     queryFn: async () => {
-      const batchSize = 100;
       const all: any[] = [];
-      for (let i = 0; i < allBillboardIds.length; i += batchSize) {
-        const batch = allBillboardIds.slice(i, i + batchSize);
+      for (let i = 0; i < candidateIds.length; i += 100) {
         const { data, error } = await supabase
           .from('billboards')
-          .select('ID, Billboard_Name, Size, Faces_Count, District, Nearest_Landmark, Image_URL, design_face_a, design_face_b, Municipality')
-          .in('ID', batch);
+          .select('ID, Billboard_Name, Size, Level, Faces_Count, District, Nearest_Landmark, Image_URL, design_face_a, design_face_b, Municipality')
+          .in('ID', candidateIds.slice(i, i + 100));
         if (error) throw error;
-        if (data) all.push(...data);
+        all.push(...(data || []));
       }
       return all;
-    }
+    },
   });
 
-  // Consider loading if any query is loading OR if we have billboard IDs but no billboard data yet
-  const isLoading = isLoadingMain || isLoadingContracts || isLoadingBillboards || 
-    (allBillboardIds.length > 0 && billboards.length === 0);
+  // كل لوحة تُنسب لعقد واحد (عقود المهمة أولاً، ثم الساري اليوم، ثم الأحدث)
+  const taskContracts = useMemo(() => [...new Set([Number(contractId), ...contractIds.map(Number)].filter(Boolean))], [contractId, contractIds]);
+  const contractOf = useMemo(() => {
+    const pausedAsContracts = pausedRows.map(r => ({ Contract_Number: r.contract_number, billboard_ids: String(r.billboard_id) }));
+    const { byContract } = assignBillboardsToContracts(
+      billboards.map(b => Number(b.ID)),
+      [...contracts, ...pausedAsContracts] as any,
+      taskContracts,
+      new Date().toISOString(),
+    );
+    const m = new Map<number, number>();
+    byContract.forEach((ids, cid) => ids.forEach(id => m.set(id, cid)));
+    return m;
+  }, [billboards, contracts, pausedRows, taskContracts]);
 
-  const billboardById = useMemo(() => {
-    const map: Record<number, any> = {};
-    billboards.forEach(b => { map[b.ID] = b; });
-    return map;
-  }, [billboards]);
-
-  // عقود المهمة (العقد الأساسي + العقود المدمجة)
-  const taskContractSet = useMemo(() => {
-    return new Set<number>([Number(contractId), ...contractIds.map(Number)].filter(Boolean));
-  }, [contractId, contractIds]);
-
-  // Group available billboards by contract, with search filtering
-  const contractGroups = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
-    return customerContracts
-      .map((contract: any) => {
-        const bbIds = contractBillboardMap.get(contract.Contract_Number) || [];
-        const availableAll = bbIds
-          .filter(id => !existingBillboardIds.includes(id))
-          .map(id => billboardById[id])
-          .filter(Boolean);
-        const available = availableAll.filter((b: any) => {
-          if (!q) return true;
-          const name = (b.Billboard_Name || '').toLowerCase();
-          const landmark = (b.Nearest_Landmark || '').toLowerCase();
-          return name.includes(q) || landmark.includes(q);
-        });
+  const groups = useMemo(() => {
+    return contracts
+      .map(c => {
+        const cid = Number(c.Contract_Number);
         return {
-          contractNumber: Number(contract.Contract_Number),
-          customerName: contract['Customer Name'],
-          adType: contract['Ad Type'],
-          billboards: available,
-          availableCount: availableAll.length,
-          totalInContract: bbIds.length,
-          isTaskContract: taskContractSet.has(Number(contract.Contract_Number)),
+          contractId: cid,
+          adType: c['Ad Type'] || '',
+          contractDate: String(c['Contract Date'] || '').slice(0, 10),
+          isTaskContract: taskContracts.includes(cid),
+          boards: sortBillboardsStandardSync(billboards.filter(b => contractOf.get(Number(b.ID)) === cid)),
         };
       })
-      // عقود المهمة أولاً ثم الأحدث
-      .sort((a, b) => (Number(b.isTaskContract) - Number(a.isTaskContract)) || (b.contractNumber - a.contractNumber));
-  }, [customerContracts, contractBillboardMap, existingBillboardIds, billboardById, searchQuery, taskContractSet]);
+      .filter(g => g.boards.length > 0)
+      .sort((a, b) => Number(b.isTaskContract) - Number(a.isTaskContract) || b.contractId - a.contractId);
+  }, [contracts, billboards, contractOf, taskContracts]);
 
-  // العقد المعروض حالياً — افتراضياً عقد المهمة
-  const [activeContract, setActiveContract] = useState<number>(Number(contractId));
-  useEffect(() => {
-    if (open) {
-      setActiveContract(Number(contractId));
-      setSelectedIds([]);
-      setSearchQuery('');
-    }
-  }, [open, contractId]);
+  const q = search.trim().toLowerCase();
+  const matches = (b: any) => !q || [b.Billboard_Name, b.ID, b.Nearest_Landmark, b.Municipality, b.District, b.Size].some(v => String(v ?? '').toLowerCase().includes(q));
+  const visibleGroups = groups
+    .filter(g => activeContract === 'all' || g.contractId === activeContract)
+    .map(g => ({ ...g, boards: g.boards.filter(matches) }))
+    .filter(g => g.boards.length > 0);
 
-  const activeGroup = contractGroups.find(g => g.contractNumber === activeContract);
-  const activeBillboards = activeGroup?.billboards || [];
+  const toggle = (id: number) => setSelectedIds(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  const toggleGroup = (ids: number[]) => {
+    const all = ids.every(id => selectedIds.includes(id));
+    setSelectedIds(p => all ? p.filter(id => !ids.includes(id)) : [...new Set([...p, ...ids])]);
+  };
+  const selectedByContract = (cid: number) => selectedIds.filter(id => contractOf.get(id) === cid).length;
+  const newContracts = [...new Set(selectedIds.map(id => contractOf.get(id)).filter((c): c is number => !!c && !taskContracts.includes(c)))];
 
-  const totalAvailable = contractGroups.reduce((sum, g) => sum + g.availableCount, 0);
-
-  // Mutations
   const addMutation = useMutation({
-    mutationFn: async (billboardIds: number[]) => {
-      const facesMap: Record<number, number> = {};
-      billboards.forEach(b => { facesMap[b.ID] = b.Faces_Count || 1; });
-
-      const itemsToInsert = billboardIds.map(billboardId => ({
-        task_id: taskId,
-        billboard_id: billboardId,
-        status: 'pending',
-        customer_installation_cost: 0,
-        faces_to_install: facesMap[billboardId] || 2
-      }));
-
-      const { error } = await supabase
-        .from('installation_task_items')
-        .insert(itemsToInsert);
+    mutationFn: async (ids: number[]) => {
+      const faces = new Map(billboards.map(b => [Number(b.ID), Number(b.Faces_Count) || 2]));
+      const { error } = await supabase.from('installation_task_items').insert(ids.map(id => ({
+        task_id: taskId, billboard_id: id, status: 'pending', customer_installation_cost: 0, faces_to_install: faces.get(id) || 2,
+      })));
       if (error) throw error;
+      await syncInstallationTaskContracts(taskId);
     },
-    onSuccess: () => {
-      toast.success(`تمت إضافة ${selectedIds.length} لوحة للمهمة`);
+    onSuccess: (_d, ids) => {
+      toast.success(`أُضيفت ${ids.length} لوحة للمهمة${newContracts.length ? ` — وأُضيف ${newContracts.length === 1 ? 'عقد' : 'عقود'} #${newContracts.join('، #')} للمهمة` : ''}`);
       queryClient.invalidateQueries({ queryKey: ['installation-task-items'] });
+      queryClient.invalidateQueries({ queryKey: ['installation-tasks'] });
       setSelectedIds([]);
       onSuccess();
       onOpenChange(false);
     },
-    onError: (error) => {
-      console.error('Error adding billboards:', error);
-      toast.error('فشل في إضافة اللوحات');
-    }
+    onError: () => toast.error('فشل إضافة اللوحات'),
   });
 
-  const handleToggle = (id: number) => {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
-  };
-
-  const activeIds = activeBillboards.map((b: any) => b.ID);
-  const allActiveSelected = activeIds.length > 0 && activeIds.every((id: number) => selectedIds.includes(id));
-
-  // تحديد/إلغاء كل لوحات العقد المعروض
-  const handleSelectAll = () => {
-    if (allActiveSelected) {
-      setSelectedIds(prev => prev.filter(id => !activeIds.includes(id)));
-    } else {
-      setSelectedIds(prev => [...new Set([...prev, ...activeIds])]);
-    }
-  };
-
-  const selectedCountByContract = (contractNumber: number) => {
-    const ids = contractBillboardMap.get(contractNumber) || [];
-    return ids.filter(id => selectedIds.includes(id)).length;
-  };
-
-  const handleAdd = () => {
-    if (selectedIds.length === 0) {
-      toast.error('يرجى اختيار لوحة واحدة على الأقل');
-      return;
-    }
-    addMutation.mutate(selectedIds);
-  };
+  const loading = loadingContracts || loadingBoards;
 
   return (
     <>
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh]" dir="rtl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Plus className="h-5 w-5 text-primary" />
-            إضافة لوحات للمهمة
-          </DialogTitle>
-          <DialogDescription>
-            {resolvedCustomerName ? `الزبون: ${resolvedCustomerName}` : 'اختر اللوحات لإضافتها للمهمة'}
-          </DialogDescription>
-        </DialogHeader>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="flex h-[88vh] max-w-5xl flex-col gap-0 overflow-hidden p-0" dir="rtl">
+          <DialogHeader className="border-b border-border px-5 py-4 text-right">
+            <DialogTitle className="text-base">إضافة لوحات للمهمة</DialogTitle>
+            <DialogDescription className="text-xs">
+              {customerName || contracts[0]?.['Customer Name'] || ''} · اختر من أي عقد للزبون. اللوحات من عقد جديد تجعل المهمة مجمعة لعدة عقود.
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="space-y-3">
-          {/* Stats */}
-          <div className="flex items-center gap-4 text-sm flex-wrap">
-            <Badge variant="outline">{customerContracts.length} عقد للزبون</Badge>
-            <Badge variant="outline">{existingBillboardIds.length} موجودة في المهمة</Badge>
-            <Badge variant="default" className="bg-emerald-600">{totalAvailable} متاحة للإضافة</Badge>
-          </div>
-
-          {/* Contract switcher */}
-          {!isLoading && contractGroups.length > 0 && (
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {contractGroups.map(g => {
-                const isActive = g.contractNumber === activeContract;
-                const selCount = selectedCountByContract(g.contractNumber);
+          <div className="grid min-h-0 flex-1 md:grid-cols-[230px_minmax(0,1fr)]">
+            {/* العقود */}
+            <nav aria-label="عقود الزبون" className="no-scrollbar flex gap-1.5 overflow-x-auto border-b border-border p-3 md:flex-col md:overflow-y-auto md:border-b-0 md:border-l">
+              <button type="button" onClick={() => setActiveContract('all')}
+                className={cn('shrink-0 rounded-lg px-3 py-2 text-right text-sm', activeContract === 'all' ? 'bg-primary/10 font-semibold text-primary' : 'hover:bg-muted')}>
+                كل العقود <span className="text-xs text-muted-foreground">({groups.reduce((s, g) => s + g.boards.length, 0)})</span>
+              </button>
+              {groups.map(g => {
+                const sel = selectedByContract(g.contractId);
                 return (
-                  <button
-                    key={g.contractNumber}
-                    type="button"
-                    onClick={() => setActiveContract(g.contractNumber)}
-                    className={`shrink-0 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs transition-all ${
-                      isActive
-                        ? 'border-primary bg-primary/10 text-foreground shadow-sm'
-                        : 'border-border bg-muted/20 text-muted-foreground hover:border-primary/40 hover:text-foreground'
-                    }`}
-                  >
-                    <FileText className={`h-3.5 w-3.5 ${isActive ? 'text-primary' : ''}`} />
-                    <span className="font-bold">#{g.contractNumber}</span>
-                    {g.adType && <span className="max-w-[120px] truncate">{g.adType}</span>}
-                    {g.isTaskContract && (
-                      <Badge className="h-4 px-1.5 text-[9px] bg-amber-500/15 text-amber-600 border border-amber-500/30">عقد المهمة</Badge>
-                    )}
-                    <Badge variant="outline" className="h-4 px-1.5 text-[9px]">{g.availableCount}</Badge>
-                    {selCount > 0 && (
-                      <Badge className="h-4 px-1.5 text-[9px] bg-primary text-primary-foreground">{selCount} ✓</Badge>
-                    )}
+                  <button key={g.contractId} type="button" onClick={() => setActiveContract(g.contractId)}
+                    className={cn('shrink-0 rounded-lg px-3 py-2 text-right md:w-full', activeContract === g.contractId ? 'bg-primary/10 ring-1 ring-primary/40' : 'hover:bg-muted')}>
+                    <span className="flex items-center justify-between gap-2 text-sm">
+                      <span className="font-bold tabular-nums">#{g.contractId}</span>
+                      <span className="text-xs text-muted-foreground tabular-nums">{sel ? <b className="text-primary">{sel}/</b> : null}{g.boards.length}</span>
+                    </span>
+                    <span className="block max-w-[180px] truncate text-xs text-muted-foreground">{g.adType || '—'}</span>
+                    {g.isTaskContract && <span className="mt-1 inline-block rounded bg-primary/15 px-1.5 text-xs text-primary">في المهمة</span>}
                   </button>
                 );
               })}
-            </div>
-          )}
+            </nav>
 
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="بحث بالاسم أو أقرب نقطة دالة..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pr-9"
-            />
-          </div>
-
-          {isLoading ? (
-            <div className="text-center py-8 text-muted-foreground">جاري التحميل...</div>
-          ) : !activeGroup ? (
-            <div className="text-center py-8 text-muted-foreground">
-              لم يتم العثور على العقد #{activeContract} — اختر عقداً آخر من الأعلى
-            </div>
-          ) : (
-            <>
-              {/* Select all + counter */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={handleSelectAll} disabled={activeIds.length === 0}>
-                    {allActiveSelected ? 'إلغاء تحديد لوحات العقد' : 'تحديد كل لوحات العقد'}
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    عقد #{activeGroup.contractNumber}{activeGroup.adType ? ` • ${activeGroup.adType}` : ''} — {activeGroup.totalInContract} لوحة في العقد
-                  </span>
+            {/* اللوحات */}
+            <div className="flex min-h-0 flex-col">
+              <div className="border-b border-border p-3">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="بحث بالاسم أو الرقم أو الموقع..." className="h-10 pr-9" />
+                  {search && <button type="button" onClick={() => setSearch('')} className="absolute left-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground" aria-label="مسح"><X className="h-3.5 w-3.5" /></button>}
                 </div>
-                <Badge variant="secondary">{selectedIds.length} محددة</Badge>
               </div>
-
-              <ScrollArea className="h-[460px] border rounded-lg">
-                {activeBillboards.length === 0 ? (
-                  <div className="text-center py-16 text-muted-foreground text-sm">
-                    {searchQuery
-                      ? 'لا توجد نتائج مطابقة للبحث في هذا العقد'
-                      : 'جميع لوحات هذا العقد موجودة في المهمة بالفعل — يمكنك اختيار عقد آخر للزبون من الأعلى'}
-                  </div>
-                ) : (
-                <div className="p-3">
-                  {[activeGroup].map(group => {
-                    return (
-                      <div key={group.contractNumber}>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              {activeBillboards.map((billboard: any) => {
-                                const imgSrc = billboard.design_face_a || billboard.Image_URL;
-                                const isSelected = selectedIds.includes(billboard.ID);
-                                return (
-                                  <Card
-                                    key={billboard.ID}
-                                    className={`group relative overflow-hidden rounded-2xl border-2 transition-all duration-300 cursor-pointer hover:shadow-lg ${
-                                      isSelected
-                                        ? 'border-primary shadow-md bg-primary/5'
-                                        : 'border-border hover:border-primary/30'
-                                    }`}
-                                    onClick={() => handleToggle(billboard.ID)}
-                                  >
-                                    {/* Checkbox overlay */}
-                                    <div className="absolute top-3 right-3 z-30">
-                                      <Checkbox
-                                        checked={isSelected}
-                                        onCheckedChange={() => handleToggle(billboard.ID)}
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="bg-background/80 backdrop-blur-sm"
-                                      />
-                                    </div>
-
-                                    {/* Image */}
-                                    <div className="aspect-[4/3] bg-muted relative overflow-hidden">
-                                      {imgSrc ? (
-                                        <>
-                                          <img
-                                            src={imgSrc}
-                                            alt={billboard.Billboard_Name}
-                                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                                            loading="lazy"
-                                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                                          />
-                                          <button
-                                            className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100"
-                                            onClick={(e) => { e.stopPropagation(); setZoomedImage(imgSrc); }}
-                                          >
-                                            <div className="bg-black/50 rounded-full p-2 backdrop-blur-sm">
-                                              <ZoomIn className="h-5 w-5 text-white" />
-                                            </div>
-                                          </button>
-                                        </>
-                                      ) : (
-                                        <div className="w-full h-full flex items-center justify-center">
-                                          <ImageIcon className="h-10 w-10 text-muted-foreground/40" />
-                                        </div>
-                                      )}
-                                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
-
-                                      {/* Size badge */}
-                                      <div className="absolute top-3 left-3 z-20">
-                                        <Badge className="bg-background/90 text-foreground shadow border-0 backdrop-blur-sm font-bold text-xs">
-                                          {billboard.Size || '—'}
-                                        </Badge>
-                                      </div>
-
-                                      {/* Design face indicators */}
-                                      <div className="absolute bottom-3 left-3 flex gap-1 z-20">
-                                        {billboard.design_face_a && (
-                                          <span className="bg-primary text-primary-foreground text-[10px] font-bold px-1.5 py-0.5 rounded shadow">أ</span>
-                                        )}
-                                        {billboard.design_face_b && (
-                                          <span className="bg-secondary text-secondary-foreground text-[10px] font-bold px-1.5 py-0.5 rounded shadow">ب</span>
-                                        )}
-                                      </div>
-
-                                      {/* Billboard name on image */}
-                                      <div className="absolute bottom-3 right-3 z-20 flex items-center gap-1.5 flex-wrap">
-                                        <h4 className="font-bold text-white text-sm drop-shadow-lg truncate max-w-[150px]">
-                                          {billboard.Billboard_Name}
-                                        </h4>
-                                        {pausedSet.has(billboard.ID) && (
-                                          <Badge className="bg-amber-600 hover:bg-amber-700 text-white text-[9px] h-4 rounded px-1 shrink-0 font-bold border-0 shadow-lg">
-                                            موقوفة
-                                          </Badge>
-                                        )}
-                                      </div>
-                                    </div>
-
-                                    {/* Details */}
-                                    <CardContent className="p-3 space-y-2">
-                                      {billboard.Nearest_Landmark && (
-                                        <p className="text-sm font-semibold text-primary flex items-center gap-1.5 truncate">
-                                          <MapPin className="h-3.5 w-3.5 shrink-0" />
-                                          {billboard.Nearest_Landmark}
-                                        </p>
-                                      )}
-
-                                      <div className="flex flex-wrap gap-1.5">
-                                        <Badge variant="secondary" className="text-[10px] gap-1">
-                                          <Layers className="h-2.5 w-2.5" />
-                                          {billboard.Faces_Count || 0} وجه
-                                        </Badge>
-                                        {billboard.Municipality && (
-                                          <Badge variant="secondary" className="text-[10px] gap-1">
-                                            <Building2 className="h-2.5 w-2.5" />
-                                            {billboard.Municipality}
-                                          </Badge>
-                                        )}
-                                        {billboard.District && (
-                                          <Badge variant="secondary" className="text-[10px] gap-1">
-                                            {billboard.District}
-                                          </Badge>
-                                        )}
-                                        {billboard.Municipality && (
-                                          <Badge variant="secondary" className="text-[10px] gap-1">
-                                            <Navigation className="h-2.5 w-2.5" />
-                                            {billboard.Municipality}
-                                          </Badge>
-                                        )}
-                                      </div>
-                                    </CardContent>
-                                  </Card>
-                                );
-                              })}
-                            </div>
+              <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-3">
+                {loading ? (
+                  <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />جارٍ التحميل...</div>
+                ) : visibleGroups.length === 0 ? (
+                  <p className="py-16 text-center text-sm text-muted-foreground">{q ? 'لا توجد نتائج مطابقة' : 'كل لوحات عقود الزبون موجودة في المهمة'}</p>
+                ) : visibleGroups.map(g => {
+                  const ids = g.boards.map((b: any) => Number(b.ID));
+                  const allSel = ids.every(id => selectedIds.includes(id));
+                  return (
+                    <section key={g.contractId} className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-primary" />
+                        <h3 className="text-sm font-bold">عقد #{g.contractId}</h3>
+                        <span className="truncate text-xs text-muted-foreground">{g.adType}{g.contractDate ? ` · ${g.contractDate}` : ''}</span>
+                        <Button variant="ghost" size="sm" className="mr-auto h-7 px-2 text-xs" onClick={() => toggleGroup(ids)}>{allSel ? 'إلغاء الكل' : 'تحديد الكل'}</Button>
                       </div>
-                    );
-                  })}
-                </div>
-                )}
-              </ScrollArea>
-            </>
-          )}
-
-          {/* Actions */}
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>إلغاء</Button>
-            <Button
-              onClick={handleAdd}
-              disabled={selectedIds.length === 0 || addMutation.isPending}
-              className="gap-2"
-            >
-              <Plus className="h-4 w-4" />
-              إضافة {selectedIds.length > 0 ? `(${selectedIds.length})` : ''}
-            </Button>
+                      <ul className="grid gap-2 lg:grid-cols-2">
+                        {g.boards.map((b: any) => {
+                          const id = Number(b.ID);
+                          const on = selectedIds.includes(id);
+                          const img = b.design_face_a || b.Image_URL;
+                          return (
+                            <li key={id}>
+                              <div role="checkbox" aria-checked={on} tabIndex={0}
+                                onClick={() => toggle(id)} onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(id); } }}
+                                className={cn('flex cursor-pointer items-center gap-3 rounded-lg border p-2 transition-colors', on ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/40')}>
+                                <span className={cn('flex h-5 w-5 shrink-0 items-center justify-center rounded border', on ? 'border-primary bg-primary text-primary-foreground' : 'border-input')}>
+                                  {on && <Check className="h-3.5 w-3.5" />}
+                                </span>
+                                <button type="button" onClick={e => { e.stopPropagation(); img && setZoomed(img); }}
+                                  className="h-12 w-16 shrink-0 overflow-hidden rounded-md bg-muted" aria-label="تكبير الصورة">
+                                  {img ? <img src={img} alt="" className="h-full w-full object-cover" loading="lazy" /> : <ImageIcon className="m-auto mt-3 h-5 w-5 text-muted-foreground/50" />}
+                                </button>
+                                <span className="min-w-0 flex-1">
+                                  <span className="flex items-center gap-1.5 text-sm font-semibold">
+                                    <span className="truncate">{b.Billboard_Name || `#${id}`}</span>
+                                    <span className="rounded bg-muted px-1.5 text-xs font-bold" dir="ltr">{b.Size}</span>
+                                    {pausedSet.has(id) && <span className="rounded bg-amber-500/15 px-1.5 text-xs text-amber-500">موقوفة</span>}
+                                  </span>
+                                  <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+                                    <MapPin className="h-3 w-3 shrink-0" />{[b.Nearest_Landmark, b.Municipality].filter(Boolean).join(' · ') || '—'}
+                                  </span>
+                                </span>
+                                <span className="shrink-0 text-xs text-muted-foreground">{b.Faces_Count || 1} وجه</span>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  );
+                })}
+              </div>
+            </div>
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
 
-    {/* Image Zoom Overlay */}
-    {zoomedImage && (
-      <Dialog open={!!zoomedImage} onOpenChange={() => setZoomedImage(null)}>
-        <DialogContent className="max-w-3xl max-h-[90vh] p-2" dir="rtl">
-          <div className="relative">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="absolute top-2 left-2 z-10 bg-background/80 backdrop-blur-sm rounded-full"
-              onClick={() => setZoomedImage(null)}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-            <img
-              src={zoomedImage}
-              alt="صورة مكبرة"
-              className="w-full h-auto max-h-[80vh] object-contain rounded-lg"
-            />
-          </div>
+          <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-muted/20 px-5 py-3">
+            <div className="text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">{selectedIds.length}</span> لوحة محددة
+              {newContracts.length > 0 && <span className="mr-2 text-orange-500">· ستُضاف للمهمة عقود: #{newContracts.join('، #')}</span>}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="ghost" onClick={() => onOpenChange(false)}>إلغاء</Button>
+              <Button onClick={() => addMutation.mutate(selectedIds)} disabled={!selectedIds.length || addMutation.isPending} className="gap-1.5">
+                {addMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                إضافة {selectedIds.length || ''} لوحة
+              </Button>
+            </div>
+          </footer>
         </DialogContent>
       </Dialog>
-    )}
+      {zoomed && createPortal(<ImageLightbox imageUrl={zoomed} onClose={() => setZoomed(null)} />, document.body)}
     </>
   );
 }

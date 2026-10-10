@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -6,12 +7,13 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Loader2, Save, Link as LinkIcon, ImageIcon, Eye, EyeOff, ArrowLeftRight, Camera, Circle, Bot } from 'lucide-react';
+import { Loader2, Save, Link as LinkIcon, ImageIcon, Eye, EyeOff, ArrowLeftRight, Camera, Circle, Bot, Calendar, ExternalLink } from 'lucide-react';
 import { clearImageUploadCache, type ImageUploadProvider } from '@/services/imageUploadService';
 import MessageTemplatesCard from '@/components/settings/MessageTemplatesCard';
 import { DEFAULT_DEBT_TEMPLATE, DEFAULT_CONTRACT_EXPIRY_TEMPLATE, DEFAULT_CONTRACT_EXPIRY_ALERT_TEMPLATE } from '@/utils/messageTemplates';
 
 export default function SystemSettings() {
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -395,6 +397,49 @@ export default function SystemSettings() {
             <p className="text-sm text-muted-foreground">
               رابط مخصص لرفع صور اللوحات وجميع تصديرات إدارة اللوحات (المتاحة، القادمة، الكل، المتابعة). إذا ترك فارغاً يستخدم الرابط العام أعلاه.
             </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Google Calendar Integration Card */}
+      <Card className="border border-border/80">
+        <CardHeader>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Calendar className="h-5 w-5 text-primary" />
+                تكامل تقويم جوجل وتنبيهات المواعيد (Google Calendar)
+              </CardTitle>
+              <CardDescription className="mt-1">
+                ربط مواعيد استحقاق الدفعات ونهاية العقود الإعلانية مع تقويم Google لإرسال تنبيهات تلقائية لإيميل معين أو عدة إيميلات
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate('/admin/google-calendar')}
+              className="cursor-pointer gap-1.5 text-primary border-primary/30 hover:bg-primary/10 shrink-0"
+            >
+              <ExternalLink className="h-4 w-4" />
+              لوحة تحكم التقويم
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-xl border bg-muted/20">
+            <div className="space-y-1">
+              <h4 className="font-semibold text-sm">إدارة الإيميلات والمزامنة الفورية</h4>
+              <p className="text-xs text-muted-foreground">
+                يمكنك تحديد إيميل معين أو أكثر لاستقبال إشعارات ودعوات التقويم، مع ضبط مواعيد التنبيهات (قبل 7 أيام، 3 أيام، يوم واحد) ومزامنة الأحداث بنقرة زر واحدة أو تصدير ملف التقويم (.ics).
+              </p>
+            </div>
+            <Button
+              onClick={() => navigate('/admin/google-calendar')}
+              className="cursor-pointer gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shrink-0"
+            >
+              <Calendar className="h-4 w-4" />
+              إعداد ومزامنة التقويم
+            </Button>
           </div>
         </CardContent>
       </Card>

@@ -7,7 +7,8 @@ import {
 } from '@/components/contracts/RentalCompensationAlert';
 import { usePricingDurations } from '@/hooks/usePricingDurations';
 import { durationPrice, durationName, durationEnd } from '@/utils/pricingDuration';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import React, { useRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { toast } from '@/components/ui/sonner';
@@ -25,7 +26,14 @@ import { ContractPDFDialog } from '@/components/Contract';
 import { getBillboardDimensions } from '@/lib/billboardDimensions';
 import type { Billboard } from '@/types';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, DollarSign, Settings, Wrench, FileText, List, Map as MapIcon, Trash2, Calculator, PauseCircle, AlertTriangle, AlertCircle, Layers, Filter, ChevronDown, Plus } from 'lucide-react';
+import { EditWorkspaceShell, EditSummaryPanel, EditMobileSummary } from '@/components/contracts/edit/EditWorkspaceShell';
+import { Input } from '@/components/ui/input';
+import { EditGroup, EditGroupNav, Field } from '@/components/contracts/edit/ui';
+import { PricingSettingsCard } from '@/components/contracts/edit/PricingSettingsCard';
+import { ServiceCostCard } from '@/components/contracts/edit/ServiceCostCard';
+import { OperatingFeesCard } from '@/components/contracts/edit/OperatingFeesCard';
+import { ArrowRight as CeIconBack, Info as CeIconInfo, LayoutGrid as CeIconBoards, PlusCircle as CeIconAdd, Calculator as CeIconMoney, Building2 as CeIconFriends, Palette as CeIconDesign, Undo2 as CeIconUndo, Printer as CeIconPrint, Save as CeIconSave, Loader2 as CeIconSpin, AlertCircle as CeIconAlert, PauseCircle as CeIconPause, RefreshCw as CeIconBorrow, Shuffle as CeIconComp } from 'lucide-react';
+import { RefreshCw, History, DollarSign, Settings, Wrench, FileText, List, Map as MapIcon, Trash2, Calculator, PauseCircle, AlertTriangle, AlertCircle, Layers, Filter, ChevronDown, Plus } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -83,7 +91,19 @@ const CONTRACT_EDIT_BILLBOARDS_STALE_TIME = 5 * 60 * 1000;
 
 export default function ContractEdit() {
   const [compensationChoices, setCompensationChoices] = useState<CompensationChoices>({});
-  const [workspaceSection, setWorkspaceSection] = useState<'basics' | 'boards' | 'catalog' | 'pricing' | 'friends' | 'designs'>('boards');
+  const [workspaceSection, setWorkspaceSection] = useState<'basics' | 'boards' | 'catalog' | 'pricing' | 'friends' | 'designs'>('basics');
+  // صفحة واحدة: الأقسام كلها ظاهرة، والتنقل يمرّر إلى القسم؛ اختيار اللوحات طبقة كاملة فوق الصفحة
+  const [sectionNavTick, setSectionNavTick] = useState(0);
+  const sectionNavMounted = useRef(false);
+  useEffect(() => {
+    if (!sectionNavMounted.current) { sectionNavMounted.current = true; return; }
+    if (workspaceSection === 'catalog') return;
+    const anchors: Record<string, string> = {
+      basics: 'contract-basics-head', boards: 'contract-boards-list', pricing: 'contract-pricing',
+      friends: 'contract-friends', designs: 'contract-designs',
+    };
+    document.getElementById(anchors[workspaceSection])?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [workspaceSection, sectionNavTick]);
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -262,7 +282,6 @@ export default function ContractEdit() {
   // Map view state
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [boardsViewMode, setBoardsViewMode] = useState<'cards' | 'map' | 'split'>('cards');
-  const [catalogFiltersCollapsed, setCatalogFiltersCollapsed] = useState(false);
 
   // Memoized billboards for map display
   const selectedBillboardsMapped = useMemo(() => {
@@ -438,66 +457,46 @@ export default function ContractEdit() {
 
   const handlePricingCategoryChange = (newVal: string) => {
     if (newVal === pricingCategory) return;
+    setPricingCategory(newVal);
     if (useStoredPrices) {
-      setPricingAlertPendingAction(() => () => {
-        setPricingCategory(newVal);
-        setUseStoredPrices(false);
-      });
-      setPricingAlertOpen(true);
-    } else {
-      setPricingCategory(newVal);
+      setUseStoredPrices(false);
+      toast.info('تغيّر أساس التسعير — تُحسب الأسعار الآن من جدول الأسعار الحالي');
     }
   };
 
   const handlePricingModeChange = (newVal: 'months' | 'days') => {
     if (newVal === pricingMode) return;
+    setPricingMode(newVal);
     if (useStoredPrices) {
-      setPricingAlertPendingAction(() => () => {
-        setPricingMode(newVal);
-        setUseStoredPrices(false);
-      });
-      setPricingAlertOpen(true);
-    } else {
-      setPricingMode(newVal);
+      setUseStoredPrices(false);
+      toast.info('تغيّر أساس التسعير — تُحسب الأسعار الآن من جدول الأسعار الحالي');
     }
   };
 
   const handleDurationMonthsChange = (newVal: number) => {
     if (newVal === durationMonths) return;
+    setDurationMonths(newVal);
     if (useStoredPrices) {
-      setPricingAlertPendingAction(() => () => {
-        setDurationMonths(newVal);
-        setUseStoredPrices(false);
-      });
-      setPricingAlertOpen(true);
-    } else {
-      setDurationMonths(newVal);
+      setUseStoredPrices(false);
+      toast.info('تغيّر أساس التسعير — تُحسب الأسعار الآن من جدول الأسعار الحالي');
     }
   };
 
   const handleDurationDaysChange = (newVal: number) => {
     if (newVal === durationDays) return;
+    setDurationDays(newVal);
     if (useStoredPrices) {
-      setPricingAlertPendingAction(() => () => {
-        setDurationDays(newVal);
-        setUseStoredPrices(false);
-      });
-      setPricingAlertOpen(true);
-    } else {
-      setDurationDays(newVal);
+      setUseStoredPrices(false);
+      toast.info('تغيّر أساس التسعير — تُحسب الأسعار الآن من جدول الأسعار الحالي');
     }
   };
 
   const handleUse30DayMonthChange = (newVal: boolean) => {
     if (newVal === use30DayMonth) return;
+    setUse30DayMonth(newVal);
     if (useStoredPrices) {
-      setPricingAlertPendingAction(() => () => {
-        setUse30DayMonth(newVal);
-        setUseStoredPrices(false);
-      });
-      setPricingAlertOpen(true);
-    } else {
-      setUse30DayMonth(newVal);
+      setUseStoredPrices(false);
+      toast.info('تغيّر أساس التسعير — تُحسب الأسعار الآن من جدول الأسعار الحالي');
     }
   };
   const [rentCost, setRentCost] = useState<number>(0);
@@ -880,15 +879,48 @@ export default function ContractEdit() {
         
         // ✅ NEW: Load design data from contract
         const savedDesigns = c.design_data;
+        let parsedDesigns: any[] = [];
         if (savedDesigns) {
           try {
             const parsed = typeof savedDesigns === 'string' ? JSON.parse(savedDesigns) : savedDesigns;
-            setBillboardDesigns(Array.isArray(parsed) ? parsed : []);
+            parsedDesigns = Array.isArray(parsed) ? parsed : [];
+            setBillboardDesigns(parsedDesigns);
           } catch (e) {
             console.error('Failed to parse design data:', e);
             setBillboardDesigns([]);
           }
         }
+        // ✅ التصاميم المطبّقة في مهام تركيب هذا العقد (المهام المجمعة) تظهر في صفحة العقد — الأحدث لكل لوحة
+        (async () => {
+          try {
+            const { data: tasks } = await supabase.from('installation_tasks').select('id').eq('contract_id', Number(contractNumber));
+            const taskIds = (tasks || []).map((t: any) => t.id);
+            if (!taskIds.length) return;
+            const { data: items } = await supabase
+              .from('installation_task_items')
+              .select('billboard_id, design_face_a, design_face_b, created_at, task_designs:selected_design_id(design_face_a_url, design_face_b_url)')
+              .in('task_id', taskIds)
+              .order('created_at', { ascending: false });
+            const latest = new Map<string, { a: string; b: string }>();
+            (items || []).forEach((it: any) => {
+              const key = String(it.billboard_id);
+              if (latest.has(key)) return;
+              const a = it.design_face_a || it.task_designs?.design_face_a_url || '';
+              const b = it.design_face_b || it.task_designs?.design_face_b_url || '';
+              if (a || b) latest.set(key, { a, b });
+            });
+            if (!latest.size) return;
+            const merged = [...parsedDesigns];
+            latest.forEach((v, key) => {
+              const idx = merged.findIndex((d: any) => String(d?.billboardId ?? d?.billboard_id ?? '') === key);
+              if (idx >= 0) merged[idx] = { ...merged[idx], designFaceA: v.a || merged[idx].designFaceA, designFaceB: v.b || merged[idx].designFaceB };
+              else merged.push({ billboardId: key, designFaceA: v.a, designFaceB: v.b, notes: '' });
+            });
+            setBillboardDesigns(merged);
+          } catch (e) {
+            console.warn('Failed to load task designs for contract:', e);
+          }
+        })();
         
         const s = c.start_date || c['Contract Date'] || '';
         const e = c.end_date || c['End Date'] || '';
@@ -1154,7 +1186,7 @@ export default function ContractEdit() {
 
         // ✅ NEW: Load friend rental operating fee settings
         const friendFeeEnabled = c.friend_rental_operating_fee_enabled === true;
-        const friendFeeRate = Number(c.friend_rental_operating_fee_rate || 3);
+        const friendFeeRate = Number(c.friend_rental_operating_fee_rate ?? 3);
         setFriendRentalOperatingFeeEnabled(friendFeeEnabled);
         setFriendRentalOperatingFeeRate(friendFeeRate);
         setRedistributeDiscount(false);
@@ -1548,7 +1580,7 @@ export default function ContractEdit() {
       // Force recalculation by updating a dependency
       setUserEditedRentCost(false);
       
-      toast.success('تم تحديث الأسعار من المنظومة الحالية');
+      toast.success('تم جلب الأسعار من جدول الأسعار الحالي — راجع الإجمالي ثم احفظ');
       
     } catch (e: any) {
       console.error('Failed to refresh prices:', e);
@@ -2436,95 +2468,14 @@ export default function ContractEdit() {
     setMaintenanceConfirmOpen(false);
   };
 
-  const removeSelected = async (id: string) => {
-    if (!contractNumber) {
-      setSelected((prev) => prev.filter((x) => x !== id));
-      return;
-    }
-    try {
-      const links = await checkLinkedTasks(Number(contractNumber), [Number(id)]);
-      const hasActiveTasks = links.some(link => 
-        link.linkedTasks.some(task => 
-          task.status !== 'completed' && task.itemStatus !== 'completed'
-        )
-      );
-
-      if (links.length > 0 && hasActiveTasks) {
-        setSmartBillboardLinks(links);
-        setPendingRemovalIds([id]);
-        setPendingSaveCallback(() => async (types: TaskTypeSelection) => {
-          const result = await removeBillboardFromAllTasks(Number(contractNumber), Number(id), types);
-          await removeBillboardFromContract(contractNumber, id);
-          setSelected((prev) => prev.filter((x) => x !== id));
-          if (result.replacedItemId) {
-            toast.success('اللوحة المركبة تم تعليمها كمستبدلة - أضف لوحة بديلة بنفس المقاس');
-          } else {
-            toast.success('تم حذف اللوحة من المهام المحددة');
-          }
-        });
-        setSmartConfirmOpen(true);
-      } else {
-        if (links.length > 0) {
-          await removeBillboardFromAllTasks(Number(contractNumber), Number(id), {
-            installation: false,
-            print: false,
-            cutout: false,
-            removal: false,
-          });
-        }
-        await removeBillboardFromContract(contractNumber, id);
-        setSelected((prev) => prev.filter((x) => x !== id));
-      }
-    } catch {
-      setSelected((prev) => prev.filter((x) => x !== id));
-    }
+  // الإزالة تعديل في المسودة فقط: تُحرَّر اللوحات وتُعالج مهامها عند حفظ العقد (مع سؤال المهام المرتبطة)
+  const removeSelected = (id: string) => {
+    setSelected((prev) => prev.filter((x) => x !== id));
   };
 
-  // ✅ Bulk remove multiple billboards at once
-  const removeMultipleSelected = async (ids: string[]) => {
-    if (!contractNumber || ids.length === 0) {
-      setSelected((prev) => prev.filter((x) => !ids.includes(x)));
-      return;
-    }
-    try {
-      const allBillboardIds = ids.map(id => Number(id));
-      const links = await checkLinkedTasks(Number(contractNumber), allBillboardIds);
-      const hasActiveTasks = links.some(link => 
-        link.linkedTasks.some(task => 
-          task.status !== 'completed' && task.itemStatus !== 'completed'
-        )
-      );
-
-      if (links.length > 0 && hasActiveTasks) {
-        setSmartBillboardLinks(links);
-        setPendingRemovalIds(ids);
-        setPendingSaveCallback(() => async (types: any) => {
-          for (const id of ids) {
-            await removeBillboardFromAllTasks(Number(contractNumber), Number(id), types);
-            await removeBillboardFromContract(contractNumber, id);
-          }
-          setSelected((prev) => prev.filter((x) => !ids.includes(x)));
-          toast.success(`تم حذف ${ids.length} لوحة من العقد والمهام`);
-        });
-        setSmartConfirmOpen(true);
-      } else {
-        for (const id of ids) {
-          if (links.length > 0) {
-            await removeBillboardFromAllTasks(Number(contractNumber), Number(id), {
-              installation: false,
-              print: false,
-              cutout: false,
-              removal: false,
-            });
-          }
-          await removeBillboardFromContract(contractNumber, id);
-        }
-        setSelected((prev) => prev.filter((x) => !ids.includes(x)));
-        toast.success(`تم حذف ${ids.length} لوحة من العقد`);
-      }
-    } catch {
-      setSelected((prev) => prev.filter((x) => !ids.includes(x)));
-    }
+  const removeMultipleSelected = (ids: string[]) => {
+    if (ids.length === 0) return;
+    setSelected((prev) => prev.filter((x) => !ids.includes(x)));
   };
 
   const handleAddCustomer = async (name: string) => {
@@ -3000,9 +2951,9 @@ export default function ContractEdit() {
       if (!contractNumber || saving) return;
       if (!contractHydrated || loading || pausedPricingFirst.loading || pausedPricingFirst.error) { toast.error(pausedPricingFirst.error || "انتظر اكتمال تحميل العقد والإيقافات"); return; }
       if (!customerName.trim() || !startDate || !endDate || endDate < startDate) { toast.error('راجع اسم العميل وتواريخ العقد'); return; }
-      if (pendingBillboardChanges) {
-        toast.error('تم تعديل لوحات العقد — اضغط «معالجة التعديلات» لإعادة توزيع الدفعات قبل الحفظ');
-        setWorkspaceSection('pricing');
+      if (zeroPricedAddedNames.length > 0) {
+        toast.error(`حدّد سعر اللوحات بدون سعر أولاً: ${zeroPricedAddedNames.join('، ')}`);
+        setWorkspaceSection('boards');
         return;
       }
       const missingFriendCosts = selected.filter(id => {
@@ -3310,15 +3261,23 @@ export default function ContractEdit() {
       const bb: any = billboards.find((b) => String((b as any).ID) === id);
       return bb?.Billboard_Name || bb?.name || `#${id}`;
     });
-  const processBillboardChanges = () => {
-    if (zeroPricedAddedNames.length > 0) {
-      toast.error(`حدّد سعر اللوحات بدون سعر أولاً: ${zeroPricedAddedNames.join('، ')}`);
-      return;
-    }
-    setInstallments((prev) => rescaleInstallmentsToTotal(prev, finalTotal));
-    setBillboardBaseline({ ids: [...selected], total: finalTotal });
-    toast.success('تمت معالجة التعديلات: أُعيد توزيع الدفعات على الإجمالي الجديد');
-  };
+
+  // تعديل اللوحات أو الأسعار يُطبَّق فوراً: الدفعات المتطابقة مع الإجمالي تتبعه تلقائياً (المعدّلة يدوياً لا تُلمس)
+  const syncedTotalRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!billboardBaseline || finalTotal <= 0) return;
+    const prevTotal = syncedTotalRef.current ?? billboardBaseline.total;
+    if (pendingBillboardChanges) setBillboardBaseline({ ids: [...selected], total: finalTotal });
+    syncedTotalRef.current = finalTotal;
+    if (Math.abs(prevTotal - finalTotal) < 0.01) return;
+    setInstallments((cur: any[]) => {
+      if (!cur.length) return cur;
+      const sum = cur.reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+      if (Math.abs(sum - prevTotal) > 1) return cur;
+      return rescaleInstallmentsToTotal(cur, finalTotal);
+    });
+  }, [finalTotal, pendingBillboardChanges, billboardBaseline]);
+
   const hasDraftChanges = draftBaseline !== null && draftFingerprint !== draftBaseline;
   useEffect(() => {
     if (!hasDraftChanges) return;
@@ -3330,82 +3289,97 @@ export default function ContractEdit() {
     const button = (event.target as HTMLElement).closest('button');
     if (!button || !hasDraftChanges) return;
     const label = (button.textContent || '') + ' ' + (button.getAttribute('title') || '');
+    if (button.closest('[data-draft-operation]')) return;
     if (button.closest('[data-immediate-operation]') || /إيقاف|استئناف|استبدال|تبديل|استعارة|لوحة موقوفة/.test(label)) {
       event.preventDefault(); event.stopPropagation();
       toast.error('احفظ تعديلات العقد أو تراجع عنها قبل تنفيذ إجراء على اللوحات');
     }
   };
 
+  const ceCurrency = getCurrencySymbol(contractCurrency);
+  const ceInstallmentsSum = installments.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const ceInstallmentsGap = money(ceInstallmentsSum - finalTotal);
+  const ceTotalDelta = money(finalTotal - originalTotal);
+  const ceSections = [
+    { key: 'basics', label: 'بيانات العقد', hint: 'الزبون والتواريخ', icon: CeIconInfo },
+    { key: 'boards', label: 'لوحات العقد', hint: `${selected.length} لوحة`, icon: CeIconBoards },
+    { key: 'catalog', label: 'إضافة لوحات', hint: 'بحث وخريطة', icon: CeIconAdd },
+    { key: 'pricing', label: 'الأسعار والدفعات', hint: `${finalTotal.toLocaleString('ar-LY')} ${ceCurrency}`, icon: CeIconMoney },
+    { key: 'friends', label: 'إيجارات الشركات', hint: 'لوحات صديقة', icon: CeIconFriends },
+    { key: 'designs', label: 'التصاميم والخريطة', hint: 'تصاميم اللوحات', icon: CeIconDesign },
+  ] as const;
+  const ceStatus = !contractHydrated
+    ? { label: 'جارٍ التحميل', tone: 'bg-muted text-muted-foreground' }
+    : hasDraftChanges
+      ? { label: 'تغييرات غير محفوظة', tone: 'bg-amber-500/15 text-amber-500' }
+      : { label: 'محفوظ', tone: 'bg-emerald-500/15 text-emerald-500' };
+
   return (
-    <div onClickCapture={guardOperationalAction} className="min-h-screen bg-muted/20 text-foreground p-3 md:p-4" dir="rtl">
-      <div className="max-w-[1440px] mx-auto space-y-3">
-        <div className="sticky top-0 z-30 space-y-2 bg-background/95 pb-2 backdrop-blur">
-        <ContractEditHeader
-          contractNumber={contractNumber}
-          onBack={() => navigate('/admin/contracts')}
-          onPrint={handlePrintContract}
-          onSave={save}
-          saving={saving || !contractHydrated}
+    <>
+    <EditWorkspaceShell
+      onClickCapture={guardOperationalAction}
+      title={`عقد #${contractNumber}`}
+      subtitle={`${customerName || 'بدون زبون'}${adType ? ` · ${adType}` : ''}${startDate ? ` · ${startDate} ← ${endDate || '—'}` : ''}`}
+      status={!contractHydrated ? { label: 'جارٍ التحميل', tone: 'loading' } : hasDraftChanges ? { label: 'تغييرات غير محفوظة', tone: 'dirty' } : { label: 'محفوظ', tone: 'saved' }}
+      badges={isExpiredContract ? <span className="rounded-md bg-rose-500/15 px-2 py-0.5 text-xs font-semibold text-rose-500">منتهي</span> : undefined}
+      onBack={() => navigate('/admin/contracts')}
+      onPrint={handlePrintContract}
+      printLabel="طباعة"
+      onSave={save}
+      saveLabel="حفظ العقد"
+      saving={saving}
+      saveDisabled={!contractHydrated}
+      onUndo={hasDraftChanges ? () => setReloadKey(key => key + 1) : undefined}
+      extraActions={!useFactorsPricing ? (useStoredPrices ? (
+        <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5 border-primary/40 text-primary hover:bg-primary/10" onClick={refreshPricesFromSystem} disabled={refreshingPrices}
+          title="الأسعار الحالية محفوظة في العقد. اضغط لإعادة حساب كل اللوحات من جدول الأسعار الحالي">
+          <RefreshCw className={`h-4 w-4 ${refreshingPrices ? 'animate-spin' : ''}`} />جلب الأسعار من الجدول الحالي
+        </Button>
+      ) : originalTotal > 0 ? (
+        <Button type="button" variant="ghost" size="sm" className="h-9 gap-1.5 text-muted-foreground" onClick={() => { setUseStoredPrices(true); toast.info('عادت الأسعار المحفوظة في العقد'); }}
+          title="الأسعار الآن من الجدول الحالي. اضغط للرجوع للأسعار المحفوظة">
+          <History className="h-4 w-4" />أسعار الجدول الحالي · رجوع للمحفوظة
+        </Button>
+      ) : undefined) : undefined}
+      sections={ceSections}
+      active={workspaceSection}
+      onSectionChange={k => { setWorkspaceSection(k as typeof workspaceSection); setSectionNavTick(t => t + 1); }}
+      navLabel="أقسام تعديل العقد"
+      mobileSummary={
+        <EditMobileSummary items={[
+          { label: 'السابق', value: originalTotal.toLocaleString('ar-LY') },
+          { label: 'بعد التعديل', value: finalTotal.toLocaleString('ar-LY'), tone: 'primary' },
+          { label: 'فرق الدفعات', value: Math.abs(ceInstallmentsGap) > 0.5 ? ceInstallmentsGap.toLocaleString('ar-LY') : 'مطابقة', tone: Math.abs(ceInstallmentsGap) > 0.5 ? 'bad' : 'good' },
+        ]} />
+      }
+      summary={
+        <EditSummaryPanel
+          currency={ceCurrency}
+          finalTotal={finalTotal}
+          originalTotal={originalTotal}
+          discount={Number(discountAmount || 0)}
+          installmentsSum={ceInstallmentsSum}
+          boardsCount={selected.length}
+          durationLabel={pricingMode === 'days' ? `${durationDays} يوم` : `${durationMonths} شهر`}
+          startDate={startDate}
+          endDate={endDate}
+          includeInstallation={includeInstallationInPrice}
+          includePrint={includePrintInPrice}
+          onReviewPayments={() => { setWorkspaceSection('pricing'); setTimeout(() => document.getElementById('contract-payments')?.scrollIntoView({ behavior: 'smooth' }), 50); }}
+          quickActions={[
+            { label: 'إضافة لوحات جديدة', icon: CeIconAdd, onClick: () => setWorkspaceSection('catalog') },
+            { label: 'لوحة موقوفة من عقد آخر', icon: CeIconPause, onClick: () => setPausedFromContractOpen(true) },
+            { label: 'استعارة لوحة من عقد آخر', icon: CeIconBorrow, onClick: () => setBorrowDialogOpen(true), tone: 'warning' },
+            ...(!isExpiredContract && compensationRows.length > 0 ? [{ label: 'تعويض العقود الأصلية', icon: CeIconComp, onClick: () => setCompensationDialogOpen(true), badge: compensationRows.length }] : []),
+          ]}
+          note="تعديلات العقد تُحفظ بزر الحفظ. الإيقاف والاستبدال والاستئناف تُنفّذ فور تأكيدها وتظهر في السجل."
         />
-        <nav aria-label="أقسام تعديل العقد" className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1.5">
-          {([
-            ['basics', 'بيانات العقد'],
-            ['boards', `لوحات العقد (${selected.length})`],
-            ['catalog', 'اختيار لوحات جديدة'],
-            ['pricing', 'الأسعار والدفعات'],
-            ['friends', 'إيجارات الشركات'],
-            ['designs', 'التصاميم والخريطة'],
-          ] as const).map(([section, label]) => (
-            <button key={section} type="button" aria-pressed={workspaceSection === section}
-              onClick={() => setWorkspaceSection(section)}
-              className={`min-h-11 flex-1 cursor-pointer whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary ${workspaceSection === section ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
-              {label}
-            </button>
-          ))}
-        </nav>
-        </div>
+      }
+    >
 
-        <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-card px-3 py-2 sm:grid-cols-4" aria-live="polite">
-          <div><span className="text-xs text-muted-foreground">حالة التعديل</span><p className="text-sm font-semibold">{!contractHydrated ? 'جارٍ تحميل العقد' : hasDraftChanges ? 'تغييرات غير محفوظة' : 'البيانات المحفوظة'}</p></div>
-          <div><span className="text-xs text-muted-foreground">الإجمالي السابق</span><p className="font-semibold">{originalTotal.toLocaleString('ar-LY')} {getCurrencySymbol(contractCurrency)}</p></div>
-          <div><span className="text-xs text-muted-foreground">الإجمالي بعد التعديل</span><p className="font-semibold text-primary">{finalTotal.toLocaleString('ar-LY')} {getCurrencySymbol(contractCurrency)}</p></div>
-          <div><span className="text-xs text-muted-foreground">فرق الدفعات</span><p className="font-semibold">{money(installments.reduce((sum, row) => sum + Number(row.amount || 0), 0) - finalTotal).toLocaleString('ar-LY')} {getCurrencySymbol(contractCurrency)}</p></div>
-          {hasDraftChanges && <Button className="sm:col-span-4 cursor-pointer" variant="outline" onClick={() => setReloadKey(key => key + 1)}>التراجع عن تعديلات المسودة وإعادة تحميل المحفوظ</Button>}
-        </div>
-        {pendingBillboardChanges && billboardBaseline && (
-          <PendingChangesBanner
-            added={addedSinceBaseline.length}
-            removed={removedSinceBaseline.length}
-            previousTotal={billboardBaseline.total}
-            newTotal={finalTotal}
-            installmentsMatch={installmentsMatchTotal(installments, finalTotal)}
-            currencySymbol={getCurrencySymbol(contractCurrency)}
-            entityLabel="العقد"
-            zeroPricedNames={zeroPricedAddedNames}
-            onProcess={processBillboardChanges}
-            onReview={() => setWorkspaceSection('pricing')}
-          />
-        )}
-        <details className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-          <summary className="cursor-pointer">معلومات الحفظ والأسعار المحفوظة</summary>
-          <p className="pt-2 leading-6">تعديلات العقد تُحفظ بزر الحفظ. إجراءات الإيقاف والاستبدال والاستئناف تُنفّذ فور تأكيدها وتظهر في السجل.</p>
- {/* تنبيه الأسعار المحفوظة */}
-        {useStoredPrices && currentContract?.billboard_prices && (
-          <div className="flex items-start gap-3 px-4 py-3 rounded-xl border-2 border-amber-500/50 bg-amber-500/10">
-            <div className="p-1.5 rounded-lg bg-amber-500/20 mt-0.5 shrink-0">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-amber-700 dark:text-amber-400">الأسعار المعروضة هي الأسعار المحفوظة مسبقاً في هذا العقد</p>
-              <p className="text-xs text-amber-600/80 dark:text-amber-500/80 mt-0.5">
-                لن يتم جلب أسعار جديدة من جدول التسعير تلقائياً. لتحديث الأسعار من الجدول الحالي، انقر على زر "تحديث الأسعار من الجدول الحالي" في إعدادات التسعير.
-              </p>
-            </div>
-          </div>
-        )}
 
-        </details>
-        <section id="contract-basics" className={`${workspaceSection === 'basics' ? 'grid' : 'hidden'} scroll-mt-40 items-start gap-5 lg:grid-cols-2`} aria-label="بيانات العقد">
+        <div id="contract-basics-head" className="scroll-mt-28 border-b border-border pb-2"><h2 className="text-base font-bold">بيانات العقد</h2><p className="text-xs text-muted-foreground">الزبون والإعلان والفترة</p></div>
+        <section id="contract-basics" className="grid scroll-mt-28 items-start gap-4 lg:grid-cols-2" aria-label="بيانات العقد">
             {/* معلومات العميل */}
             <CustomerInfoForm
               customerName={customerName}
@@ -3441,11 +3415,11 @@ export default function ContractEdit() {
 
 
         </section>
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-4">
           {/* Main Content */}
-          <div id="contract-boards" className={`${['boards', 'catalog', 'friends', 'designs'].includes(workspaceSection) ? 'block' : 'hidden'} scroll-mt-40 min-w-0 space-y-3`}>
-            <div className={workspaceSection !== 'catalog' ? 'space-y-3' : 'hidden'}>
-            <div className={workspaceSection === 'boards' ? 'space-y-3' : 'hidden'}>
+          <div id="contract-boards" className="block min-w-0 space-y-3">
+            <div className="space-y-8">
+            <div id="contract-boards-list" className="scroll-mt-28 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-3">
                 <h2 className="text-base font-bold">لوحات العقد والإيقافات</h2>
@@ -3488,7 +3462,7 @@ export default function ContractEdit() {
               </Button>
             </div>
             {/* أزرار الاستعارة والإيقاف الخارجي */}
-            <details className="rounded-xl border border-border p-3"><summary className="cursor-pointer text-sm font-medium text-foreground">إجراءات إضافية للوحات</summary><div className="mt-3 flex justify-end gap-2 flex-wrap">
+            <details className="rounded-xl border border-border p-3 xl:hidden"><summary className="cursor-pointer text-sm font-medium text-foreground">إجراءات إضافية للوحات</summary><div className="mt-3 flex justify-end gap-2 flex-wrap">
               <Button
                 type="button"
                 variant="outline"
@@ -3569,7 +3543,7 @@ export default function ContractEdit() {
             )}
 
             {boardsViewMode === 'split' && (
-              <div className="w-full h-[540px] lg:h-[58vh] min-h-[440px] rounded-2xl overflow-hidden border border-border shadow-sm relative mb-4">
+              <div className="w-full h-[540px] lg:h-[58vh] min-h-[440px] rounded-2xl overflow-hidden border border-border shadow-sm relative mb-0">
                 <SelectableGoogleHomeMap
                   className="w-full h-full"
                   billboards={selectedBillboardsMapped}
@@ -3659,8 +3633,8 @@ export default function ContractEdit() {
             )}
 
             </div>
-            <div className={workspaceSection === 'friends' ? 'space-y-3' : 'hidden'}>
-            <h2 className="text-lg font-bold">إيجارات الشركات الصديقة</h2>
+            <div id="contract-friends" className={`${billboards.some(b => selected.includes(String((b as any).ID)) && (b as any).friend_company_id) ? 'space-y-3' : 'hidden'} scroll-mt-28`}>
+            <div className="border-b border-border pb-2"><h2 className="text-base font-bold">إيجارات الشركات الصديقة</h2></div>
             {!billboards.some(b => selected.includes(String((b as any).ID)) && (b as any).friend_company_id) && <p className="rounded-lg border border-border bg-card p-4 text-muted-foreground">لا توجد لوحات مستأجرة من شركات صديقة ضمن هذا العقد.</p>}
  {/* NEW: إيجارات اللوحات الصديقة بالجملة */}
             {selected.length > 0 && billboards.filter(b => 
@@ -3704,12 +3678,12 @@ export default function ContractEdit() {
             )}
 
             </div>
-            <div className={workspaceSection === 'designs' ? 'space-y-3' : 'hidden'}>
-            <h2 className="text-lg font-bold">التصاميم والخريطة</h2>
-            {/* خريطة اللوحات المرتبطة - مطوية افتراضياً */}
+            <div id="contract-designs" className="scroll-mt-28 space-y-3">
+            <div className="border-b border-border pb-2"><h2 className="text-base font-bold">التصاميم والخريطة</h2></div>
+            {/* خريطة اللوحات المرتبطة - تُحمّل عند فتح القسم فقط */}
             {selected.length > 0 && (
               <Card className="bg-card border-border shadow-card overflow-hidden">
-                <Collapsible defaultOpen={true}>
+                <Collapsible defaultOpen={false}>
                   <CollapsibleTrigger asChild>
                     <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-accent/50 transition-colors">
                       <div className="flex items-center gap-3">
@@ -3767,76 +3741,50 @@ export default function ContractEdit() {
             </div>
             </div>
  {/* اختيار اللوحات مع الخريطة */}
-            <div className={workspaceSection === 'catalog' ? 'space-y-4' : 'hidden'}>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div><h2 className="text-lg font-bold">اختيار لوحات جديدة</h2><p className="text-sm text-muted-foreground">ابحث وحدد اللوحات، ثم عد لمراجعة اختياراتك داخل العقد.</p></div>
-                <Button type="button" variant="outline" onClick={() => setWorkspaceSection('boards')} className="min-h-10 cursor-pointer transition-all duration-200">مراجعة لوحات العقد ({selected.length})</Button>
-              </div>
-            <Card className="flex min-h-[700px] flex-col overflow-hidden border-border shadow-sm">
-              <div className="shrink-0 border-b border-border bg-gradient-to-l from-primary/10 via-primary/5 to-transparent p-3 lg:p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
-                    <Filter className="h-3.5 w-3.5 text-primary" />
-                    فلاتر البحث والتصفية
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setCatalogFiltersCollapsed(prev => !prev)}
-                    className="h-7 px-2.5 text-xs gap-1.5 text-muted-foreground hover:text-foreground cursor-pointer rounded-lg border border-border/60 bg-background/50 hover:bg-muted"
-                  >
-                    <span>{catalogFiltersCollapsed ? 'إظهار الفلاتر' : 'طي الفلاتر لتوسيع المساحة'}</span>
-                    <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${catalogFiltersCollapsed ? '' : 'rotate-180'}`} />
-                  </Button>
+            {createPortal(
+            <div className={workspaceSection === 'catalog' ? 'fixed inset-0 z-[10000] space-y-3 overflow-y-auto bg-background p-3 md:p-6' : 'hidden'} role="region" aria-label="اختيار لوحات للعقد">
+              <Tabs defaultValue="list" className="flex w-full flex-col">
+              <div className="relative z-10 -mx-3 -mt-3 space-y-3 border-b md:sticky md:top-0 border-border bg-background/95 px-3 py-3 backdrop-blur md:-mx-6 md:-mt-6 md:px-6">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="text-base font-bold">إضافة لوحات إلى العقد #{contractNumber}</h2>
+                    <p className="text-xs text-muted-foreground">مرتبة حسب المقاس ثم المستوى ثم البلدية · {filtered.length} لوحة معروضة · {selected.length} في العقد</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <TabsList className="h-9 bg-muted/50 p-1">
+                      <TabsTrigger value="list" className="h-7 cursor-pointer gap-1.5 px-3 text-xs data-[state=active]:bg-card data-[state=active]:shadow-sm"><List className="h-3.5 w-3.5" />قائمة</TabsTrigger>
+                      <TabsTrigger value="map" className="h-7 cursor-pointer gap-1.5 px-3 text-xs data-[state=active]:bg-card data-[state=active]:shadow-sm"><MapIcon className="h-3.5 w-3.5" />خريطة</TabsTrigger>
+                    </TabsList>
+                    <Button type="button" onClick={() => { setWorkspaceSection('boards'); setSectionNavTick(t => t + 1); }} className="h-9 gap-1.5">تم — العودة إلى العقد ({selected.length})</Button>
+                  </div>
                 </div>
-                {!catalogFiltersCollapsed && (
-                  <BillboardFilters
-                    searchQuery={searchQuery}
-                    setSearchQuery={setSearchQuery}
-                    cityFilter={cityFilter}
-                    setCityFilter={setCityFilter}
-                    sizeFilter={sizeFilter}
-                    setSizeFilter={setSizeFilter}
-                    statusFilter={statusFilter}
-                    setStatusFilter={setStatusFilter}
-                    pricingCategory={pricingCategory}
-                    setPricingCategory={handlePricingCategoryChange}
-                    cities={cities}
-                    sizes={sizes}
-                    pricingCategories={pricingCategories}
-                    municipalities={municipalities}
-                    municipalityFilter={municipalityFilter}
-                    setMunicipalityFilter={setMunicipalityFilter}
-                    onCleanup={handleCleanup}
-                    sizeFilters={sizeFilters}
-                    setSizeFilters={setSizeFilters}
-                    totalCount={billboards.length}
-                    selectedCount={selected.length}
-                  />
-                )}
+                <BillboardFilters
+                  searchQuery={searchQuery}
+                  setSearchQuery={setSearchQuery}
+                  cityFilter={cityFilter}
+                  setCityFilter={setCityFilter}
+                  sizeFilter={sizeFilter}
+                  setSizeFilter={setSizeFilter}
+                  statusFilter={statusFilter}
+                  setStatusFilter={setStatusFilter}
+                  pricingCategory={pricingCategory}
+                  setPricingCategory={handlePricingCategoryChange}
+                  cities={cities}
+                  sizes={sizes}
+                  pricingCategories={pricingCategories}
+                  municipalities={municipalities}
+                  municipalityFilter={municipalityFilter}
+                  setMunicipalityFilter={setMunicipalityFilter}
+                  onCleanup={handleCleanup}
+                  sizeFilters={sizeFilters}
+                  setSizeFilters={setSizeFilters}
+                  totalCount={filtered.length}
+                  selectedCount={selected.length}
+                />
               </div>
 
-              <Tabs defaultValue="list" className="w-full flex-1 flex flex-col min-h-0">
-                <div className="flex shrink-0 flex-col gap-3 border-b border-border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h3 className="text-sm font-bold text-foreground">اختيار اللوحات</h3>
-                    <p className="text-xs text-muted-foreground">الصورة الكاملة والتفاصيل الأساسية قبل الإضافة للعقد</p>
-                  </div>
-                  <TabsList className="grid h-11 w-full grid-cols-2 bg-background/70 sm:w-[240px]">
-                    <TabsTrigger value="list" className="flex cursor-pointer items-center gap-2 transition-all duration-200 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                      <List className="h-4 w-4" />
-                      القائمة
-                    </TabsTrigger>
-                    <TabsTrigger value="map" className="flex cursor-pointer items-center gap-2 transition-all duration-200 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
-                      <MapIcon className="h-4 w-4" />
-                      الخريطة
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
-                
-                <TabsContent value="list" className="m-0 flex-1 overflow-y-auto min-h-[500px] max-h-[75vh]">
-                  <div className="space-y-3 p-3 lg:p-5">
+                <TabsContent value="list" className="m-0">
+                  <div className="pt-1">
                     <AvailableBillboardsGrid
                       billboards={filtered}
                       selected={selected}
@@ -3854,7 +3802,7 @@ export default function ContractEdit() {
                   </div>
                 </TabsContent>
                 
-                <TabsContent value="map" className="m-0 p-0 flex-1 min-h-[650px] h-[760px] lg:h-[84vh] relative">
+                <TabsContent value="map" className="relative m-0 mt-1 h-[calc(100vh-220px)] min-h-[520px] overflow-hidden rounded-xl border border-border p-0">
                   <SelectableGoogleHomeMap
                     className="w-full h-full min-h-[650px]"
                     hideInternalFilters
@@ -3924,535 +3872,113 @@ export default function ContractEdit() {
                   />
                 </TabsContent>
               </Tabs>
-            </Card>
             </div>
+            , document.body)}
           </div>
 
           {/* Sidebar - القائمة الجانبية */}
-          <div id="contract-pricing" className={`${workspaceSection === 'pricing' ? 'grid' : 'hidden'} scroll-mt-40 min-w-0 items-start gap-5 lg:grid-cols-2`}>
-            <PricingSnapshotCard snapshot={currentContract?.pricing_snapshot} currentPricing={pricingData} entityLabel="العقد" />
-            <div className="lg:col-span-2 flex flex-wrap items-center justify-between gap-3">
-              <div><h2 className="text-lg font-bold">الأسعار والخدمات والدفعات</h2><p className="text-sm text-muted-foreground">اضبط التكاليف، ثم راجع الخصومات والإجمالي وجدول السداد.</p></div>
-              <div className="flex flex-wrap gap-2">
-                <a href="#contract-summary" className="min-h-10 rounded-lg border border-border bg-card px-4 py-2 text-sm cursor-pointer hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary transition-all duration-200">الملخص والخصومات</a>
-                <a href="#contract-payments" className="min-h-10 rounded-lg border border-border bg-card px-4 py-2 text-sm cursor-pointer hover:bg-muted focus-visible:ring-2 focus-visible:ring-primary transition-all duration-200">جدول الدفعات</a>
+          <div id="contract-pricing" className="block min-w-0 scroll-mt-28 space-y-6">
+            <div className="border-b border-border pb-2"><h2 className="text-base font-bold">الأسعار والدفعات</h2></div>
+            <EditGroupNav items={[
+              { id: 'pricing-settings', label: 'الإعدادات والخدمات' },
+              { id: 'contract-summary', label: 'الخصومات والإجمالي' },
+              { id: 'contract-payments', label: 'الدفعات' },
+              { id: 'contract-expenses', label: 'المصاريف' },
+            ]} />
+
+            <EditGroup id="pricing-settings" title="الإعدادات والخدمات" description="مصدر الأسعار والعملة، ثم تكاليف التركيب والطباعة ورسوم التشغيل">
+              <PricingSnapshotCard snapshot={currentContract?.pricing_snapshot} currentPricing={pricingData} entityLabel="العقد" />
+              <div className="grid items-start gap-4 lg:grid-cols-2">
+                <PricingSettingsCard
+                  useFactorsPricing={useFactorsPricing}
+                  setUseFactorsPricing={setUseFactorsPricing}
+                  useStoredPrices={useStoredPrices}
+                  setUseStoredPrices={setUseStoredPrices}
+                  hasStoredPrices={originalTotal > 0}
+                  refreshing={refreshingPrices}
+                  onRefreshFromTable={refreshPricesFromSystem}
+                  currency={contractCurrency}
+                  setCurrency={setContractCurrency}
+                  exchangeRate={exchangeRate}
+                  setExchangeRate={setExchangeRate}
+                  currencies={CURRENCIES}
+                  currencySymbol={getCurrencySymbol(contractCurrency)}
+                />
+                <div className="space-y-4">
+                  <ServiceCostCard
+                    icon={Wrench}
+                    title="التركيب"
+                    description="تكلفة تركيب اللوحات حسب المقاس"
+                    enabled={installationEnabled}
+                    onToggle={(checked) => { setInstallationEnabled(checked); toast.success(checked ? 'تم تفعيل التركيب' : 'تم إلغاء التركيب'); }}
+                    rows={(installationCostSummary?.groupedSizes || []).map((sizeInfo: any) => ({
+                      label: sizeInfo.size,
+                      sub: `${sizeInfo.count} لوحة`,
+                      value: applyExchangeRate(sizeInfo.totalForSize),
+                    }))}
+                    total={applyExchangeRate(installationCostSummary?.totalInstallationCost || 0)}
+                    currencySymbol={getCurrencySymbol(contractCurrency)}
+                    emptyText="لا توجد لوحات مختارة"
+                    disabledText="العقد بدون تكلفة تركيب"
+                  />
+                  <ServiceCostCard
+                    icon={FileText}
+                    title="الطباعة"
+                    description="المساحة × سعر المتر لكل مقاس"
+                    enabled={printCostEnabled}
+                    onToggle={setPrintCostEnabled}
+                    extra={
+                      <Field label="سعر المتر المربع" hint="يُطبّق على مساحة كل الأوجه المطبوعة">
+                        <div className="relative">
+                          <Input type="number" min="0" step="0.01" value={printPricePerMeter}
+                            onChange={(e) => setPrintPricePerMeter(Number(e.target.value) || 0)} className="h-10 pl-10 text-center tabular-nums" />
+                          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">د.ل</span>
+                        </div>
+                      </Field>
+                    }
+                    rows={(printCostSummary?.groupedDetails || []).map((detail: any) => ({
+                      label: detail.size,
+                      sub: `${detail.count} لوحة × ${detail.faces} وجه · ${Number(detail.area || 0).toFixed(1)} م²`,
+                      value: Number(detail.totalCost || 0),
+                    }))}
+                    total={applyExchangeRate(Number(printCostSummary?.totalPrintCost || 0))}
+                    currencySymbol={getCurrencySymbol(contractCurrency)}
+                    emptyText={selected.length === 0 ? 'لا توجد لوحات مختارة' : 'أدخل سعر المتر لحساب التكلفة'}
+                    disabledText="العقد بدون تكلفة طباعة"
+                  />
+                </div>
               </div>
-            </div>
-            {/* معلومات لوحات المشاركة */}
-            {selected.length > 0 && startDate && endDate && (
-              <PartnershipBillboardsInfo 
-                billboardIds={selected.map(id => Number(id))}
-                startDate={startDate}
-                endDate={endDate}
-              />
-            )}
-
-            {/* رسوم التشغيل للوحات المشاركة */}
-            {selected.length > 0 && billboards.filter(b => selected.includes(String((b as any).ID)) && (b as any).is_partnership).length > 0 && (
-              <Card className="bg-card border-border shadow-lg overflow-hidden">
-                <div className="h-1 bg-gradient-to-r from-primary to-primary/60" />
-                <CardHeader className="py-3 px-4 bg-gradient-to-br from-primary/5 to-transparent">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <div className="p-1.5 rounded-lg bg-primary/10">
-                      <Settings className="h-4 w-4 text-primary" />
-                    </div>
-                    رسوم التشغيل (لوحات المشاركة)
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-4 space-y-4">
-                  <div className="flex items-center gap-3">
-                    <Label className="text-sm font-medium whitespace-nowrap">النسبة:</Label>
-                    <div className="relative flex-1">
-                      <input
-                        type="number"
-                        value={partnershipOperatingFeeRate}
-                        onChange={(e) => setPartnershipOperatingFeeRate(Number(e.target.value) || 0)}
-                        className="w-full h-10 px-3 rounded-lg bg-background border-2 border-border focus:border-purple-500 transition-colors text-center font-medium"
-                        placeholder="3"
-                        min="0"
-                        step="0.1"
-                      />
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium">%</span>
-                    </div>
-                  </div>
-                  
-                  <div className="p-3 rounded-xl bg-gradient-to-br from-purple-500/10 to-purple-500/5 border border-purple-500/20 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">إيجار لوحات المشاركة:</span>
-                      <span className="font-semibold">{partnershipBillboardsRentalCost.toLocaleString('ar-LY')} د.ل</span>
-                    </div>
-                    <div className="flex justify-between items-center pt-2 border-t border-purple-500/20">
-                      <span className="font-semibold text-purple-700 dark:text-purple-300">رسوم التشغيل:</span>
-                      <span className="text-lg font-bold text-primary">{partnershipOperatingFee.toLocaleString('ar-LY')} د.ل</span>
-                    </div>
-                  </div>
-                  
-                  <p className="text-xs text-muted-foreground text-center bg-muted/30 p-2 rounded-lg">
- ️ رسوم منفصلة عن اللوحات العادية
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-            
-            {/* رسوم التشغيل العادية - ملخص */}
-            {selected.length > 0 && regularBillboardsRentalCost > 0 && (
-              <Card className="bg-card border-border shadow-lg overflow-hidden">
-                <div className="h-1 bg-gradient-to-r from-blue-500 to-cyan-500" />
-                <CardHeader className="py-3 px-4 bg-gradient-to-br from-blue-500/5 to-transparent">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <div className="p-1.5 rounded-lg bg-blue-500/10">
-                      <DollarSign className="h-4 w-4 text-blue-600" />
-                    </div>
-                    رسوم التشغيل (اللوحات العادية)
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-4 space-y-4">
-                  <div className="flex items-center gap-3">
-                    <Label className="text-sm font-medium whitespace-nowrap">النسبة:</Label>
-                    <div className="relative flex-1">
-                      <input
-                        type="number"
-                        value={operatingFeeRate}
-                        onChange={(e) => setOperatingFeeRate(Number(e.target.value) || 3)}
-                        className="w-full h-10 px-3 rounded-lg bg-background border-2 border-border focus:border-blue-500 transition-colors text-center font-medium"
-                        placeholder="3"
-                        min="0"
-                        max="100"
-                        step="0.1"
-                      />
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium">%</span>
-                    </div>
-                  </div>
-                  
-                  <div className="p-3 rounded-xl bg-gradient-to-br from-blue-500/10 to-blue-500/5 border border-blue-500/20 space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">صافي الإيجار (للشركة):</span>
-                      <span className="font-semibold">{netRentalForCompany.toLocaleString('ar-LY')} د.ل</span>
-                    </div>
-                    <div className="flex justify-between items-center pt-2 border-t border-blue-500/20">
-                      <span className="font-semibold text-blue-700 dark:text-blue-300">رسوم التشغيل:</span>
-                      <span className="text-lg font-bold text-blue-600">{operatingFee.toLocaleString('ar-LY')} د.ل</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
- {/* إجمالي رسوم التشغيل */}
-            {(operatingFee > 0 || partnershipOperatingFee > 0 || friendOperatingFeeAmount > 0) && (
-              <Card className="bg-card border-border shadow-lg overflow-hidden">
-                <div className="h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
-                <CardHeader className="py-3 px-4 bg-gradient-to-br from-emerald-500/5 to-transparent">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <div className="p-1.5 rounded-lg bg-emerald-500/10">
-                      <DollarSign className="h-4 w-4 text-emerald-600" />
-                    </div>
-                    إجمالي رسوم التشغيل
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-4 space-y-3">
-                  {operatingFee > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">رسوم اللوحات العادية ({operatingFeeRate}%):</span>
-                      <span className="font-semibold text-blue-600">{operatingFee.toLocaleString('ar-LY')} {getCurrencySymbol(contractCurrency)}</span>
-                    </div>
-                  )}
-                  {partnershipOperatingFee > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">رسوم لوحات المشاركة ({partnershipOperatingFeeRate}%):</span>
-                      <span className="font-semibold text-primary">{partnershipOperatingFee.toLocaleString('ar-LY')} {getCurrencySymbol(contractCurrency)}</span>
-                    </div>
-                  )}
-                  {friendOperatingFeeAmount > 0 && (
-                    <div className="flex flex-col gap-1">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">تكلفة اللوحات الصديقة:</span>
-                        <span className="font-semibold text-amber-500">{totalFriendCosts.toLocaleString('ar-LY')} {getCurrencySymbol(contractCurrency)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">رسوم التشغيل ({friendRentalOperatingFeeRate}%):</span>
-                        <span className="font-semibold text-amber-600">{friendOperatingFeeAmount.toLocaleString('ar-LY')} {getCurrencySymbol(contractCurrency)}</span>
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex justify-between items-center pt-3 border-t border-emerald-500/20">
-                    <span className="font-bold text-emerald-700 dark:text-emerald-300">الإجمالي:</span>
-                    <span className="text-xl font-bold text-emerald-600">
-                      {(operatingFee + partnershipOperatingFee + friendOperatingFeeAmount).toLocaleString('ar-LY')} {getCurrencySymbol(contractCurrency)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground text-center bg-muted/30 p-2 rounded-lg">
-                    يتم حفظ هذا المبلغ في حقل "رسوم التشغيل" بالعقد
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-
-            <Card className="bg-card border-border shadow-lg overflow-hidden">
-              <div className="h-1 bg-gradient-to-r from-amber-500 to-orange-500" />
-              <CardHeader className="py-3 px-4 bg-gradient-to-br from-amber-500/5 to-transparent">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <div className="p-1.5 rounded-lg bg-amber-500/10">
-                    <DollarSign className="h-4 w-4 text-amber-600" />
-                  </div>
-                  إعدادات العملة
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-4 space-y-4">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium text-muted-foreground">عملة العقد</Label>
-                    <Select value={contractCurrency} onValueChange={setContractCurrency}>
-                      <SelectTrigger className="h-10 bg-background border-2 border-border focus:border-amber-500">
-                        <SelectValue placeholder="اختر العملة" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-popover border-border z-[10000]">
-                        {CURRENCIES.map((currency) => (
-                          <SelectItem key={currency.code} value={currency.code}>
-                            {currency.symbol} - {currency.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium text-muted-foreground">سعر الصرف</Label>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        value={exchangeRate}
-                        onChange={(e) => setExchangeRate(Number(e.target.value) || 1)}
-                        className="w-full h-10 px-3 rounded-lg bg-background border-2 border-border focus:border-amber-500 transition-colors text-center font-medium"
-                        placeholder="1"
-                        min="0"
-                        step="0.01"
-                      />
-                    </div>
-                  </div>
-                </div>
-                
-                {contractCurrency !== 'LYD' && (
-                  <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-center">
-                    <span className="text-xs text-amber-700 dark:text-amber-300">
-                      1 د.ل = {exchangeRate} {getCurrencySymbol(contractCurrency)}
-                    </span>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* إعدادات التسعير */}
-            <Card className="bg-card border-border shadow-lg overflow-hidden">
-              <div className="h-1 bg-gradient-to-r from-violet-500 to-purple-500" />
-              <CardHeader className="py-3 px-4 bg-gradient-to-br from-violet-500/5 to-transparent">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <div className="p-1.5 rounded-lg bg-violet-500/10">
-                    <RefreshCw className="h-4 w-4 text-violet-600" />
-                  </div>
-                  إعدادات التسعير
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-4 space-y-4">
-                {/* نظام التسعير */}
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground">نظام التسعير</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      variant={!useFactorsPricing ? "default" : "outline"}
-                      size="sm"
-                      className={`h-10 text-xs gap-2 ${!useFactorsPricing ? 'bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 shadow-md' : 'hover:bg-violet-500/10 hover:border-violet-500/50'}`}
-                      onClick={() => setUseFactorsPricing(false)}
-                    >
-                      <List className="h-4 w-4" />
-                      جدول الأسعار
-                    </Button>
-                    <Button
-                      variant={useFactorsPricing ? "default" : "outline"}
-                      size="sm"
-                      className={`h-10 text-xs gap-2 ${useFactorsPricing ? 'bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 shadow-md' : 'hover:bg-violet-500/10 hover:border-violet-500/50'}`}
-                      onClick={() => setUseFactorsPricing(true)}
-                    >
-                      <Calculator className="h-4 w-4" />
-                      نظام المعاملات
-                    </Button>
-                  </div>
-                </div>
-
-                {/* أسعار مخزنة أو حالية */}
-                {!useFactorsPricing && (
-                  <div className="space-y-3">
-                    {/* Status indicator */}
-                    <div className={`flex items-center justify-between p-3 rounded-xl border-2 transition-colors ${
-                      useStoredPrices 
-                        ? 'bg-amber-500/5 border-amber-500/30' 
-                        : 'bg-emerald-500/5 border-emerald-500/30'
-                    }`}>
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${useStoredPrices ? 'bg-amber-500/15' : 'bg-emerald-500/15'}`}>
-                          {useStoredPrices ? (
-                            <DollarSign className="h-4 w-4 text-amber-600" />
-                          ) : (
-                            <RefreshCw className="h-4 w-4 text-emerald-600" />
-                          )}
-                        </div>
-                        <div className="space-y-0.5">
-                          <Label className="text-sm font-medium">مصدر الأسعار</Label>
-                          <p className={`text-xs ${useStoredPrices ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                            {useStoredPrices ? 'الأسعار المحفوظة في العقد' : 'من جدول التسعير الحالي'}
-                          </p>
-                        </div>
-                      </div>
-                      <Badge 
-                        variant="outline" 
-                        className={`text-xs ${
-                          useStoredPrices 
-                            ? 'border-amber-500/50 text-amber-600 bg-amber-500/10' 
-                            : 'border-emerald-500/50 text-emerald-600 bg-emerald-500/10'
-                        }`}
-                      >
-                        {useStoredPrices ? 'محفوظة' : 'محدثة'}
-                      </Badge>
-                    </div>
-                    
-                    {/* Prominent refresh button */}
-                    {useStoredPrices && (
-                      <Button
-                        variant="outline"
-                        onClick={refreshPricesFromSystem}
-                        disabled={refreshingPrices}
-                        className="w-full h-12 gap-2.5 border-2 border-primary/40 hover:border-primary hover:bg-primary/10 text-primary font-semibold rounded-xl shadow-sm transition-all"
-                      >
-                        {refreshingPrices ? (
-                          <>
-                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                            جاري التحديث...
-                          </>
-                        ) : (
-                          <>
-                            <RefreshCw className="h-5 w-5" />
-                            تحديث الأسعار من الجدول الحالي
-                          </>
-                        )}
-                      </Button>
-                    )}
-                    
-                    {/* Switch to stored prices if currently using fresh */}
-                    {!useStoredPrices && originalTotal > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setUseStoredPrices(true)}
-                        className="w-full text-xs text-muted-foreground hover:text-foreground gap-2"
-                      >
-                        <DollarSign className="h-3.5 w-3.5" />
-                        استخدام الأسعار المحفوظة السابقة
-                      </Button>
-                    )}
-                  </div>
-                )}
-                
-                {useFactorsPricing && (
-                  <a 
-                    href="/admin/pricing-factors" 
-                    target="_blank" 
-                    className="flex items-center justify-center gap-2 p-3 rounded-xl bg-gradient-to-r from-violet-500/10 to-purple-500/10 border border-violet-500/30 text-violet-700 dark:text-violet-300 text-sm font-medium hover:from-violet-500/20 hover:to-purple-500/20 transition-all"
-                  >
-                    <Settings className="h-4 w-4" />
-                    إدارة المعاملات والأسعار الأساسية
-                  </a>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* تكلفة التركيب */}
-            <Card className="bg-card border-border shadow-lg overflow-hidden">
-              <div className="h-1 bg-gradient-to-r from-orange-500 to-red-500" />
-              <CardHeader className="py-3 px-4 bg-gradient-to-br from-orange-500/5 to-transparent">
-                <CardTitle className="flex items-center justify-between text-base">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded-lg bg-orange-500/10">
-                      <Wrench className="h-4 w-4 text-orange-600" />
-                    </div>
-                    تكلفة التركيب
-                  </div>
-                  <Switch
-                    checked={installationEnabled}
-                    onCheckedChange={(checked) => {
-                      setInstallationEnabled(checked);
-                      toast.success(checked ? 'تم تفعيل التركيب' : 'تم إلغاء التركيب');
-                    }}
-                  />
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-4">
-                {installationEnabled && installationCostSummary ? (
-                  <div className="space-y-3">
-                    {/* الإجمالي الرئيسي */}
-                    <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500/10 to-orange-500/5 border border-orange-500/20">
-                      <div className="flex justify-between items-center">
-                        <span className="font-medium text-orange-700 dark:text-orange-300">إجمالي التركيب:</span>
-                        <span className="text-xl font-bold text-orange-600">
-                          {applyExchangeRate(installationCostSummary.totalInstallationCost).toLocaleString('ar-LY')} {getCurrencySymbol(contractCurrency)}
-                        </span>
-                      </div>
-                    </div>
-                    
-                    {/* تفاصيل المقاسات */}
-                    {installationCostSummary.groupedSizes.length > 0 && (
-                      <div className="space-y-1.5">
-                        {installationCostSummary.groupedSizes.map((sizeInfo: any, index: number) => (
-                          <div key={index} className="flex justify-between text-sm px-2 py-1.5 rounded-lg bg-muted/30">
-                            <span className="text-muted-foreground">{sizeInfo.size} ({sizeInfo.count} لوحة)</span>
-                            <span className="font-medium">{applyExchangeRate(sizeInfo.totalForSize).toLocaleString()} {getCurrencySymbol(contractCurrency)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground text-center py-4 bg-muted/20 rounded-lg">
-                    {installationEnabled ? 'لا توجد لوحات مختارة' : 'العقد بدون تكلفة تركيب'}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* تكلفة الطباعة */}
-            <Card className="bg-card border-border shadow-lg overflow-hidden">
-              <div className="h-1 bg-gradient-to-r from-cyan-500 to-blue-500" />
-              <CardHeader className="py-3 px-4 bg-gradient-to-br from-cyan-500/5 to-transparent">
-                <CardTitle className="flex items-center justify-between text-base">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded-lg bg-cyan-500/10">
-                      <FileText className="h-4 w-4 text-cyan-600" />
-                    </div>
-                    تكلفة الطباعة
-                  </div>
-                  <Switch
-                    checked={printCostEnabled}
-                    onCheckedChange={setPrintCostEnabled}
-                  />
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-4">
-                {printCostEnabled ? (
-                  <div className="space-y-4">
-                    {/* سعر المتر */}
-                    <div className="flex items-center gap-3">
-                      <Label className="text-sm font-medium whitespace-nowrap">سعر المتر²:</Label>
-                      <div className="relative flex-1">
-                        <input
-                          type="number"
-                          value={printPricePerMeter}
-                          onChange={(e) => setPrintPricePerMeter(Number(e.target.value) || 0)}
-                          className="w-full h-10 px-3 rounded-lg bg-background border-2 border-border focus:border-cyan-500 transition-colors text-center font-medium"
-                          placeholder="0"
-                          min="0"
-                          step="0.01"
-                        />
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">د.ل</span>
-                      </div>
-                    </div>
-                    
-                    {printCostSummary && printCostSummary.groupedDetails.length > 0 ? (
-                      <div className="space-y-3">
-                        {/* تفاصيل المقاسات */}
-                        <div className="space-y-2 max-h-48 overflow-y-auto">
-                          {printCostSummary.groupedDetails.map((detail: any, index: number) => (
-                            <div key={index} className="p-2.5 rounded-lg bg-muted/30 border border-border/50">
-                              <div className="flex justify-between items-center mb-1.5">
-                                <span className="font-semibold text-sm">{detail.size}</span>
-                                <Badge variant="secondary" className="text-xs">
-                                  {detail.count} لوحة × {detail.faces} وجه
-                                </Badge>
-                              </div>
-                              <div className="flex justify-between text-xs text-muted-foreground">
-                                <span>المساحة: {detail.area.toFixed(1)} م²</span>
-                                <span className="font-medium text-cyan-600">{detail.totalCost.toFixed(0)} د.ل</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                        
-                        {/* الإجمالي */}
-                        <div className="p-3 rounded-xl bg-gradient-to-br from-cyan-500/10 to-cyan-500/5 border border-cyan-500/20">
-                          <div className="flex justify-between items-center">
-                            <span className="font-medium text-cyan-700 dark:text-cyan-300">إجمالي الطباعة:</span>
-                            <span className="text-xl font-bold text-cyan-600">
-                              {applyExchangeRate(Number(printCostSummary.totalPrintCost || 0)).toLocaleString('ar-LY')} {getCurrencySymbol(contractCurrency)}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-sm text-center py-4 text-muted-foreground bg-muted/20 rounded-lg">
-                        {selected.length === 0 ? 'لا توجد لوحات مختارة' : 'أدخل سعر المتر لحساب التكلفة'}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground text-center py-4 bg-muted/20 rounded-lg">
-                    العقد بدون تكلفة طباعة
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-
-
-            {/* إدارة الدفعات */}
-            <div id="contract-payments" className="scroll-mt-40 lg:col-span-2">
-            <InstallmentsManager
-              installments={installments}
-              finalTotal={finalTotal}
-              startDate={startDate}
-              endDate={endDate}
-              // ✅ Prevent auto-redistribution when installments are loaded from DB
-              disableAutoRedistribute={installmentsLoaded}
-              onDistributeEvenly={distributeEvenly}
-              onDistributeWithInterval={distributeWithInterval}
-              onDistributeByDurationPeriods={distributeByDurationPeriods}
-              onCreateManualInstallments={createManualInstallments}
-              onApplyUnequalDistribution={handleApplyUnequalDistribution}
-              onAddInstallment={addInstallment}
-              onRemoveInstallment={removeInstallment}
-              onUpdateInstallment={updateInstallment}
-              onClearAll={clearAllInstallments}
-              installmentSummary={getInstallmentSummary()}
-              // ✅ NEW: Pass saved settings
-              savedDistributionType={installmentDistributionType}
-              savedFirstPaymentAmount={installmentFirstPaymentAmount}
-              savedFirstPaymentType={installmentFirstPaymentType}
-              savedInterval={installmentInterval}
-              savedCount={installmentCount}
-              savedHasDifferentFirstPayment={hasDifferentFirstPayment}
-              savedFirstAtSigning={installmentFirstAtSigning}
-              // ✅ NEW: Sync callbacks
-              onDistributionTypeChange={setInstallmentDistributionType}
-              onFirstPaymentAmountChange={setInstallmentFirstPaymentAmount}
-              onFirstPaymentTypeChange={setInstallmentFirstPaymentType}
-              onIntervalChange={setInstallmentInterval}
-              onCountChange={setInstallmentCount}
-              onHasDifferentFirstPaymentChange={setHasDifferentFirstPayment}
-              onFirstAtSigningChange={setInstallmentFirstAtSigning}
-            />
-
-            </div>
-            {/* مكون تخفيض حسب المستوى */}
-            {selected.length > 0 && (
-              <LevelDiscountsCard
-                selectedBillboards={billboards.filter(b => selected.includes(String((b as any).ID)))}
-                levelDiscounts={levelDiscounts}
-                setLevelDiscounts={setLevelDiscounts}
+              {selected.length > 0 && startDate && endDate && (
+                <PartnershipBillboardsInfo billboardIds={selected.map(id => Number(id))} startDate={startDate} endDate={endDate} />
+              )}
+              <OperatingFeesCard
+                showRegular={selected.length > 0 && regularBillboardsRentalCost > 0}
+                regularBase={netRentalForCompany}
+                regularRate={operatingFeeRate}
+                setRegularRate={setOperatingFeeRate}
+                regularFee={operatingFee}
+                showPartnership={selected.length > 0 && billboards.some(bb => selected.includes(String((bb as any).ID)) && (bb as any).is_partnership)}
+                partnershipBase={partnershipBillboardsRentalCost}
+                partnershipRate={partnershipOperatingFeeRate}
+                setPartnershipRate={setPartnershipOperatingFeeRate}
+                partnershipFee={partnershipOperatingFee}
+                friendFee={friendOperatingFeeAmount}
+                friendRate={friendRentalOperatingFeeRate}
                 currencySymbol={getCurrencySymbol(contractCurrency)}
-                calculateBillboardPrice={calculateBillboardPrice}
-                sizeNames={sizeNames}
               />
-            )}
+            </EditGroup>
 
-            {/* ملخص التكاليف */}
-            <div id="contract-summary" className="scroll-mt-40 lg:col-span-2">
+            <EditGroup id="contract-summary" title="الخصومات والإجمالي" description="تخفيضات المستوى، خصم العقد، وما يشمله السعر">
+              {selected.length > 0 && (
+                <LevelDiscountsCard
+                  selectedBillboards={billboards.filter(b => selected.includes(String((b as any).ID)))}
+                  levelDiscounts={levelDiscounts}
+                  setLevelDiscounts={setLevelDiscounts}
+                  currencySymbol={getCurrencySymbol(contractCurrency)}
+                  calculateBillboardPrice={calculateBillboardPrice}
+                  sizeNames={sizeNames}
+                />
+              )}
             <CostSummaryCard
               pausedTotals={pausedTotals}
               estimatedTotal={estimatedTotal}
@@ -4522,14 +4048,53 @@ export default function ContractEdit() {
               setFriendRentalOperatingFeeRate={setFriendRentalOperatingFeeRate}
               friendOperatingFeeAmount={friendOperatingFeeAmount}
             />
+            </EditGroup>
 
-            </div>
-            {/* مصاريف وخسائر العقد */}
+            <EditGroup id="contract-payments" title="الدفعات" description="جدول السداد يجب أن يطابق إجمالي العقد">
+            <InstallmentsManager
+              installments={installments}
+              finalTotal={finalTotal}
+              startDate={startDate}
+              endDate={endDate}
+              // ✅ Prevent auto-redistribution when installments are loaded from DB
+              disableAutoRedistribute={installmentsLoaded}
+              onDistributeEvenly={distributeEvenly}
+              onDistributeWithInterval={distributeWithInterval}
+              onDistributeByDurationPeriods={distributeByDurationPeriods}
+              onCreateManualInstallments={createManualInstallments}
+              onApplyUnequalDistribution={handleApplyUnequalDistribution}
+              onAddInstallment={addInstallment}
+              onRemoveInstallment={removeInstallment}
+              onUpdateInstallment={updateInstallment}
+              onClearAll={clearAllInstallments}
+              installmentSummary={getInstallmentSummary()}
+              // ✅ NEW: Pass saved settings
+              savedDistributionType={installmentDistributionType}
+              savedFirstPaymentAmount={installmentFirstPaymentAmount}
+              savedFirstPaymentType={installmentFirstPaymentType}
+              savedInterval={installmentInterval}
+              savedCount={installmentCount}
+              savedHasDifferentFirstPayment={hasDifferentFirstPayment}
+              savedFirstAtSigning={installmentFirstAtSigning}
+              // ✅ NEW: Sync callbacks
+              onDistributionTypeChange={setInstallmentDistributionType}
+              onFirstPaymentAmountChange={setInstallmentFirstPaymentAmount}
+              onFirstPaymentTypeChange={setInstallmentFirstPaymentType}
+              onIntervalChange={setInstallmentInterval}
+              onCountChange={setInstallmentCount}
+              onHasDifferentFirstPaymentChange={setHasDifferentFirstPayment}
+              onFirstAtSigningChange={setInstallmentFirstAtSigning}
+            />
+            </EditGroup>
+
             {contractNumber && (
-              <ContractExpensesManager contractNumber={Number(contractNumber)} />
+              <EditGroup id="contract-expenses" title="المصاريف والخسائر" description="مصاريف مرتبطة بهذا العقد">
+                <ContractExpensesManager contractNumber={Number(contractNumber)} />
+              </EditGroup>
             )}
           </div>
         </div>
+    </EditWorkspaceShell>
 
         <ContractPDFDialog
           open={pdfOpen}
@@ -4745,7 +4310,6 @@ export default function ContractEdit() {
             setConflictList([]);
           }}
         />
-      </div>
-    </div>
+    </>
   );
 }

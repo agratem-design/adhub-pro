@@ -4,11 +4,12 @@ import * as UIDialog from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { Printer, X, Receipt } from 'lucide-react';
-import { showPrintPreview } from '@/components/print/PrintPreviewDialog';
-import { getMergedInvoiceStylesAsync, hexToRgba } from '@/hooks/useInvoiceSettingsSync';
-import { unifiedHeaderFooterCss, unifiedHeaderHtml, unifiedFooterHtml, formatDateForPrint } from '@/lib/unifiedInvoiceBase';
-import { numberToArabicWords } from '@/lib/printUtils';
 import { compositeTaskLabel } from '@/lib/compositeTaskLabel';
+import { usePrintSettingsByType } from '@/store';
+import { DOCUMENT_TYPES } from '@/types/document-types';
+import { DEFAULT_PRINT_SETTINGS } from '@/types/print-settings';
+import { printUnifiedReceipt } from './UnifiedReceiptPrint';
+import { buildReceiptLineItems, loadReceiptGroup } from './receiptLineItems';
 interface ReceiptPrintDialogProps {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -46,6 +47,8 @@ const formatArabicNumber = (num: number): string => {
 
 export default function ReceiptPrintDialog({ open, onOpenChange, payment, customerName }: ReceiptPrintDialogProps) {
   const [isGenerating, setIsGenerating] = useState(false);
+  // ✅ نفس إعدادات وتصميم إيصال الدفعة الموزعة
+  const { settings: receiptSettings } = usePrintSettingsByType(DOCUMENT_TYPES.PAYMENT_RECEIPT);
   const [showCollectionDetails, setShowCollectionDetails] = useState(false);
   const [customerData, setCustomerData] = useState<{
     name: string;
@@ -395,487 +398,40 @@ export default function ReceiptPrintDialog({ open, onOpenChange, payment, custom
 
       const currencyInfo = getCurrencyInfo();
 
-      // ✅ جلب إعدادات القالب المحفوظة (async)
-      const styles = await getMergedInvoiceStylesAsync('receipt');
-      const fontBaseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-      const logoUrl = styles.logoPath || '/logofaresgold.svg';
-      const fullLogoUrl = logoUrl.startsWith('http') ? logoUrl : `${fontBaseUrl}${logoUrl}`;
+      // ✅ تصميم موحّد: نفس إيصال الدفعة الموزعة (جدول البنود + تفاصيل السداد + ملخص الدفعة)
+      const groupRows = await loadReceiptGroup(payment);
+      const lineItems = await buildReceiptLineItems(groupRows);
+      const groupAmount = groupRows.reduce((sum: number, r: any) => sum + (Number(r.amount) || 0), 0);
+      void getPaymentDescription; void isDistributedPayment;
 
-      const receiptDate = formatDateForPrint(new Date().toISOString(), styles.showHijriDate);
-      const receiptNumber = `REC-${Date.now()}`;
-      
-      // تنسيق تاريخ الدفعة
-      const paymentDate = payment.paid_at 
-        ? formatDateForPrint(payment.paid_at, styles.showHijriDate)
-        : receiptDate;
-
-      const receiptHeaderMetaLinesHtml = `<div><strong>رقم الإيصال:</strong> ${receiptNumber}</div><div><strong>التاريخ:</strong> ${receiptDate}</div><div><strong>العملة:</strong> ${currencyInfo.name}</div>`;
-      const receiptFooterTextHtml = `${styles.footerText || 'شكراً لتعاملكم معنا | Thank you for your business'}<br/>هذا إيصال إلكتروني ولا يحتاج إلى ختم أو توقيع إضافي`;
-      const receiptPrintStyles = { ...styles, footerText: receiptFooterTextHtml };
-
-      const htmlContent = `
-        <!DOCTYPE html>
-        <html dir="rtl" lang="ar">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>إيصال استلام رقم ${receiptNumber}</title>
-          <style>
-            @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;700&display=swap');
-            
-            * {
-              margin: 0;
-              padding: 0;
-              box-sizing: border-box;
-            }
-            
-            html, body {
-              width: 210mm;
-              min-height: 297mm;
-              height: auto;
-              font-family: ${styles.fontFamily || "'Noto Sans Arabic', Arial, sans-serif"};
-              direction: rtl;
-              text-align: right;
-              background: white;
-              color: ${styles.customerSectionTextColor};
-              font-size: ${styles.bodyFontSize}px;
-              line-height: 1.2;
-              overflow: visible;
-            }
-            
-            .receipt-container {
-              width: 210mm;
-              min-height: 297mm;
-              height: auto;
-              box-sizing: border-box;
-              padding: ${styles.pageMarginTop}mm ${styles.pageMarginRight}mm ${styles.pageMarginBottom}mm ${styles.pageMarginLeft}mm;
-              display: flex;
-              flex-direction: column;
-            }
-            
-            .header {
-              display: flex;
-              justify-content: space-between;
-              align-items: flex-start;
-              margin-bottom: 20px;
-              border-bottom: 2px solid ${styles.primaryColor};
-              padding-bottom: 15px;
-            }
-
-            ${unifiedHeaderFooterCss(receiptPrintStyles)}
-
-            
-            .receipt-info {
-              text-align: left;
-              direction: ltr;
-              order: 2;
-            }
-            
-            .receipt-title {
-              font-size: ${styles.titleFontSize}px;
-              font-weight: bold;
-              color: ${styles.primaryColor};
-              margin-bottom: 6px;
-            }
-            
-            .receipt-details {
-              font-size: ${styles.bodyFontSize}px;
-              color: #666;
-              line-height: 1.4;
-            }
-            
-            .company-info {
-              display: flex;
-              flex-direction: column;
-              align-items: flex-end;
-              text-align: right;
-              order: 1;
-            }
-            
-            .company-logo {
-              max-width: ${styles.logoSize}px;
-              height: auto;
-              object-fit: contain;
-              margin-bottom: 4px;
-              display: block;
-              margin-right: 0;
-            }
-            
-            .company-details {
-              font-size: ${styles.contactInfoFontSize}px;
-              color: #666;
-              line-height: 1.4;
-              font-weight: 400;
-              text-align: ${styles.contactInfoAlignment};
-            }
-            
-            .customer-info {
-              background: ${hexToRgba(styles.customerSectionBgColor, 50)};
-              padding: 10px;
-              border-radius: 0;
-              margin-bottom: 12px;
-              border-right: 3px solid ${styles.primaryColor};
-              border: 1px solid ${styles.customerSectionBorderColor};
-            }
-            
-            .customer-title {
-              font-size: ${styles.headerFontSize}px;
-              font-weight: bold;
-              margin-bottom: 6px;
-              color: ${styles.customerSectionTitleColor};
-            }
-            
-            .customer-details {
-              font-size: ${styles.bodyFontSize}px;
-              line-height: 1.4;
-            }
-            
-            .payment-details {
-              background: ${hexToRgba(styles.customerSectionBgColor, 30)};
-              padding: 12px;
-              border-radius: 6px;
-              margin-bottom: 12px;
-              border: 1px solid ${styles.tableBorderColor};
-            }
-            
-            .payment-title {
-              font-size: ${styles.headerFontSize}px;
-              font-weight: bold;
-              margin-bottom: 8px;
-              color: ${styles.customerSectionTitleColor};
-              text-align: center;
-            }
-            
-            .payment-info {
-              display: grid;
-              grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-              gap: 8px;
-              font-size: ${styles.bodyFontSize}px;
-            }
-            
-            .payment-info div {
-              padding: 6px;
-              background: white;
-              border-radius: 4px;
-              border: 1px solid ${styles.tableBorderColor};
-            }
-            
-            .payment-info strong {
-              color: ${styles.customerSectionTitleColor};
-              font-weight: bold;
-            }
-            
-            .amount-section {
-              margin-top: 12px;
-              border-top: 2px solid ${styles.primaryColor};
-              padding-top: 10px;
-            }
-            
-            .amount-row {
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              gap: 16px;
-              padding: 14px;
-              font-size: 16px;
-              font-weight: bold;
-              background: ${styles.totalBgColor};
-              color: ${styles.totalTextColor};
-              border: 1px solid ${styles.tableBorderColor};
-              margin-top: 10px;
-              break-inside: avoid;
-            }
-            .amount-row.balance-row { background: ${styles.customerSectionBgColor}; color: ${styles.customerSectionTextColor}; }
-            .currency {
-              min-width: 0;
-              font-family: 'Manrope', 'Tajawal', sans-serif;
-              direction: ltr;
-              unicode-bidi: isolate;
-              text-align: left;
-              white-space: nowrap;
-              overflow: visible;
-              font-size: 20px;
-              line-height: 1.4;
-              color: inherit;
-              font-variant-numeric: tabular-nums;
-            }
-            .balance-status { display: block; margin-top: 4px; font-size: 12px; font-weight: normal; }
-            .payment-info > div { min-width: 0; overflow-wrap: anywhere; }
-            .amount-words {
-              margin-top: 8px;
-              font-size: ${styles.bodyFontSize}px;
-              color: #666;
-              text-align: center;
-              font-style: italic;
-            }
-            
-            .footer {
-              margin-top: auto;
-              text-align: center;
-              font-size: 9px;
-              color: ${styles.footerTextColor};
-              border-top: 1px solid #ddd;
-              padding-top: 10px;
-            }
-            
-            .signature-section {
-              margin-top: 15px;
-              display: flex;
-              justify-content: space-between;
-              align-items: flex-end;
-            }
-            
-            .signature-box {
-              text-align: center;
-              border-top: 1px solid ${styles.primaryColor};
-              padding-top: 6px;
-              min-width: 100px;
-            }
-            
-            .signature-name {
-              margin-top: 6px;
-              font-size: ${styles.bodyFontSize}px;
-              color: #666;
-              font-weight: normal;
-            }
-            
-            @media print {
-              html, body {
-                width: 210mm !important;
-                min-height: 297mm !important;
-                height: auto !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                overflow: visible !important;
-                -webkit-print-color-adjust: exact;
-                print-color-adjust: exact;
-                color-adjust: exact;
-              }
-              
-              .receipt-container {
-                width: 210mm !important;
-                min-height: 297mm !important;
-                height: auto !important;
-                box-sizing: border-box !important;
-                padding: 12mm !important;
-              }
-              
-              @page {
-                size: A4 portrait;
-                margin: 0 !important;
-                padding: 0 !important;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="receipt-container">
-            ${unifiedHeaderHtml({
-              styles: receiptPrintStyles,
-              fullLogoUrl,
-              metaLinesHtml: receiptHeaderMetaLinesHtml,
-              titleAr: 'إيصال قبض',
-              titleEn: 'RECEIPT',
-            })}
-            
-            <div class="payment-details">
-              <div class="payment-title">بيانات عملية التحصيل والتسليم</div>
-              <div class="payment-info">
-                ${showCollectionDetails ? `
-                <div>
-                  <strong>المحصل (المستلم من الزبون):</strong><br>
-                  ${payment.collector_name || 'غير محدد'}
-                </div>
-                <div>
-                  <strong>المسلم له (المدير):</strong><br>
-                  ${payment.receiver_name || 'غير محدد'}
-                </div>
-                <div>
-                  <strong>مكان التسليم:</strong><br>
-                  ${payment.delivery_location || 'غير محدد'}
-                </div>
-                <div>
-                  <strong>نوع الدفع:</strong><br>
-                  ${payment.method || 'نقدي'}
-                </div>
-                ` : `
-                <div>
-                  <strong>طريقة الدفع:</strong><br>
-                  ${payment.method || 'نقدي'}
-                </div>
-                ${payment.method === 'تحويل بنكي' ? `
-                ${payment.source_bank ? `
-                <div>
-                  <strong>المصرف المحول منه:</strong><br>
-                  ${payment.source_bank}
-                </div>
-                ` : ''}
-                ${payment.destination_bank ? `
-                <div>
-                  <strong>المصرف المحول إليه:</strong><br>
-                  ${payment.destination_bank}
-                </div>
-                ` : ''}
-                ${payment.transfer_reference ? `
-                <div>
-                  <strong>رقم العملية التحويلية:</strong><br>
-                  ${payment.transfer_reference}
-                </div>
-                ` : ''}
-                ` : ''}
-                ${payment.method === 'شيك' && payment.reference ? `
-                <div>
-                  <strong>رقم الشيك:</strong><br>
-                  ${payment.reference}
-                </div>
-                ` : ''}
-                `}
-              </div>
-            </div>
-            
-            <div class="customer-info">
-              <div class="customer-title">بيانات العميل</div>
-              <div class="customer-details">
-                <strong>الاسم:</strong> ${customerData.name}<br>
-                ${customerData.company ? `<strong>الشركة:</strong> ${customerData.company}<br>` : ''}
-                ${customerData.phone ? `<strong>الهاتف:</strong> ${customerData.phone}<br>` : ''}
-              </div>
-            </div>
-            
-            ${receiverName ? `
-            <div class="customer-info" style="border-right-color: #000; background: #f8f9fa;">
-              <div class="customer-title">المستلم</div>
-              <div class="customer-details">
-                <strong>اسم المستلم:</strong> ${receiverName}
-              </div>
-            </div>
-            ` : ''}
-            
-            ${isDistributedPayment && distributedContracts.length > 0 ? `
-            <div class="payment-details" style="border-color: #000; background: #f8f9fa;">
-              <div class="payment-title">العقود الموزعة</div>
-              <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
-                <thead>
-                  <tr style="background: #e5e7eb;">
-                    <th style="padding: 8px; border: 1px solid #000; text-align: right;">رقم العقد</th>
-                    <th style="padding: 8px; border: 1px solid #000; text-align: right;">نوع الإعلان</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${distributedContracts.map((contractNum: string) => `
-                  <tr>
-                    <td style="padding: 8px; border: 1px solid #000; font-weight: bold;">${contractNum}</td>
-                    <td style="padding: 8px; border: 1px solid #000;">${contractsData[contractNum] || 'لوحة إعلانية'}</td>
-                  </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
-            ` : ''}
-            
-            <div class="payment-details">
-              <div class="payment-title">تفاصيل الدفعة</div>
-              <div class="payment-info">
-                <div>
-                  <strong>تاريخ الدفعة:</strong><br>
-                  ${paymentDate}
-                </div>
-                <div>
-                  <strong>البيان:</strong><br>
-                  ${getPaymentDescription()}
-                </div>
-                ${payment.contract_number && !isDistributedPayment && !isCompositeTaskPayment && !isSalesInvoicePayment && !isPrintedInvoicePayment ? `
-                <div>
-                  <strong>رقم العقد:</strong><br>
-                  ${payment.contract_number}
-                </div>
-                ` : ''}
-                ${isCompositeTaskPayment && compositeTaskInfo ? `
-                <div>
-                  <strong>إجمالي المهمة:</strong><br>
-                  ${formatArabicNumber(compositeTaskInfo.customer_total || 0)} ${currencyInfo.symbol}
-                </div>
-                ` : ''}
-                ${isSalesInvoicePayment && salesInvoiceInfo ? `
-                <div>
-                  <strong>إجمالي الفاتورة:</strong><br>
-                  ${formatArabicNumber(salesInvoiceInfo.total_amount || 0)} ${currencyInfo.symbol}
-                </div>
-                ` : ''}
-                ${isPrintedInvoicePayment && printedInvoiceInfo ? `
-                <div>
-                  <strong>إجمالي فاتورة الطباعة:</strong><br>
-                  ${formatArabicNumber(printedInvoiceInfo.total_amount || 0)} ${currencyInfo.symbol}
-                </div>
-                ` : ''}
-                ${payment.reference ? `
-                <div>
-                  <strong>المرجع / رقم الشيك:</strong><br>
-                  ${payment.reference}
-                </div>
-                ` : ''}
-                ${cleanNotes ? `
-                <div style="grid-column: 1 / -1;">
-                  <strong>ملاحظات:</strong><br>
-                  ${cleanNotes}
-                </div>
-                ` : ''}
-              </div>
-            </div>
-            
-            <div class="amount-section">
-              <div class="amount-row">
-                <span>المبلغ المستلم:</span>
-                <span class="currency">${currencyInfo.symbol} ${formatArabicNumber(payment.amount || 0)}</span>
-              </div>
-              
-              ${balanceInfo ? `
-              <div class="amount-row balance-row">
-                <span>المتبقي من إجمالي الديون:</span>
-                <div style="text-align: left; display: flex; flex-direction: column; align-items: flex-end;">
-                  <span class="currency">${currencyInfo.symbol} ${formatArabicNumber(Math.abs(balanceInfo.remainingBalance))}</span>
-                  <span class="balance-status">${balanceInfo.remainingBalance < 0 ? 'رصيد دائن' : balanceInfo.remainingBalance === 0 ? 'مسدد بالكامل' : 'رصيد مستحق'}</span>
-                </div>
-              </div>
-              ` : ''}
-              
-              <div class="amount-words">
-                المبلغ بالكلمات: ${numberToArabicWords(payment.amount || 0)} ${currencyInfo.writtenName}
-              </div>
-            </div>
-            
-            <div class="signature-section">
-              <div class="signature-box">
-                <div>توقيع الدافع</div>
-                <div class="signature-name">${customerData.name}</div>
-              </div>
-              ${receiverName ? `
-              <div class="signature-box">
-                <div>توقيع المستلم</div>
-                <div class="signature-name">${receiverName}</div>
-              </div>
-              ` : ''}
-            </div>
-            
-            ${unifiedFooterHtml(receiptPrintStyles)}
-          </div>
-          
-          <script>
-            window.addEventListener('load', function() {
-              setTimeout(function() {
-                window.focus();
-                window.print();
-              }, 500);
-            });
-          </script>
-        </body>
-        </html>
-      `;
-
-      // فتح معاينة الطباعة في حوار داخلي
-      showPrintPreview(htmlContent, `إيصال استلام: ${customerData.name} • ${receiptNumber}`, 'billing-receipts', customerData.phone || '');
-
-      toast.success(`تم فتح الإيصال للطباعة بنجاح بعملة ${currencyInfo.name}!`);
+      await printUnifiedReceipt(receiptSettings || DEFAULT_PRINT_SETTINGS, {
+        payment: {
+          id: payment.id,
+          amount: groupRows.length > 1 ? groupAmount : (Number(payment.amount) || 0),
+          paid_at: payment.paid_at,
+          method: payment.method || 'نقدي',
+          reference: payment.reference || undefined,
+          notes: cleanNotes || undefined,
+          contract_number: payment.contract_number ?? null,
+          collector_name: showCollectionDetails ? (payment.collector_name || undefined) : undefined,
+          receiver_name: showCollectionDetails ? (payment.receiver_name || receiverName || undefined) : (receiverName || undefined),
+          delivery_location: showCollectionDetails ? (payment.delivery_location || undefined) : undefined,
+          source_bank: payment.source_bank || undefined,
+          destination_bank: payment.destination_bank || undefined,
+          transfer_reference: payment.transfer_reference || undefined,
+          transfer_image_url: payment.transfer_image_url || undefined,
+          distributed_payment_id: payment.distributed_payment_id || undefined,
+        },
+        customerData: {
+          id: payment.customer_id || '',
+          name: customerData.name,
+          company: customerData.company || undefined,
+          phone: customerData.phone || undefined,
+        },
+        currency: currencyInfo,
+        distributedContracts: lineItems,
+        ...(balanceInfo ? { balanceInfo: { remainingBalance: balanceInfo.remainingBalance, totalPaid: 0 } } : {}),
+      });
       onOpenChange(false);
 
     } catch (error) {

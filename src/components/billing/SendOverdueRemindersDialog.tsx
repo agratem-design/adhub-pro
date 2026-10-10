@@ -1,3 +1,4 @@
+import { BrowserWhatsAppBatch } from "./BrowserWhatsAppBatch";
 import { useState, useEffect, useMemo } from "react";
 import { formatAmount } from '@/lib/formatUtils';
 import { InlinePhoneEditor } from '@/components/shared/InlinePhoneEditor';
@@ -297,7 +298,7 @@ export function SendOverdueRemindersDialog({
   const { sendMessage: sendWhatsApp, loading: sendingWhatsApp } = useSendWhatsApp();
   const { sendMessage: sendTextly, loading: sendingTextly } = useSendTextly();
   const [internalOpen, setInternalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<string>("manual");
+  const [activeTab, setActiveTab] = useState<string>("browser");
   const [recipientType, setRecipientType] = useState<'customers' | 'management' | 'both'>('customers');
   const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
   const [selectedManagement, setSelectedManagement] = useState<Set<string>>(new Set());
@@ -933,7 +934,7 @@ export function SendOverdueRemindersDialog({
           إرسال تنبيهات واتساب
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-w-5xl max-h-[92dvh] w-[95vw] sm:w-auto p-0 gap-0 overflow-hidden" dir="rtl">
+      <DialogContent className="flex flex-col max-w-5xl max-h-[92dvh] w-[95vw] p-0 gap-0 overflow-hidden" dir="rtl">
         {/* Header */}
         <div className="bg-gradient-to-l from-orange-500/10 via-orange-500/5 to-transparent border-b px-3 py-3 sm:px-6 sm:py-5">
           <DialogHeader>
@@ -988,7 +989,8 @@ export function SendOverdueRemindersDialog({
           ) : (
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
               <div className="px-3 sm:px-6 pt-3 sm:pt-4 pb-2 border-b bg-muted/30">
-                <TabsList className="w-full grid grid-cols-2 h-9 sm:h-11">
+                <TabsList className="w-full grid grid-cols-3 h-9 sm:h-11">
+                  <TabsTrigger value="browser" className="gap-2 text-xs sm:text-sm">واتساب المتصفح</TabsTrigger>
                   <TabsTrigger value="manual" className="gap-1 sm:gap-2 text-xs sm:text-sm">
                     <MessageSquare className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                     <span className="hidden sm:inline">إرسال يدوي (واتساب مباشر)</span>
@@ -1003,6 +1005,7 @@ export function SendOverdueRemindersDialog({
               </div>
 
               {/* Manual Tab */}
+              <TabsContent value="browser" className="px-3 py-4 sm:px-6 mt-0 flex-1 overflow-auto"><BrowserWhatsAppBatch recipients={customersWithPhone.map(customer => { const id = customer.customerId || customer.customerName; return {id, name:customer.customerName, phone:customer.phone, message:manualMessages.get(id) ?? generateCustomerMessage(customer)}; })}/></TabsContent>
               <TabsContent value="manual" className="px-3 sm:px-6 py-3 sm:py-4 mt-0 flex-1 overflow-auto">
                 {/* خيار نوع الرسالة */}
                 <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-3 sm:mb-4">

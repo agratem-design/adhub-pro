@@ -27,8 +27,8 @@ interface SmartBillboardConfirmDialogProps {
 }
 
 const taskTypeConfig = {
-  installation: { icon: Wrench, color: 'bg-blue-500/15 text-blue-700 border-blue-200', label: 'تركيب' },
-  print: { icon: Printer, color: 'bg-purple-500/15 text-purple-700 border-purple-200', label: 'طباعة' },
+  installation: { icon: Wrench, color: 'bg-blue-500/15 text-primary border-blue-200', label: 'تركيب' },
+  print: { icon: Printer, color: 'bg-purple-500/15 text-primary border-purple-200', label: 'طباعة' },
   cutout: { icon: Box, color: 'bg-amber-500/15 text-amber-700 border-amber-200', label: 'قص مجسم' },
   removal: { icon: ArrowLeftRight, color: 'bg-red-500/15 text-red-700 border-red-200', label: 'إزالة' },
 };

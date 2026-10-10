@@ -260,7 +260,7 @@ export function DesignManager({ selectedBillboards, designs, onChange, contractI
 
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <Card className="bg-card border-border shadow-card overflow-hidden">
+      <Card className="bg-card border-border shadow-sm overflow-hidden">
         <CollapsibleTrigger asChild>
           <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-accent/50 transition-colors">
             <div className="flex items-center gap-3">
@@ -356,7 +356,7 @@ export function DesignManager({ selectedBillboards, designs, onChange, contractI
                         <div
                           key={billboard.id}
                           onClick={() => toggleBillboard(design.id, billboard.id)}
-                          className={`relative group cursor-pointer rounded-lg overflow-hidden border-2 transition-all hover:shadow-lg ${
+                          className={`relative group cursor-pointer rounded-lg overflow-hidden border transition-all hover:shadow-lg ${
                             isChecked ? 'border-primary shadow-md' : 'border-border hover:border-primary/50'
                           }`}
                         >

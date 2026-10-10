@@ -141,6 +141,7 @@ const ExportContentSettings = lazyRetry(() => import("./pages/ExportContentSetti
 const ExportPricingList = lazyRetry(() => import("./pages/ExportPricingList"));
 const ContractClosureSimulator = lazyRetry(() => import("./pages/ContractClosureSimulator"));
 const GoogleDriveUploaderPage = lazyRetry(() => import("./pages/GoogleDriveUploaderPage"));
+const GoogleCalendarSyncPage = lazyRetry(() => import("./pages/GoogleCalendarSyncPage"));
 
 // ---- Loading fallback ----
 const PageLoader = () => (
@@ -239,6 +240,7 @@ const adminRoutes: { path: string; Component: React.LazyExoticComponent<any>; pe
   { path: "export-pricing", Component: ExportPricingList, permission: "pricing" },
   { path: "contract-closure-simulator", Component: ContractClosureSimulator, permission: "contracts" },
   { path: "drive-uploader", Component: GoogleDriveUploaderPage, permission: "settings" },
+  { path: "google-calendar", Component: GoogleCalendarSyncPage },
 ];
 
 // ---- QueryClient with caching ----

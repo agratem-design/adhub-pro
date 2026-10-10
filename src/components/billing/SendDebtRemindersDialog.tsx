@@ -1,3 +1,4 @@
+import { BrowserWhatsAppBatch } from "./BrowserWhatsAppBatch";
 import { useState, useEffect, useMemo } from "react";
 import { InlinePhoneEditor } from '@/components/shared/InlinePhoneEditor';
 import {
@@ -164,7 +165,7 @@ export function SendDebtRemindersDialog({
   const { sendMessage: sendWhatsApp, loading: sendingWhatsApp } = useSendWhatsApp();
   const { sendMessage: sendTextly, loading: sendingTextly } = useSendTextly();
   const [internalOpen, setInternalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<string>("manual");
+  const [activeTab, setActiveTab] = useState<string>("browser");
   const [recipientType, setRecipientType] = useState<"customers" | "management" | "both">("customers");
   const [selectedCustomers, setSelectedCustomers] = useState<Set<string>>(new Set());
   const [selectedManagement, setSelectedManagement] = useState<Set<string>>(new Set());
@@ -624,7 +625,7 @@ export function SendDebtRemindersDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-w-5xl max-h-[92vh] p-0 gap-0 overflow-hidden" dir="rtl">
+      <DialogContent className="flex flex-col max-w-5xl max-h-[92dvh] w-[95vw] p-0 gap-0 overflow-hidden" dir="rtl">
         {/* Header */}
         <div className="bg-gradient-to-l from-destructive/10 via-destructive/5 to-transparent border-b px-6 py-5">
           <DialogHeader>
@@ -679,7 +680,8 @@ export function SendDebtRemindersDialog({
           ) : (
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
               <div className="px-6 pt-4 pb-2 border-b bg-muted/30">
-                <TabsList className="w-full grid grid-cols-2 h-11">
+                <TabsList className="w-full grid grid-cols-3 h-11">
+                  <TabsTrigger value="browser" className="gap-2 text-xs sm:text-sm">واتساب المتصفح</TabsTrigger>
                   <TabsTrigger value="manual" className="gap-2 text-sm">
                     <MessageSquare className="h-4 w-4" />
                     إرسال يدوي (واتساب مباشر)
@@ -692,6 +694,7 @@ export function SendDebtRemindersDialog({
               </div>
 
               {/* Manual Tab */}
+              <TabsContent value="browser" className="px-3 py-4 sm:px-6 mt-0 flex-1 overflow-auto"><BrowserWhatsAppBatch recipients={customersWithDebt.map(customer => { const id = customer.customerId || customer.customerName; return {id, name:customer.customerName, phone:customer.phone, message:manualMessages.get(id) ?? generateCustomerMessage(customer)}; })}/></TabsContent>
               <TabsContent value="manual" className="px-6 py-4 mt-0 flex-1 overflow-auto">
  {/* خيار نوع الرسالة: مفصل أو مختصر */}
                 <div className="flex items-center gap-3 mb-4">

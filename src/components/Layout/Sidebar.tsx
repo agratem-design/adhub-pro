@@ -75,6 +75,7 @@ const sidebarInventory: SidebarSection[] = [
     title: 'المالية',
     icon: DollarSign,
     items: [
+      { id: 'google_calendar', label: 'تقويم جوجل والتنبيهات', icon: Calendar, path: '/admin/google-calendar' },
       { id: 'overdue_payments', label: 'دفعات العقود المتأخرة', icon: AlertCircle, path: '/admin/overdue-payments' },
       { id: 'account_overdue_payments', label: 'متأخرات الحسابات والفواتير', icon: Receipt, path: '/admin/account-overdue-payments' },
       { id: 'payments', label: 'الدفعات والإيصالات', icon: CreditCard, path: '/admin/payments-receipts-page' },
@@ -192,7 +193,7 @@ const sidebarSections: SidebarSection[] = [
   group('sales', 'العملاء والأسعار', Users, ['customers', 'pricing', 'pricing_factors', 'export_pricing', 'customer_merge']),
   group('billboards', 'إدارة اللوحات والمواقع', MapPin, ['billboard_photos', 'extended_billboards', 'delayed_billboards', 'billboard_maintenance', 'smart_distribution', 'billboard_cleanup']),
   group('operations', 'التنفيذ والتصميم', FolderKanban, ['tasks', 'comprehensive_installation_tasks', 'removal_tasks', 'design_studio', 'image_gallery', 'field_photos', 'rephotography', 'drive_uploader']),
-  group('finance', 'المالية والحسابات', DollarSign, ['payments', 'overdue_payments', 'account_overdue_payments', 'revenue', 'expenses', 'printed_invoices_page', 'printer_accounts', 'installation_team_accounts', 'custody', 'salaries', 'contract_closure_simulator']),
+  group('finance', 'المالية والحسابات', DollarSign, ['google_calendar', 'payments', 'overdue_payments', 'account_overdue_payments', 'revenue', 'expenses', 'printed_invoices_page', 'printer_accounts', 'installation_team_accounts', 'custody', 'salaries', 'contract_closure_simulator']),
   group('partnerships', 'الشركات والشراكات', Building2, ['company_management', 'shared_companies', 'shared_billboards', 'friend_billboards', 'friend_accounts', 'logo_management']),
   group('municipalities', 'البلديات', MapPin, ['municipality_organizer', 'municipality_stickers', 'municipality_rent_prices', 'municipality_stats']),
   group('reports', 'التقارير والأداء', BarChart3, ['reports', 'kpi_dashboard', 'profitability_reports', 'activity_log']),

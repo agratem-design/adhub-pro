@@ -53,7 +53,7 @@ export const BillboardImageZoom: React.FC<Props> = ({
         </div>
       </div>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-5xl p-3 bg-background/95 backdrop-blur border border-border shadow-2xl relative [&>button]:hidden">
+        <DialogContent className="max-w-5xl p-3 bg-background/95 backdrop-blur border border-border shadow-md relative [&>button]:hidden">
           <DialogTitle className="sr-only">{alt || 'معاينة صورة اللوحة'}</DialogTitle>
           <DialogDescription className="sr-only">عرض صورة اللوحة بحجم مكبر</DialogDescription>
           <button
@@ -62,7 +62,7 @@ export const BillboardImageZoom: React.FC<Props> = ({
               e.stopPropagation();
               setOpen(false);
             }}
-            className="absolute top-4 right-4 z-50 h-10 w-10 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-full flex items-center justify-center shadow-2xl border-2 border-white/30 transition-all hover:scale-110 cursor-pointer"
+            className="absolute top-4 right-4 z-50 h-10 w-10 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-full flex items-center justify-center shadow-md border border-white/30 transition-all hover:scale-110 cursor-pointer"
             aria-label="إغلاق"
           >
             <X className="h-5 w-5" strokeWidth={2.5} />

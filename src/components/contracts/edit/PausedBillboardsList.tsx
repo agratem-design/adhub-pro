@@ -165,7 +165,7 @@ export function PausedBillboardsList({
   return (
     <Card
       ref={sectionRef as any}
-      className="border-2 border-primary/40 bg-gradient-to-br from-primary/5 via-background to-amber-500/5 shadow-lg overflow-hidden"
+      className="border border-primary/40 bg-muted/30 shadow-lg overflow-hidden"
     >
       <CardHeader className="py-3 px-4 bg-primary/10 border-b-2 border-primary/30">
         <CardTitle className="flex items-center justify-between gap-3 flex-wrap">
@@ -206,7 +206,7 @@ export function PausedBillboardsList({
 
       {items.length > 0 && (
         <div className="px-3 pt-3">
-          <div className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border border-primary/20 rounded-xl p-3">
+          <div className="bg-primary/10 border border-primary/20 rounded-xl p-3">
             <div className="flex items-center gap-2 mb-2">
               <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center">
                 <TrendingUp className="h-3.5 w-3.5 text-primary" />
@@ -246,13 +246,13 @@ export function PausedBillboardsList({
             </div>
             <div className="text-lg font-bold tabular-nums text-foreground" dir="ltr">{formatAmount(totals.fullSum)}</div>
           </div>
-          <div className="rounded-lg border-2 border-primary/40 bg-primary/10 p-2 text-center">
+          <div className="rounded-lg border border-primary/40 bg-primary/10 p-2 text-center">
             <div className="text-[10px] text-primary flex items-center justify-center gap-1">
               <TrendingUp className="h-3 w-3" /> المضاف للعقد
             </div>
             <div className="text-lg font-bold tabular-nums text-primary" dir="ltr">{formatAmount(totals.consumedSum)}</div>
           </div>
-          <div className="rounded-lg border-2 border-amber-500/40 bg-amber-500/10 p-2 text-center">
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-center">
             <div className="text-[10px] text-amber-600 dark:text-amber-400 flex items-center justify-center gap-1">
               <TrendingDown className="h-3 w-3" /> خصم الإيقاف
             </div>
@@ -268,10 +268,10 @@ export function PausedBillboardsList({
           )}
           {printCostEnabled && (totals.printSum || 0) > 0 && (
             <div className="rounded-lg border border-orange-500/40 bg-orange-500/10 p-2 text-center">
-              <div className="text-[10px] text-orange-600 flex items-center justify-center gap-1">
+              <div className="text-[10px] text-primary flex items-center justify-center gap-1">
                 <Printer className="h-3 w-3" /> إجمالي الطباعة
               </div>
-              <div className="text-lg font-bold tabular-nums text-orange-600" dir="ltr">{formatAmount(totals.printSum)}</div>
+              <div className="text-lg font-bold tabular-nums text-primary" dir="ltr">{formatAmount(totals.printSum)}</div>
             </div>
           )}
         </div>

@@ -186,9 +186,9 @@ export function ReplacePausedBillboardDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent dir="rtl" className="max-w-6xl bg-card border-border h-[90vh] flex flex-col p-0 rounded-[28px] shadow-2xl overflow-hidden">
+      <DialogContent dir="rtl" className="max-w-6xl bg-card border-border h-[90vh] flex flex-col p-0 rounded-[28px] shadow-md overflow-hidden">
         {/* Header */}
-        <DialogHeader className="px-6 py-4.5 border-b bg-gradient-to-r from-primary/5 to-transparent shrink-0">
+        <DialogHeader className="px-6 py-4.5 border-b bg-muted/30 shrink-0">
           <DialogTitle className="flex items-center gap-3 text-xl font-bold">
             <div className="h-11 w-11 rounded-xl bg-primary/10 flex items-center justify-center">
               <Repeat2 className="w-6 h-6 text-primary" />
@@ -376,7 +376,7 @@ export function ReplacePausedBillboardDialog({
           <div className="lg:col-span-5 bg-muted/25 flex flex-col h-full overflow-hidden p-6">
             {!picked ? (
               /* Empty State Placeholder */
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-6 border-2 border-dashed border-border/80 rounded-[22px] bg-card/50">
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-6 border border-dashed border-border/80 rounded-[22px] bg-card/50">
                 <div className="h-14 w-14 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-4 animate-bounce">
                   <Repeat2 className="h-7 w-7" />
                 </div>
@@ -418,7 +418,7 @@ export function ReplacePausedBillboardDialog({
                 </div>
 
                 {/* 2. Interactive Calculator / Financial Preview */}
-                <div className="bg-primary/[0.01] border-2 border-primary/20 rounded-[22px] p-4 space-y-3.5 shadow-inner">
+                <div className="bg-primary/[0.01] border border-primary/20 rounded-[22px] p-4 space-y-3.5 shadow-inner">
                   <div className="text-xs font-black text-foreground flex items-center gap-1.5">
                     <Coins className="h-4.5 w-4.5 text-primary" />
                     الحسابات المالية والمدد (تحديث حي)

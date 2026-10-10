@@ -28,7 +28,7 @@ export function BillboardReplacementHistoryCard({ contractNumber, refreshKey }: 
   }
 
   return (
-    <Card className="border-2 border-primary/30 bg-gradient-to-br from-card via-card to-primary/5 shadow-md overflow-hidden" dir="rtl">
+    <Card className="border border-primary/30 bg-muted/30 shadow-md overflow-hidden" dir="rtl">
       <CardHeader className="py-3 px-4 bg-primary/10 border-b border-primary/20">
         <CardTitle className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2">

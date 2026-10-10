@@ -721,10 +721,10 @@ export function BillboardTaskCard({
             <Palette className="h-4 w-4 text-primary" />
             التصميم المطبق
           </label>
-          <span className="text-[10px] font-bold text-muted-foreground">اضغط لاختيار تصميم آخر</span>
+          <span className="text-[10px] text-muted-foreground">تغيير التصميم</span>
         </div>
         <Select value={selectedDesignId} onValueChange={handleDesignChange} disabled={saving}>
-          <SelectTrigger className="h-14 cursor-pointer rounded-xl border-primary/25 bg-primary/5 px-2.5 text-right transition-all duration-200 hover:border-primary/45 hover:bg-primary/10 focus:ring-2 focus:ring-primary/25">
+          <SelectTrigger className="h-12 cursor-pointer rounded-lg border-border bg-muted/20 px-2.5 text-right transition-all duration-200 hover:border-primary/45 hover:bg-primary/10 focus:ring-2 focus:ring-primary/25">
             <div className="flex min-w-0 flex-1 items-center gap-3" dir="rtl">
               <div className="flex h-10 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border/50 bg-muted/50">
                 {currentDesignImage ? (
@@ -1465,7 +1465,7 @@ export function BillboardTaskCard({
             )}
 
             {/* Quick Actions Row */}
-            <div className="grid grid-cols-2 gap-2 border-t border-border/50 pt-3 sm:grid-cols-4" onClick={e => e.stopPropagation()}>
+            <div className="grid grid-cols-2 gap-2 border-t border-border pt-3" onClick={e => e.stopPropagation()}>
               {/* Camera - Add Installed Image */}
               {onAddInstalledImage && (
                 <Button
@@ -1810,18 +1810,8 @@ export function BillboardTaskCard({
                 </span>
               </div>
               
-              <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                <span className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                  قيد التركيب
-                </span>
-                {billboard?.Size && (
-                  <Badge variant="secondary" className="text-[9px] px-2 py-0.5 font-extrabold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/30 flex items-center gap-1 rounded-full">
-                    <Box className="h-3 w-3 text-blue-500" />
-                    <span>المقاس: {billboard.Size}</span>
-                  </Badge>
-                )}
-                <Badge variant="secondary" className="text-[9px] px-2 py-0.5 font-extrabold bg-primary/10 text-primary border border-primary/30 flex items-center gap-1 rounded-full">
+              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                <Badge variant="secondary" className="text-[11px] px-2 py-0.5 font-semibold bg-muted/40 text-primary border border-primary/30 flex items-center gap-1 rounded-full">
                   <Layers className="h-3 w-3 text-primary" />
                   <span>
                     الوجوه: {
@@ -1832,11 +1822,6 @@ export function BillboardTaskCard({
                     }
                   </span>
                 </Badge>
-                {isPrintActive && (
-                  <Badge className="text-[9px] px-2 py-0.5 font-bold bg-blue-500/10 hover:bg-blue-500/20 text-blue-500 border border-blue-500/30 flex items-center gap-1 rounded-full">
-                    <span>تم تفعيل الطباعة</span>
-                  </Badge>
-                )}
                 {billboard?.friend_companies?.name && (
                   <div className="flex items-center gap-1 text-[9px] text-muted-foreground font-bold">
                     <Building2 className="h-3 w-3.5 shrink-0" />
@@ -1847,11 +1832,11 @@ export function BillboardTaskCard({
 
               {/* Location Strip on Card Header */}
               {(billboard?.Nearest_Landmark || billboard?.District || billboard?.Municipality || billboard?.City || billboard?.GPS_Link) && (
-                <div className="flex items-center justify-between gap-1.5 text-[11px] p-2 bg-muted/40 dark:bg-muted/15 rounded-xl border border-border/40 text-foreground font-bold flex-wrap mt-1">
+                <div className="flex items-center justify-between gap-1.5 text-[11px] text-muted-foreground flex-wrap mt-1">
                   <div className="flex items-center gap-1.5 flex-wrap flex-1">
                     <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
                     {billboard?.Nearest_Landmark && (
-                      <span className="text-foreground font-extrabold">{billboard.Nearest_Landmark}</span>
+                      <span className="text-foreground font-medium">{billboard.Nearest_Landmark}</span>
                     )}
                     {billboard?.District && (
                       <span className="text-muted-foreground">{billboard?.Nearest_Landmark ? '• ' : ''}{billboard.District}</span>
@@ -1877,13 +1862,13 @@ export function BillboardTaskCard({
               )}
 
               {/* Quick Actions Row */}
-              <div className="grid grid-cols-2 gap-2 border-t border-border/40 pt-3 sm:grid-cols-5" onClick={e => e.stopPropagation()}>
+              <div className="grid grid-cols-2 gap-2 border-t border-border pt-3" onClick={e => e.stopPropagation()}>
                 {onAddInstalledImage && (
                   <Button
                     variant="default"
                     size="sm"
                     onClick={onAddInstalledImage}
-                    className="h-10 w-full cursor-pointer gap-1 rounded-xl bg-primary px-2 text-[10px] font-black text-primary-foreground transition-all duration-200 hover:bg-primary/90 active:scale-95"
+                    className="h-10 w-full cursor-pointer gap-1 rounded-lg bg-primary px-2 text-[11px] font-semibold text-primary-foreground transition-all duration-200 hover:bg-primary/90 active:scale-95"
                   >
                     <Camera className="h-3.5 w-3.5" />
                     <span>صورة التركيب</span>
@@ -1895,7 +1880,7 @@ export function BillboardTaskCard({
                     variant="outline"
                     size="sm"
                     onClick={onEditDesign}
-                    className="h-10 w-full rounded-xl text-[10px] font-bold gap-1 border-primary/25 hover:bg-primary/10 hover:text-primary hover:border-primary/40 transition-all duration-200 cursor-pointer"
+                    className="h-10 w-full rounded-lg text-[11px] font-semibold gap-1 border-primary/25 hover:bg-primary/10 hover:text-primary hover:border-primary/40 transition-all duration-200 cursor-pointer"
                   >
                     <PaintBucket className="h-3.5 w-3.5 text-primary" />
                     <span>التصاميم</span>
@@ -1908,7 +1893,7 @@ export function BillboardTaskCard({
                     variant="outline"
                     size="sm"
                     onClick={onPrint}
-                    className="h-10 w-full rounded-xl text-[10px] font-bold gap-1 border-blue-500/25 hover:bg-blue-500/10 hover:text-blue-500 hover:border-blue-500/40 transition-all duration-200 cursor-pointer"
+                    className="h-10 w-full rounded-lg text-[11px] font-semibold gap-1 border-blue-500/25 hover:bg-blue-500/10 hover:text-blue-500 hover:border-blue-500/40 transition-all duration-200 cursor-pointer"
                   >
                     <Printer className="h-3.5 w-3.5 text-blue-500" />
                     <span>طباعة</span>
@@ -1921,7 +1906,7 @@ export function BillboardTaskCard({
                     variant="outline"
                     size="sm"
                     onClick={() => setReplaceDialogOpen(true)}
-                    className="h-10 w-full rounded-xl text-[10px] font-bold gap-1 border-amber-500/25 hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/40 transition-all duration-200 cursor-pointer"
+                    className="h-10 w-full rounded-lg text-[11px] font-semibold gap-1 border-amber-500/25 hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/40 transition-all duration-200 cursor-pointer"
                   >
                     <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
                     <span>إعادة تركيب</span>

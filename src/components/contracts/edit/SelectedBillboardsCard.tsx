@@ -1,3 +1,6 @@
+import { sortBillboardsStandardSync } from '@/lib/billboardSorter';
+import { BillboardCardFrame, CardIconButton, CardStatusBadge, billboardFields } from '@/components/billboards/card/BillboardCardFrame';
+import { Square as CardSquareIcon } from 'lucide-react';
 import React, { useEffect, useState, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { formatAmount } from '@/lib/formatUtils';
@@ -50,7 +53,7 @@ function FriendCompanyBadge({ billboardId, billboard }: { billboardId: string; b
   });
 
   return (
-    <Badge className="bg-amber-500/90 text-white text-[10px] px-2 py-0.5 shadow-sm max-w-[150px] truncate">
+    <Badge className="bg-amber-500/90 text-white text-xs px-2 py-0.5 shadow-sm max-w-[150px] truncate">
       <Building2 className="h-2.5 w-2.5 ml-1" />
       {friendCompany?.name || 'شركة صديقة'}
     </Badge>
@@ -313,9 +316,9 @@ export function SelectedBillboardsCard({
 
     if (nonDeletableBillboards.length > 0) {
       const ok = await confirm({
-        title: 'حذف فوري بدون إيقاف',
-        message: `بعض اللوحات المحددة (${nonDeletableBillboards.map(b => b.Billboard_Name || b.name || `لوحة ${b.ID}`).join(', ')}) لا يمكن حذفها مباشرة لوجود مهمة تركيب أو لتجاوز المدة. هل تريد حذف كافة اللوحات المحددة فورياً وبدون إيقاف؟`,
-        confirmText: 'حذف فوري للكل',
+        title: 'إزالة اللوحات من العقد',
+        message: `بعض اللوحات المحددة (${nonDeletableBillboards.map(b => b.Billboard_Name || b.name || `لوحة ${b.ID}`).join(', ')}) لها مهام تركيب أو تجاوزت مدة الإزالة المباشرة. تُزال كلها من العقد دون تسوية مالية، وتُحرَّر عند حفظ العقد. متابعة؟`,
+        confirmText: 'إزالة الكل',
         cancelText: 'إلغاء',
         variant: 'destructive',
       });
@@ -327,7 +330,7 @@ export function SelectedBillboardsCard({
         }
         setBulkSelectedIds(new Set());
         setBulkSelectMode(false);
-        toast.success('تم الحذف الفوري لكافة اللوحات المحددة');
+        toast.success(`أُزيلت ${ids.length} لوحة — احفظ العقد لاعتماد الإزالة`);
       }
       return;
     }
@@ -338,7 +341,7 @@ export function SelectedBillboardsCard({
       } else {
         deletableIds.forEach(id => onRemoveSelected(id));
       }
-      toast.success('تم حذف اللوحات المحددة');
+      toast.success(`أُزيلت ${deletableIds.length} لوحة — احفظ العقد لاعتماد الإزالة`);
     }
 
     setBulkSelectedIds(new Set());
@@ -807,9 +810,11 @@ export function SelectedBillboardsCard({
     return 999;
   };
   
-  const selectedBillboards = billboards
-    .filter((b) => selected.includes(String((b as any).ID)))
-    .sort((a, b) => getSortOrder(a) - getSortOrder(b));
+  // الترتيب الموحد في كل النظام: المقاس ← المستوى ← البلدية
+  const selectedBillboards = sortBillboardsStandardSync(
+    billboards.filter((b) => selected.includes(String((b as any).ID))),
+    sizesOrder,
+  );
 
   const getOriginalFacesCount = (b: any): number => {
     const raw = (b as any)?.Faces_Count ?? (b as any)?.faces_count ?? (b as any)?.faces ?? (b as any)?.Number_of_Faces ?? (b as any)?.Faces ?? (b as any)?.face_count ?? (b as any)?.FacesCount;
@@ -1075,20 +1080,20 @@ export function SelectedBillboardsCard({
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
                 {/* إجمالي اللوحات */}
                 <div className="bg-background/80 backdrop-blur rounded-lg p-3 border border-border text-center">
-                  <div className="text-2xl font-bold text-primary font-manrope">{sizeSummary.totalCount}</div>
+                  <div className="text-base font-bold text-primary font-manrope">{sizeSummary.totalCount}</div>
                   <div className="text-xs text-muted-foreground">إجمالي اللوحات</div>
                 </div>
                 {/* إجمالي الوجوه */}
                 <div className="bg-background/80 backdrop-blur rounded-lg p-3 border border-border text-center">
-                  <div className="text-2xl font-bold text-accent font-manrope">{sizeSummary.totalFaces}</div>
+                  <div className="text-base font-bold text-accent font-manrope">{sizeSummary.totalFaces}</div>
                   <div className="text-xs text-muted-foreground">إجمالي الوجوه</div>
                 </div>
                 {/* تفاصيل كل مقاس */}
                 {sizeSummary.sizes.map(([size, data]) => (
                   <div key={size} className="bg-background/80 backdrop-blur rounded-lg p-3 border border-border text-center">
-                    <div className="text-lg font-bold text-foreground font-manrope">{data.count}</div>
+                    <div className="text-base font-bold text-foreground font-manrope">{data.count}</div>
                     <div className="text-xs text-muted-foreground">{size}</div>
-                    <div className="text-[10px] text-primary/70">{data.faces} وجه</div>
+                    <div className="text-xs text-primary/70">{data.faces} وجه</div>
                   </div>
                 ))}
               </div>
@@ -1110,11 +1115,11 @@ export function SelectedBillboardsCard({
                     {/* تكلفة الطباعة */}
                     {costsSummary.totalPrintCost > 0 && (
                       <div className="flex justify-between items-center text-sm">
-                        <span className="text-blue-600 flex items-center gap-1">
+                        <span className="text-primary flex items-center gap-1">
                           <Printer className="h-3.5 w-3.5" />
                           إجمالي تكلفة الطباعة
                         </span>
-                        <span className="font-bold text-blue-600 font-manrope">+ {costsSummary.totalPrintCost.toLocaleString('ar-LY')} {currencySymbol}</span>
+                        <span className="font-bold text-primary font-manrope">+ {costsSummary.totalPrintCost.toLocaleString('ar-LY')} {currencySymbol}</span>
                       </div>
                     )}
                     
@@ -1132,7 +1137,7 @@ export function SelectedBillboardsCard({
                     {/* الإجمالي الكلي */}
                     <div className="flex justify-between items-center text-base pt-2 border-t border-border mt-2">
                       <span className="font-bold text-primary">الإجمالي الكلي للوحات</span>
-                      <span className="font-bold text-xl text-primary font-manrope">{costsSummary.grandTotal.toLocaleString('ar-LY')} {currencySymbol}</span>
+                      <span className="font-bold text-base text-primary font-manrope">{costsSummary.grandTotal.toLocaleString('ar-LY')} {currencySymbol}</span>
                     </div>
                   </div>
                 </div>
@@ -1241,128 +1246,48 @@ export function SelectedBillboardsCard({
 
                 // Renewal check
                 const isRenewed = previousContractBillboardIds.has(billboardId);
+                const sf = billboardFields(b);
 
                 return (
-                  <div 
-                    key={(b as any).ID} 
-                    className={`group relative flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-xl hover:shadow-primary/10 ${
-                      bulkSelectMode && bulkSelectedIds.has(billboardId) 
-                        ? 'border-destructive ring-2 ring-destructive/30' 
-                        : replacementsMap.has(billboardId)
-                          ? 'border-primary ring-2 ring-primary/40 bg-gradient-to-br from-primary/5 to-transparent'
-                          : isRenewed
-                            ? 'border-emerald-500/40 shadow-emerald-500/5 bg-gradient-to-br from-emerald-500/[0.02] to-transparent'
-                            : 'border-border'
-                    }`}
+                  <BillboardCardFrame
+                    key={(b as any).ID}
+                    tone={bulkSelectMode && bulkSelectedIds.has(billboardId) ? 'danger' : replacementsMap.has(billboardId) ? 'replacement' : isRenewed ? 'renewed' : 'default'}
                     onClick={bulkSelectMode ? () => toggleBulkSelect(billboardId) : undefined}
-                    style={bulkSelectMode ? { cursor: 'pointer' } : undefined}
-                  >
-                    {/* Header: Prominent Size Badge, Billboard Code & Actions */}
-                    <div className="flex flex-wrap min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border/70 bg-muted/40 px-3 py-2" dir="rtl">
-                      <div className="flex items-center gap-2 overflow-hidden">
-                        {/* Prominent Size Badge at Top Header */}
-                        <Badge 
-                          variant="outline"
-                          className="shrink-0 border border-primary/40 bg-primary/10 px-3 py-1 font-manrope text-xs font-extrabold text-primary shadow-sm sm:text-sm"
-                        >
-                          {getDisplaySize(b)}
-                        </Badge>
-
-                        {/* Billboard Code Badge */}
-                        <span className="font-extrabold text-foreground tracking-wide text-xs sm:text-sm font-manrope bg-muted/40 px-2.5 py-0.5 rounded-lg border border-border/40 shrink-0">
-                          {(b as any).code || (b as any).Code || `TR-${String(billboardId).padStart(4, '0')}`}
-                        </span>
-
-                        {/* ID Pill */}
-                        <span className="text-[10px] bg-amber-500/15 text-amber-400 font-manrope font-bold px-2 py-0.5 rounded-md border border-amber-500/20 shrink-0">
-                          #{billboardId}
-                        </span>
-
+                    code={sf.code}
+                    size={getDisplaySize(b)}
+                    level={sf.level}
+                    headerExtra={
+                      <>
+                        <span className="font-manrope text-xs text-muted-foreground">#{billboardId}</span>
                         {isRenewed && (
-                          <Badge className="bg-emerald-500/10 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[9px] font-bold px-1.5 py-0.5 shrink-0 select-none flex items-center gap-1">
-                            <RefreshCw className="h-2.5 w-2.5 ml-1" />
-                            مجدد {previousContractNumber ? `#${previousContractNumber}` : ''}
-                          </Badge>
+                          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-xs font-bold text-emerald-500">
+                            <RefreshCw className="h-2.5 w-2.5" />مجدد{previousContractNumber ? ` #${previousContractNumber}` : ''}
+                          </span>
                         )}
-                      </div>
-                      
-                      <div className="flex items-center gap-1 shrink-0">
-                        {/* Bulk Select Checkbox: always accessible when more than 1 billboard */}
+                      </>
+                    }
+                    headerActions={
+                      <>
                         {selected.length > 1 && (
-                          <div 
-                            className="flex items-center justify-center ml-1 cursor-pointer"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (!bulkSelectMode) setBulkSelectMode(true);
-                              toggleBulkSelect(billboardId);
-                            }}
-                            title={bulkSelectedIds.has(billboardId) ? "إلغاء تحديد اللوحة" : "تحديد اللوحة للإزالة المتعددة"}
-                          >
-                            <div className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${
-                              bulkSelectedIds.has(billboardId)
-                                ? 'bg-destructive border-destructive text-destructive-foreground scale-105'
-                                : 'bg-background border-muted-foreground/40 hover:border-destructive/60'
-                            }`}>
-                              {bulkSelectedIds.has(billboardId) && <CheckSquare className="h-3 w-3" />}
-                            </div>
-                          </div>
+                          <CardIconButton
+                            icon={bulkSelectedIds.has(billboardId) ? CheckSquare : CardSquareIcon}
+                            tone={bulkSelectedIds.has(billboardId) ? 'danger' : 'default'}
+                            title={bulkSelectedIds.has(billboardId) ? 'إلغاء تحديد اللوحة' : 'تحديد اللوحة للإزالة المتعددة'}
+                            onClick={() => { if (!bulkSelectMode) setBulkSelectMode(true); toggleBulkSelect(billboardId); }}
+                          />
                         )}
-
-                        {/* Quick Swap button — Single Unified Swap Action */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg p-0 text-primary transition-all duration-200 hover:bg-primary/10 hover:text-primary"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!b) return;
-                            setSwappingBillboard(b);
-                            setSwapDialogOpen(true);
-                          }}
-                          title="تبديل اللوحة"
-                        >
-                          <ArrowLeftRight className="h-4 w-4" />
-                        </Button>
-
-                        {/* Quick Pause button */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg p-0 text-amber-500 transition-all duration-200 hover:bg-amber-500/10 hover:text-amber-600"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!b) return;
-                            setQuickPausingBillboard(b);
-                            setQuickPauseOpen(true);
-                          }}
-                          title="إيقاف مؤقت للوحة"
-                        >
-                          <PauseCircle className="h-4 w-4" />
-                        </Button>
-
-                        {/* Remove button directly visible */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-lg p-0 text-destructive transition-all duration-200 hover:bg-destructive/10 hover:text-destructive"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (bulkSelectedIds.size > 1 && bulkSelectedIds.has(billboardId)) {
-                              handleBulkRemove();
-                              return;
-                            }
-                            if (!computeCanDelete(b)) {
-                              setDeletingBillboard(b);
-                              setDeleteChoiceOpen(true);
-                              return;
-                            }
+                        <CardIconButton icon={ArrowLeftRight} tone="primary" title="تبديل اللوحة" onClick={() => { setSwappingBillboard(b); setSwapDialogOpen(true); }} />
+                        <CardIconButton icon={PauseCircle} tone="warning" title="إيقاف مؤقت للوحة" onClick={() => { setQuickPausingBillboard(b); setQuickPauseOpen(true); }} />
+                        <CardIconButton
+                          icon={X}
+                          tone="danger"
+                          title="إزالة من العقد"
+                          onClick={() => {
+                            if (bulkSelectedIds.size > 1 && bulkSelectedIds.has(billboardId)) { handleBulkRemove(); return; }
+                            if (!computeCanDelete(b)) { setDeletingBillboard(b); setDeleteChoiceOpen(true); return; }
                             onRemoveSelected(billboardId);
                           }}
-                          title="إزالة من العقد"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-
+                        />
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button 
@@ -1397,15 +1322,13 @@ export function SelectedBillboardsCard({
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
-                      </div>
-                    </div>
-
-                    {/* Unified clean replacement banner across the top of the card */}
-                    {replacementsMap.has(billboardId) && (() => {
+                      </>
+                    }
+                    banner={replacementsMap.has(billboardId) && (() => {
                       const info = replacementsMap.get(billboardId)!;
                       return (
                         <div className="relative z-10 bg-primary/95 text-primary-foreground px-3 py-1.5 border-b border-primary/30 shadow-sm">
-                          <div className="flex items-center gap-1.5 text-[11px] font-bold truncate">
+                          <div className="flex items-center gap-1.5 text-xs font-bold truncate">
                             <ArrowLeftRight className="h-3.5 w-3.5 shrink-0" />
                             <span>لوحة بديلة عن:</span>
                             <span className="bg-black/25 px-1.5 py-0.5 rounded font-extrabold truncate">
@@ -1415,152 +1338,46 @@ export function SelectedBillboardsCard({
                         </div>
                       );
                     })()}
-
-                    {/* Image Section — click to zoom */}
-                    <div className="relative h-56 shrink-0 overflow-hidden border-b border-border bg-muted/30">
+                    image={
                       <BillboardImageZoom
                         billboard={b}
-                        alt={(b as any).name || (b as any).Billboard_Name || 'لوحة'}
-                        className="h-full w-full transition-transform duration-300 group-hover/zoom:scale-[1.02]"
+                        alt={sf.title}
+                        className="h-full w-full"
                         thumbnailObjectFit="contain"
                       />
-                      {/* Gradient Overlay */}
-                      
-                      {/* Badges overlayed on top-right of image */}
-                      <div className="absolute top-3 right-3 z-10 flex flex-col gap-1.5 items-end max-w-[90%] pointer-events-none">
-                        {isPartnership && (
-                          <Badge className="bg-primary/90 text-primary-foreground text-[10px] font-bold px-2 py-0.5 shadow-md flex items-center gap-1 border border-primary/20 backdrop-blur-sm">
-                            <Users className="h-3 w-3 ml-1" />
-                            مشتركة
-                          </Badge>
-                        )}
+                    }
+                    imageHeight="h-40"
+                    statusBadges={
+                      <>
+                        {isPartnership && <CardStatusBadge kind="info" icon={Users} label="مشتركة" />}
                         {isPartnership && partnershipInfo && partnershipInfo.partnerShares.length > 0 && (
-                          <Badge className="max-w-[150px] truncate border border-primary/30 bg-primary/90 px-2 py-0.5 text-[10px] font-bold text-primary-foreground shadow-md backdrop-blur-sm">
-                            {partnershipInfo.partnerShares.map(ps => ps.partnerName).join(' • ')}
-                          </Badge>
+                          <CardStatusBadge kind="info" label={partnershipInfo.partnerShares.map(ps => ps.partnerName).join(' • ')} />
                         )}
-                        {isFriendBillboard && (
-                          <FriendCompanyBadge billboardId={billboardId} billboard={b} />
-                        )}
-                        {isSingleFace && (
-                          <Badge className="bg-amber-600/90 text-white text-[10px] font-bold px-2 py-0.5 shadow-md border border-amber-500/20 backdrop-blur-sm">
-                            وجه واحد
-                          </Badge>
-                        )}
-                        {activeLoansByBillboard.get(billboardId) && (
-                          <BillboardLoanBadge loan={activeLoansByBillboard.get(billboardId)!} />
-                        )}
-                        {replacementsMap.has(billboardId) && (
-                          <Badge className="bg-primary/90 text-primary-foreground border border-primary/20 text-[10px] font-bold px-2 py-0.5 shadow-md flex items-center gap-1 backdrop-blur-sm">
-                            <ArrowLeftRight className="h-3 w-3" />
-                            لوحة بديلة
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Content Section */}
-                    <div className="flex flex-1 flex-col space-y-3 p-3" dir="rtl">
-                      {/* Location / Nearest Landmark */}
-                      <div className="flex items-start gap-2 bg-muted/30 p-2.5 rounded-xl border border-border/40 shrink-0 text-right" dir="rtl">
-                        <MapPin className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-                        <div className="space-y-0.5 text-right">
-                          <span className="text-[10px] text-muted-foreground block font-medium">أقرب نقطة دالة</span>
-                          <p className="text-sm font-extrabold text-foreground leading-snug text-right">
-                            {(b as any).location || (b as any).Nearest_Landmark || (b as any).Nearest_landmark || 'غير محدد'}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Details Row: Municipality, District, City & Level */}
-                      {(() => {
-                        const cityName = (b as any).city || (b as any).City || '-';
-                        const muniName = (b as any).municipality || (b as any).Municipality || '-';
-                        const districtName = (b as any).district || (b as any).District || (b as any).area || (b as any).Area || '-';
-                        const levelVal = (b as any).level || (b as any).Level || '-';
-
-                        return (
-                          <div className="grid grid-cols-2 gap-2 shrink-0" dir="rtl">
-                            <div className="text-center bg-amber-500/10 border border-amber-500/30 rounded-xl py-1.5 px-1">
-                              <div className="text-[9px] text-amber-500/90 mb-0.5 font-bold">البلدية</div>
-                              <div className="text-xs font-bold text-amber-400 truncate" title={muniName}>{muniName}</div>
-                            </div>
-                            <div className="text-center bg-muted/40 border border-border/40 rounded-xl py-1.5 px-1">
-                              <div className="text-[9px] text-muted-foreground mb-0.5 font-medium">المنطقة</div>
-                              <div className="text-xs font-bold text-foreground truncate" title={districtName}>{districtName}</div>
-                            </div>
-                            <div className="text-center bg-muted/40 border border-border rounded-xl py-1.5 px-1">
-                              <div className="text-xs text-muted-foreground mb-0.5 font-medium">المدينة</div>
-                              <div className="text-sm font-semibold text-foreground break-words" title={cityName}>{cityName}</div>
-                            </div>
-                            <div className="text-center bg-amber-500/10 border border-amber-500/30 rounded-xl py-1.5 px-1">
-                              <div className="text-[9px] text-amber-400/80 mb-0.5 font-medium">المستوى</div>
-                              <div className="text-xs font-extrabold text-amber-400 font-manrope">{levelVal}</div>
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Interactive Segmented Selector for Face Count or Static Single-Face Display */}
-                      {originalFaces > 1 ? (
-                        onToggleSingleFace && (
-                          <div className="flex items-center justify-between bg-muted/40 p-1 rounded-xl border border-border/50 text-xs shrink-0 select-none">
-                            <span className="font-bold text-foreground/75 mr-2">عدد الوجوه</span>
-                            <div className="flex bg-muted/80 rounded-lg p-0.5 border border-border/20">
-                              <button
-                                onClick={() => isSingleFace && onToggleSingleFace(billboardId)}
-                                className={`px-3 py-1 rounded-md font-bold text-[11px] transition-all duration-200 cursor-pointer ${
-                                  !isSingleFace
-                                    ? 'bg-primary text-primary-foreground shadow-sm'
-                                    : 'text-muted-foreground hover:text-foreground'
-                                }`}
-                              >
-                                وجهين
-                              </button>
-                              <button
-                                onClick={() => !isSingleFace && onToggleSingleFace(billboardId)}
-                                className={`px-3 py-1 rounded-md font-bold text-[11px] transition-all duration-200 cursor-pointer ${
-                                  isSingleFace
-                                    ? 'bg-amber-500 text-white shadow-sm'
-                                    : 'text-muted-foreground hover:text-foreground'
-                                }`}
-                              >
-                                وجه واحد
-                              </button>
-                            </div>
-                          </div>
-                        )
-                      ) : (
-                        <div className="flex items-center justify-between bg-muted/40 px-3 py-2 rounded-xl border border-border/50 text-xs shrink-0">
-                          <span className="font-bold text-foreground/75">عدد الوجوه</span>
-                          <span className="px-2.5 py-0.5 rounded-md font-bold text-[11px] bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-                            وجه واحد
-                          </span>
-                        </div>
-                      )}
-
-                      <dl className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border border-border bg-muted/20 p-3 text-xs">
-                        <dt className="text-muted-foreground">السعر قبل الخصم</dt>
-                        <dd className="text-left font-semibold tabular-nums">{formatAmount(baseTotalForBoard + extraInstallCost + extraPrintCost)} {currencySymbol}</dd>
-                        <dt className="text-muted-foreground">{levelDiscountAmt > 0 ? `الخصم الفردي (منه تخفيض المستوى ${formatAmount(levelDiscountAmt)})` : 'الخصم الفردي'}</dt>
-                        <dd className="text-left font-semibold tabular-nums">{formatAmount(individualDiscountAmt)} {currencySymbol}</dd>
-                        <dt className="text-muted-foreground">نصيب اللوحة من خصم العقد</dt>
-                        <dd className="text-left font-semibold tabular-nums">{formatAmount(discountPerBillboard)} {currencySymbol}</dd>
-                        <dt className="border-t border-border pt-2 font-bold">السعر النهائي</dt>
-                        <dd className="border-t border-border pt-2 text-left font-bold text-primary tabular-nums">{formatAmount(priceAfterDiscount)} {currencySymbol}</dd>
-                      </dl>
-                    </div>
+                        {isFriendBillboard && <span className="pointer-events-auto"><FriendCompanyBadge billboardId={billboardId} billboard={b} /></span>}
+                        {isSingleFace && <CardStatusBadge kind="warning" label="وجه واحد" />}
+                        {activeLoansByBillboard.get(billboardId) && <span className="pointer-events-auto"><BillboardLoanBadge loan={activeLoansByBillboard.get(billboardId)!} /></span>}
+                        {replacementsMap.has(billboardId) && <CardStatusBadge kind="info" icon={ArrowLeftRight} label="لوحة بديلة" />}
+                      </>
+                    }
+                    title={sf.title}
+                    landmark={sf.landmark}
+                    municipality={sf.municipality}
+                    district={sf.district}
+                    city={sf.city}
+                    priceLabel="السعر النهائي للوحة"
+                    price={<>{formatAmount(priceAfterDiscount)} <span className="text-xs font-normal text-muted-foreground">{currencySymbol}</span></>}
+                    after={
                     <details className="group/details border-t border-border" dir="rtl">
-                      <summary className="min-h-10 cursor-pointer px-3 py-2 text-sm font-semibold hover:bg-muted/50 transition-all duration-200">تعديل الخصم والتواريخ وتفاصيل التكلفة</summary>
+                      <summary className="flex min-h-10 cursor-pointer items-center gap-1.5 px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted/50 hover:text-foreground">تعديل الخصم والتواريخ وتفاصيل التكلفة</summary>
                     <div className="flex flex-1 flex-col space-y-3 p-3" dir="rtl">
                       {/* عرض التواريخ المخصصة إذا تم تفعيلها */}
                       {billboardCustomDates[billboardId]?.startDate && (
-                        <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 flex items-center justify-between text-[11px] font-bold text-amber-800 dark:text-amber-300 shrink-0">
+                        <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 flex items-center justify-between text-xs font-bold text-amber-800 dark:text-amber-300 shrink-0">
                           <span className="flex items-center gap-1.5">
-                            <Calendar className="h-3.5 w-3.5 text-amber-600" />
+                            <Calendar className="h-3.5 w-3.5 text-primary" />
                             تاريخ الحجز المخصص:
                           </span>
-                          <span className="font-manrope text-[10px]">
+                          <span className="font-manrope text-xs">
                             {billboardCustomDates[billboardId].startDate} ← {billboardCustomDates[billboardId].endDate}
                           </span>
                         </div>
@@ -1571,28 +1388,28 @@ export function SelectedBillboardsCard({
                         {/* Base Rental */}
                         <div className="flex justify-between items-center">
                           <span className="text-sm font-medium text-muted-foreground">الإيجار الأساسي</span>
-                          <span className="text-lg font-bold text-primary font-manrope">{baseTotalForBoard.toLocaleString('ar-LY')} {currencySymbol}</span>
+                          <span className="text-base font-bold text-primary font-manrope">{baseTotalForBoard.toLocaleString('ar-LY')} {currencySymbol}</span>
                         </div>
 
                         {/* Print Cost - included in price */}
                         {printCostEnabled && includePrintInPrice && printCostForBillboard > 0 && (
                           <div className="flex justify-between items-center bg-orange-500/10 rounded-lg px-3 py-1.5 -mx-1">
-                            <span className="text-xs font-medium text-orange-600 flex items-center gap-1.5">
+                            <span className="text-xs font-medium text-primary flex items-center gap-1.5">
                               <Printer className="h-3 w-3" />
                               طباعة مضمنة
                             </span>
-                            <span className="text-sm font-bold text-orange-600 font-manrope">- {printCostForBillboard.toLocaleString('ar-LY')} {currencySymbol}</span>
+                            <span className="text-sm font-bold text-primary font-manrope">- {printCostForBillboard.toLocaleString('ar-LY')} {currencySymbol}</span>
                           </div>
                         )}
 
                         {/* Print Cost - NOT included in price */}
                         {printCostEnabled && !includePrintInPrice && printCostForBillboard > 0 && (
                           <div className="flex justify-between items-center bg-blue-500/10 rounded-lg px-3 py-1.5 -mx-1">
-                            <span className="text-xs font-medium text-blue-600 flex items-center gap-1.5">
+                            <span className="text-xs font-medium text-primary flex items-center gap-1.5">
                               <Printer className="h-3 w-3" />
                               تكلفة الطباعة
                             </span>
-                            <span className="text-sm font-bold text-blue-600 font-manrope">+ {printCostForBillboard.toLocaleString('ar-LY')} {currencySymbol}</span>
+                            <span className="text-sm font-bold text-primary font-manrope">+ {printCostForBillboard.toLocaleString('ar-LY')} {currencySymbol}</span>
                           </div>
                         )}
 
@@ -1643,7 +1460,7 @@ export function SelectedBillboardsCard({
                         )}
 
                         {Math.abs(pricingData?.roundingAdjustment || 0) >= 0.01 && (
-                          <p className="text-[11px] text-muted-foreground">يشمل الخصم تسوية القيم المقفلة مع الحفاظ على إجمالي العقد.</p>
+                          <p className="text-xs text-muted-foreground">يشمل الخصم تسوية القيم المقفلة مع الحفاظ على إجمالي العقد.</p>
                         )}
                         {/* Net after discount */}
                         {discountPerBillboard > 0 && (
@@ -1678,7 +1495,7 @@ export function SelectedBillboardsCard({
                                   onUpdateIndividualDiscount(billboardId, currentVal, v);
                                 }}
                               >
-                                <SelectTrigger className="h-7 w-16 text-[10px] px-1.5 font-bold" onClick={(e) => e.stopPropagation()}>
+                                <SelectTrigger className="h-7 w-16 text-xs px-1.5 font-bold" onClick={(e) => e.stopPropagation()}>
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent className="bg-popover z-[100]">
@@ -1713,7 +1530,7 @@ export function SelectedBillboardsCard({
                               <div className="space-y-2 pt-1 animate-in slide-in-from-top-2 duration-200">
                                 <div className="grid grid-cols-2 gap-2">
                                   <div className="space-y-1">
-                                    <label className="text-[10px] font-bold text-muted-foreground block">تاريخ البدء المخصص</label>
+                                    <label className="text-xs font-bold text-muted-foreground block">تاريخ البدء المخصص</label>
                                     <Input
                                       type="date"
                                       value={billboardCustomDates[billboardId]?.startDate || ''}
@@ -1725,7 +1542,7 @@ export function SelectedBillboardsCard({
                                     />
                                   </div>
                                   <div className="space-y-1">
-                                    <label className="text-[10px] font-bold text-muted-foreground block">تاريخ الانتهاء (تلقائي)</label>
+                                    <label className="text-xs font-bold text-muted-foreground block">تاريخ الانتهاء (تلقائي)</label>
                                     <Input
                                       type="date"
                                       value={billboardCustomDates[billboardId]?.endDate || ''}
@@ -1736,7 +1553,7 @@ export function SelectedBillboardsCard({
                                   </div>
                                 </div>
                                 <div className="space-y-1">
-                                  <label className="text-[10px] font-bold text-muted-foreground block">سبب تعديل تاريخ بدء اللوحة</label>
+                                  <label className="text-xs font-bold text-muted-foreground block">سبب تعديل تاريخ بدء اللوحة</label>
                                   <Input
                                     type="text"
                                     placeholder="مثال: تأخير بسبب التركيب أو ظروف قهرية"
@@ -1762,10 +1579,10 @@ export function SelectedBillboardsCard({
                           <div className="flex justify-between items-center bg-primary/10 rounded-lg px-3 py-2.5 -mx-1 border border-primary/30 mt-1">
                             <span className="text-sm font-bold text-primary">الإجمالي النهائي</span>
                             <div className="text-left">
-                              <span className="text-lg font-bold text-primary font-manrope">
+                              <span className="text-base font-bold text-primary font-manrope">
                                 {formatAmount(totalForBoard)} {currencySymbol}
                               </span>
-                              <span className="text-[10px] text-primary/60 font-normal mr-1">
+                              <span className="text-xs text-primary/60 font-normal mr-1">
                                 /{pricingMode === 'months' ? `${durationMonths} شهر` : `${durationDays} يوم`}
                               </span>
                             </div>
@@ -1781,7 +1598,7 @@ export function SelectedBillboardsCard({
                               <Building2 className="h-4 w-4 text-primary" />
                               <span className="text-sm font-bold text-foreground">لوحة صديقة</span>
                             </div>
-                            <Badge variant="secondary" className="text-[10px]">
+                            <Badge variant="secondary" className="text-xs">
  {friendCostsSaveState === 'saving' ? 'جاري الحفظ...' : friendCostsSaveState === 'saved' ? ' محفوظ' : 'سعر مطبّق'}
                             </Badge>
                           </div>
@@ -1801,7 +1618,7 @@ export function SelectedBillboardsCard({
                           {friendCost && friendCost.friendRentalCost > 0 && (
                             <div className="flex justify-between items-center bg-primary/20 rounded-lg px-4 py-3 border border-primary/30">
                               <span className="text-sm font-bold text-primary">الربح المتوقع</span>
-                              <span className="text-xl font-bold text-primary">
+                              <span className="text-base font-bold text-primary">
                                 {(priceAfterDiscount - friendCost.friendRentalCost).toLocaleString('ar-LY')} {currencySymbol}
                               </span>
                             </div>
@@ -1830,7 +1647,7 @@ export function SelectedBillboardsCard({
                           {/* Capital Info */}
                           <div className="grid grid-cols-2 gap-3">
                             <div className="bg-muted border border-border rounded-lg px-3 py-2.5">
-                              <div className="text-[10px] text-muted-foreground mb-0.5">رأس المال</div>
+                              <div className="text-xs text-muted-foreground mb-0.5">رأس المال</div>
                               <div className="text-base font-bold text-foreground">{partnershipInfo.capital.toLocaleString()} {currencySymbol}</div>
                             </div>
                             <div className={`rounded-lg px-3 py-2.5 ${
@@ -1838,7 +1655,7 @@ export function SelectedBillboardsCard({
                                 ? 'bg-primary/10 border border-primary/20' 
                                 : 'bg-accent/10 border border-accent/20'
                             }`}>
-                              <div className={`text-[10px] mb-0.5 ${partnershipInfo.capitalRemaining <= 0 ? 'text-primary' : 'text-accent'}`}>المتبقي</div>
+                              <div className={`text-xs mb-0.5 ${partnershipInfo.capitalRemaining <= 0 ? 'text-primary' : 'text-accent'}`}>المتبقي</div>
                               <div className={`text-base font-bold ${partnershipInfo.capitalRemaining <= 0 ? 'text-primary' : 'text-accent'}`}>
                                 {partnershipInfo.capitalRemaining.toLocaleString()} {currencySymbol}
                               </div>
@@ -1863,7 +1680,7 @@ export function SelectedBillboardsCard({
                           {/* Company Share */}
                           <div className="flex justify-between items-center bg-primary/20 rounded-lg px-4 py-3 border border-primary/30">
                             <span className="text-sm font-bold text-primary">حصة الشركة</span>
-                            <span className="text-xl font-bold text-primary">
+                            <span className="text-base font-bold text-primary">
                               {(priceAfterDiscount * (partnershipInfo.companySharePct / 100)).toLocaleString()} {currencySymbol}
                             </span>
                           </div>
@@ -1871,7 +1688,100 @@ export function SelectedBillboardsCard({
                       )}
                     </div>
                     </details>
-                  </div>
+                    }
+                  >
+                      {/* الخدمات: حالة التركيب والطباعة لهذه اللوحة */}
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        {[
+                          { label: 'التركيب', enabled: installationEnabled, included: includeInstallationInPrice, amount: installPrice },
+                          { label: 'الطباعة', enabled: printCostEnabled, included: includePrintInPrice, amount: printCostForBillboard },
+                        ].map(sv => (
+                          <div key={sv.label} className={`rounded-lg border px-2.5 py-1.5 ${sv.enabled ? 'border-border bg-muted/20' : 'border-dashed border-border'}`}>
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-muted-foreground">{sv.label}</span>
+                              <span className={`rounded px-1.5 py-px font-semibold ${!sv.enabled ? 'text-muted-foreground' : sv.included ? 'bg-emerald-500/10 text-emerald-500' : 'bg-primary/10 text-primary'}`}>
+                                {!sv.enabled ? 'غير مفعّل' : sv.included ? 'مشمول بالسعر' : 'إضافي'}
+                              </span>
+                            </div>
+                            {sv.enabled && (
+                              <div className="mt-0.5 font-semibold tabular-nums text-foreground">{formatAmount(sv.amount)} {currencySymbol}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Interactive Segmented Selector for Face Count or Static Single-Face Display */}
+                      {originalFaces > 1 ? (
+                        onToggleSingleFace && (
+                          <div className="flex items-center justify-between bg-muted/40 p-1 rounded-xl border border-border/50 text-xs shrink-0 select-none">
+                            <span className="font-bold text-foreground/75 mr-2">عدد الوجوه</span>
+                            <div className="flex bg-muted/80 rounded-lg p-0.5 border border-border/20">
+                              <button
+                                onClick={() => isSingleFace && onToggleSingleFace(billboardId)}
+                                className={`px-3 py-1 rounded-md font-bold text-xs transition-all duration-200 cursor-pointer ${
+                                  !isSingleFace
+                                    ? 'bg-primary text-primary-foreground shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                }`}
+                              >
+                                وجهين
+                              </button>
+                              <button
+                                onClick={() => !isSingleFace && onToggleSingleFace(billboardId)}
+                                className={`px-3 py-1 rounded-md font-bold text-xs transition-all duration-200 cursor-pointer ${
+                                  isSingleFace
+                                    ? 'bg-amber-500 text-white shadow-sm'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                }`}
+                              >
+                                وجه واحد
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      ) : (
+                        <div className="flex items-center justify-between bg-muted/40 px-3 py-2 rounded-xl border border-border/50 text-xs shrink-0">
+                          <span className="font-bold text-foreground/75">عدد الوجوه</span>
+                          <span className="px-2.5 py-0.5 rounded-md font-bold text-xs bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                            وجه واحد
+                          </span>
+                        </div>
+                      )}
+
+                      {(() => {
+                        const grossPrice = baseTotalForBoard + extraInstallCost + extraPrintCost;
+                        const ownDiscount = Math.max(0, individualDiscountAmt - levelDiscountAmt);
+                        const rows: { label: string; value: number }[] = [
+                          ...(levelDiscountAmt > 0 ? [{ label: 'تخفيض المستوى', value: levelDiscountAmt }] : []),
+                          ...(ownDiscount > 0 ? [{ label: 'خصم خاص باللوحة', value: ownDiscount }] : []),
+                          ...(discountPerBillboard > 0 ? [{ label: 'نصيبها من خصم العقد', value: discountPerBillboard }] : []),
+                        ];
+                        const totalDiscount = rows.reduce((sum, r) => sum + r.value, 0);
+                        return (
+                          <div className="overflow-hidden rounded-lg border border-border text-xs">
+                            <div className="flex items-center justify-between bg-muted/30 px-3 py-2">
+                              <span className="text-muted-foreground">سعر اللوحة للمدة</span>
+                              <span className="font-semibold tabular-nums">{formatAmount(grossPrice)} {currencySymbol}</span>
+                            </div>
+                            {rows.length > 0 ? rows.map(r => (
+                              <div key={r.label} className="flex items-center justify-between border-t border-border px-3 py-1.5">
+                                <span className="text-muted-foreground">{r.label}</span>
+                                <span dir="ltr" className="font-semibold tabular-nums text-rose-500">−{formatAmount(r.value)}</span>
+                              </div>
+                            )) : (
+                              <div className="border-t border-border px-3 py-1.5 text-muted-foreground">بدون خصم</div>
+                            )}
+                            {totalDiscount > 0 && grossPrice > 0 && (
+                              <div className="flex items-center justify-between border-t border-border bg-rose-500/5 px-3 py-1.5">
+                                <span className="font-semibold text-rose-500">إجمالي الخصم</span>
+                                <span className="font-bold tabular-nums text-rose-500"><span dir="ltr">−{formatAmount(totalDiscount)}</span> · {Math.round((totalDiscount / grossPrice) * 100)}%</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+
+                  </BillboardCardFrame>
                 );
               })}
             </div>
@@ -1881,7 +1791,7 @@ export function SelectedBillboardsCard({
 
  {/* NEW: Installation Cost Summary with unique sizes display */}
       {installationCostSummary && installationCostSummary.totalInstallationCost > 0 && (
-        <Card className="bg-card border-border shadow-card">
+        <Card className="bg-card border-border shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-card-foreground">
               <Wrench className="h-5 w-5 text-accent" />
@@ -1892,14 +1802,14 @@ export function SelectedBillboardsCard({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
                 <label className="text-sm font-medium text-muted-foreground block mb-2">إجمالي تكلفة التركيب</label>
-                <div className="px-4 py-3 rounded bg-accent/10 text-accent font-bold text-lg">
+                <div className="px-4 py-3 rounded bg-accent/10 text-accent font-bold text-base">
                   {installationCostSummary.totalInstallationCost.toLocaleString('ar-LY')} د.ل
                 </div>
               </div>
               
               <div>
                 <label className="text-sm font-medium text-muted-foreground block mb-2">عدد اللوحات</label>
-                <div className="px-4 py-3 rounded bg-muted text-card-foreground font-bold text-lg">
+                <div className="px-4 py-3 rounded bg-muted text-card-foreground font-bold text-base">
                   {selected.length} لوحة
                 </div>
               </div>
@@ -2080,7 +1990,7 @@ export function SelectedBillboardsCard({
       <Dialog open={deleteChoiceOpen} onOpenChange={setDeleteChoiceOpen}>
         <DialogContent dir="rtl" className="sm:max-w-[500px] bg-card border-border">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-lg font-bold text-foreground">
+            <DialogTitle className="flex items-center gap-2 text-base font-bold text-foreground">
               <Trash2 className="w-5 h-5 text-destructive" />
               خيارات إزالة اللوحة النشطة
             </DialogTitle>
@@ -2101,9 +2011,9 @@ export function SelectedBillboardsCard({
 
             <div className="space-y-3">
               <div className="p-3 border border-border rounded-lg bg-muted/40 hover:bg-muted/60 transition-all">
-                <h4 className="text-sm font-bold text-foreground mb-1">1. حذف فوري (بدون إيقاف)</h4>
+                <h4 className="text-sm font-bold text-foreground mb-1">1. إزالة من العقد فقط</h4>
                 <p className="text-xs text-muted-foreground leading-relaxed">
-                  حذف اللوحة فوراً من العقد وإلغاؤها مباشرة دون تسجيلها كلوحة موقوفة ودون تطبيق أي تسويات مالية أو خصومات إيقاف.
+                  تُزال اللوحة من العقد بلا تسوية مالية، وتُحرَّر وتُعالج مهامها عند حفظ العقد. يمكن التراجع قبل الحفظ.
                 </p>
               </div>
 
@@ -2125,11 +2035,12 @@ export function SelectedBillboardsCard({
                 }
                 setDeleteChoiceOpen(false);
                 setDeletingBillboard(null);
-                toast.success('تم الحذف الفوري بنجاح');
+                toast.success('أُزيلت اللوحة — احفظ العقد لاعتماد الإزالة');
               }}
+              data-draft-operation
               className="bg-destructive/10 text-destructive border-destructive/20 hover:bg-destructive hover:text-white"
             >
-              حذف فوري (بدون إيقاف)
+              إزالة من العقد فقط
             </Button>
             <Button
               onClick={() => {

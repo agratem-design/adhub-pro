@@ -177,13 +177,12 @@ export function CostSummaryCard({
   const priceDifference = adjustedFinalTotal - originalTotal;
   
   return (
-    <Card className="border-border shadow-xl overflow-hidden [contain:layout_style] min-h-[640px]">
+    <Card className="border-border shadow-sm overflow-hidden [contain:layout_style] min-h-[640px]">
       {/* Header with gradient */}
-      <div className="h-1.5 bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500" />
-      <CardHeader className="py-4 px-5 bg-gradient-to-br from-green-500/10 via-emerald-500/5 to-transparent border-b border-border">
+      <CardHeader className="py-4 px-5 bg-muted/30 border-b border-border">
         <CardTitle className="flex items-center justify-between">
-          <div className="flex items-center gap-3 text-lg">
-            <div className="p-2 rounded-xl bg-gradient-to-br from-green-500 to-emerald-600 shadow-lg shadow-green-500/25">
+          <div className="flex items-center gap-3 text-base">
+            <div className="p-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-green-500/25">
               <Calculator className="h-5 w-5 text-white" />
             </div>
             ملخص التكاليف
@@ -202,7 +201,7 @@ export function CostSummaryCard({
       </CardHeader>
       <CardContent className="p-5 space-y-5">
  {/* Estimated Total Badge with Refresh Button */}
-        <div className="p-4 rounded-xl bg-gradient-to-r from-muted/80 to-muted/50 border border-border">
+        <div className="p-4 rounded-xl bg-muted/30 border border-border">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground font-medium">الإيجار الأساسي</span>
@@ -212,7 +211,7 @@ export function CostSummaryCard({
                 </Badge>
               )}
             </div>
-            <span className="font-bold text-lg text-primary font-manrope">{(estimatedTotal || 0).toLocaleString('ar-LY')} {currencySymbol}</span>
+            <span className="font-bold text-base text-primary font-manrope">{(estimatedTotal || 0).toLocaleString('ar-LY')} {currencySymbol}</span>
           </div>
           
           {/* Show comparison with calculated value if different */}
@@ -231,7 +230,7 @@ export function CostSummaryCard({
               variant="outline"
               size="sm"
               onClick={onRefreshPricesFromTable}
-              className="w-full mt-3 text-blue-600 border-blue-200 hover:bg-blue-50 dark:border-blue-800 dark:hover:bg-blue-900/20"
+              className="w-full mt-3 text-primary border-blue-200 hover:bg-blue-50 dark:border-blue-800 dark:hover:bg-blue-900/20"
             >
               <RefreshCw className="h-3.5 w-3.5 ml-2" />
               تحديث الأسعار من الجدول الحالي
@@ -253,14 +252,14 @@ export function CostSummaryCard({
               setUserEditedRentCost(true);
             }}
             placeholder="التكلفة قبل الخصم"
-            className="h-12 font-bold text-xl bg-background border-2 border-border focus:border-primary rounded-xl"
+            className="h-12 font-bold text-base bg-background border border-input focus:border-primary rounded-xl"
           />
         </div>
 
         {/* Proportional Distribution Section */}
         {onProportionalDistribution && estimatedTotal > 0 && (
-          <div className="p-4 rounded-xl bg-violet-500/5 border-2 border-violet-500/20 space-y-3">
-            <label className="text-sm font-semibold text-violet-600 dark:text-violet-400 flex items-center gap-2">
+          <div className="p-4 rounded-xl bg-violet-500/5 border border-violet-500/20 space-y-3">
+            <label className="text-sm font-semibold text-primary flex items-center gap-2">
               <RefreshCw className="h-4 w-4" />
               توزيع نسبي على اللوحات
               <TooltipProvider>
@@ -304,10 +303,10 @@ export function CostSummaryCard({
             </div>
             {proportionalValue > 0 && estimatedTotal > 0 && (
               <div className="flex items-center justify-between text-xs bg-violet-500/10 rounded-lg px-3 py-2">
-                <span className="text-violet-700 dark:text-violet-300">
+                <span className="text-primary">
                   نسبة التغيير: {((proportionalValue / estimatedTotal - 1) * 100).toFixed(1)}%
                 </span>
-                <span className="font-medium text-violet-700 dark:text-violet-300">
+                <span className="font-medium text-primary">
                   {proportionalValue > estimatedTotal ? (
                     <span className="flex items-center gap-1">
                       <TrendingUp className="h-3 w-3" />
@@ -328,7 +327,7 @@ export function CostSummaryCard({
         )}
 
         {/* Discount Section - القيمة والنسبة معاً */}
-        <div className="p-4 rounded-xl bg-red-500/5 border-2 border-red-500/20 space-y-3">
+        <div className="p-4 rounded-xl bg-red-500/5 border border-red-500/20 space-y-3">
           <label className="text-sm font-semibold text-red-600 dark:text-red-400 flex items-center gap-2">
             <Percent className="h-4 w-4" />
             الخصم
@@ -394,9 +393,9 @@ export function CostSummaryCard({
           <CollapsibleContent className="space-y-4">
             {/* Installation Inclusion Toggle */}
             {installationEnabled && installationCost > 0 && setIncludeInstallationInPrice && (
-              <div className="p-4 rounded-xl bg-orange-500/5 border-2 border-orange-500/20 space-y-3">
+              <div className="p-4 rounded-xl bg-orange-500/5 border border-orange-500/20 space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="include-install" className="text-sm font-semibold text-orange-600 dark:text-orange-400 flex items-center gap-2 cursor-pointer">
+                  <Label htmlFor="include-install" className="text-sm font-semibold text-primary flex items-center gap-2 cursor-pointer">
                     <Wrench className="h-4 w-4" />
                     تضمين التركيب في السعر
                     <TooltipProvider>
@@ -419,7 +418,7 @@ export function CostSummaryCard({
                 </div>
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-muted-foreground">تكلفة التركيب:</span>
-                  <span className="font-bold text-orange-600 font-manrope">{installationCost.toLocaleString('ar-LY')} {currencySymbol}</span>
+                  <span className="font-bold text-primary font-manrope">{installationCost.toLocaleString('ar-LY')} {currencySymbol}</span>
                 </div>
                 {includeInstallationInPrice ? (
                   <div className="flex items-center gap-2 p-2 bg-green-500/10 rounded-lg border border-green-500/20">
@@ -428,8 +427,8 @@ export function CostSummaryCard({
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 p-2 bg-orange-500/10 rounded-lg border border-orange-500/20">
-                    <DollarSign className="h-4 w-4 text-orange-600" />
-                    <span className="text-xs font-medium text-orange-600">تضاف للإجمالي (يدفعها العميل)</span>
+                    <DollarSign className="h-4 w-4 text-primary" />
+                    <span className="text-xs font-medium text-primary">تضاف للإجمالي (يدفعها العميل)</span>
                   </div>
                 )}
               </div>
@@ -437,9 +436,9 @@ export function CostSummaryCard({
 
             {/* Print Cost Inclusion Toggle */}
             {printCostEnabled && printCost > 0 && setIncludePrintInPrice && (
-              <div className="p-4 rounded-xl bg-blue-500/5 border-2 border-blue-500/20 space-y-3">
+              <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/20 space-y-3">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="include-print" className="text-sm font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-2 cursor-pointer">
+                  <Label htmlFor="include-print" className="text-sm font-semibold text-primary flex items-center gap-2 cursor-pointer">
                     <Printer className="h-4 w-4" />
                     تضمين الطباعة في السعر
                     <TooltipProvider>
@@ -462,7 +461,7 @@ export function CostSummaryCard({
                 </div>
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-muted-foreground">تكلفة الطباعة:</span>
-                  <span className="font-bold text-blue-600 font-manrope">{printCost.toLocaleString('ar-LY')} {currencySymbol}</span>
+                  <span className="font-bold text-primary font-manrope">{printCost.toLocaleString('ar-LY')} {currencySymbol}</span>
                 </div>
                 {includePrintInPrice ? (
                   <div className="flex items-center gap-2 p-2 bg-green-500/10 rounded-lg border border-green-500/20">
@@ -471,8 +470,8 @@ export function CostSummaryCard({
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 p-2 bg-blue-500/10 rounded-lg border border-blue-500/20">
-                    <DollarSign className="h-4 w-4 text-blue-600" />
-                    <span className="text-xs font-medium text-blue-600">تضاف للإجمالي (يدفعها العميل)</span>
+                    <DollarSign className="h-4 w-4 text-primary" />
+                    <span className="text-xs font-medium text-primary">تضاف للإجمالي (يدفعها العميل)</span>
                   </div>
                 )}
               </div>
@@ -480,10 +479,10 @@ export function CostSummaryCard({
 
             {/* NEW: Operating Fee Inclusion Toggles */}
             {operatingFeeRate > 0 && (
-              <div className="p-4 rounded-xl bg-violet-500/5 border-2 border-violet-500/20 space-y-3">
+              <div className="p-4 rounded-xl bg-violet-500/5 border border-violet-500/20 space-y-3">
                 <div className="flex items-center gap-2 mb-3">
-                  <Percent className="h-4 w-4 text-violet-600" />
-                  <span className="text-sm font-semibold text-violet-600 dark:text-violet-400">
+                  <Percent className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-semibold text-primary">
                     تضمين نسبة التشغيل ({operatingFeeRate}%)
                   </span>
                 </div>
@@ -493,7 +492,7 @@ export function CostSummaryCard({
                   <div className="space-y-2 bg-background/50 rounded-lg p-3">
                     <div className="flex items-center justify-between">
                       <Label htmlFor="include-operating-print" className="text-sm text-foreground flex items-center gap-2 cursor-pointer">
-                        <Printer className="h-4 w-4 text-blue-500" />
+                        <Printer className="h-4 w-4 text-primary" />
                         تضمين في الطباعة
                       </Label>
                       <Switch
@@ -515,7 +514,7 @@ export function CostSummaryCard({
                           className="h-7 w-20 text-center text-sm font-manrope"
                         />
                         <span className="text-xs text-muted-foreground">%</span>
-                        <span className="text-xs text-blue-600 font-semibold mr-auto font-manrope">
+                        <span className="text-xs text-primary font-semibold mr-auto font-manrope">
                           = {Math.round(printCost * (operatingFeeRatePrint / 100)).toLocaleString('ar-LY')} {currencySymbol}
                         </span>
                       </div>
@@ -528,7 +527,7 @@ export function CostSummaryCard({
                   <div className="space-y-2 bg-background/50 rounded-lg p-3">
                     <div className="flex items-center justify-between">
                       <Label htmlFor="include-operating-install" className="text-sm text-foreground flex items-center gap-2 cursor-pointer">
-                        <Wrench className="h-4 w-4 text-orange-500" />
+                        <Wrench className="h-4 w-4 text-primary" />
                         تضمين في التركيب
                       </Label>
                       <Switch
@@ -550,7 +549,7 @@ export function CostSummaryCard({
                           className="h-7 w-20 text-center text-sm font-manrope"
                         />
                         <span className="text-xs text-muted-foreground">%</span>
-                        <span className="text-xs text-orange-600 font-semibold mr-auto font-manrope">
+                        <span className="text-xs text-primary font-semibold mr-auto font-manrope">
                           = {Math.round(installationCost * (operatingFeeRateInstallation / 100)).toLocaleString('ar-LY')} {currencySymbol}
                         </span>
                       </div>
@@ -563,8 +562,8 @@ export function CostSummaryCard({
             <Separator />
 
             {/* Cost Breakdown - Enhanced */}
-            <div className="space-y-0 rounded-xl border-2 border-border overflow-hidden">
-              <div className="p-3 bg-gradient-to-r from-slate-500/10 to-slate-500/5 border-b border-border">
+            <div className="space-y-0 rounded-xl border border-input overflow-hidden">
+              <div className="p-3 bg-muted/30 border-b border-border">
                 <h4 className="text-sm font-bold text-foreground flex items-center gap-2">
                   <Settings className="h-4 w-4" />
                   تفاصيل الحساب الكاملة
@@ -592,25 +591,25 @@ export function CostSummaryCard({
                   <div className="flex items-center gap-2 text-xs mb-2">
                     <Badge variant="outline" className={cn(
                       "text-[10px] px-1.5 py-0",
-                      includeInstallationInPrice ? "border-green-500/50 text-green-600" : "border-orange-500/50 text-orange-600"
+                      includeInstallationInPrice ? "border-green-500/50 text-green-600" : "border-orange-500/50 text-primary"
                     )}>
                       {discountAmount > 0 ? '3' : '2'}
                     </Badge>
-                    <span className={includeInstallationInPrice ? "text-green-600" : "text-orange-600"}>
+                    <span className={includeInstallationInPrice ? "text-green-600" : "text-primary"}>
                       تكلفة التركيب
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className={cn(
                       "text-sm flex items-center gap-1",
-                      includeInstallationInPrice ? "text-green-600" : "text-orange-600"
+                      includeInstallationInPrice ? "text-green-600" : "text-primary"
                     )}>
                       <Wrench className="h-3 w-3" />
                       {includeInstallationInPrice ? 'مخصوم (مجاني للعميل)' : 'يضاف للعميل'}
                     </span>
                     <span className={cn(
-                      "font-bold text-lg font-manrope",
-                      includeInstallationInPrice ? "text-green-600" : "text-orange-600"
+                      "font-bold text-base font-manrope",
+                      includeInstallationInPrice ? "text-green-600" : "text-primary"
                     )}>
                       {includeInstallationInPrice ? '-' : '+'}{installationCost.toLocaleString('ar-LY')} {currencySymbol}
                     </span>
@@ -627,25 +626,25 @@ export function CostSummaryCard({
                   <div className="flex items-center gap-2 text-xs mb-2">
                     <Badge variant="outline" className={cn(
                       "text-[10px] px-1.5 py-0",
-                      includePrintInPrice ? "border-green-500/50 text-green-600" : "border-blue-500/50 text-blue-600"
+                      includePrintInPrice ? "border-green-500/50 text-green-600" : "border-blue-500/50 text-primary"
                     )}>
                       {(discountAmount > 0 ? 1 : 0) + (installationEnabled && installationCost > 0 ? 1 : 0) + 2}
                     </Badge>
-                    <span className={includePrintInPrice ? "text-green-600" : "text-blue-600"}>
+                    <span className={includePrintInPrice ? "text-green-600" : "text-primary"}>
                       تكلفة الطباعة
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className={cn(
                       "text-sm flex items-center gap-1",
-                      includePrintInPrice ? "text-green-600" : "text-blue-600"
+                      includePrintInPrice ? "text-green-600" : "text-primary"
                     )}>
                       <Printer className="h-3 w-3" />
                       {includePrintInPrice ? 'مخصومة (مجانية للعميل)' : 'تضاف للعميل'}
                     </span>
                     <span className={cn(
-                      "font-bold text-lg font-manrope",
-                      includePrintInPrice ? "text-green-600" : "text-blue-600"
+                      "font-bold text-base font-manrope",
+                      includePrintInPrice ? "text-green-600" : "text-primary"
                     )}>
                       {includePrintInPrice ? '-' : '+'}{printCost.toLocaleString('ar-LY')} {currencySymbol}
                     </span>
@@ -671,7 +670,7 @@ export function CostSummaryCard({
                       <Minus className="h-3 w-3" />
                       مخصوم من صافي الإيجار
                     </span>
-                    <span className="font-bold text-lg text-amber-600 font-manrope">-{totalFriendCosts.toLocaleString('ar-LY')} {currencySymbol}</span>
+                    <span className="font-bold text-base text-amber-600 font-manrope">-{totalFriendCosts.toLocaleString('ar-LY')} {currencySymbol}</span>
                   </div>
                   {typeof validFriendCount === 'number' && typeof storedFriendCount === 'number' && storedFriendCount > validFriendCount && onCleanStaleFriendCosts && (
                     <Button
@@ -723,7 +722,7 @@ export function CostSummaryCard({
               )}
 
               {/* Summary Row */}
-              <div className="p-3 bg-gradient-to-r from-primary/10 to-primary/5">
+              <div className="p-3 bg-primary/10">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <span className="text-xs text-muted-foreground block mb-1">صافي الإيجار (للشركة)</span>
@@ -731,7 +730,7 @@ export function CostSummaryCard({
                   </div>
                   <div className="text-left">
                     <span className="text-xs text-muted-foreground block mb-1">إجمالي رسوم التشغيل</span>
-                    <span className="font-bold text-purple-600 font-manrope">{(calculatedOperatingFee + friendOperatingFeeAmount).toLocaleString('ar-LY')} {currencySymbol}</span>
+                    <span className="font-bold text-primary font-manrope">{(calculatedOperatingFee + friendOperatingFeeAmount).toLocaleString('ar-LY')} {currencySymbol}</span>
                     {friendOperatingFeeAmount > 0 && (
                       <span className="block text-[10px] text-amber-600 mt-1">
                         منها {friendOperatingFeeAmount.toLocaleString('ar-LY')} على الشركات الصديقة
@@ -747,7 +746,7 @@ export function CostSummaryCard({
         <Separator />
 
         {/* Net Rental - الأهم */}
-        <div className="p-4 rounded-xl bg-gradient-to-r from-primary/15 to-primary/5 border-2 border-primary/30">
+        <div className="p-4 rounded-xl bg-primary/10 border border-primary/30">
           <div className="flex justify-between items-center mb-2">
             <div className="flex items-center gap-2">
               <span className="font-bold text-primary">صافي الإيجار</span>
@@ -766,7 +765,7 @@ export function CostSummaryCard({
                 </Tooltip>
               </TooltipProvider>
             </div>
-            <span className="text-2xl font-bold text-primary font-manrope">{netRental.toLocaleString('ar-LY')} {currencySymbol}</span>
+            <span className="text-base font-bold text-primary font-manrope">{netRental.toLocaleString('ar-LY')} {currencySymbol}</span>
           </div>
           
           {/* Operating Fee from Net Rental */}
@@ -775,14 +774,14 @@ export function CostSummaryCard({
               <DollarSign className="h-3 w-3" />
               رسوم التشغيل ({operatingFeeRate}% من الصافي)
             </span>
-            <span className="font-semibold text-purple-600 font-manrope">{calculatedOperatingFee.toLocaleString('ar-LY')} {currencySymbol}</span>
+            <span className="font-semibold text-primary font-manrope">{calculatedOperatingFee.toLocaleString('ar-LY')} {currencySymbol}</span>
           </div>
 
  {/* NEW: Friend Operating Fee Line */}
           {friendOperatingFeeAmount > 0 && (
             <div className="flex justify-between items-center text-sm pt-2 border-t border-amber-500/20 mt-2">
               <span className="text-muted-foreground flex items-center gap-1">
-                <Percent className="h-3 w-3 text-amber-600" />
+                <Percent className="h-3 w-3 text-primary" />
                 رسوم تشغيل الشركات الصديقة ({friendRentalOperatingFeeRate}%)
               </span>
               <span className="font-semibold text-amber-600 font-manrope">{friendOperatingFeeAmount.toLocaleString('ar-LY')} {currencySymbol}</span>
@@ -792,8 +791,8 @@ export function CostSummaryCard({
  {/* Combined total operating fee */}
           {friendOperatingFeeAmount > 0 && (
             <div className="flex justify-between items-center pt-2 border-t-2 border-purple-500/30 mt-2">
-              <span className="font-bold text-sm text-purple-700 dark:text-purple-300">إجمالي رسوم التشغيل</span>
-              <span className="font-bold text-lg text-purple-600 font-manrope">
+              <span className="font-bold text-sm text-primary">إجمالي رسوم التشغيل</span>
+              <span className="font-bold text-base text-primary font-manrope">
                 {(calculatedOperatingFee + friendOperatingFeeAmount).toLocaleString('ar-LY')} {currencySymbol}
               </span>
             </div>
@@ -802,7 +801,7 @@ export function CostSummaryCard({
 
         {/* Paused billboards summary */}
         {pausedTotals && pausedTotals.count > 0 && (
-          <div className="p-4 rounded-xl bg-amber-500/5 border-2 border-amber-500/30 space-y-2">
+          <div className="p-4 rounded-xl bg-amber-500/5 border border-amber-500/30 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-sm font-bold text-amber-700 dark:text-amber-400">اللوحات الموقوفة</span>
               <Badge className="bg-amber-500 text-white border-0 tabular-nums">{pausedTotals.count}</Badge>
@@ -825,10 +824,10 @@ export function CostSummaryCard({
         )}
 
         {/* Final Total */}
-        <div className="p-5 rounded-2xl bg-gradient-to-br from-green-500/15 via-emerald-500/10 to-teal-500/5 border-2 border-green-500/40 shadow-lg">
+        <div className="p-5 rounded-2xl bg-muted/30 border border-green-500/40 shadow-lg">
           <div className="flex justify-between items-center mb-1">
-            <span className="font-bold text-lg text-foreground">الإجمالي للعميل</span>
-            <span className="text-3xl font-bold text-green-600 font-manrope">{adjustedFinalTotal.toLocaleString('ar-LY')} {currencySymbol}</span>
+            <span className="font-bold text-base text-foreground">الإجمالي للعميل</span>
+            <span className="text-base font-bold text-green-600 font-manrope">{adjustedFinalTotal.toLocaleString('ar-LY')} {currencySymbol}</span>
           </div>
 
           {(!includeInstallationInPrice && installationCost > 0) || (!includePrintInPrice && printCost > 0) ? (
@@ -843,7 +842,7 @@ export function CostSummaryCard({
             <div className="mt-3 pt-3 border-t border-green-500/30">
               <div className="flex justify-between items-center p-2 rounded-lg bg-muted/50">
                 <span className="text-sm font-medium text-foreground">الإجمالي السابق:</span>
-                <span className="font-bold text-lg text-foreground font-manrope">{originalTotal.toLocaleString('ar-LY')} {currencySymbol}</span>
+                <span className="font-bold text-base text-foreground font-manrope">{originalTotal.toLocaleString('ar-LY')} {currencySymbol}</span>
               </div>
             </div>
           )}
@@ -852,7 +851,7 @@ export function CostSummaryCard({
         {/* Price Difference Warning */}
         {originalTotal > 0 && priceDifference !== 0 && (
           <div className={cn(
-            "p-4 rounded-xl border-2 space-y-2",
+            "p-4 rounded-xl border space-y-2",
             priceDifference > 0 
               ? "bg-amber-500/10 border-amber-500/40" 
               : "bg-red-500/10 border-red-500/40"
@@ -863,7 +862,7 @@ export function CostSummaryCard({
                 priceDifference > 0 ? "bg-amber-500/20" : "bg-red-500/20"
               )}>
                 {priceDifference > 0 ? (
-                  <TrendingUp className="h-4 w-4 text-amber-600" />
+                  <TrendingUp className="h-4 w-4 text-primary" />
                 ) : (
                   <TrendingDown className="h-4 w-4 text-red-600" />
                 )}
@@ -912,11 +911,11 @@ export function CostSummaryCard({
               }
             }} 
             disabled={saving}
-            className="h-12 text-base bg-gradient-to-r from-primary to-primary/80 hover:from-primary/90 hover:to-primary/70 shadow-lg shadow-primary/25"
+            className="h-12 text-base bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/25"
           >
             {saving ? (
               <div className="flex items-center gap-2">
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent"></div>
+                <div className="h-5 w-5 animate-spin rounded-full border border-primary-foreground border-t-transparent"></div>
                 جاري الحفظ...
               </div>
             ) : (
@@ -945,18 +944,18 @@ export function CostSummaryCard({
                 <div className="space-y-3 p-4 rounded-xl bg-muted/50 border border-border">
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">الإجمالي السابق:</span>
-                    <span className="font-bold text-lg font-manrope">{originalTotal.toLocaleString('ar-LY')} {currencySymbol}</span>
+                    <span className="font-bold text-base font-manrope">{originalTotal.toLocaleString('ar-LY')} {currencySymbol}</span>
                   </div>
                   <Separator />
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">الإجمالي الجديد:</span>
-                    <span className="font-bold text-lg text-green-600 font-manrope">{adjustedFinalTotal.toLocaleString('ar-LY')} {currencySymbol}</span>
+                    <span className="font-bold text-base text-green-600 font-manrope">{adjustedFinalTotal.toLocaleString('ar-LY')} {currencySymbol}</span>
                   </div>
                   <Separator />
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">الفرق:</span>
                     <span className={cn(
-                      "font-bold text-lg font-manrope",
+                      "font-bold text-base font-manrope",
                       priceDifference > 0 ? "text-amber-600" : "text-red-600"
                     )}>
                       {priceDifference > 0 ? '+' : ''}{priceDifference.toLocaleString('ar-LY')} {currencySymbol}

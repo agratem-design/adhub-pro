@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { Minus, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -35,7 +36,28 @@ interface PrintCustomizationPanelProps {
   saving: boolean;
   previewStatusMode?: PreviewStatusMode;
   onPreviewStatusModeChange?: (mode: PreviewStatusMode) => void;
+  /** العنصر المحدد بالنقر في المعاينة — يفتح إعداداته مباشرة */
+  selectedElement?: string | null;
 }
+
+// ربط عناصر المعاينة بمجموعات الإعدادات
+const ELEMENT_GROUPS: Record<string, { tab: string; group: string }> = {
+  mainImage: { tab: 'images', group: 'صورة اللوحة الرئيسية' },
+  installedImages: { tab: 'images', group: 'صور التركيب (وجهين)' },
+  designs: { tab: 'images', group: 'صور التصاميم' },
+  billboardName: { tab: 'text', group: 'اسم اللوحة' },
+  billboardStatus: { tab: 'text', group: 'حالة اللوحة (أسفل الاسم)' },
+  size: { tab: 'text', group: 'المقاس' },
+  facesCount: { tab: 'text', group: 'عدد الأوجه' },
+  contractNumber: { tab: 'text', group: 'رقم العقد' },
+  installationDate: { tab: 'text', group: 'تاريخ التركيب' },
+  teamName: { tab: 'text', group: 'فريق التركيب' },
+  locationInfo: { tab: 'location', group: 'البلدية والحي' },
+  landmarkInfo: { tab: 'location', group: 'أقرب معلم' },
+  qrCode: { tab: 'qr', group: 'رمز QR' },
+  statusBadges: { tab: 'status', group: 'شارات الحالة' },
+};
+const SelectedGroupCtx = createContext<string | null>(null);
 
 // تحويل قيمة mm إلى رقم للمنزلق
 const mmToNumber = (value: string): number => {
@@ -91,14 +113,25 @@ function SettingSlider({ label, value, onChange, min, max, step = 1, unit }: Set
 
   return (
     <div className="space-y-2">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center gap-2">
         <Label className="text-xs">{label}</Label>
-        <Input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-20 h-7 text-xs text-center"
-        />
+        <div className="flex items-center gap-1">
+          <button type="button" aria-label="إنقاص" className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-muted transition-colors cursor-pointer"
+            onClick={() => onChange(formatValue(Math.max(min, +(numValue - step).toFixed(2))))}>
+            <Minus className="h-3 w-3" />
+          </button>
+          <Input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-20 h-7 text-xs text-center font-mono"
+            dir="ltr"
+          />
+          <button type="button" aria-label="زيادة" className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-muted transition-colors cursor-pointer"
+            onClick={() => onChange(formatValue(Math.min(max, +(numValue + step).toFixed(2))))}>
+            <Plus className="h-3 w-3" />
+          </button>
+        </div>
       </div>
       <Slider
         value={[numValue]}
@@ -183,10 +216,20 @@ interface SettingGroupProps {
 
 function SettingGroup({ title, icon, children, defaultOpen = false, conditionNote }: SettingGroupProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
+  const selectedGroup = useContext(SelectedGroupCtx);
+  const isSelected = selectedGroup === title;
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!isSelected) return;
+    setIsOpen(true);
+    const t = setTimeout(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
+    return () => clearTimeout(t);
+  }, [isSelected]);
 
   return (
+    <div ref={ref} className={`rounded-lg transition-shadow ${isSelected ? 'ring-2 ring-primary ring-offset-1 ring-offset-background' : ''}`}>
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
-      <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors">
+      <CollapsibleTrigger className="flex items-center justify-between w-full p-3 bg-muted/50 rounded-lg hover:bg-muted transition-colors cursor-pointer">
         <div className="flex items-center gap-2">
           {icon}
           <div className="text-right">
@@ -198,10 +241,11 @@ function SettingGroup({ title, icon, children, defaultOpen = false, conditionNot
         </div>
         <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </CollapsibleTrigger>
-      <CollapsibleContent className="pt-3 space-y-3">
+      <CollapsibleContent className="pt-3 px-1 pb-1 space-y-3">
         {children}
       </CollapsibleContent>
     </Collapsible>
+    </div>
   );
 }
 
@@ -212,9 +256,14 @@ export function PrintCustomizationPanel({
   onReset,
   saving,
   previewStatusMode,
-  onPreviewStatusModeChange
+  onPreviewStatusModeChange,
+  selectedElement = null,
 }: PrintCustomizationPanelProps) {
+  const [tab, setTab] = useState('images');
+  const selected = selectedElement ? ELEMENT_GROUPS[selectedElement] : undefined;
+  useEffect(() => { if (selected) setTab(selected.tab); }, [selectedElement]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
+    <SelectedGroupCtx.Provider value={selected?.group ?? null}>
     <Card className="h-full">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
@@ -246,7 +295,8 @@ export function PrintCustomizationPanel({
       </CardHeader>
       
       <CardContent className="p-0">
-        <Tabs defaultValue="images" className="w-full">
+        <p className="px-4 pb-2 text-[11px] text-muted-foreground">انقر على أي عنصر في المعاينة لفتح إعداداته هنا مباشرة. المواقع تُقيَّد تلقائياً بحدود آمنة كما في الطباعة الفعلية.</p>
+        <Tabs value={tab} onValueChange={setTab} className="w-full">
           <TabsList className="w-full justify-start rounded-none border-b px-4">
             <TabsTrigger value="images" className="text-xs">
               <Image className="h-3.5 w-3.5 ml-1" />
@@ -270,7 +320,7 @@ export function PrintCustomizationPanel({
             </TabsTrigger>
           </TabsList>
 
-          <ScrollArea className="h-[400px]">
+          <ScrollArea className="h-[calc(100vh-300px)] min-h-[420px]">
             <div className="p-4 space-y-4">
               {/* تبويب الصور */}
               <TabsContent value="images" className="mt-0 space-y-4">
@@ -873,5 +923,6 @@ export function PrintCustomizationPanel({
         </Tabs>
       </CardContent>
     </Card>
+    </SelectedGroupCtx.Provider>
   );
 }

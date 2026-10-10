@@ -34,7 +34,7 @@ export function PrintCostSummary({
   totalPrintCost,
 }: PrintCostSummaryProps) {
   return (
-    <Card className="bg-card border-border shadow-lg">
+    <Card className="bg-card border-border shadow-sm">
       <CardHeader className="border-b border-border">
         <div className="flex items-center justify-between">
           <CardTitle className="text-xl font-bold flex items-center gap-2">
@@ -119,7 +119,7 @@ export function PrintCostSummary({
 
                       {/* إمكانية تعديل التكلفة لكل وحدة */}
                       <div className="flex items-center gap-3 bg-blue-50 dark:bg-blue-950/20 p-3 rounded-lg border border-blue-200 dark:border-blue-800">
-                        <Edit2 className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                        <Edit2 className="h-4 w-4 text-primary flex-shrink-0" />
                         <div className="flex-1">
                           <Label htmlFor={`unit-cost-${detail.size}`} className="text-xs text-muted-foreground mb-1 block">
                             تعديل التكلفة لكل لوحة (اختياري)
@@ -148,10 +148,10 @@ export function PrintCostSummary({
                 </div>
 
                 {/* الإجمالي */}
-                <div className="bg-gradient-to-r from-primary/10 to-primary/5 p-4 rounded-lg border-2 border-primary/20">
+                <div className="bg-primary/10 p-4 rounded-lg border border-primary/20">
                   <div className="flex items-center justify-between">
                     <span className="text-lg font-bold">إجمالي تكلفة الطباعة</span>
-                    <span className="text-2xl font-bold text-primary">
+                    <span className="text-xl font-bold text-primary">
                       {totalPrintCost.toFixed(2)} د.ل
                     </span>
                   </div>

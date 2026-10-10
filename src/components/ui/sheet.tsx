@@ -75,6 +75,7 @@ const SheetContent = React.forwardRef<React.ElementRef<typeof SheetPrimitive.Con
       <SheetOverlay />
       <SheetPrimitive.Content
         ref={ref}
+        dir="rtl"
         className={cn(sheetVariants({ side }), className)}
         onCloseAutoFocus={(e) => {
           e.preventDefault();
@@ -95,7 +96,7 @@ const SheetContent = React.forwardRef<React.ElementRef<typeof SheetPrimitive.Con
 SheetContent.displayName = SheetPrimitive.Content.displayName;
 
 const SheetHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn("flex flex-col space-y-2 text-center sm:text-left", className)} {...props} />
+  <div className={cn("flex flex-col space-y-2 text-right", className)} {...props} />
 );
 SheetHeader.displayName = "SheetHeader";
 

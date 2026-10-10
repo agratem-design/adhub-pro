@@ -2309,7 +2309,8 @@ export default function InstallationTasks() {
               onPrintAll={() => {
                 const taskDesigns = selectedTaskId ? (designsByTask[selectedTaskId] || []) : [];
                 const adFromDesigns = taskDesigns.map((d: any) => d.design_name).filter(Boolean)[0] || '';
-                const adFromContract = selectedTaskContract?.['Ad Type'] || (selectedTaskContract as any)?.ad_type || '';
+                const adFromContracts = [...new Set(selectedDerivedContractIds.map(id => contractById[id]?.['Ad Type']).filter(Boolean))].join(' / ');
+                const adFromContract = adFromContracts || selectedTaskContract?.['Ad Type'] || (selectedTaskContract as any)?.ad_type || '';
                 const effectiveTaskAdType = adFromContract || adFromDesigns || (selectedTaskObj as any)?.task_name || (selectedTaskObj as any)?.ad_type || '';
 
                 const isReinstall = (selectedTaskObj.task_type || 'installation') === 'reinstallation';

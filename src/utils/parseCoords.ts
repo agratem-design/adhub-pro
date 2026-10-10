@@ -76,6 +76,28 @@ export function parseCoords(b: any): { lat: number; lng: number } | null {
  * Resolves overlapping/duplicate coordinates by adding a tiny spiral offset.
  * This ensures markers that share identical coordinates don't hide each other on the map.
  */
+const jitterIndexCache = new WeakMap<any[], Map<string, string[]>>();
+const coordKey = (c: { lat: number; lng: number }) => `${c.lat.toFixed(6)},${c.lng.toFixed(6)}`;
+
+function buildJitterIndex(allBillboards: any[]): Map<string, string[]> {
+  const groups = new Map<string, { id: string; n: number }[]>();
+  for (const other of allBillboards) {
+    const otherId = String(other?.ID || other?.id || other?.Id || '');
+    if (!otherId) continue;
+    const c = parseCoords(other);
+    if (!c) continue;
+    const k = coordKey(c);
+    const g = groups.get(k);
+    const entry = { id: otherId, n: Number(other?.ID || other?.id || 0) };
+    if (g) g.push(entry); else groups.set(k, [entry]);
+  }
+  const index = new Map<string, string[]>();
+  groups.forEach((g, k) => {
+    if (g.length > 1) index.set(k, g.sort((x, y) => x.n - y.n).map(e => e.id));
+  });
+  return index;
+}
+
 export function getJitteredCoords(b: any, allBillboards: any[]): { lat: number; lng: number } | null {
   const coords = parseCoords(b);
   if (!coords) return null;
@@ -83,39 +105,16 @@ export function getJitteredCoords(b: any, allBillboards: any[]): { lat: number; 
   const id = String(b.ID || b.id || b.Id || '');
   if (!id || !allBillboards || !Array.isArray(allBillboards)) return coords;
 
-  // Find all billboards in the list that resolve to the same coordinate (within 0.000001 deg)
-  const duplicates = allBillboards.filter(other => {
-    const otherId = String(other.ID || other.id || other.Id || '');
-    if (!otherId || otherId === id) return false;
-    const otherCoords = parseCoords(other);
-    return otherCoords && 
-           Math.abs(otherCoords.lat - coords.lat) < 0.000001 && 
-           Math.abs(otherCoords.lng - coords.lng) < 0.000001;
-  });
+  // فهرس اللوحات المتطابقة الإحداثيات يُبنى مرة واحدة لكل قائمة
+  let index = jitterIndexCache.get(allBillboards);
+  if (!index) { index = buildJitterIndex(allBillboards); jitterIndexCache.set(allBillboards, index); }
+  const group = index.get(coordKey(coords));
+  if (!group) return coords;
+  const position = group.indexOf(id);
+  if (position <= 0) return coords;
 
-  if (duplicates.length === 0) {
-    return coords;
-  }
-
-  // Sort by ID to ensure stable and consistent ordering
-  const sortedGroup = [b, ...duplicates].sort((x, y) => {
-    const idX = Number(x.ID || x.id || 0);
-    const idY = Number(y.ID || y.id || 0);
-    return idX - idY;
-  });
-
-  const index = sortedGroup.findIndex(x => String(x.ID || x.id || '') === id);
-  if (index <= 0) {
-    return coords; // Keep the first one exactly at the original position
-  }
-
-  // Calculate spiral offset (about 4-5 meters per step)
-  const angle = index * (2 * Math.PI / sortedGroup.length);
-  const radius = 0.000045 * Math.sqrt(index);
-
-  return {
-    lat: coords.lat + radius * Math.cos(angle),
-    lng: coords.lng + radius * Math.sin(angle)
-  };
+  const angle = position * (2 * Math.PI / group.length);
+  const radius = 0.000045 * Math.sqrt(position);
+  return { lat: coords.lat + radius * Math.cos(angle), lng: coords.lng + radius * Math.sin(angle) };
 }
 

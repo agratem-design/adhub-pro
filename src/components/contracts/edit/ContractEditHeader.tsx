@@ -35,7 +35,7 @@ export function ContractEditHeader({
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 lg:px-5">
       <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-foreground mb-1">
+        <h1 className="text-xl sm:text-xl font-bold text-foreground mb-1">
           {title ?? <>تعديل عقد {contractNumber && `#${contractNumber}`}</>}
         </h1>
         <p className="text-xs sm:text-sm text-muted-foreground">

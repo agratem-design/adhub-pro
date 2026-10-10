@@ -94,6 +94,8 @@ export default function BillboardPrintSettingsNew() {
   } = usePrintCustomization();
 
   const [selectedElement, setSelectedElement] = useState<string | null>(null);
+  const [showPreviousAdPreview, setShowPreviousAdPreview] = useState(false);
+  const [showAllCases, setShowAllCases] = useState(false);
   const [previewScale, setPreviewScale] = useState(0.4);
   const [previewTarget, setPreviewTarget] = useState<'customer' | 'team' | 'installation'>('team');
   const [hideBackground, setHideBackground] = useState(false);
@@ -576,6 +578,7 @@ export default function BillboardPrintSettingsNew() {
               onSave={handleSave}
               onReset={resetToDefaults}
               saving={isSaving}
+              selectedElement={selectedElement}
               previewStatusMode={previewStatusMode}
               onPreviewStatusModeChange={setPreviewStatusMode}
             />
@@ -594,12 +597,53 @@ export default function BillboardPrintSettingsNew() {
                     )}
                   </CardTitle>
                   <div className="flex items-center gap-2">
+                    <Button size="sm" variant={showAllCases ? 'default' : 'outline'} className="h-7 text-xs" onClick={() => setShowAllCases(v => !v)}>
+                      {showAllCases ? 'معاينة واحدة' : 'عرض جميع الحالات'}
+                    </Button>
+                    <Label className="text-xs">الإعلان السابق</Label>
+                    <input type="checkbox" checked={showPreviousAdPreview} onChange={(e) => setShowPreviousAdPreview(e.target.checked)} className="h-4 w-4" />
                     <Label className="text-xs">إخفاء الخلفية</Label>
                     <input type="checkbox" checked={hideBackground} onChange={(e) => setHideBackground(e.target.checked)} className="h-4 w-4" />
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="p-4">
+                {showAllCases ? (() => {
+                  const base: any = { ...baseBillboard };
+                  const designA = base.design_face_a || base.Image_URL;
+                  const designB = base.design_face_b || base.Image_URL;
+                  const cases: { key: string; label: string; mode: any; bb: any; prev?: string; target?: any }[] = [
+                    { key: 'normal', label: 'عادي — تصميمان', mode: 'normal', bb: { ...base, design_face_a: designA, design_face_b: designB, installed_image_face_a_url: null, installed_image_face_b_url: null } },
+                    { key: 'one-design', label: 'تصميم واحد', mode: 'one-design', bb: { ...base, design_face_a: designA, design_face_b: null, installed_image_face_a_url: null, installed_image_face_b_url: null } },
+                    { key: 'one-face', label: 'وجه واحد', mode: 'one-face', bb: { ...base, Faces_Count: 1, design_face_a: designA, design_face_b: null, installed_image_face_a_url: null, installed_image_face_b_url: null } },
+                    { key: 'no-design', label: 'بدون تصميم', mode: 'no-design', bb: { ...base, design_face_a: null, design_face_b: null, installed_image_face_a_url: null, installed_image_face_b_url: null } },
+                    { key: 'with-cutout', label: 'مع مجسم', mode: 'with-cutout', bb: { ...base, has_cutout: true, design_face_a: designA, design_face_b: designB } },
+                    { key: 'installed', label: 'صورتا تركيب (وجهين)', mode: 'normal', bb: { ...base, design_face_a: designA, design_face_b: designB, installed_image_face_a_url: base.Image_URL, installed_image_face_b_url: base.Image_URL } },
+                    { key: 'prev', label: 'الإعلان السابق + فريق التركيب + تاريخ', mode: 'normal', prev: 'إعلان العقد السابق (مثال)', target: 'installation', bb: { ...base, design_face_a: designA, design_face_b: designB, installation_date: new Date().toISOString() } },
+                    { key: 'long', label: 'أسماء ونصوص طويلة', mode: 'normal', bb: { ...base, Billboard_Name: (base.Billboard_Name || 'لوحة') + ' - اسم طويل جداً للاختبار', Nearest_Landmark: 'بجوار مبنى كبير جداً على الطريق الرئيسي المؤدي إلى وسط المدينة مقابل المحطة', Municipality: base.Municipality || 'البلدية', District: (base.District || 'المنطقة') + ' - حي طويل الاسم', design_face_a: designA, design_face_b: designB } },
+                  ];
+                  return (
+                    <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                      {cases.map(c => (
+                        <button key={c.key} type="button" className="text-right space-y-1 cursor-pointer group" onClick={() => { setPreviewStatusMode(c.mode); setShowPreviousAdPreview(!!c.prev); setShowAllCases(false); }}>
+                          <div className="text-xs font-medium group-hover:text-primary transition-colors">{c.label}</div>
+                          <PrintPreview compact scale={0.24}
+                            settings={getSettingsForStatus(c.mode)}
+                            billboard={c.bb}
+                            contractNumber={selectedTask?.contract_id || 12345}
+                            customerName={taskDetails?.customerName || 'شركة تجريبية'}
+                            adType={taskDetails?.adType || 'عقد إعلان'}
+                            previewTarget={c.target || previewTarget}
+                            hideBackground={hideBackground}
+                            backgroundUrl={customBackgroundUrl || '/ipg.svg'}
+                            teamName={selectedTask?.team_name || 'فريق التركيب'}
+                            previousAd={c.prev || ''}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })() : (
                 <PrintPreview
                   settings={getSettingsForStatus(previewStatusMode)}
                   billboard={currentBillboard}
@@ -613,7 +657,9 @@ export default function BillboardPrintSettingsNew() {
                   hideBackground={hideBackground}
                   backgroundUrl={customBackgroundUrl || '/ipg.svg'}
                   teamName={selectedTask?.team_name}
+                  previousAd={showPreviousAdPreview ? 'إعلان العقد السابق (مثال)' : ''}
                 />
+                )}
 
                 <div className="mt-4 flex items-center gap-3">
                   <span className="text-xs text-muted-foreground">التكبير:</span>

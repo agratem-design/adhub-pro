@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { BillboardImage } from '@/components/BillboardImage';
 import ContractPDFDialog from '@/pages/ContractPDFDialog';
 import { ContractExpensesManager } from '@/components/contracts/ContractExpensesManager';
+import { getCalendarConfig, generateGoogleCalendarWebUrl } from '@/services/googleCalendarService';
 
 interface Contract {
   [key: string]: any;
@@ -344,6 +345,44 @@ export default function ContractView() {
   const totalCost = getNumericFieldValue(contract, 'Total', 'total_cost', 'Total_Cost');
   const contractNumber = contract.Contract_Number || contract.ID;
 
+  const handleAddToGoogleCalendar = async () => {
+    if (!contract) return;
+    try {
+      const cfg = await getCalendarConfig();
+      const endD = getFieldValue(contract, 'End Date', 'end_date', 'End_Date');
+      if (!endD) {
+        toast.error('لا يوجد تاريخ انتهاء محدد لهذا العقد');
+        return;
+      }
+      const cNum = contract.Contract_Number || contract.ID;
+      const cCust = getFieldValue(contract, 'Customer Name', 'customer_name', 'Customer_Name') || '';
+      const cTotal = getNumericFieldValue(contract, 'Total', 'total_cost', 'Total_Cost');
+      const cAd = getFieldValue(contract, 'Ad Type', 'ad_type', 'Ad_Type') || '';
+
+      const gUrl = generateGoogleCalendarWebUrl(
+        {
+          title: `انتهاء عقد: ${cCust} (عقد #${cNum})`,
+          description: [
+            `تنبيه موعد انتهاء العقد الإعلاني`,
+            `--------------------------------`,
+            `العميل: ${cCust}`,
+            `رقم العقد: #${cNum}`,
+            `تاريخ النهاية: ${endD}`,
+            `قيمة العقد: ${cTotal.toLocaleString()} د.ل`,
+            cAd ? `نوع الإعلان: ${cAd}` : '',
+            `عدد اللوحات: ${billboards.length}`,
+          ].filter(Boolean).join('\n'),
+          startDate: endD,
+        },
+        cfg.emails
+      );
+      window.open(gUrl, '_blank');
+      toast.success('تم فتح تقويم Google لإضافة الموعد وتنبيه الإيميلات');
+    } catch (e: any) {
+      toast.error('خطأ: ' + (e.message || 'فشل فتح التقويم'));
+    }
+  };
+
   return (
     <div className="container mx-auto px-4 py-6 space-y-6" dir="rtl">
       {/* Header */}
@@ -371,6 +410,15 @@ export default function ContractView() {
           </div>
         </div>
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleAddToGoogleCalendar}
+            className="gap-2 border-primary/40 text-primary hover:bg-primary/10 cursor-pointer"
+            title="إضافة موعد انتهاء العقد وتنبيهه إلى تقويم Google"
+          >
+            <Calendar className="h-4 w-4" />
+            تقويم Google
+          </Button>
           <Button
             variant="outline"
             onClick={() => navigate(`/admin/contracts/edit?contract=${contractNumber}`)}
@@ -522,6 +570,15 @@ export default function ContractView() {
                     : `${daysRemaining} يوم متبقي`
                   }
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAddToGoogleCalendar}
+                  className="w-full gap-1.5 text-xs border-primary/30 text-primary hover:bg-primary/10 cursor-pointer mt-1"
+                >
+                  <Calendar className="h-3.5 w-3.5" />
+                  إضافة تذكير انتهاء العقد لتقويم Google
+                </Button>
               </CardContent>
             </Card>
           </div>

@@ -6,24 +6,26 @@
 
 @layer base {
   :root {
-    --background: 36 25% 98%;
-    --foreground: 0 0% 12%;
+    color-scheme: light;
+    --background: 36 20% 97%;
+    --foreground: 30 10% 12%;
 
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 12%;
+    --card-foreground: 30 10% 12%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 12%;
+    --popover-foreground: 30 10% 12%;
 
-    --primary: 38 82% 35%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 42 67% 55%;
+    --primary-text: 38 82% 30%;
+    --primary-foreground: 30 10% 8%;
     --primary-glow: 38 85% 45%;
 
-    --secondary: 0 0% 96%;
-    --secondary-foreground: 0 0% 18%;
+    --secondary: 36 14% 94%;
+    --secondary-foreground: 30 8% 18%;
 
-    --muted: 0 0% 94%;
-    --muted-foreground: 0 0% 35%;
+    --muted: 36 14% 94%;
+    --muted-foreground: 30 6% 38%;
 
     --accent: 38 50% 93%;
     --accent-foreground: 38 70% 22%;
@@ -31,13 +33,13 @@
     --destructive: 0 68% 50%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 0 0% 85%;
-    --input: 0 0% 85%;
+    --border: 34 12% 86%;
+    --input: 34 12% 84%;
     --ring: 38 82% 35%;
 
     --radius: 0.75rem;
 
-    --gradient-primary: linear-gradient(135deg, hsl(38 82% 35%) 0%, hsl(34 72% 26%) 100%);
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(42 67% 58%) 100%);
     --gradient-secondary: linear-gradient(135deg, hsl(0 0% 100%) 0%, hsl(38 20% 97%) 100%);
     --gradient-dark: linear-gradient(135deg, hsl(0 0% 98%) 0%, hsl(38 15% 96%) 100%);
     --gradient-luxury: linear-gradient(135deg, hsl(0 0% 100%) 0%, hsl(38 20% 97%) 50%, hsl(38 30% 95%) 100%);
@@ -64,52 +66,67 @@
 
     --sidebar-background: 0 0% 100%;
     --sidebar-foreground: 0 0% 14%;
-    --sidebar-primary: 38 80% 46%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 95%;
-    --sidebar-accent-foreground: 0 0% 14%;
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--primary-foreground);
+    --sidebar-accent: var(--accent);
+    --sidebar-accent-foreground: var(--accent-foreground);
     --sidebar-border: 0 0% 90%;
     --sidebar-ring: 38 80% 46%;
 
-    --green: 152 65% 38%;
-    --yellow: 38 80% 46%;
-    --red: 0 68% 50%;
-    --orange: 25 85% 50%;
+    --success: 152 65% 30%;
+    --success-foreground: 0 0% 100%;
+    --warning: 35 85% 30%;
+    --warning-foreground: 0 0% 100%;
+    --info: 217 75% 40%;
+    --info-foreground: 0 0% 100%;
+    --green: var(--success);
+    --yellow: var(--warning);
+    --red: var(--destructive);
+    --orange: var(--warning);
     --purple: 262 75% 52%;
-    --blue: 217 80% 52%;
+    --blue: var(--info);
   }
 
   .dark {
-    --background: 0 0% 5%;
-    --foreground: 43 20% 90%;
+    color-scheme: dark;
+    --success: 152 60% 62%;
+    --success-foreground: 152 60% 8%;
+    --warning: 38 90% 65%;
+    --warning-foreground: 38 65% 8%;
+    --info: 217 90% 72%;
+    --info-foreground: 217 60% 8%;
+    --purple: 262 75% 75%;
+    --background: 30 6% 6%;
+    --foreground: 40 14% 92%;
 
-    --card: 0 0% 8%;
-    --card-foreground: 43 20% 90%;
+    --card: 30 5% 9.5%;
+    --card-foreground: 40 14% 92%;
 
-    --popover: 0 0% 8%;
-    --popover-foreground: 43 20% 90%;
+    --popover: 30 5% 10.5%;
+    --popover-foreground: 40 14% 92%;
 
-    --primary: 43 85% 55%;
+    --primary: 42 67% 55%;
+    --primary-text: 42 78% 64%;
     --primary-foreground: 0 0% 0%;
-    --primary-glow: 43 90% 65%;
+    --primary-glow: 42 85% 64%;
 
-    --secondary: 0 0% 12%;
-    --secondary-foreground: 43 15% 85%;
+    --secondary: 30 5% 14%;
+    --secondary-foreground: 40 12% 86%;
 
-    --muted: 0 0% 14%;
-    --muted-foreground: 0 0% 65%;
+    --muted: 30 5% 14%;
+    --muted-foreground: 35 8% 64%;
 
-    --accent: 43 40% 20%;
-    --accent-foreground: 43 85% 65%;
+    --accent: 40 28% 18%;
+    --accent-foreground: 42 80% 66%;
 
     --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive-foreground: 0 0% 0%;
 
-    --border: 0 0% 18%;
-    --input: 0 0% 18%;
-    --ring: 43 85% 55%;
+    --border: 30 6% 19%;
+    --input: 30 6% 22%;
+    --ring: 42 78% 56%;
 
-    --gradient-primary: linear-gradient(135deg, hsl(43 85% 55%) 0%, hsl(38 80% 45%) 100%);
+    --gradient-primary: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(42 67% 58%) 100%);
     --gradient-secondary: linear-gradient(135deg, hsl(0 0% 12%) 0%, hsl(43 20% 14%) 100%);
     --gradient-dark: linear-gradient(135deg, hsl(0 0% 5%) 0%, hsl(0 0% 8%) 100%);
     --gradient-luxury: linear-gradient(135deg, hsl(0 0% 5%) 0%, hsl(43 20% 12%) 50%, hsl(43 30% 18%) 100%);
@@ -132,7 +149,7 @@
 
     --sidebar-background: 0 0% 4%;
     --sidebar-foreground: 43 20% 85%;
-    --sidebar-primary: 43 85% 55%;
+    --sidebar-primary: var(--primary);
     --sidebar-primary-foreground: 0 0% 0%;
     --sidebar-accent: 0 0% 10%;
     --sidebar-accent-foreground: 43 20% 90%;
@@ -236,7 +253,7 @@
 }
 
 .system-dialog-title {
-  color: hsl(var(--primary));
+  color: hsl(var(--primary-text));
   font-weight: 700;
   font-size: 14px;
   text-align: right;
@@ -1020,3 +1037,37 @@ body[data-scroll-locked] [data-radix-dialog-content] {
 .print-position-dialog input:not([type="checkbox"]) { min-height:40px; }
 .print-position-dialog [role="tablist"] { flex-wrap:wrap; width:100%; }
 .print-position-dialog [role="switch"] { direction:ltr; }
+
+/* ── شريط تمرير موحد ورفيع لكل النظام ── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.28) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.28);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: hsl(var(--primary) / 0.55); background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+/* إخفاء شريط التمرير في شرائط التبويبات الأفقية */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* بطاقة مهمة التركيب: التخطيط حسب عرض البطاقة نفسها لا عرض الشاشة */
+.tcr-root { container-type: inline-size; }
+.tcr-wide { display: none; }
+.tcr-compact { display: flex; }
+@container (min-width: 1075px) {
+  .tcr-wide { display: grid; }
+  .tcr-compact { display: none; }
+}
+
+/* Compact billboard cards adapt to the card width, including the miniature grid. */
+.billboard-grid-card { container-type: inline-size; container-name: billboard-card; }
+@container billboard-card (max-width: 220px) {
+  .billboard-contract-thumbnail { display: none; }
+}

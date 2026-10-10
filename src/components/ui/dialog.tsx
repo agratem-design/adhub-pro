@@ -58,6 +58,7 @@ const DialogContent = React.forwardRef<
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      dir="rtl"
       className={cn(
         "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[9999] w-[calc(100vw-2rem)] max-w-lg max-h-[90vh] border border-border bg-background p-4 sm:p-6 shadow-2xl rounded-2xl overflow-hidden focus:outline-none duration-150 animate-in fade-in zoom-in-95",
         className,

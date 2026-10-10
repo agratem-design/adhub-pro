@@ -13,6 +13,9 @@ import { UnifiedTaskInvoice, InvoiceType } from '@/components/composite-tasks/Un
 import { FullStatementOptionsDialog, FullStatementOptions } from '@/components/billing/FullStatementOptionsDialog';
 import { CompositeTaskWithDetails } from '@/types/composite-task';
 import { PrinterPaymentDialog } from '@/components/printers/PrinterPaymentDialog';
+import PrintedMetersStatement from '@/components/printers/PrintedMetersStatement';
+import { taskPrintAmounts, collectStatementRows } from '@/lib/printerStatement';
+import { ensureDefaultPrinterAssignments } from '@/lib/printerDefaults';
 import { toast } from 'sonner';
 import { 
   Search, 
@@ -115,16 +118,30 @@ export default function PrinterAccounts() {
   const [fullStatementDialogOpen, setFullStatementDialogOpen] = useState(false);
   const [editingPriceTaskId, setEditingPriceTaskId] = useState<string | null>(null);
   const [editPriceValue, setEditPriceValue] = useState('');
+  const [metersOpen, setMetersOpen] = useState(false);
 
   const { data: accounts = [], isLoading } = useQuery({
     queryKey: ['printer-accounts'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('printer_accounts')
-        .select('*')
-        .order('printer_name');
-      if (error) throw error;
-      return (data || []) as PrinterAccount[];
+      await ensureDefaultPrinterAssignments();
+      const [printers, prints, cutouts, payments] = await Promise.all([
+        collectStatementRows((from, to) => supabase.from('printers').select('id, name').order('name').order('id').range(from, to)),
+        collectStatementRows((from, to) => supabase.from('print_tasks').select('printer_id, total_area, printer_cost_per_meter, price_per_meter, printer_total_cost, total_cost').neq('status', 'cancelled').order('id').range(from, to)),
+        collectStatementRows((from, to) => supabase.from('cutout_tasks').select('printer_id, total_cost').neq('status', 'cancelled').order('id').range(from, to)),
+        collectStatementRows((from, to) => supabase.from('printer_payments').select('printer_id, amount').order('id').range(from, to)),
+      ]);
+      for (const result of [printers, prints, cutouts, payments]) if (result.error) throw result.error;
+      return (printers.data || []).map(p => {
+        const tasks = (prints.data || []).filter(t => t.printer_id === p.id);
+        const cuts = (cutouts.data || []).filter(t => t.printer_id === p.id);
+        const printCost = tasks.reduce((sum, t) => sum + taskPrintAmounts(t).cost, 0);
+        const cutCost = cuts.reduce((sum, t) => sum + Number(t.total_cost || 0), 0);
+        const paid = (payments.data || []).filter(t => t.printer_id === p.id).reduce((sum, t) => sum + Number(t.amount || 0), 0);
+        return { printer_id: p.id, printer_name: p.name, customer_id: null, customer_name: null,
+          total_print_costs: printCost, total_cutout_costs: cutCost, total_supplier_debt: printCost + cutCost,
+          total_payments_to_printer: paid, total_customer_debt: 0, total_customer_payments: 0,
+          final_balance: printCost + cutCost - paid, print_tasks_count: tasks.length, cutout_tasks_count: cuts.length };
+      }) as PrinterAccount[];
     }
   });
 
@@ -132,13 +149,16 @@ export default function PrinterAccounts() {
     queryKey: ['printer-print-tasks', selectedPrinterId],
     queryFn: async () => {
       if (!selectedPrinterId) return [];
+      await ensureDefaultPrinterAssignments();
       const { data, error } = await supabase
         .from('print_tasks')
         .select('*, installation_task_id')
         .eq('printer_id', selectedPrinterId)
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return (data || []) as PrintTask[];
+      return (data || []).filter(t => t.status !== 'cancelled').map(t => ({ ...t,
+        total_cost: taskPrintAmounts(t).cost, price_per_meter: taskPrintAmounts(t).costPerMeter,
+      })) as PrintTask[];
     },
     enabled: !!selectedPrinterId
   });
@@ -153,7 +173,7 @@ export default function PrinterAccounts() {
         .eq('printer_id', selectedPrinterId)
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return (data || []) as CutoutTask[];
+      return (data || []).filter(t => t.status !== 'cancelled') as CutoutTask[];
     },
     enabled: !!selectedPrinterId
   });
@@ -1029,7 +1049,7 @@ export default function PrinterAccounts() {
     // 1. Update print_tasks
     const { error } = await supabase
       .from('print_tasks')
-      .update({ price_per_meter: newPrice, total_cost: newTotalCost, updated_at: new Date().toISOString() })
+      .update({ price_per_meter: newPrice, printer_cost_per_meter: newPrice, printer_total_cost: newTotalCost, total_cost: newTotalCost, updated_at: new Date().toISOString() })
       .eq('id', taskId);
     
     if (error) {
@@ -1097,15 +1117,16 @@ export default function PrinterAccounts() {
           <h1 className="text-3xl font-bold">حسابات المطابع</h1>
           <p className="text-muted-foreground">إدارة ومتابعة حسابات شركات الطباعة والقص</p>
         </div>
+        <Button className="cursor-pointer gap-2 transition-all duration-200" onClick={() => setMetersOpen(true)}><Calendar className="h-4 w-4" />كشف طباعة هذا الأسبوع</Button>
       </div>
 
       {/* Overall Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-blue-200 dark:border-blue-800">
+        <Card className="bg-card border-border shadow-card">
           <CardContent className="pt-5">
             <div className="flex items-center gap-3">
-              <div className="p-3 rounded-full bg-blue-500/20">
-                <Printer className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              <div className="p-3 rounded-full bg-primary/10">
+                <Printer className="h-5 w-5 text-primary" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">عدد المطابع</p>
@@ -1114,11 +1135,11 @@ export default function PrinterAccounts() {
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 border-purple-200 dark:border-purple-800">
+        <Card className="bg-card border-border shadow-card">
           <CardContent className="pt-5">
             <div className="flex items-center gap-3">
-              <div className="p-3 rounded-full bg-purple-500/20">
-                <FileText className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+              <div className="p-3 rounded-full bg-primary/10">
+                <FileText className="h-5 w-5 text-primary" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">إجمالي المهام</p>
@@ -1127,30 +1148,30 @@ export default function PrinterAccounts() {
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-gradient-to-br from-red-500/10 to-red-600/5 border-red-200 dark:border-red-800">
+        <Card className="bg-card border-border shadow-card">
           <CardContent className="pt-5">
             <div className="flex items-center gap-3">
-              <div className="p-3 rounded-full bg-red-500/20">
-                <TrendingUp className="h-5 w-5 text-red-600 dark:text-red-400" />
+              <div className="p-3 rounded-full bg-destructive/10">
+                <TrendingUp className="h-5 w-5 text-destructive" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">مستحقات علينا</p>
-                <p className="text-2xl font-bold text-red-600 dark:text-red-400">
+                <p className="text-2xl font-bold text-destructive">
                   {overallStats.totalOwed.toLocaleString()} <span className="text-sm">د.ل</span>
                 </p>
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-gradient-to-br from-green-500/10 to-green-600/5 border-green-200 dark:border-green-800">
+        <Card className="bg-card border-border shadow-card">
           <CardContent className="pt-5">
             <div className="flex items-center gap-3">
-              <div className="p-3 rounded-full bg-green-500/20">
-                <TrendingDown className="h-5 w-5 text-green-600 dark:text-green-400" />
+              <div className="p-3 rounded-full bg-success/10">
+                <TrendingDown className="h-5 w-5 text-success" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">مدفوع للمطابع</p>
-                <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                <p className="text-2xl font-bold text-success">
                   {overallStats.totalOwing.toLocaleString()} <span className="text-sm">د.ل</span>
                 </p>
               </div>
@@ -1674,6 +1695,7 @@ export default function PrinterAccounts() {
       )}
     </div>
 
+    <PrintedMetersStatement open={metersOpen} onOpenChange={setMetersOpen} printers={accounts.map(p => ({ id: p.printer_id, name: p.printer_name }))} initialPrinterId={selectedPrinterId || undefined} />
     <FullStatementOptionsDialog
       open={fullStatementDialogOpen}
       onOpenChange={setFullStatementDialogOpen}

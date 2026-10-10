@@ -1,11 +1,10 @@
 import React from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, Trash2, X, Filter, Building2, MapPin, Ruler, Tag, SlidersHorizontal } from 'lucide-react';
+import { Building2, CheckSquare, MapPin, Ruler, Search, Tag, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
 import { MultiSelect } from '@/components/ui/multi-select';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { STATUS_PALETTE } from '@/lib/billboardStatusPalette';
 
 interface BillboardFiltersProps {
   searchQuery: string;
@@ -39,295 +38,122 @@ interface BillboardFiltersProps {
 }
 
 const STATUS_OPTIONS = [
-  { value: 'available', label: 'متاح', color: 'bg-emerald-500', ring: 'ring-emerald-500/30' },
-  { value: 'nearExpiry', label: 'قريب الانتهاء', color: 'bg-amber-500', ring: 'ring-amber-500/30' },
-  { value: 'rented', label: 'مؤجر', color: 'bg-red-500', ring: 'ring-red-500/30' },
-  { value: 'maintenance', label: 'صيانة', color: 'bg-orange-500', ring: 'ring-orange-500/30' },
-  { value: 'hidden', label: 'مخفية', color: 'bg-slate-500', ring: 'ring-slate-500/30' },
-  { value: 'all', label: 'الكل', color: 'bg-muted-foreground', ring: 'ring-muted-foreground/30' },
+  { value: 'all', label: 'الكل', dot: 'bg-muted-foreground' },
+  { value: 'available', label: 'متاح', dot: STATUS_PALETTE.available.dot },
+  { value: 'nearExpiry', label: 'قريب الانتهاء', dot: STATUS_PALETTE.reserved.dot },
+  { value: 'rented', label: 'مؤجر', dot: STATUS_PALETTE.rented.dot },
+  { value: 'maintenance', label: 'صيانة', dot: STATUS_PALETTE.maintenance.dot },
+  { value: 'hidden', label: 'مخفية', dot: 'bg-zinc-400' },
 ];
 
+/** فلاتر اختيار اللوحات في صفحات العقد والعرض: بحث، حالة، ومحددات الموقع والمقاس والفئة */
 export function BillboardFilters({
-  searchQuery,
-  setSearchQuery,
-  cityFilter,
-  setCityFilter,
-  sizeFilter,
-  setSizeFilter,
-  statusFilter,
-  setStatusFilter,
-  pricingCategory,
-  setPricingCategory,
-  cities,
-  sizes,
-  pricingCategories,
-  municipalities = [],
-  municipalityFilter = 'all',
-  setMunicipalityFilter,
-  onCleanup,
-  selectedCount = 0,
-  totalCount = 0,
-  onSelectAll,
-  onClearSelection,
-  sizeFilters,
-  setSizeFilters,
-  cityFilters,
-  setCityFilters,
-  municipalityFilters,
-  setMunicipalityFilters,
-  isMapOpen = false,
+  searchQuery, setSearchQuery, cityFilter, setCityFilter, sizeFilter, setSizeFilter, statusFilter, setStatusFilter,
+  pricingCategory, setPricingCategory, cities, sizes, pricingCategories, municipalities = [], municipalityFilter = 'all',
+  setMunicipalityFilter, onCleanup, selectedCount = 0, totalCount = 0, onSelectAll, onClearSelection,
+  sizeFilters, setSizeFilters, cityFilters, setCityFilters, municipalityFilters, setMunicipalityFilters,
 }: BillboardFiltersProps) {
-  const [filtersOpen, setFiltersOpen] = React.useState(true);
-
-  React.useEffect(() => {
-    if (isMapOpen) {
-      setFiltersOpen(false);
-    }
-  }, [isMapOpen]);
-
   const useMultiSize = !!(sizeFilters !== undefined && setSizeFilters);
   const useMultiCity = !!(cityFilters !== undefined && setCityFilters);
   const useMultiMunicipality = !!(municipalityFilters !== undefined && setMunicipalityFilters);
 
-  const activeCityCount = useMultiCity ? (cityFilters?.length || 0) : (cityFilter !== 'all' ? 1 : 0);
-  const activeMunicipalityCount = useMultiMunicipality ? (municipalityFilters?.length || 0) : (municipalityFilter !== 'all' ? 1 : 0);
-  const activeSizeCount = useMultiSize ? (sizeFilters?.length || 0) : (sizeFilter !== 'all' ? 1 : 0);
+  const cityValue = useMultiCity ? cityFilters! : (cityFilter !== 'all' ? [cityFilter] : []);
+  const municipalityValue = useMultiMunicipality ? municipalityFilters! : (municipalityFilter !== 'all' ? [municipalityFilter] : []);
+  const sizeValue = useMultiSize ? sizeFilters! : (sizeFilter !== 'all' ? [sizeFilter] : []);
 
-  const hasActiveFilters = activeCityCount > 0 || activeMunicipalityCount > 0 || activeSizeCount > 0 || statusFilter !== 'all' || searchQuery.length > 0;
-  const activeFilterCount = [activeCityCount > 0, activeMunicipalityCount > 0, activeSizeCount > 0, statusFilter !== 'all', searchQuery.length > 0].filter(Boolean).length;
+  const activeChips: { label: string; onRemove: () => void }[] = [];
+  if (searchQuery) activeChips.push({ label: `بحث: ${searchQuery}`, onRemove: () => setSearchQuery('') });
+  if (statusFilter !== 'all') activeChips.push({ label: STATUS_OPTIONS.find(s => s.value === statusFilter)?.label || statusFilter, onRemove: () => setStatusFilter('all') });
+  if (cityValue.length) activeChips.push({ label: cityValue.length === 1 ? cityValue[0] : `${cityValue.length} مدن`, onRemove: () => useMultiCity ? setCityFilters!([]) : setCityFilter('all') });
+  if (municipalityValue.length) activeChips.push({ label: municipalityValue.length === 1 ? municipalityValue[0] : `${municipalityValue.length} بلديات`, onRemove: () => useMultiMunicipality ? setMunicipalityFilters!([]) : setMunicipalityFilter?.('all') });
+  if (sizeValue.length) activeChips.push({ label: sizeValue.length === 1 ? sizeValue[0] : `${sizeValue.length} مقاسات`, onRemove: () => useMultiSize ? setSizeFilters!([]) : setSizeFilter('all') });
 
-  const clearAllFilters = () => {
+  const clearAll = () => {
     setSearchQuery('');
     setCityFilter('all');
     setSizeFilter('all');
     setStatusFilter('all');
-    if (setMunicipalityFilter) setMunicipalityFilter('all');
-    if (setSizeFilters) setSizeFilters([]);
-    if (setCityFilters) setCityFilters([]);
-    if (setMunicipalityFilters) setMunicipalityFilters([]);
+    setMunicipalityFilter?.('all');
+    setSizeFilters?.([]);
+    setCityFilters?.([]);
+    setMunicipalityFilters?.([]);
   };
 
-  const sizeOptions = sizes.map(s => ({ label: s, value: s }));
-  const cityOptions = cities.map(c => ({ label: c, value: c }));
-  const municipalityOptions = municipalities.map(m => ({ label: m, value: m }));
-  const pricingOptions = pricingCategories.map(p => ({ label: p, value: p }));
-
-  // Collect active filter badges for display
-  const activeBadges: { label: string; onRemove: () => void }[] = [];
-  if (activeCityCount > 0) {
-    const label = useMultiCity ? `${activeCityCount} مدينة` : cityFilter;
-    activeBadges.push({ label, onRemove: () => useMultiCity ? setCityFilters!([]) : setCityFilter('all') });
-  }
-  if (activeMunicipalityCount > 0) {
-    const label = useMultiMunicipality ? `${activeMunicipalityCount} بلدية` : municipalityFilter;
-    activeBadges.push({ label, onRemove: () => useMultiMunicipality ? setMunicipalityFilters!([]) : setMunicipalityFilter?.('all') });
-  }
-  if (activeSizeCount > 0) {
-    const label = useMultiSize ? `${activeSizeCount} مقاس` : sizeFilter;
-    activeBadges.push({ label, onRemove: () => useMultiSize ? setSizeFilters!([]) : setSizeFilter('all') });
-  }
+  const opts = (list: string[]) => list.map(v => ({ label: v, value: v }));
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm" dir="rtl">
-      {/* Top bar: search + stats */}
-      <div className="space-y-3 p-3 lg:p-4">
-        {/* Header row */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <div className="p-1 rounded-md bg-amber-500/10 border border-amber-500/20">
-              <Filter className="h-3.5 w-3.5 text-amber-500" />
-            </div>
-            <span className="text-xs font-bold text-foreground">فلترة اللوحات</span>
-            {totalCount > 0 && (
-              <span className="text-[10px] text-muted-foreground bg-muted/30 px-1.5 py-0.5 rounded-md">
-                {totalCount}
-              </span>
-            )}
-            {selectedCount > 0 && (
-              <Badge className="text-[10px] h-4 px-1.5 bg-amber-500/15 text-amber-500 border border-amber-500/20">
-                {selectedCount} محددة
-              </Badge>
-            )}
-            {activeFilterCount > 0 && (
-              <Badge variant="outline" className="text-[10px] h-4 px-1.5 border-amber-500/40 text-amber-500">
-                {activeFilterCount} فلتر نشط
-              </Badge>
-            )}
-          </div>
-
-          <div className="flex items-center gap-1">
-            {onSelectAll && (
-              <Button variant="ghost" size="sm" onClick={onSelectAll} className="min-h-10 cursor-pointer px-3 text-xs text-primary transition-all duration-200 hover:bg-primary/10">
-                تحديد الكل
-              </Button>
-            )}
-            {onClearSelection && selectedCount > 0 && (
-              <Button variant="ghost" size="sm" onClick={onClearSelection} className="min-h-10 cursor-pointer px-3 text-xs text-destructive transition-all duration-200 hover:bg-destructive/10">
-                <X className="h-2.5 w-2.5 ml-0.5" />
-                إلغاء التحديد
-              </Button>
-            )}
-          </div>
-        </div>
-
-        {/* Search bar */}
-        <div className="relative">
-          <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+    <div className="space-y-3" dir="rtl">
+      {/* البحث والعدد */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[220px] flex-1">
+          <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="بحث بالاسم، الموقع، البلدية، رقم اللوحة..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-11 rounded-xl border-border/70 bg-background pr-9 pl-9 text-sm transition-all duration-200 focus:border-primary/60 focus:ring-1 focus:ring-primary/30"
-            dir="rtl"
+            onChange={e => setSearchQuery(e.target.value)}
+            className="h-10 pl-9 pr-9"
           />
           {searchQuery && (
-            <button
-              onClick={() => setSearchQuery('')}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
-            >
-              <X className="h-3 w-3" />
+            <button type="button" onClick={() => setSearchQuery('')} aria-label="مسح البحث"
+              className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer rounded p-1 text-muted-foreground hover:text-foreground">
+              <X className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
+        <span className="text-xs text-muted-foreground">
+          {totalCount} لوحة{selectedCount > 0 && <> · <span className="font-semibold text-primary">{selectedCount} محددة</span></>}
+        </span>
+        {onSelectAll && <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={onSelectAll}><CheckSquare className="h-4 w-4" />تحديد الكل</Button>}
+        {onClearSelection && selectedCount > 0 && <Button variant="ghost" size="sm" className="h-9 gap-1.5 text-destructive" onClick={onClearSelection}><X className="h-4 w-4" />إلغاء التحديد</Button>}
       </div>
 
-      {/* Status pills */}
-      <div className="px-2.5 pb-2">
-        <div className="flex flex-wrap gap-2">
-          {STATUS_OPTIONS.map((s) => {
-            const isActive = statusFilter === s.value;
-            return (
-              <button
-                key={s.value}
-                onClick={() => setStatusFilter(s.value)}
-                className={cn(
-                  "flex min-h-10 cursor-pointer items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold transition-all duration-200 active:scale-[0.97]",
-                  isActive
-                    ? `bg-primary text-primary-foreground shadow-md shadow-primary/20 ring-1 ring-primary/30`
-                    : "bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                )}
-              >
-                <span className={cn("h-1.5 w-1.5 rounded-full", s.color)} />
-                {s.label}
-              </button>
-            );
-          })}
+      {/* الحالة */}
+      <div role="radiogroup" aria-label="حالة اللوحة" className="no-scrollbar flex gap-1 overflow-x-auto rounded-lg border border-border bg-muted/30 p-1">
+        {STATUS_OPTIONS.map(s => {
+          const on = statusFilter === s.value;
+          return (
+            <button key={s.value} type="button" role="radio" aria-checked={on} onClick={() => setStatusFilter(s.value)}
+              className={cn('inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-3 text-xs font-semibold transition-colors',
+                on ? 'bg-card text-foreground shadow-sm ring-1 ring-primary/40' : 'text-muted-foreground hover:text-foreground')}>
+              <span className={cn('h-2 w-2 rounded-full', s.dot)} />{s.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* المحددات */}
+      <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+        <MultiSelect options={opts(cities)} value={cityValue}
+          onChange={useMultiCity ? setCityFilters! : v => setCityFilter(v.length ? v[v.length - 1] : 'all')}
+          placeholder="المدينة" emptyText="لا توجد مدن" icon={<Building2 className="h-3.5 w-3.5" />} className="h-10 text-xs" />
+        {municipalities.length > 0 && (
+          <MultiSelect options={opts(municipalities)} value={municipalityValue}
+            onChange={useMultiMunicipality ? setMunicipalityFilters! : v => setMunicipalityFilter?.(v.length ? v[v.length - 1] : 'all')}
+            placeholder="البلدية" emptyText="لا توجد بلديات" icon={<MapPin className="h-3.5 w-3.5" />} className="h-10 text-xs" />
+        )}
+        <MultiSelect options={opts(sizes)} value={sizeValue}
+          onChange={useMultiSize ? setSizeFilters! : v => setSizeFilter(v.length ? v[v.length - 1] : 'all')}
+          placeholder="المقاس" emptyText="لا توجد مقاسات" icon={<Ruler className="h-3.5 w-3.5" />} className="h-10 text-xs" />
+        <MultiSelect options={opts(pricingCategories)} value={pricingCategory ? [pricingCategory] : []}
+          onChange={v => setPricingCategory(v.length ? v[v.length - 1] : pricingCategories[0] || '')}
+          placeholder="الفئة السعرية" emptyText="لا توجد فئات" icon={<Tag className="h-3.5 w-3.5" />} className="h-10 text-xs" />
+      </div>
+
+      {/* الفلاتر النشطة */}
+      {(activeChips.length > 0 || onCleanup) && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {activeChips.map((c, i) => (
+            <span key={i} className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+              <span className="max-w-[160px] truncate">{c.label}</span>
+              <button type="button" onClick={c.onRemove} aria-label="إزالة الفلتر" className="cursor-pointer rounded hover:text-foreground"><X className="h-3 w-3" /></button>
+            </span>
+          ))}
+          <span className="mr-auto flex items-center gap-1">
+            {activeChips.length > 0 && <Button variant="ghost" size="sm" className="h-8 gap-1 text-xs" onClick={clearAll}><X className="h-3.5 w-3.5" />مسح الكل</Button>}
+            {onCleanup && <Button variant="ghost" size="sm" className="h-8 gap-1 text-xs text-muted-foreground hover:text-destructive" onClick={onCleanup}><Trash2 className="h-3.5 w-3.5" />تنظيف</Button>}
+          </span>
         </div>
-      </div>
-
-      {/* Collapsible advanced filters */}
-      <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
-        <CollapsibleTrigger asChild>
-          <button className="flex min-h-10 w-full cursor-pointer items-center justify-center gap-1.5 border-t border-border/30 bg-muted/20 py-2 text-xs text-muted-foreground transition-all duration-200 hover:bg-muted/40 hover:text-foreground">
-            <SlidersHorizontal className="h-3 w-3" />
-            {filtersOpen ? 'إخفاء الفلاتر المتقدمة' : 'عرض الفلاتر المتقدمة'}
-            {!filtersOpen && activeFilterCount > 0 && (
-              <Badge className="text-[9px] h-3.5 px-1 bg-primary text-primary-foreground">{activeFilterCount}</Badge>
-            )}
-          </button>
-        </CollapsibleTrigger>
-
-        <CollapsibleContent>
-          <div className="p-2.5 pt-2 space-y-2 border-t border-border/30 bg-muted/10">
-            {/* Filter dropdowns grid */}
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              {/* Cities */}
-              <MultiSelect
-                options={cityOptions}
-                value={useMultiCity ? cityFilters! : (cityFilter !== 'all' ? [cityFilter] : [])}
-                onChange={useMultiCity ? setCityFilters! : (v) => setCityFilter(v.length > 0 ? v[v.length - 1] : 'all')}
-                placeholder="المدن"
-                className="h-8 text-[11px]"
-                emptyText="لا توجد مدن"
-                icon={<Building2 className="h-3 w-3" />}
-              />
-
-              {/* Municipalities */}
-              {municipalities.length > 0 && (
-                <MultiSelect
-                  options={municipalityOptions}
-                  value={useMultiMunicipality ? municipalityFilters! : (municipalityFilter !== 'all' ? [municipalityFilter] : [])}
-                  onChange={useMultiMunicipality ? setMunicipalityFilters! : (v) => setMunicipalityFilter?.(v.length > 0 ? v[v.length - 1] : 'all')}
-                  placeholder="البلديات"
-                  className="h-8 text-[11px]"
-                  emptyText="لا توجد بلديات"
-                  icon={<MapPin className="h-3 w-3" />}
-                />
-              )}
-
-              {/* Sizes */}
-              <MultiSelect
-                options={sizeOptions}
-                value={useMultiSize ? sizeFilters! : (sizeFilter !== 'all' ? [sizeFilter] : [])}
-                onChange={useMultiSize ? setSizeFilters! : (v) => setSizeFilter(v.length > 0 ? v[v.length - 1] : 'all')}
-                placeholder="المقاسات"
-                className="h-8 text-[11px]"
-                emptyText="لا توجد مقاسات"
-                icon={<Ruler className="h-3 w-3" />}
-              />
-
-              {/* Pricing Category */}
-              <MultiSelect
-                options={pricingOptions}
-                value={pricingCategory ? [pricingCategory] : []}
-                onChange={(v) => setPricingCategory(v.length > 0 ? v[v.length - 1] : pricingCategories[0] || '')}
-                placeholder="الفئة السعرية"
-                className="h-8 text-[11px]"
-                emptyText="لا توجد فئات"
-                icon={<Tag className="h-3 w-3" />}
-              />
-            </div>
-
-            {/* Active filter badges + clear */}
-            {hasActiveFilters && (
-              <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/30" dir="rtl">
-                <div className="flex flex-wrap gap-1.5 items-center">
-                  {activeBadges.map((badge, i) => (
-                    <Badge
-                      key={i}
-                      variant="secondary"
-                      className="inline-flex items-center gap-1.5 text-[11px] font-bold px-2 py-0.5 bg-amber-500/15 text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/25 transition-colors cursor-pointer"
-                      dir="rtl"
-                    >
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); badge.onRemove(); }} 
-                        className="hover:text-red-400 p-0.5 rounded-full hover:bg-black/30 transition-colors"
-                        title="إزالة الفلتر"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                      <span className="truncate">{badge.label}</span>
-                    </Badge>
-                  ))}
-                </div>
-
-                <div className="flex items-center gap-1.5 shrink-0" dir="rtl">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={clearAllFilters}
-                    className="h-6 text-[11px] font-bold text-muted-foreground hover:text-foreground hover:bg-muted/50 gap-1 px-2 rounded-lg cursor-pointer"
-                  >
-                    <X className="h-3 w-3" />
-                    مسح الكل
-                  </Button>
-                  {onCleanup && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={onCleanup}
-                      className="h-6 text-[11px] font-bold text-muted-foreground hover:text-destructive hover:bg-destructive/10 gap-1 px-2 rounded-lg cursor-pointer"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                      تنظيف
-                    </Button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+      )}
     </div>
   );
 }

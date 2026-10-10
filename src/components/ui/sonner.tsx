@@ -1,11 +1,11 @@
 import React from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/contexts/ThemeContext";
 import { Toaster as Sonner, toast as sonnerToast } from "sonner";
 
 type ToasterProps = React.ComponentProps<typeof Sonner>;
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme();
+  const { theme } = useTheme();
 
   return (
     <Sonner
@@ -18,6 +18,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
           description: "group-[.toast]:text-muted-foreground",
           actionButton: "group-[.toast]:bg-primary group-[.toast]:text-primary-foreground",
           cancelButton: "group-[.toast]:bg-muted group-[.toast]:text-muted-foreground",
+          success: "group-[.toaster]:border-success/30 [&_[data-icon]]:text-success",
+          warning: "group-[.toaster]:border-warning/30 [&_[data-icon]]:text-warning",
+          info: "group-[.toaster]:border-info/30 [&_[data-icon]]:text-info",
+          error: "group-[.toaster]:border-destructive/30 [&_[data-icon]]:text-destructive",
         },
       }}
       {...props}

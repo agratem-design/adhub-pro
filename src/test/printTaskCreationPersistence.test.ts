@@ -126,6 +126,23 @@ describe('Print Task Creation Orchestration & Persistence Integrity', () => {
     mockDb = new MockDatabaseClient();
   });
 
+  it('persists the reviewed rates for each contract and face instead of copying the first price', async () => {
+    const result = await executeCreatePrintTask({
+      installationTaskId: 'inst-rates', selectedBillboardIds: [1, 2],
+      taskItems: [{ id: 'a', billboard_id: 1, design_face_a: 'https://example.com/a' },
+        { id: 'b', billboard_id: 2, design_face_a: 'https://example.com/b' }],
+      billboardsMap: { 1: { id: 1, size: '3x4', contractNumber: 10 }, 2: { id: 2, size: '3x4', contractNumber: 11 } },
+      contractLookupMap: { 10: { contractNumber: 10, customerId: 'same', customerName: 'زبون' },
+        11: { contractNumber: 11, customerId: 'same', customerName: 'زبون' } },
+      printerId: 'printer-1', printerName: 'المطبعة', printerPricePerMeter: 10, customerPricePerMeter: 20,
+      itemPrintRates: { '1:a': { printer: 10, customer: 20 }, '2:a': { printer: 13, customer: 25 } },
+    }, mockDb);
+    expect(result.success).toBe(true);
+    expect(mockDb.tables.print_tasks[0].total_cost).toBe(276);
+    expect(mockDb.tables.print_tasks[0].customer_total_amount).toBe(540);
+    expect(result.resolvedItems?.map(i => i.customerPricePerMeter)).toEqual([20, 25]);
+  });
+
   // Test 1: Multi-Billboard Exact Mapping Persistence (101->A, 102->B, 103->C)
   it('Test 1: should persist exact design payload for multiple billboards without cross-contamination', async () => {
     const params: CreatePrintTaskOrchestratorParams = {

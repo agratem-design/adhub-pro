@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "الفارس — إرسال واتساب",
+  "version": "1.0.0",
+  "minimum_chrome_version": "120",
+  "description": "إرسال الرسائل المحددة في نظام الفارس عبر جلسة واتساب ويب المفتوحة.",
+  "permissions": ["activeTab", "scripting", "storage", "alarms"],
+  "host_permissions": ["https://web.whatsapp.com/*"],
+  "action": { "default_popup": "popup.html", "default_title": "الفارس — إرسال واتساب" },
+  "background": { "service_worker": "background.js", "type": "module" },
+  "content_scripts": [{ "matches": ["https://web.whatsapp.com/*"], "js": ["whatsapp.js"], "run_at": "document_idle" }]
+}

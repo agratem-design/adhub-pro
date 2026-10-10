@@ -150,6 +150,7 @@ export const DesignPanel = ({
               />
             )}
 
+            <button type="button" onClick={e => { e.stopPropagation(); setLightboxOpen(true); }} className="absolute left-2 top-2 z-30 inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-card/95 px-3 text-[12px] font-semibold text-foreground shadow-sm transition-colors hover:bg-card" aria-label={`تكبير ${label}`}><Maximize2 className="h-4 w-4"/>تكبير التصميم</button>
             {/* Quick Hover Action Bar */}
             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/design:opacity-100 transition-all duration-200 z-20 flex flex-col items-center justify-center gap-2 p-2 pointer-events-none">
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/95 text-black font-black text-xs shadow-xl backdrop-blur-md transform scale-95 group-hover/design:scale-100 transition-transform">
@@ -164,7 +165,7 @@ export const DesignPanel = ({
                 <button
                   type="button"
                   onClick={handlePrev}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 z-30 h-7 w-7 rounded-full bg-black/75 text-white flex items-center justify-center opacity-0 group-hover/design:opacity-100 transition-opacity hover:bg-black/90 cursor-pointer shadow-md"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 z-30 h-10 w-10 rounded-full bg-black/75 text-white flex items-center justify-center opacity-100 transition-opacity hover:bg-black/90 cursor-pointer shadow-md"
                   aria-label="التصميم السابق"
                 >
                   <ChevronRight className="h-4 w-4" />
@@ -172,7 +173,7 @@ export const DesignPanel = ({
                 <button
                   type="button"
                   onClick={handleNext}
-                  className="absolute left-1.5 top-1/2 -translate-y-1/2 z-30 h-7 w-7 rounded-full bg-black/75 text-white flex items-center justify-center opacity-0 group-hover/design:opacity-100 transition-opacity hover:bg-black/90 cursor-pointer shadow-md"
+                  className="absolute left-1.5 top-1/2 -translate-y-1/2 z-30 h-10 w-10 rounded-full bg-black/75 text-white flex items-center justify-center opacity-100 transition-opacity hover:bg-black/90 cursor-pointer shadow-md"
                   aria-label="التصميم التالي"
                 >
                   <ChevronLeft className="h-4 w-4" />

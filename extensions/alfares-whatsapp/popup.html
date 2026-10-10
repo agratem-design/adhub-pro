@@ -1,0 +1,9 @@
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>الفارس — إرسال واتساب</title><link rel="stylesheet" href="popup.css"></head><body>
+<h1>إرسال واتساب</h1><p>يستخدم جلسة واتساب ويب المفتوحة في هذا المتصفح.</p>
+<button id="connect">ربط صفحة النظام المفتوحة</button><p id="connection"></p>
+<p id="error" role="alert"></p><section id="batch" hidden>
+<h2 id="summary"></h2><p>راجع الأسماء والأرقام والرسائل. اترك تبويب واتساب للإضافة حتى تنتهي الدفعة. فاصل الإرسال 15 ثانية.</p>
+<label for="tabs">تبويب واتساب</label><select id="tabs"></select>
+<div class="actions"><button id="start">بدء الإرسال للمستلمين المعروضين</button><button id="pause">إيقاف مؤقت</button><button id="cancel">إلغاء المتبقي</button><button id="clear">مسح سجل الدفعة</button></div>
+<p>عند الإيقاف قد تكتمل الرسالة الجاري إرسالها. الحالات غير المؤكدة لا تُرسل مرة أخرى تلقائيًا. «أُرسلت» تعني تأكيد واتساب للإرسال، ولا تعني أن المستلم قرأها.</p>
+<div id="recipients"></div></section><script src="popup.js" type="module"></script></body></html>

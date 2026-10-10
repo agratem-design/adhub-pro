@@ -45,10 +45,12 @@ export function TaskDesignManager({ taskId, designs, onDesignsUpdate, contractNu
   const [designDate, setDesignDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [previewDesign, setPreviewDesign] = useState<TaskDesign | null>(null);
+  const editorRef = useRef<HTMLElement>(null);
+  useEffect(() => { if (dialogOpen) editorRef.current?.scrollIntoView({block:'nearest',behavior:'auto'}); }, [dialogOpen, editingDesign?.id]);
 
   // Separate upload method and loading state per face
-  const [uploadMethodA, setUploadMethodA] = useState<'url' | 'file'>('url');
-  const [uploadMethodB, setUploadMethodB] = useState<'url' | 'file'>('url');
+  const [uploadMethodA, setUploadMethodA] = useState<'url' | 'file'>('file');
+  const [uploadMethodB, setUploadMethodB] = useState<'url' | 'file'>('file');
   const [uploadingA, setUploadingA] = useState(false);
   const [uploadingB, setUploadingB] = useState(false);
   const fileInputRefA = useRef<HTMLInputElement>(null);
@@ -253,8 +255,8 @@ export function TaskDesignManager({ taskId, designs, onDesignsUpdate, contractNu
     setDesignFaceBUrl('');
     setDesignDate(new Date().toISOString().slice(0, 10));
     setEditingDesign(null);
-    setUploadMethodA('url');
-    setUploadMethodB('url');
+    setUploadMethodA('file');
+    setUploadMethodB('file');
     if (fileInputRefA.current) fileInputRefA.current.value = '';
     if (fileInputRefB.current) fileInputRefB.current.value = '';
   };
@@ -483,16 +485,11 @@ export function TaskDesignManager({ taskId, designs, onDesignsUpdate, contractNu
           <Plus className="w-3.5 h-3.5" />
           إضافة تصميم
         </Button>
-        <Dialog open={dialogOpen} onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) resetForm();
-        }}>
-          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" dir="rtl">
-            <DialogHeader>
-              <DialogTitle className="text-right">
-                {editingDesign ? 'تعديل التصميم' : 'إضافة تصميم جديد'}
-              </DialogTitle>
-            </DialogHeader>
+
+      </div>
+
+      {dialogOpen && <section ref={editorRef} className="rounded-xl border border-primary/30 bg-card p-4" dir="rtl" aria-label="تحرير التصميم">
+        <h4 className="mb-4 text-base font-bold">{editingDesign ? 'تعديل التصميم' : 'إضافة تصميم جديد'}</h4>
             <div className="space-y-4">
               {/* Name + Date row */}
               <div className="grid grid-cols-2 gap-3">
@@ -551,9 +548,7 @@ export function TaskDesignManager({ taskId, designs, onDesignsUpdate, contractNu
                 </Button>
               </div>
             </div>
-          </DialogContent>
-        </Dialog>
-      </div>
+      </section>}
 
       {/* Designs List */}
       {designs.length === 0 ? (

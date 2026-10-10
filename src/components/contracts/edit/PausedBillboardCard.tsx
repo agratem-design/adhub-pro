@@ -250,10 +250,10 @@ function PausedBillboardCardImpl({
       data-paused-bb={raw.billboard_id}
       className={`group relative h-full flex flex-col bg-card border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 min-w-0 ${
         highlight
-          ? 'border-emerald-500 ring-2 ring-emerald-500/50 bg-gradient-to-br from-emerald-500/[0.02] to-transparent'
+          ? 'border-emerald-500 ring-2 ring-emerald-500/50 bg-muted/30'
           : isRenewed
-            ? 'border-emerald-500/40 shadow-emerald-500/5 bg-gradient-to-br from-emerald-500/[0.02] to-transparent'
-            : 'border-amber-500/40 bg-gradient-to-br from-amber-500/[0.01] to-transparent'
+            ? 'border-emerald-500/40 shadow-emerald-500/5 bg-muted/30'
+            : 'border-amber-500/40 bg-muted/30'
       }`}
     >
       {resumeOpen && <ResumePausedBillboardDialog row={raw} currency={currencySymbol} onClose={() => setResumeOpen(false)} onChanged={() => onChanged?.()} />}
@@ -327,14 +327,14 @@ function PausedBillboardCardImpl({
                 <Button 
                   variant="ghost"
                   size="sm"
-                  className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50/10 rounded-full cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200"
+                  className="h-7 w-7 p-0 text-primary hover:text-primary hover:bg-blue-50/10 rounded-full cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200"
                   title="البديل المخصص للوحة"
                 >
                   <Repeat2 className="h-4 w-4" />
                 </Button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-72 p-3 space-y-2">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-blue-700 dark:text-blue-400">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-primary">
                   <Repeat2 className="h-4 w-4" /> لوحة بديلة
                 </div>
                 <div className="flex items-center gap-3">
@@ -386,7 +386,7 @@ function PausedBillboardCardImpl({
               variant="ghost"
               size="sm"
               onClick={() => setReplaceDialogOpen(true)}
-              className="h-7 w-7 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50/10 rounded-full cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200"
+              className="h-7 w-7 p-0 text-primary hover:text-primary hover:bg-blue-50/10 rounded-full cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200"
               title="تخصيص لوحة بديلة"
             >
               <Repeat2 className="h-4 w-4" />
@@ -547,20 +547,20 @@ function PausedBillboardCardImpl({
 
           {printCostEnabled && includePrintInPrice && item.printCost > 0 && (
             <div className="flex justify-between items-center bg-orange-500/10 rounded-lg px-3 py-1.5 -mx-1">
-              <span className="text-xs font-medium text-orange-600 flex items-center gap-1.5">
+              <span className="text-xs font-medium text-primary flex items-center gap-1.5">
                 <Printer className="h-3 w-3" /> طباعة مضمنة
               </span>
-              <span className="text-sm font-bold text-orange-600 font-manrope">
+              <span className="text-sm font-bold text-primary font-manrope">
                 - {item.printCost.toLocaleString('ar-LY')} {currencySymbol}
               </span>
             </div>
           )}
           {printCostEnabled && !includePrintInPrice && item.printCost > 0 && (
             <div className="flex justify-between items-center bg-blue-500/10 rounded-lg px-3 py-1.5 -mx-1">
-              <span className="text-xs font-medium text-blue-600 flex items-center gap-1.5">
+              <span className="text-xs font-medium text-primary flex items-center gap-1.5">
                 <Printer className="h-3 w-3" /> تكلفة الطباعة
               </span>
-              <span className="text-sm font-bold text-blue-600 font-manrope">
+              <span className="text-sm font-bold text-primary font-manrope">
                 + {item.printCost.toLocaleString('ar-LY')} {currencySymbol}
               </span>
             </div>
@@ -636,7 +636,7 @@ function PausedBillboardCardImpl({
         </div>
 
         {/* Pause Section */}
-        <div className="rounded-xl border-2 border-amber-500/40 bg-amber-500/5 p-3 space-y-3 min-w-0">
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 space-y-3 min-w-0">
           <div className="flex items-center gap-1.5 text-xs font-bold text-amber-700 dark:text-amber-400 flex-wrap min-w-0">
             <PauseCircle className="h-4 w-4 shrink-0" />
             <span>تفاصيل الإيقاف</span>
@@ -709,8 +709,8 @@ function PausedBillboardCardImpl({
                     </div>
                     {((item as any).printAdded || 0) > 0 && (
                       <div className="flex justify-between">
-                        <span className="text-orange-600 flex items-center gap-1"><Printer className="h-3 w-3" /> طباعة</span>
-                        <span className="tabular-nums font-semibold text-orange-600" dir="ltr">+ {formatAmount((item as any).printAdded)} {currencySymbol}</span>
+                        <span className="text-primary flex items-center gap-1"><Printer className="h-3 w-3" /> طباعة</span>
+                        <span className="tabular-nums font-semibold text-primary" dir="ltr">+ {formatAmount((item as any).printAdded)} {currencySymbol}</span>
                       </div>
                     )}
                     {((item as any).installAdded || 0) > 0 && (
@@ -727,7 +727,7 @@ function PausedBillboardCardImpl({
                 </Popover>
               )}
             </Label>
-            <div className="h-10 px-3 rounded-md border-2 border-primary/40 bg-primary/10 flex items-center justify-end font-bold text-primary tabular-nums text-base w-full min-w-0 overflow-hidden" dir="ltr">
+            <div className="h-10 px-3 rounded-md border border-primary/40 bg-primary/10 flex items-center justify-end font-bold text-primary tabular-nums text-base w-full min-w-0 overflow-hidden" dir="ltr">
               <span className="truncate">{formatAmount(effectiveConsumed)} {currencySymbol}</span>
             </div>
             <div className="text-[10px] text-muted-foreground text-center" dir="ltr">

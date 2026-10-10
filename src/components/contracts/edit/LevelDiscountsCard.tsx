@@ -1,10 +1,8 @@
-import React, { useMemo, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Layers, Percent, TrendingDown } from 'lucide-react';
+import { Fragment, useMemo, useState } from 'react';
+import { ChevronDown, Layers } from 'lucide-react';
 import type { Billboard } from '@/types';
+import { cn } from '@/lib/utils';
+import { EditSection } from './ui';
 
 interface LevelDiscountsCardProps {
   selectedBillboards: Billboard[];
@@ -17,210 +15,147 @@ interface LevelDiscountsCardProps {
 
 interface LevelSummary {
   level: string;
-  billboards: {
-    id: string;
-    name: string;
-    size: string;
-    price: number;
-  }[];
+  billboards: { id: string; name: string; size: string; price: number }[];
   totalPrice: number;
   discountPercent: number;
   discountAmount: number;
   priceAfterDiscount: number;
 }
 
+const fmt = (n: number) => Math.round(Number(n || 0)).toLocaleString('ar-LY');
+
+/** تخفيض بنسبة لكل مستوى لوحات: جدول واحد، والضغط على الصف يعرض لوحاته */
 export function LevelDiscountsCard({
-  selectedBillboards,
-  levelDiscounts,
-  setLevelDiscounts,
-  currencySymbol = 'د.ل',
-  calculateBillboardPrice,
-  sizeNames = new Map()
+  selectedBillboards, levelDiscounts, setLevelDiscounts, currencySymbol = 'د.ل', calculateBillboardPrice, sizeNames = new Map(),
 }: LevelDiscountsCardProps) {
   const [expandedLevel, setExpandedLevel] = useState<string | null>(null);
 
-  const getDisplaySize = (billboard: any): string => {
-    const sizeId = billboard.size_id || billboard.Size_ID;
-    if (sizeId && sizeNames.has(sizeId)) {
-      return sizeNames.get(sizeId)!;
-    }
-    return billboard.size || billboard.Size || 'غير محدد';
-  };
-
   const levelSummaries = useMemo<LevelSummary[]>(() => {
-    const levelMap = new Map<string, LevelSummary>();
-
+    const getDisplaySize = (b: any): string => {
+      const sizeId = b.size_id || b.Size_ID;
+      if (sizeId && sizeNames.has(sizeId)) return sizeNames.get(sizeId)!;
+      return b.size || b.Size || 'غير محدد';
+    };
+    const map = new Map<string, LevelSummary>();
     selectedBillboards.forEach((b) => {
       const level = (b as any).Level || (b as any).level || 'غير محدد';
       const price = calculateBillboardPrice(b);
-      const billboardInfo = {
-        id: String((b as any).ID),
-        name: (b as any).Billboard_Name || (b as any).name || '',
-        size: getDisplaySize(b),
-        price
-      };
-
-      if (levelMap.has(level)) {
-        const existing = levelMap.get(level)!;
-        existing.billboards.push(billboardInfo);
-        existing.totalPrice += price;
-      } else {
-        levelMap.set(level, {
-          level,
-          billboards: [billboardInfo],
-          totalPrice: price,
-          discountPercent: 0,
-          discountAmount: 0,
-          priceAfterDiscount: price
-        });
-      }
+      const info = { id: String((b as any).ID), name: (b as any).Billboard_Name || (b as any).name || '', size: getDisplaySize(b), price };
+      const cur = map.get(level);
+      if (cur) { cur.billboards.push(info); cur.totalPrice += price; }
+      else map.set(level, { level, billboards: [info], totalPrice: price, discountPercent: 0, discountAmount: 0, priceAfterDiscount: price });
     });
-
-    // Apply discounts
-    levelMap.forEach((summary, level) => {
-      const discountPercent = levelDiscounts[level] || 0;
-      const discountAmount = summary.totalPrice * (discountPercent / 100);
-      summary.discountPercent = discountPercent;
-      summary.discountAmount = discountAmount;
-      summary.priceAfterDiscount = summary.totalPrice - discountAmount;
+    map.forEach((s, level) => {
+      const pct = levelDiscounts[level] || 0;
+      s.discountPercent = pct;
+      s.discountAmount = s.totalPrice * (pct / 100);
+      s.priceAfterDiscount = s.totalPrice - s.discountAmount;
     });
-
-    return Array.from(levelMap.values()).sort((a, b) => a.level.localeCompare(b.level));
+    return Array.from(map.values()).sort((a, b) => a.level.localeCompare(b.level));
   }, [selectedBillboards, calculateBillboardPrice, levelDiscounts, sizeNames]);
 
   const handleDiscountChange = (level: string, value: number) => {
-    const newDiscounts = { ...levelDiscounts };
-    if (value > 0) {
-      newDiscounts[level] = Math.min(100, Math.max(0, value));
-    } else {
-      delete newDiscounts[level];
-    }
-    setLevelDiscounts(newDiscounts);
+    const next = { ...levelDiscounts };
+    if (value > 0) next[level] = Math.min(100, Math.max(0, value));
+    else delete next[level];
+    setLevelDiscounts(next);
   };
 
-  const totalDiscountAmount = useMemo(() => {
-    return levelSummaries.reduce((sum, s) => sum + s.discountAmount, 0);
-  }, [levelSummaries]);
+  const totals = useMemo(() => levelSummaries.reduce(
+    (acc, s) => ({ before: acc.before + s.totalPrice, discount: acc.discount + s.discountAmount }),
+    { before: 0, discount: 0 },
+  ), [levelSummaries]);
 
   if (levelSummaries.length === 0) return null;
 
   return (
-    <Card className="border-border shadow-sm">
-      <CardHeader className="py-3 px-4 bg-gradient-to-br from-purple-500/10 via-purple-500/5 to-transparent border-b border-border">
-        <CardTitle className="flex items-center justify-between text-base">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-purple-500/20">
-              <Layers className="h-4 w-4 text-purple-600" />
-            </div>
-            <span>تخفيض حسب المستوى</span>
-          </div>
-          {totalDiscountAmount > 0 && (
-            <Badge className="bg-red-500/10 text-red-600 border-red-500/20">
-              إجمالي التخفيض: <span className="font-manrope">{totalDiscountAmount.toLocaleString('ar-LY')}</span> {currencySymbol}
-            </Badge>
+    <EditSection
+      icon={Layers}
+      title="تخفيض حسب المستوى"
+      description="نسبة تخفيض على كل لوحات المستوى نفسه"
+      actions={totals.discount > 0 ? (
+        <span className="rounded-md bg-rose-500/10 px-2 py-0.5 text-xs font-semibold text-rose-500">
+          <span dir="ltr">−{fmt(totals.discount)}</span> {currencySymbol}
+        </span>
+      ) : undefined}
+      flush
+    >
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/30 text-xs text-muted-foreground">
+            <tr>
+              <th className="px-4 py-2 text-right font-medium">المستوى</th>
+              <th className="px-4 py-2 text-right font-medium">الإيجار</th>
+              <th className="px-4 py-2 text-right font-medium">التخفيض</th>
+              <th className="px-4 py-2 text-left font-medium">بعد التخفيض</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {levelSummaries.map((s) => {
+              const open = expandedLevel === s.level;
+              const sizes = Array.from(new Set(s.billboards.map(b => b.size)));
+              return (
+                <Fragment key={s.level}>
+                  <tr key={s.level} className="cursor-pointer hover:bg-muted/20" onClick={() => setExpandedLevel(open ? null : s.level)}>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform', open && 'rotate-180')} />
+                        <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 font-manrope text-sm font-bold text-primary">{s.level}</span>
+                        <span className="min-w-0">
+                          <span className="block text-xs text-muted-foreground">{s.billboards.length} لوحة</span>
+                          <span className="block truncate text-xs text-muted-foreground" dir="ltr">{sizes.join(' · ')}</span>
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 tabular-nums">{fmt(s.totalPrice)}</td>
+                    <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center gap-2">
+                        <div className="relative w-20">
+                          <input
+                            type="number" min="0" max="100" step="0.5"
+                            aria-label={`نسبة تخفيض المستوى ${s.level}`}
+                            value={s.discountPercent || ''}
+                            placeholder="0"
+                            onChange={e => handleDiscountChange(s.level, Number(e.target.value))}
+                            className="h-9 w-full rounded-lg border border-input bg-background px-2 pl-6 text-center text-sm font-semibold focus:border-primary focus:outline-none"
+                          />
+                          <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                        </div>
+                        {s.discountAmount > 0 && <span dir="ltr" className="text-xs font-semibold tabular-nums text-rose-500">−{fmt(s.discountAmount)}</span>}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 text-left font-semibold tabular-nums">{fmt(s.priceAfterDiscount)}</td>
+                  </tr>
+                  {open && (
+                    <tr key={`${s.level}-items`} className="bg-muted/10">
+                      <td colSpan={4} className="px-4 py-2">
+                        <ul className="divide-y divide-border rounded-lg border border-border bg-card">
+                          {s.billboards.map(b => (
+                            <li key={b.id} className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs">
+                              <span className="min-w-0 truncate"><span className="font-medium">{b.name}</span> <span className="text-muted-foreground" dir="ltr">{b.size}</span></span>
+                              <span className="shrink-0 tabular-nums">{fmt(b.price)} {currencySymbol}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+          {totals.discount > 0 && (
+            <tfoot>
+              <tr className="border-t border-border bg-primary/5 font-semibold">
+                <td className="px-4 py-2.5">الإجمالي</td>
+                <td className="px-4 py-2.5 tabular-nums">{fmt(totals.before)}</td>
+                <td className="px-4 py-2.5 tabular-nums text-rose-500"><span dir="ltr">−{fmt(totals.discount)}</span></td>
+                <td className="px-4 py-2.5 text-left tabular-nums text-primary">{fmt(totals.before - totals.discount)} {currencySymbol}</td>
+              </tr>
+            </tfoot>
           )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="p-4 space-y-4">
-        <div className="grid gap-3">
-          {levelSummaries.map((summary) => (
-            <div
-              key={summary.level}
-              className="bg-muted/50 border border-border rounded-xl overflow-hidden"
-            >
-              {/* Level Header */}
-              <div
-                className="p-4 cursor-pointer hover:bg-muted/80 transition-colors"
-                onClick={() => setExpandedLevel(expandedLevel === summary.level ? null : summary.level)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                      <span className="text-lg font-bold font-manrope text-primary">{summary.level}</span>
-                    </div>
-                    <div>
-                      <div className="font-bold text-foreground">مستوى {summary.level}</div>
-                      <div className="text-sm text-muted-foreground font-manrope">
-                        {summary.billboards.length} لوحة
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-4">
-                    {/* Size badges */}
-                    <div className="hidden sm:flex flex-wrap gap-1 max-w-[200px]">
-                      {Array.from(new Set(summary.billboards.map(b => b.size))).map((size) => (
-                        <Badge key={size} variant="outline" className="text-xs">
-                          {size}
-                        </Badge>
-                      ))}
-                    </div>
-                    
-                    {/* Discount Input */}
-                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      <div className="relative">
-                        <Input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={summary.discountPercent || ''}
-                          onChange={(e) => handleDiscountChange(summary.level, Number(e.target.value))}
-                          placeholder="0"
-                          className="w-20 h-9 text-center pr-7 bg-background"
-                        />
-                        <Percent className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                      </div>
-                    </div>
-                    
-                    {/* Prices */}
-                    <div className="text-left min-w-[120px]">
-                      {summary.discountAmount > 0 ? (
-                        <>
-                          <div className="text-sm line-through text-muted-foreground font-manrope">
-                            {summary.totalPrice.toLocaleString('ar-LY')}
-                          </div>
-                          <div className="font-bold font-manrope text-primary">
-                            {summary.priceAfterDiscount.toLocaleString('ar-LY')} {currencySymbol}
-                          </div>
-                        </>
-                      ) : (
-                        <div className="font-bold font-manrope text-foreground">
-                          {summary.totalPrice.toLocaleString('ar-LY')} {currencySymbol}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Discount indicator */}
-                {summary.discountAmount > 0 && (
-                  <div className="mt-3 flex items-center gap-2 text-sm text-red-600 font-manrope">
-                    <TrendingDown className="h-4 w-4" />
-                    <span>تخفيض {summary.discountPercent}% = {summary.discountAmount.toLocaleString('ar-LY')} {currencySymbol}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Expanded Billboard Details */}
-              {expandedLevel === summary.level && (
-                <div className="border-t border-border bg-background p-3">
-                  <div className="grid gap-2">
-                    {summary.billboards.map((bb) => (
-                      <div key={bb.id} className="flex items-center justify-between text-sm bg-muted/30 rounded-lg px-3 py-2">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-foreground">{bb.name}</span>
-                          <Badge variant="outline" className="text-xs">{bb.size}</Badge>
-                        </div>
-                        <span className="font-bold font-manrope text-primary">{bb.price.toLocaleString('ar-LY')} {currencySymbol}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+        </table>
+      </div>
+    </EditSection>
   );
 }

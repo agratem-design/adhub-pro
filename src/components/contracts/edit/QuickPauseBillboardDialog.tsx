@@ -125,7 +125,7 @@ export function QuickPauseBillboardDialog({
       <DialogContent className="max-w-md bg-background border-border" dir="rtl">
         <DialogHeader className="space-y-1">
           <div className="flex items-center gap-2">
-            <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500">
+            <div className="p-2 rounded-lg bg-primary/10 text-amber-500">
               <PauseCircle className="w-5 h-5" />
             </div>
             <div>
@@ -164,7 +164,7 @@ export function QuickPauseBillboardDialog({
           </div>
 
           {/* Financial Refund Preview */}
-          <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-xs space-y-1">
+          <div className="p-3 rounded-lg bg-primary/10 border border-emerald-500/20 text-xs space-y-1">
             <div className="flex justify-between items-center text-emerald-500 font-bold">
               <span>المبلغ المسترجع للعميل (يُخصم من العقد):</span>
               <span className="text-sm">{remainingCalc.remainingValue.toLocaleString('ar-LY')} {currencySymbol}</span>

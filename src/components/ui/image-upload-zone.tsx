@@ -11,6 +11,7 @@ interface ImageUploadZoneProps {
   value?: string;
   /** Called with the uploaded/pasted image URL */
   onChange: (url: string) => void;
+  onUploadingChange?: (uploading: boolean) => void;
   /** Called when the image is cleared / removed (optional, defaults to calling onChange('')) */
   onClear?: () => void;
   /** Name used for upload naming */
@@ -38,6 +39,7 @@ interface ImageUploadZoneProps {
 export function ImageUploadZone({
   value,
   onChange,
+  onUploadingChange,
   onClear,
   imageName = 'image',
   folder,
@@ -110,6 +112,7 @@ export function ImageUploadZone({
     }
 
     setUploading(true);
+    onUploadingChange?.(true);
     startSimulatedProgress();
     const finalName = imageName.toLowerCase().endsWith('.jpg') ? imageName : `${imageName}.jpg`;
     try {
@@ -124,8 +127,9 @@ export function ImageUploadZone({
       toast.error(error.message || 'فشل رفع الصورة. يرجى التأكد من الاتصال وإعادة المحاولة.');
     } finally {
       setUploading(false);
+      onUploadingChange?.(false);
     }
-  }, [imageName, onChange, folder, startSimulatedProgress, stopSimulatedProgress]);
+  }, [imageName, onChange, onUploadingChange, folder, startSimulatedProgress, stopSimulatedProgress]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

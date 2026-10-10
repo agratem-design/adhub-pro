@@ -2,7 +2,10 @@ import { useState } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
-import { ArrowRight, Printer, Trash2, RefreshCw, Plus } from 'lucide-react';
+import { ArrowRight, Printer, Trash2, RefreshCw, Plus, Ruler } from 'lucide-react';
+import PrintedMetersStatement from '@/components/printers/PrintedMetersStatement';
+import { ensureDefaultPrinterAssignments } from '@/lib/printerDefaults';
+import { useQuery as useMetersQuery } from '@tanstack/react-query';
 import { PrintTasksTable } from '@/components/print-tasks/PrintTasksTable';
 import { PrintTaskDetails } from '@/components/print-tasks/PrintTaskDetails';
 import { CreateManualPrintTask } from '@/components/print-tasks/CreateManualPrintTask';
@@ -39,6 +42,15 @@ export default function PrintTasks() {
   const queryClient = useQueryClient();
   const [selectedTask, setSelectedTask] = useState<any | null>(null);
   const [createManualDialogOpen, setCreateManualDialogOpen] = useState(false);
+  const [metersOpen, setMetersOpen] = useState(false);
+  const { data: meterPrinters = [] } = useMetersQuery({
+    queryKey: ['printers-for-meters'],
+    enabled: metersOpen,
+    queryFn: async () => {
+      const { data } = await supabase.from('printers').select('id, name').order('name');
+      return (data || []) as { id: string; name: string }[];
+    },
+  });
   const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>('customer');
   const [invoiceCompositeTask, setInvoiceCompositeTask] = useState<CompositeTaskWithDetails | null>(null);
@@ -46,6 +58,7 @@ export default function PrintTasks() {
   const { data: tasks = [], isLoading, refetch, isFetching } = useQuery({
     queryKey: ['print-tasks'],
     queryFn: async () => {
+      await ensureDefaultPrinterAssignments();
       const { data, error } = await supabase
         .from('print_tasks')
         .select(`
@@ -299,6 +312,17 @@ export default function PrintTasks() {
                   <RefreshCw className={`h-3.5 w-3.5 text-blue-500 ${isFetching ? 'animate-spin' : ''}`} />
                   تحديث البيانات
                 </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 rounded-xl px-4 h-10 text-xs font-bold"
+                  onClick={() => setMetersOpen(true)}
+                >
+                  <Ruler className="h-3.5 w-3.5" />
+                  كشف طباعة الأمتار
+                </Button>
+                <PrintedMetersStatement open={metersOpen} onOpenChange={setMetersOpen} printers={meterPrinters} />
 
                 <Button 
                   size="sm" 

@@ -128,10 +128,10 @@ export function UnequalDistributionManager({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-hidden flex flex-col p-0">
-        <DialogHeader className="p-4 pb-3 border-b border-border bg-gradient-to-r from-purple-500/10 to-purple-500/5">
+        <DialogHeader className="p-4 pb-3 border-b border-border bg-muted/30">
           <DialogTitle className="flex items-center gap-2 text-lg">
-            <div className="p-1.5 rounded-lg bg-purple-500/20">
-              <Sparkles className="h-4 w-4 text-purple-500" />
+            <div className="p-1.5 rounded-lg bg-primary/10">
+              <Sparkles className="h-4 w-4 text-primary" />
             </div>
             توزيع يدوي للدفعات
           </DialogTitle>
@@ -150,7 +150,7 @@ export function UnequalDistributionManager({
               <div 
                 className={cn(
                   "h-full transition-all duration-300 rounded-full",
-                  isValid ? "bg-green-500" : progressPercent > 100 ? "bg-red-500" : "bg-gradient-to-r from-purple-500 to-purple-400"
+                  isValid ? "bg-green-500" : progressPercent > 100 ? "bg-red-500" : "bg-primary text-primary-foreground hover:bg-primary/90"
                 )}
                 style={{ width: `${Math.min(100, progressPercent)}%` }}
               />
@@ -217,7 +217,7 @@ export function UnequalDistributionManager({
               <div 
                 key={index} 
                 className={cn(
-                  "p-3 rounded-lg border-2 space-y-2",
+                  "p-3 rounded-lg border space-y-2",
                   index === 0 
                     ? "bg-purple-500/5 border-purple-500/30" 
                     : "bg-card border-border"
@@ -314,7 +314,7 @@ export function UnequalDistributionManager({
           <Button
             onClick={handleApply}
             disabled={!isValid}
-            className="flex-1 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700"
+            className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90"
           >
             <CheckCircle className="h-4 w-4 mr-2" />
             تطبيق

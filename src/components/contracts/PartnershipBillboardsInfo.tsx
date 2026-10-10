@@ -218,7 +218,7 @@ export function PartnershipBillboardsInfo({ billboardIds, startDate, endDate }: 
                 </div>
                 <div>
                   <p className="text-muted-foreground">إجمالي الخصم</p>
-                  <p className="font-medium text-orange-600">{billboard.total_deduction.toLocaleString()} ريال</p>
+                  <p className="font-medium text-primary">{billboard.total_deduction.toLocaleString()} ريال</p>
                 </div>
                 <div>
                   <p className="text-muted-foreground">المتبقي من رأس المال</p>
@@ -243,7 +243,7 @@ export function PartnershipBillboardsInfo({ billboardIds, startDate, endDate }: 
                     <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                       <div>رأس المال: {partner.capital_contribution.toLocaleString()}</div>
                       <div>المتبقي: {partner.capital_remaining.toLocaleString()}</div>
-                      <div className="col-span-2 text-orange-600 font-medium">
+                      <div className="col-span-2 text-primary font-medium">
                         سيتم خصم: {partner.deduction_amount.toLocaleString()} ريال
                       </div>
                     </div>
@@ -258,10 +258,10 @@ export function PartnershipBillboardsInfo({ billboardIds, startDate, endDate }: 
 
         <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
           <div className="flex items-center gap-2">
-            <TrendingDown className="h-5 w-5 text-orange-600" />
+            <TrendingDown className="h-5 w-5 text-primary" />
             <span className="font-medium">إجمالي الخصم من رأس المال</span>
           </div>
-          <span className="text-lg font-bold text-orange-600">
+          <span className="text-base font-bold text-primary">
             {totalCapitalDeduction.toLocaleString()} ريال
           </span>
         </div>
