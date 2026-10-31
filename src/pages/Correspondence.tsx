@@ -150,6 +150,7 @@ export default function Correspondence() {
   const [q, setQ] = useState('');
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = usePersistedState<LetterPrintMode>('correspondence.mode', 'full');
+  const [yearOnlyDate, setYearOnlyDate] = usePersistedState<boolean>('correspondence.yearOnlyDate', false);
   const [fit, setFit] = useState<{ scale: number; overflow: boolean }>({ scale: 1, overflow: false });
 
   const company = companies.find(c => c.id === (draft?.company_id || companyId)) || null;
@@ -161,7 +162,7 @@ export default function Correspondence() {
   const companyLetters = letters.filter(l => !companyId || l.company_id === companyId);
   const monthLetters = companyLetters.filter(l => l.letter_date?.slice(0, 7) === today().slice(0, 7));
 
-  const html = useMemo(() => (company && draft ? renderLetterHtml(company, draft, window.location.origin, { mode }) : ''), [company, draft, mode]);
+  const html = useMemo(() => (company && draft ? renderLetterHtml(company, draft, window.location.origin, { mode, yearOnlyDate }) : ''), [company, draft, mode, yearOnlyDate]);
   const set = (patch: Partial<Letter>) => setDraft(d => (d ? { ...d, ...patch } : d));
 
   const print = (l: Letter, m: LetterPrintMode = 'full') => {
@@ -169,7 +170,7 @@ export default function Correspondence() {
     if (!c) return;
     const suffix = m === 'full' ? '' : ` (${PRINT_MODE_LABELS[m]})`;
     const w = preparePrintWindow(`مراسلة ${l.reference_number}`);
-    writePrintWindow(w, renderLetterHtml(c, l, window.location.origin, { mode: m }), { title: m === 'background' ? `ترويسة ${c.name}` : `مراسلة ${l.reference_number} - ${l.subject || ''}${suffix}`.trim(), showDownloadPdf: true, showShare: true, autoPrint: false });
+    writePrintWindow(w, renderLetterHtml(c, l, window.location.origin, { mode: m, yearOnlyDate }), { title: m === 'background' ? `ترويسة ${c.name}` : `مراسلة ${l.reference_number} - ${l.subject || ''}${suffix}`.trim(), showDownloadPdf: true, showShare: true, autoPrint: false });
   };
 
   const save = async (andPrint: LetterPrintMode | false = false) => {
@@ -297,7 +298,7 @@ export default function Correspondence() {
             </div>
             <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-3">
               <Button variant="outline" disabled={saving} onClick={() => save(false)}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}حفظ</Button>
-              <PrintMenu label="حفظ وطباعة" onPrint={m => save(m)} />
+              <PrintMenu label="حفظ وطباعة" onPrint={m => save(m)} yearOnlyDate={yearOnlyDate} onYearOnlyDateChange={setYearOnlyDate} />
             </div>
           </section>
           <section className="min-w-0 space-y-3 self-start rounded-2xl border border-border bg-muted/30 p-3 md:p-4 xl:sticky xl:top-4">
@@ -347,11 +348,11 @@ export default function Correspondence() {
                       <tr key={l.id} className="grid grid-cols-2 p-3 transition-colors hover:bg-primary/5 md:table-row md:p-0">
                         <td className="p-2 font-bold tabular-nums md:p-3" dir="ltr" style={{ textAlign: 'right' }}>{l.reference_number}</td>
                         <td className="p-2 text-left tabular-nums md:p-3 md:text-right">{String(l.letter_date).split('-').reverse().join('/')}</td>
-                        <td className="col-span-2 p-2 md:p-3"><div className="font-semibold">{l.recipient || '—'}</div><div className="text-xs text-muted-foreground">{l.subject}</div></td>
+                        <td className="col-span-2 p-2 md:p-3"><div className="font-semibold">{l.recipient?.trim() || l.subject?.trim() || '—'}</div>{l.recipient?.trim() && <div className="text-xs text-muted-foreground">{l.subject}</div>}</td>
                         <td className="col-span-2 p-2 md:p-3">
                           <div className="flex flex-wrap items-center justify-end gap-1">
                             <Button size="sm" variant="outline" className="h-8" onClick={() => setDraft(l)}><Pencil className="h-3.5 w-3.5" />تعديل</Button>
-                            <PrintMenu size="sm" onPrint={m => print(l, m)} />
+                            <PrintMenu size="sm" onPrint={m => print(l, m)} yearOnlyDate={yearOnlyDate} onYearOnlyDateChange={setYearOnlyDate} />
                             <Button size="sm" variant="ghost" className="h-10 w-10" aria-label="نسخ كمراسلة جديدة" title="نسخ كمراسلة جديدة" onClick={() => { const c = companies.find(x => x.id === l.company_id); setDraft({ ...l, id: undefined, created_at: undefined, letter_date: today(), reference_number: nextReference(c?.reference_prefix || '', allLetters.filter(x => x.company_id === l.company_id)) }); }}><Copy className="h-3.5 w-3.5" /></Button>
                             <Button size="sm" variant="ghost" aria-label={`حذف المراسلة ${l.reference_number}`} title="حذف المراسلة" className="h-10 w-10 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={async () => {
                               if (!(await confirm({ title: 'حذف المراسلة', message: `حذف المراسلة ${l.reference_number} نهائياً؟`, confirmText: 'حذف', variant: 'destructive' } as any))) return;

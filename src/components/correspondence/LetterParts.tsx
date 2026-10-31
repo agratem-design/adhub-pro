@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ChevronDown, Printer } from 'lucide-react';
 import { PRINT_MODE_LABELS, type LetterPrintMode } from '@/services/correspondence';
 
@@ -11,13 +11,19 @@ export const MODE_HINT: Record<LetterPrintMode, string> = {
 };
 
 /** زر طباعة بثلاثة أوضاع */
-export function PrintMenu({ onPrint, size = 'default', label = 'طباعة' }: { onPrint: (m: LetterPrintMode) => void; size?: 'sm' | 'default'; label?: string }) {
+export function PrintMenu({ onPrint, size = 'default', label = 'طباعة', yearOnlyDate, onYearOnlyDateChange }: { onPrint: (m: LetterPrintMode) => void; size?: 'sm' | 'default'; label?: string; yearOnlyDate?: boolean; onYearOnlyDateChange?: (checked: boolean) => void }) {
   return (
     <DropdownMenu dir="rtl">
       <DropdownMenuTrigger asChild>
         <Button size={size} variant="outline" className={size === 'sm' ? 'h-8' : ''}><Printer className="h-3.5 w-3.5" />{label}<ChevronDown className="h-3 w-3 opacity-60" /></Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-72">
+        {onYearOnlyDateChange && <>
+          <DropdownMenuCheckboxItem checked={yearOnlyDate} onCheckedChange={onYearOnlyDateChange} onSelect={e => e.preventDefault()} className="cursor-pointer transition-colors duration-200">
+            التاريخ: السنة فقط (اليوم والشهر فارغان)
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuSeparator />
+        </>}
         {(Object.keys(PRINT_MODE_LABELS) as LetterPrintMode[]).map(m => (
           <DropdownMenuItem key={m} onClick={() => onPrint(m)} className="flex-col items-start gap-0.5">
             <span className="font-semibold">{PRINT_MODE_LABELS[m]}</span>

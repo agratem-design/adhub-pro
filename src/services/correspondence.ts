@@ -189,6 +189,8 @@ const box = (left: number, right: number, cy: number, h = 18) => `left:${left}pt
 
 export interface RenderOptions {
   mode?: LetterPrintMode;
+  /** ترك اليوم والشهر فارغين للكتابة اليدوية مع إبقاء السنة */
+  yearOnlyDate?: boolean;
   /** تقارير متعددة الصفحات: يُوزَّع النص على صفحات بنفس الترويسة بدلاً من تصغير الخط */
   paginate?: boolean;
   /** تنسيق مبسّط في النص: «## عنوان»، «- بند»، جداول «| a | b |» */
@@ -270,8 +272,8 @@ export function renderLetterHtml(company: LetterheadCompany, letter: Letter, ori
   ${addresses.length ? `<div class="abs addr" style="right:${PAGE_W - 252}pt;top:${addresses.length > 1 ? 779 : 786}pt">${addresses.map(a => `<div>${nums(esc(a))}</div>`).join('')}</div>` : ''}`;
 
   const meta = !showText ? '' : `
-  <div class="abs meta" style="${box(478, 527, 58)}">${esc(d || '')}</div>
-  <div class="abs meta" style="${box(433, 474, 58)}">${esc(mo || '')}</div>
+  <div class="abs meta" style="${box(478, 527, 58)}">${opts.yearOnlyDate ? '' : esc(d || '')}</div>
+  <div class="abs meta" style="${box(433, 474, 58)}">${opts.yearOnlyDate ? '' : esc(mo || '')}</div>
   <div class="abs meta" style="${box(384, 427, 58)}">${esc(y || '')}</div>
   <div class="abs meta" style="${box(399, 494, 81)}">${esc(letter.reference_number)}</div>`;
 
@@ -282,7 +284,7 @@ export function renderLetterHtml(company: LetterheadCompany, letter: Letter, ori
       ${bodyHtml}
       ${letter.closing ? `<div class="closing" data-bid="cl">${nums(esc(letter.closing))}</div>` : ''}`;
   const bodyBox = (inner: string, bottom: number, ids = false) => !showText ? '' : `
-  <div ${ids ? 'id="body" ' : ''}class="content body" style="top:${BODY.top}pt;left:${BODY.side}pt;right:${BODY.side}pt;height:${bottom - BODY.top}pt">
+  <div ${ids ? 'id="body" ' : ''}class="content body${!paginate ? ' letter-body' : ''}" style="top:${BODY.top}pt;left:${BODY.side}pt;right:${BODY.side}pt;height:${bottom - BODY.top}pt">
     <div ${ids ? 'id="flow" ' : ''}class="flow">${inner}</div>
   </div>`;
 
@@ -391,8 +393,16 @@ export function renderLetterHtml(company: LetterheadCompany, letter: Letter, ori
   var flow = document.getElementById('flow');
   function fit() {
     if (!body || !flow) { report(1, false); return; }
+    var paper = body.closest('.paper');
+    paper.classList.remove('short-letter');
+    paper.style.removeProperty('--letter-sign-top');
     var size = 14;
     body.style.fontSize = size + 'pt';
+    // Keep the signature and stamp close to short letters on the left.
+    if (flow.scrollHeight <= body.clientHeight * 0.65) {
+      paper.classList.add('short-letter');
+      paper.style.setProperty('--letter-sign-top', (${BODY.top} + flow.getBoundingClientRect().height * 0.75 + 24) + 'pt');
+    }
     while (flow.scrollHeight > body.clientHeight + 1 && size > 9.5) { size -= 0.25; body.style.fontSize = size + 'pt'; }
     report(size / 14, flow.scrollHeight > body.clientHeight + 1);
   }
@@ -427,8 +437,11 @@ ${fontLink}${doranFace}
   .contact { direction: ltr; text-align: left; font-size: 9.5pt; letter-spacing: .7pt; max-width: 182pt; }
   .addr { text-align: right; font-size: 9pt; line-height: 13.5pt; white-space: nowrap; max-width: 210pt; overflow: hidden; }
   .content { position: absolute; overflow: hidden; font-size: ${paginate ? 12.5 : 14}pt; line-height: ${paginate ? 1.68 : 1.72}; }
-  .content .to, .content .greet, .content .subject { font-weight: 800; margin: 0 0 ${paginate ? '.7em' : '1em'}; }
+  .letter-body > .flow { display: flow-root; }
+  .letter-body { text-align: right; }
+  .content .to, .content .greet, .content .subject { text-align: right; font-weight: 800; margin: 0 0 ${paginate ? '.7em' : '1em'}; }
   .content p { margin: 0 0 ${paginate ? '.75em' : '1em'}; text-align: justify; }
+  .letter-body p { text-align: right; margin-bottom: .8em; }
   .content h3 { font-size: 1.08em; font-weight: 800; margin: .9em 0 .45em; padding-right: 8pt; border-right: 3pt solid ${color}; line-height: 1.4; }
   .content ul { margin: 0 0 .8em; padding: 0 1.2em 0 0; }
   .content li { margin: 0 0 .25em; }
@@ -444,6 +457,9 @@ ${fontLink}${doranFace}
   .sign .sig-area img { max-height: 40pt; max-width: 150pt; object-fit: contain; mix-blend-mode: multiply; margin-top: -6pt; }
   .sign .dots { letter-spacing: 1px; color: #555; font-size: 11pt; }
   .stamp { position: absolute; left: 150pt; top: 640pt; width: 110pt; height: 110pt; object-fit: contain; mix-blend-mode: multiply; opacity: .92; transform: rotate(-8deg); }
+  .short-letter .sign-wrap { inset: auto; top: var(--letter-sign-top); left: 30pt; width: 175pt; display: flex; flex-direction: column; align-items: center; }
+  .short-letter .sign { position: static; width: 100%; height: auto; overflow: visible; }
+  .short-letter .stamp { position: absolute; left: 50%; top: ${(signer ? 13 * 1.45 : 0) + (signerTitle ? 13 * 1.45 : 0)}pt; width: 90pt; height: 90pt; margin: 0; transform: translateX(-50%) rotate(-8deg); }
   .pno { position: absolute; left: 0; right: 0; top: 750pt; text-align: center; font-size: 8pt; color: #777; }
   @media screen { body { background: #e9e9e9; padding: 8mm 0; } .paper { box-shadow: 0 2px 18px rgba(0,0,0,.18); } .paper + .paper { margin-top: 8mm; } }
 </style></head><body>
