@@ -101,6 +101,7 @@ interface FirstPartyData {
 }
 
 export interface PageSectionSettings {
+  companyStamp?: import('@/lib/companyStamp').CompanyStampSettings;
   header: SectionPosition;
   date: SectionPosition;
  adType?: SectionPosition; // نوع الإعلان - جديد

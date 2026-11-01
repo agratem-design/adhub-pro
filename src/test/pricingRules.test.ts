@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { applyPricingRules, defaultPricingRules } from '../utils/pricingRules';
+import { applyPricingRules, defaultPricingRules, linkSizeGroup, sizeGroupsOf, unlinkSizeGroup } from '../utils/pricingRules';
+
+describe('pricing size groups', () => {
+  it('links several sizes to one source and reads them back as one group', () => {
+    const aliases = linkSizeGroup({}, 'large', ['large', 'medium', 'small']);
+    expect(aliases).toEqual({ medium: 'large', small: 'large' });
+    expect(sizeGroupsOf(aliases)).toEqual([{ source: 'large', members: ['medium', 'small'] }]);
+  });
+  it('unlinks a whole group without touching other groups', () => {
+    const aliases = { medium: 'large', small: 'large', b: 'a' };
+    expect(unlinkSizeGroup(aliases, 'large')).toEqual({ b: 'a' });
+  });
+  it('applies the group source price to every member when rules are enabled', () => {
+    const rows = ['large', 'medium', 'small'].map(size => ({ size, billboard_level: 'A', customer_category: 'عادي', one_month: size === 'large' ? 300 : 100 }));
+    const result = applyPricingRules(rows, { ...defaultPricingRules, enabled: true, sizeAliases: linkSizeGroup({}, 'large', ['large', 'medium', 'small']) }, ['one_month']);
+    expect(result.map(row => row.one_month)).toEqual([300, 300, 300]);
+  });
+});
 
 describe('pricing rules', () => {
   it('derives levels and linked sizes from the same base in each customer category', () => {

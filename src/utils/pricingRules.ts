@@ -12,6 +12,25 @@ export interface PricingRules {
 
 export const defaultPricingRules: PricingRules = { enabled: false, baseLevel: 'A', rates: {}, sizeAliases: {}, position: 'bottom', baseOnly: true };
 
+/** مجموعة مقاسات بنفس السعر: المقاس الممثل (source) وبقية الأعضاء يأخذون سعره */
+export interface SizeGroup { source: string; members: string[] }
+
+export function sizeGroupsOf(sizeAliases: Record<string, string>): SizeGroup[] {
+  const bySource = new Map<string, string[]>();
+  Object.entries(sizeAliases).forEach(([size, source]) => bySource.set(source, [...(bySource.get(source) || []), size]));
+  return [...bySource].map(([source, members]) => ({ source, members: members.sort((a, b) => a.localeCompare(b)) }));
+}
+
+export function linkSizeGroup(sizeAliases: Record<string, string>, source: string, sizes: string[]): Record<string, string> {
+  const next = { ...sizeAliases };
+  sizes.filter(size => size !== source).forEach(size => { next[size] = source; });
+  return next;
+}
+
+export function unlinkSizeGroup(sizeAliases: Record<string, string>, source: string): Record<string, string> {
+  return Object.fromEntries(Object.entries(sizeAliases).filter(([, value]) => value !== source));
+}
+
 export function applyPricingRules<T extends { size: string; billboard_level: string; customer_category: string; [key: string]: any }>(rows: T[], rules: PricingRules, columns: string[]): T[] {
   if (!rules.enabled) return rows;
   return rows.map(row => {

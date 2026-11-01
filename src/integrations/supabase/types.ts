@@ -2928,6 +2928,11 @@ export type Database = {
       }
       customers: {
         Row: {
+          stamp_image?: string | null
+          stamp_enabled?: boolean
+          stamp_x?: number
+          stamp_y?: number
+          stamp_width?: number
           company: string | null
           contracts_count: number | null
           created_at: string | null
@@ -2948,6 +2953,11 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          stamp_image?: string | null
+          stamp_enabled?: boolean
+          stamp_x?: number
+          stamp_y?: number
+          stamp_width?: number
           company?: string | null
           contracts_count?: number | null
           created_at?: string | null
@@ -2968,6 +2978,11 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          stamp_image?: string | null
+          stamp_enabled?: boolean
+          stamp_x?: number
+          stamp_y?: number
+          stamp_width?: number
           company?: string | null
           contracts_count?: number | null
           created_at?: string | null

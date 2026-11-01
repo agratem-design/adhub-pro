@@ -20,8 +20,8 @@ describe('amendments use the existing contract print template', () => {
   it('prints the amendment heading, original clauses, and an appended history page', async () => {
     const html = await generateUnifiedPrintHTML(options);
     const dom = new DOMParser().parseFromString(html.replace(/<link\b[^>]*>/g, '').replace(/@import[^;]*;/g, ''), 'text/html');
-    expect(dom.querySelector('svg')?.textContent).toContain('ملحق العقد رقم: 2 للعقد رقم: 1294');
-    expect(dom.querySelector('svg')?.textContent).toContain('نفس بنود العقد المحفوظة.');
+    expect(dom.querySelector('svg.overlay-svg')?.textContent).toContain('ملحق العقد رقم: 2 للعقد رقم: 1294');
+    expect(dom.querySelector('svg.overlay-svg')?.textContent).toContain('نفس بنود العقد المحفوظة.');
     expect(dom.querySelectorAll('.contract-amendment-history')).toHaveLength(1);
     expect(dom.querySelectorAll('.print-page')).toHaveLength(2);
     expect(dom.title).toContain('ملحق العقد رقم: 2 للعقد رقم: 1294');
@@ -32,8 +32,8 @@ describe('amendments use the existing contract print template', () => {
   it('keeps the ordinary contract heading when printing the original', async () => {
     const html = await generateUnifiedPrintHTML({ ...options, contractData: { ...options.contractData, amendmentNumber: undefined } });
     const dom = new DOMParser().parseFromString(html.replace(/<link\b[^>]*>/g, '').replace(/@import[^;]*;/g, ''), 'text/html');
-    expect(dom.querySelector('svg')?.textContent).toContain('عقد إيجار مواقع إعلانية رقم: 1294');
-    expect(dom.querySelector('svg')?.textContent).not.toContain('ملحق العقد رقم:');
+    expect(dom.querySelector('svg.overlay-svg')?.textContent).toContain('عقد إيجار مواقع إعلانية رقم: 1294');
+    expect(dom.querySelector('svg.overlay-svg')?.textContent).not.toContain('ملحق العقد رقم:');
   });
 });
 
@@ -53,7 +53,45 @@ describe('complete contract and amendment bundle', () => {
     expect(pages[1].textContent).toContain((6500).toLocaleString('ar-LY'));
     expect(pages[1].textContent).toContain('التوقيع');
     expect(pages[1].textContent).toContain('متطلبات تنفيذ الإعلان');
-    expect(dom.querySelector('svg')?.textContent).toContain('عقد إيجار مواقع إعلانية');
+    expect(dom.querySelector('svg.overlay-svg')?.textContent).toContain('عقد إيجار مواقع إعلانية');
     writeFileSync('scratch/contract-bundle-preview.html', html.replace(/<script>[\s\S]*?<\/script>/g, '').replace(/data:image\/png;base64,first/g, '/bgc1.svg').replace(/data:image\/png;base64,table/g, '/bgc2.svg').replace(/http:\/\/localhost:3000\//g, '/'));
+  });
+});
+
+
+describe('independent company stamp', () => {
+  it('toggles the company stamp without changing the background', async () => {
+    const shown = await generateUnifiedPrintHTML({ ...options, showCompanyStamp: true, settings: { ...options.settings, companyStamp: { visible: true, x: 1400, y: 2900, width: 350 } } });
+    expect(shown).toContain('data-company-stamp="true"');
+    expect(shown).not.toContain('mix-blend-mode:multiply');
+    expect(shown).toContain('left:1400px;top:2900px;width:350px');
+    const hidden = await generateUnifiedPrintHTML({ ...options, showCompanyStamp: false });
+    expect(hidden).not.toContain('data-company-stamp="true"');
+    expect(hidden).toContain(options.templateBgUrl);
+    const globallyHidden = await generateUnifiedPrintHTML({ ...options, showCompanyStamp: true, settings: { ...options.settings, companyStamp: { visible: false, x: 1400, y: 2900, width: 350 } } });
+    expect(globallyHidden).not.toContain('data-company-stamp="true"');
+  });
+});
+
+
+describe('stamps on all contract pages', () => {
+  it('repeats the selected stamps on contract, billboard and amendment pages', async () => {
+    const config = { ...options, showCompanyStamp: true,
+      settings: { ...options.settings, tableSettings: { ...options.settings.tableSettings, maxRows: 1 } },
+      billboards: [{ id: '1', billboardName: 'لوحة 1' }, { id: '2', billboardName: 'لوحة 2' }],
+      contractData: { ...options.contractData, customerStamp: { stamp_enabled: true, stamp_image: 'data:image/png;base64,YQ==' } } };
+    for (const printAllAmendments of [false, true]) {
+      const html = await generateUnifiedPrintHTML({ ...config, printAllAmendments });
+      const dom = new DOMParser().parseFromString(html.replace(/<link\b[^>]*>/g, '').replace(/@import[^;]*;/g, ''), 'text/html');
+      const pages = [...dom.querySelectorAll('.print-page')];
+      expect(pages.length).toBeGreaterThanOrEqual(4);
+      for (const page of pages) {
+        expect(page.querySelectorAll('[data-company-stamp]')).toHaveLength(1);
+        expect(page.querySelectorAll('[data-customer-stamp]')).toHaveLength(1);
+      }
+    }
+    const hidden = await generateUnifiedPrintHTML({ ...config, showCompanyStamp: false, contractData: options.contractData });
+    expect(hidden).not.toContain('data-company-stamp');
+    expect(hidden).not.toContain('data-customer-stamp');
   });
 });

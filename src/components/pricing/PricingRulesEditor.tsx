@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Layers, Link2, Printer, Save, ShieldCheck, Percent } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { PricingRules } from '@/utils/pricingRules';
+import { linkSizeGroup, sizeGroupsOf, unlinkSizeGroup, type PricingRules } from '@/utils/pricingRules';
 
 export function PricingRulesEditor({ value, savedValue, onChange, levels, sizes, onSave, onSaveDisplay, busy }: {
   value: PricingRules; savedValue: PricingRules; onChange: (value: PricingRules) => void; levels: string[]; sizes: string[]; onSave: () => void; onSaveDisplay: () => void; busy: boolean;
@@ -13,6 +13,12 @@ export function PricingRulesEditor({ value, savedValue, onChange, levels, sizes,
   const selectClass = 'h-11 w-full rounded-lg border border-border bg-background px-3 cursor-pointer';
   const tabs = [{ key: 'rates', label: 'نسب المستويات', icon: Layers }, { key: 'sizes', label: 'ربط المقاسات', icon: Link2 }, { key: 'print', label: 'ظهور النسب بالطباعة', icon: Printer }] as const;
   const otherLevels = levels.filter(level => level !== value.baseLevel);
+  const [groupSizes, setGroupSizes] = useState<string[]>([]);
+  const [groupSource, setGroupSource] = useState('');
+  const activeGroupSource = groupSizes.includes(groupSource) ? groupSource : groupSizes[0] || '';
+  const linkedSizes = new Set([...Object.keys(value.sizeAliases), ...Object.values(value.sizeAliases)]);
+  const availableForGroup = sizes.filter(size => !linkedSizes.has(size));
+  const savedGroups = sizeGroupsOf(value.sizeAliases);
   return <section className="pricing-rules-panel rounded-2xl border border-border bg-card overflow-hidden" aria-label="قواعد التسعير والطباعة">
     <div className="border-b border-border p-5 sm:p-6 flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="text-xl font-bold">قواعد التسعير والطباعة</h2><p className="text-sm text-muted-foreground mt-1">اضبط أساس التسعير، ثم اختر ما يظهر لعملائك.</p></div>
@@ -36,6 +42,22 @@ export function PricingRulesEditor({ value, savedValue, onChange, levels, sizes,
         </>}
         {section === 'sizes' && <>
           <div><h3 className="font-bold">مقاسان بسعر واحد</h3><p className="text-sm text-muted-foreground mt-1">اختر المقاس الأعلى ليكون مصدر السعر. سيظهر المقاس المصدر وحده في الطباعة مع ملاحظة تساوي الأسعار.</p></div>
+          <div className="rounded-xl border border-primary/25 bg-primary/5 p-4 space-y-4">
+            <div><h4 className="font-bold">إضافة مجموعة بسعر مماثل</h4><p className="text-sm text-muted-foreground mt-1">حدد عدة مقاسات بنفس السعر. يُطبَّق سعر المقاس الممثل عليها، وتظهر المجموعة كمقاس واحد في الطباعة. تعمل المجموعات عند تفعيل القواعد.</p></div>
+            <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-2">{availableForGroup.map(size => <label key={size} className="flex items-center gap-3 rounded-lg border border-border bg-background p-3 cursor-pointer"><input className="accent-primary h-5 w-5 cursor-pointer shrink-0" type="checkbox" checked={groupSizes.includes(size)} onChange={e => setGroupSizes(e.target.checked ? [...groupSizes, size] : groupSizes.filter(item => item !== size))} /><span className="font-semibold" dir="ltr">{size}</span></label>)}</div>
+            {availableForGroup.length === 0 && <p className="text-sm text-muted-foreground">كل المقاسات مرتبطة بمجموعات حاليًا.</p>}
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="space-y-2 min-w-48"><span className="text-sm font-semibold">المقاس الممثل (يحدد السعر)</span><select aria-label="المقاس الممثل للمجموعة" className={selectClass} value={activeGroupSource} onChange={e => setGroupSource(e.target.value)} disabled={groupSizes.length < 2}>{groupSizes.map(size => <option key={size} value={size} dir="ltr">{size}</option>)}</select></label>
+              <Button className="h-11" disabled={groupSizes.length < 2} onClick={() => { onChange({ ...value, sizeAliases: linkSizeGroup(value.sizeAliases, activeGroupSource, groupSizes) }); setGroupSizes([]); setGroupSource(''); }}><Link2 className="h-4 w-4 ml-2" />حفظ المجموعة</Button>
+            </div>
+          </div>
+          {savedGroups.length > 0 && <div className="space-y-2">
+            <h4 className="font-bold">المجموعات المحفوظة</h4>
+            {savedGroups.map(group => <div key={group.source} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3">
+              <span className="text-sm"><b dir="ltr">{group.source}</b><span className="text-muted-foreground"> (الممثل) ← </span><span dir="ltr">{group.members.join('، ')}</span></span>
+              <Button variant="outline" className="h-9" onClick={() => onChange({ ...value, sizeAliases: unlinkSizeGroup(value.sizeAliases, group.source) })}>فك المجموعة</Button>
+            </div>)}
+          </div>}
           <Input aria-label="البحث في المقاسات المرتبطة" placeholder="ابحث عن مقاس..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-sm h-11" />
           <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-3">{sizes.filter(size => size.includes(search.trim())).map(size => <label key={size} className="rounded-xl border border-border p-4 space-y-2"><span className="font-semibold block" dir="ltr">{size}</span><select aria-label={`مصدر سعر المقاس ${size}`} className={selectClass} value={value.sizeAliases[size] || ''} onChange={e => { const sizeAliases = { ...value.sizeAliases }; if (e.target.value) sizeAliases[size] = e.target.value; else delete sizeAliases[size]; onChange({ ...value, sizeAliases }); }}><option value="">سعر مستقل</option>{sizes.filter(other => other !== size && !value.sizeAliases[other] && !Object.values(value.sizeAliases).includes(size)).map(other => <option key={other}>{other}</option>)}</select></label>)}</div>
           {!sizes.some(size => size.includes(search.trim())) && <p className="py-8 text-center text-muted-foreground">لا توجد مقاسات مطابقة.</p>}

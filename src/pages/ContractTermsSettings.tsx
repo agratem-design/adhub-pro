@@ -1,3 +1,5 @@
+import companyStampImage from '@/assets/company-contract-stamp.png?inline';
+import { companyStampPosition, DEFAULT_COMPANY_STAMP, type CompanyStampSettings } from '@/lib/companyStamp';
 import { fetchInvoiceExtras } from '@/utils/invoiceExtras';
 import { renderContractBankAccount } from '@/lib/contractBankAccount';
 import { contractTemplateQueryOptions } from '@/lib/contractTemplateQuery';
@@ -411,6 +413,7 @@ interface TableTermSettings {
 }
 
 interface PageSectionSettings {
+  companyStamp?: CompanyStampSettings;
   header: SectionPosition;
   date: SectionPosition;
   adType: SectionPosition;
@@ -1911,6 +1914,10 @@ export default function ContractTermsSettings() {
                             </g>
                           );
                         });
+                      })()}
+                      {companyStampPosition(sectionSettings.companyStamp).visible && (() => {
+                        const stamp = companyStampPosition(sectionSettings.companyStamp);
+                        return <image href={companyStampImage} x={stamp.x} y={stamp.y} width={stamp.width} height={stamp.width} preserveAspectRatio="xMidYMid meet" />;
                       })()}
                     </svg>
                     </div>
@@ -3998,6 +4005,18 @@ export default function ContractTermsSettings() {
                   </div>
                 </div>
 
+                <div className="space-y-3 rounded-lg border border-primary/25 bg-primary/5 p-3">
+                  <Label className="text-sm font-bold">ختم الشركة المستقل</Label>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input type="checkbox" checked={companyStampPosition(sectionSettings.companyStamp).visible} onChange={e => setSectionSettings(prev => ({ ...prev, companyStamp: { ...companyStampPosition(prev.companyStamp), visible: e.target.checked } }))} />
+                    إظهار ختم الشركة في العقود
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {([['x', 'الموضع الأفقي', 2480], ['y', 'الموضع الرأسي', 3508], ['width', 'حجم الختم', 700]] as const).map(([key, title, max]) => <label key={key} className="space-y-1 text-xs">{title}<Input type="number" min={key === 'width' ? 100 : 0} max={max} value={companyStampPosition(sectionSettings.companyStamp)[key]} onChange={e => setSectionSettings(prev => ({ ...prev, companyStamp: companyStampPosition({ ...companyStampPosition(prev.companyStamp), [key]: Number(e.target.value) }) }))} /></label>)}
+                  </div>
+                  <Button type="button" variant="outline" size="sm" className="cursor-pointer transition-all duration-200 hover:bg-primary/10" onClick={() => setSectionSettings(prev => ({ ...prev, companyStamp: { ...DEFAULT_COMPANY_STAMP } }))}>استعادة موضع ختم الشركة</Button>
+                  <p className="text-xs text-muted-foreground">احفظ إعدادات القالب لتطبيق الموضع والحجم على العقود. يمكن إخفاء الختم لكل نسخة من نافذة طباعة العقد.</p>
+                </div>
                 {/* No-Stamp Background Settings */}
                 <div className="pt-2 border-t space-y-2">
                   <Label className="text-sm font-medium flex items-center gap-2">

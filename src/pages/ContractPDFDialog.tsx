@@ -363,11 +363,13 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
   const [isGenerating, setIsGenerating] = useState(false);
   const [printMode, setPrintMode] = useState<'auto' | 'manual'>('auto');
   const [useInstallationImages, setUseInstallationImages] = useState(false);
+  const [withCustomerStamp, setWithCustomerStamp] = useState(true);
   const [withStamp, setWithStamp] = useState(true); // مع ختم افتراضياً
   const [customerData, setCustomerData] = useState<{
     name: string;
     company: string | null;
     phone: string | null;
+    stamp?: import('@/lib/customerStamp').CustomerStamp;
   } | null>(null);
   // دالة لجلب بيانات المقاسات والبلديات والمستويات
   const [sizesData, setSizesData] = useState<any[]>([]);
@@ -615,7 +617,7 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
   const loadCustomerData = async () => {
     if (contract?._document_snapshot) {
       const saved = contract._snapshot_customer || {};
-      setCustomerData({ name: saved.name || contract['Customer Name'] || '', company: saved.company || null, phone: saved.phone || null });
+      setCustomerData({ name: saved.name || contract['Customer Name'] || '', company: saved.company || null, phone: saved.phone || null, stamp: saved.stamp });
       return;
     }
     try {
@@ -626,7 +628,7 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
         // Try to get customer data by ID first
         const { data, error } = await supabase
           .from('customers')
-          .select('name, company, phone')
+          .select('name, company, phone, stamp_image, stamp_enabled, stamp_x, stamp_y, stamp_width')
           .eq('id', customerId)
           .single();
 
@@ -634,7 +636,8 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
           setCustomerData({
             name: data.name || customerName,
             company: data.company,
-            phone: data.phone
+            phone: data.phone,
+            stamp: data
           });
           return;
         }
@@ -644,7 +647,7 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
       if (customerName) {
         const { data, error } = await supabase
           .from('customers')
-          .select('name, company, phone')
+          .select('name, company, phone, stamp_image, stamp_enabled, stamp_x, stamp_y, stamp_width')
           .ilike('name', customerName)
           .limit(1)
           .single();
@@ -653,7 +656,8 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
           setCustomerData({
             name: data.name || customerName,
             company: data.company,
-            phone: data.phone
+            phone: data.phone,
+            stamp: data
           });
           return;
         }
@@ -1862,7 +1866,8 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
         contractNumber: isOffer ? (contract?.offer_number || contract?.id || '') : (contract?.Contract_Number || contract?.id || ''),
         customerName: customerData.name,
         customerCompany: customerData.company || '',
-        customerPhone: customerData.phone || '',
+        customerStamp: withCustomerStamp ? customerData.stamp : undefined,
+          customerPhone: customerData.phone || '',
         adType: contract?.ad_type || contract?.['Ad Type'] || (isOffer ? 'عرض سعر' : 'عقد إيجار لوحات إعلانية'),
         startDate: contractDetails.startDate,
         endDate: contractDetails.endDate,
@@ -2721,6 +2726,7 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
           durationDays: contractDetails.durationDays,
           customerName: customerData.name,
           customerCompany: customerData.company || '',
+          customerStamp: withCustomerStamp ? customerData.stamp : undefined,
           customerPhone: customerData.phone || '',
           isOffer,
           adType: contract?.ad_type || contract?.['Ad Type'] || (isOffer ? 'عرض سعر' : 'عقد إيجار'),
@@ -2730,7 +2736,8 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
         terms: unifiedTerms,
         billboards: sortedBillboards,
         templateBgUrl: templateBgUrl,
-        noStampBgUrl: !withStamp ? configuredNoStampBgUrl : undefined,
+        noStampBgUrl: configuredNoStampBgUrl,
+        showCompanyStamp: withStamp,
         tableBgUrl: tableBgUrl,
         noStampTableBgUrl: !withStamp ? configuredNoStampTableBgUrl : undefined,
         currencyInfo: {
@@ -2840,6 +2847,7 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
           durationDays: contractDetails.durationDays,
           customerName: customerData.name,
           customerCompany: customerData.company || '',
+          customerStamp: withCustomerStamp ? customerData.stamp : undefined,
           customerPhone: customerData.phone || '',
           isOffer,
           adType: contract?.ad_type || contract?.['Ad Type'] || (isOffer ? 'عرض سعر' : 'عقد إيجار'),
@@ -2849,7 +2857,8 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
         terms: unifiedTerms,
         billboards: sortedBillboards,
         templateBgUrl: templateBgUrl,
-        noStampBgUrl: !withStamp ? configuredNoStampBgUrl : undefined,
+        noStampBgUrl: configuredNoStampBgUrl,
+        showCompanyStamp: withStamp,
         tableBgUrl: tableBgUrl,
         noStampTableBgUrl: !withStamp ? configuredNoStampTableBgUrl : undefined,
         currencyInfo: {
@@ -3125,6 +3134,7 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
           durationDays: contractDetails.durationDays,
           customerName: customerData.name,
           customerCompany: customerData.company || '',
+          customerStamp: withCustomerStamp ? customerData.stamp : undefined,
           customerPhone: customerData.phone || '',
           isOffer,
           adType: contract?.ad_type || contract?.['Ad Type'] || (isOffer ? 'عرض سعر' : 'عقد إيجار'),
@@ -3134,7 +3144,8 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
         terms: unifiedTerms,
         billboards: sortedBillboards,
         templateBgUrl: templateBgUrl,
-        noStampBgUrl: !withStamp ? configuredNoStampBgUrl : undefined,
+        noStampBgUrl: configuredNoStampBgUrl,
+        showCompanyStamp: withStamp,
         tableBgUrl: tableBgUrl,
         noStampTableBgUrl: !withStamp ? configuredNoStampTableBgUrl : undefined,
         currencyInfo: {
@@ -3409,13 +3420,15 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
           startDate: contractDetails.startDate, endDate: contractDetails.endDate, rawStartDate,
           duration: contractDetails.durationLabel,
           durationDays: contractDetails.durationDays,
-          customerName: customerData.name, customerCompany: customerData.company || '', customerPhone: customerData.phone || '',
+          customerName: customerData.name, customerCompany: customerData.company || '', customerStamp: withCustomerStamp ? customerData.stamp : undefined,
+          customerPhone: customerData.phone || '',
           isOffer, adType: contract?.ad_type || contract?.['Ad Type'] || (isOffer ? 'عرض سعر' : 'عقد إيجار'),
           billboardsCount, currencyName: currencyInfo.name,
         },
         terms: unifiedTerms, billboards: sortedBillboards,
         templateBgUrl: templateBgUrl,
-        noStampBgUrl: !withStamp ? configuredNoStampBgUrl : undefined,
+        noStampBgUrl: configuredNoStampBgUrl,
+        showCompanyStamp: withStamp,
         tableBgUrl: tableBgUrl,
         noStampTableBgUrl: !withStamp ? configuredNoStampTableBgUrl : undefined,
         currencyInfo: { symbol: currencyInfo.symbol, writtenName: currencyInfo.writtenName },
@@ -3636,6 +3649,7 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
           durationDays: contractDetails.durationDays,
           customerName: customerData.name,
           customerCompany: customerData.company || '',
+          customerStamp: withCustomerStamp ? customerData.stamp : undefined,
           customerPhone: customerData.phone || '',
           isOffer,
           adType: contract?.ad_type || contract?.['Ad Type'] || (isOffer ? 'عرض سعر' : 'عقد إيجار'),
@@ -3645,7 +3659,8 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
         terms: unifiedTerms,
         billboards: sortedBillboards,
         templateBgUrl: templateBgUrl,
-        noStampBgUrl: !withStamp ? configuredNoStampBgUrl : undefined,
+        noStampBgUrl: configuredNoStampBgUrl,
+        showCompanyStamp: withStamp,
         tableBgUrl: tableBgUrl,
         noStampTableBgUrl: !withStamp ? configuredNoStampTableBgUrl : undefined,
         currencyInfo: {
@@ -3855,13 +3870,15 @@ function ContractPDFDialogContent({ open, onOpenChange, contract, liveBillboardP
             sendingWhatsApp={sendingWhatsApp}
             hasPhone={!!customerData?.phone}
             printMode={printMode}
+            withCustomerStamp={withCustomerStamp}
+            onWithCustomerStampChange={setWithCustomerStamp}
             withStamp={withStamp}
             onWithStampChange={setWithStamp}
             onPrintInvoice={handlePrintInvoice}
             onPreviewInvoice={handlePreviewInvoice}
             onDownloadInvoice={handleDownloadInvoicePDF}
             onSendInvoiceWhatsApp={handleSendInvoiceWhatsApp}
-            onPrintContract={handlePrintContract}
+            onPrintContract={handleUnifiedPrint}
             onPreviewContract={handlePreviewContract}
             onDownloadContract={handleDownloadContractPDF}
             onSendContractWhatsApp={handleSendContractWhatsApp}

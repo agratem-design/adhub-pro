@@ -1,3 +1,4 @@
+import { CustomerStampEditor } from '@/components/customers/CustomerStampEditor';
 // @ts-nocheck
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useEffect, useMemo, useState } from 'react';
@@ -487,6 +488,7 @@ export default function Customers() {
   const [customerPhoneInput, setCustomerPhoneInput] = useState('');
   const [customerEmailInput, setCustomerEmailInput] = useState('');
   const [customerCompanyInput, setCustomerCompanyInput] = useState('');
+  const [customerStamp, setCustomerStamp] = useState({ stamp_image: null as string | null, stamp_enabled: false, stamp_x: 450, stamp_y: 2990, stamp_width: 380 });
   const [pricingCategoryInput, setPricingCategoryInput] = useState<string>('عادي');
   const [pricingCategories, setPricingCategories] = useState<string[]>([]);
   const [isCustomerChecked, setIsCustomerChecked] = useState(true);
@@ -1682,6 +1684,7 @@ export default function Customers() {
   };
 
   const openCustomerEditor = async (customer: CustomerSummary) => {
+    setCustomerStamp({ stamp_image: null, stamp_enabled: false, stamp_x: 450, stamp_y: 2990, stamp_width: 380 });
     setEditingCustomerId(customer.id);
     setCustomerNameInput(customer.name);
     setCustomerPhoneInput(customer.phone || '');
@@ -1692,11 +1695,12 @@ export default function Customers() {
     if (!customer.id.startsWith('name:')) {
       const { data } = await supabase
         .from('customers')
-        .select('email, is_customer, is_supplier, supplier_type, printer_id, pricing_category')
+        .select('email, is_customer, is_supplier, supplier_type, printer_id, pricing_category, stamp_image, stamp_enabled, stamp_x, stamp_y, stamp_width')
         .eq('id', customer.id)
         .single();
 
       if (data) {
+        setCustomerStamp({ stamp_image: data.stamp_image, stamp_enabled: data.stamp_enabled ?? false, stamp_x: data.stamp_x ?? 450, stamp_y: data.stamp_y ?? 2990, stamp_width: data.stamp_width ?? 380 });
         if (data.email) setCustomerEmailInput(data.email);
         setIsCustomerChecked(data.is_customer ?? true);
         setIsSupplierChecked(data.is_supplier ?? false);
@@ -1749,7 +1753,7 @@ export default function Customers() {
             <Button type="button" variant="outline" onClick={() => setDebtReportOpen(true)} className="h-10 cursor-pointer gap-2 transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
               <Send className="h-4 w-4" />تقرير الديون
             </Button>
-            <Button type="button" onClick={() => { setEditingCustomerId(null); setNewCustomerOpen(true); setCustomerNameInput(''); setCustomerPhoneInput(''); setCustomerEmailInput(''); setCustomerCompanyInput(''); setPricingCategoryInput('عادي'); setIsCustomerChecked(true); setIsSupplierChecked(false); setSupplierTypeInput(''); setSelectedPrinterId(''); }} className="h-10 cursor-pointer gap-2 shadow-md transition-all duration-200 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
+            <Button type="button" onClick={() => { setCustomerStamp({ stamp_image: null, stamp_enabled: false, stamp_x: 450, stamp_y: 2990, stamp_width: 380 }); setEditingCustomerId(null); setNewCustomerOpen(true); setCustomerNameInput(''); setCustomerPhoneInput(''); setCustomerEmailInput(''); setCustomerCompanyInput(''); setPricingCategoryInput('عادي'); setIsCustomerChecked(true); setIsSupplierChecked(false); setSupplierTypeInput(''); setSelectedPrinterId(''); }} className="h-10 cursor-pointer gap-2 shadow-md transition-all duration-200 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
               <Plus className="h-4 w-4" />إضافة عميل
             </Button>
           </div>
@@ -1908,11 +1912,11 @@ export default function Customers() {
             }
             setNewCustomerOpen(open);
           }}>
-            <DialogContent className="max-w-2xl">
+            <DialogContent className="flex max-h-[90dvh] max-w-2xl flex-col overflow-hidden">
               <DialogHeader>
                 <DialogTitle>{editingCustomerId ? 'تعديل الزبون' : 'إضافة زبون جديد'}</DialogTitle>
               </DialogHeader>
-              <div className="space-y-4 mt-4">
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto mt-4 px-1">
                 <div>
                   <Input 
                     placeholder="اسم الزبون" 
@@ -2028,7 +2032,9 @@ export default function Customers() {
                   </div>
                 </div>
                 
-                <div className="flex justify-end gap-2">
+                <CustomerStampEditor value={customerStamp} onChange={setCustomerStamp} />
+              </div>
+                <div className="flex shrink-0 justify-end gap-2 border-t border-border bg-background pt-4">
                   <Button variant="outline" onClick={() => setNewCustomerOpen(false)}>إلغاء</Button>
                   <Button onClick={async () => {
                     const name = customerNameInput.trim();
@@ -2058,6 +2064,7 @@ export default function Customers() {
                     
                     try {
                       const customerData = {
+                        ...customerStamp,
                         name,
                         phone: phone || null,
                         email: email || null,
@@ -2136,7 +2143,6 @@ export default function Customers() {
                     }
                   }}>حفظ</Button>
                 </div>
-              </div>
             </DialogContent>
           </Dialog>
 

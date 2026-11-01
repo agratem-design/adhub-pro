@@ -1,3 +1,6 @@
+import companyStampImage from '@/assets/company-contract-stamp.png?inline';
+import { companyStampPosition } from '@/lib/companyStamp';
+import { renderCustomerStamp, type CustomerStamp } from '@/lib/customerStamp';
 import { renderReplacementLabel } from '@/lib/contractReplacementLabel';
 import { contractDocumentHeading, buildFormalAmendmentPages, buildAmendmentHistoryPages, type ContractAmendment } from '@/utils/contractAmendments';
 /**
@@ -182,6 +185,7 @@ export interface ContractData {
   customerName: string;
   customerCompany?: string;
   customerPhone?: string;
+  customerStamp?: CustomerStamp;
   isOffer?: boolean;
   adType?: string;
   billboardsCount?: number;
@@ -231,6 +235,7 @@ export interface UnifiedPrintOptions {
   terms: ContractTerm[];
   billboards: BillboardPrintData[];
   templateBgUrl: string;
+  showCompanyStamp?: boolean;
   noStampBgUrl?: string; // خلفية بدون ختم للصفحة الأولى
   tableBgUrl: string;
   noStampTableBgUrl?: string; // خلفية بدون ختم لجدول اللوحات
@@ -1100,6 +1105,10 @@ export async function generateUnifiedPrintHTML(options: UnifiedPrintOptions): Pr
   await ensureTermFontsLoaded();
   const embeddedBgUrl = await rasterizeSvgToDataUrl(effectiveBgUrl);
   const embeddedTableBgUrl = await rasterizeSvgToDataUrl(effectiveTableBgUrl);
+  const companyStamp = companyStampPosition(settings.companyStamp);
+  const showCompanyStamp = (options.showCompanyStamp ?? !options.noStampBgUrl) && companyStamp.visible;
+
+
   const rowsPerPage = settings.tableSettings.maxRows || 12;
   
   // Generate QR codes for all billboards
@@ -1138,6 +1147,7 @@ export async function generateUnifiedPrintHTML(options: UnifiedPrintOptions): Pr
         display: block;
       " />
       ${firstPageSVG}
+
       ${renderContractBankAccount(bankAccounts)}
     </div>
   `;
@@ -1157,6 +1167,20 @@ export async function generateUnifiedPrintHTML(options: UnifiedPrintOptions): Pr
       buildTablePageHTML(pageBillboards, settings, embeddedTableBgUrl, pageIndex, qrDataUrls, renderTarget)
     );
   
+  // Apply the same selected stamps to every designed page, including amendments.
+  const pageStamps = `
+    <div class="contract-page-stamps" style="position:absolute;inset:0;pointer-events:none;z-index:30;">
+      ${showCompanyStamp ? `<img data-company-stamp="true" src="${companyStampImage}" alt="ختم الشركة" style="position:absolute;left:${companyStamp.x}px;top:${companyStamp.y}px;width:${companyStamp.width}px;height:${companyStamp.width}px;object-fit:contain;z-index:2;" />` : ''}
+      <svg width="2480" height="3508" viewBox="0 0 2480 3508" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible;">${renderCustomerStamp(contractData.customerStamp, contractData.isOffer)}</svg>
+    </div>`;
+  const amendmentPages = options.printAllAmendments
+    ? buildFormalAmendmentPages(options.amendmentHistory || [], embeddedTableBgUrl, contractData.contractNumber, options.currencyInfo.symbol)
+    : buildAmendmentHistoryPages(options.amendmentHistory || [], embeddedTableBgUrl, contractData.contractNumber);
+  const designedPages = `<div class="print-page">${firstPageHTML}</div>`
+    + tablePages.map((page, idx) => `<div class="print-page${idx === tablePages.length - 1 ? ' last-table-page' : ''}">${page}</div>`).join('')
+    + amendmentPages;
+  const stampedPages = designedPages.replace(/<div class="contract-preview-container"[^>]*>/g, opening => opening + pageStamps);
+
   // Collect styles from page
   const stylesHtml = typeof document !== 'undefined' 
     ? Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
@@ -1506,11 +1530,7 @@ export async function generateUnifiedPrintHTML(options: UnifiedPrintOptions): Pr
       <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet">
     </head>
     <body data-keep-print-colors="true">
-      <div class="print-page">
-        ${firstPageHTML}
-      </div>
-      ${tablePages.length > 0 ? tablePages.map((page, idx) => `<div class="print-page${idx === tablePages.length - 1 ? ' last-table-page' : ''}">${page}</div>`).join('') : ''}
-      ${options.printAllAmendments ? buildFormalAmendmentPages(options.amendmentHistory || [], embeddedTableBgUrl, contractData.contractNumber, options.currencyInfo.symbol) : buildAmendmentHistoryPages(options.amendmentHistory || [], embeddedTableBgUrl, contractData.contractNumber)}
+      ${stampedPages}
       <script>
         function setDynamicPrintScale() {
           try {
