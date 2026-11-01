@@ -124,10 +124,13 @@ export function getBillboardStatus(billboard: any): { color: string; label: stri
   const rentStartDate = billboard.Rent_Start_Date || billboard.rent_start_date
   
   // إزالة / removed
-  if (status === 'إزالة' || status === 'ازالة' || status === 'removed' || 
+  // نوع الصيانة القديم لا يُعتمد عليه إذا أُعيدت الحالة إلى "operational"
+  const staleRemovalType = maintenanceStatus !== 'operational' &&
+    (maintenanceType === 'تمت الإزالة' || maintenanceType === 'تحتاج إزالة' || maintenanceType === 'لم يتم التركيب')
+  if (status === 'إزالة' || status === 'ازالة' || status === 'removed' ||
       maintenanceStatus === 'removed' || maintenanceStatus === 'تمت الإزالة' ||
       maintenanceStatus === 'تحتاج ازالة لغرض التطوير' || maintenanceStatus === 'لم يتم التركيب' ||
-      maintenanceType === 'تمت الإزالة' || maintenanceType === 'تحتاج إزالة' || maintenanceType === 'لم يتم التركيب') {
+      staleRemovalType) {
     return { color: '#808080', label: 'إزالة' }
   }
   

@@ -479,8 +479,9 @@ export default function BillboardMaintenance() {
     try {
       const { error } = await supabase
         .from('billboards')
-        .update({ 
+        .update({
           maintenance_status: 'operational',
+          maintenance_type: null,
           maintenance_date: new Date().toISOString()
         })
         .eq('ID', billboardId);

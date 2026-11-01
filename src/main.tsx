@@ -1,4 +1,5 @@
 import './lib/polyfills';
+import { installChunkLoadRecovery } from './lib/chunkLoadRecovery';
 import React from "react";
 import { createRoot } from "react-dom/client";
 // leaflet يُحمَّل مع صفحات الخرائط فقط (utils/leafletInit) بدل تحميله مع بداية التطبيق
@@ -8,6 +9,8 @@ import { prefetchInvoiceSettings } from "@/hooks/useInvoiceSettingsSync";
 import { isOfflineMode } from "@/integrations/supabase/client";
 import { preloadImageCache, installImageInterceptor } from "@/utils/offlineImageInterceptor";
 import { loadDSManifest, loadImageManifest } from "@/utils/imageResolver";
+
+installChunkLoadRecovery();
 
 // ✅ Fix: Override ar-LY locale for numbers to use en-US formatting
 // This ensures comma (,) is used as thousands separator instead of dot (.)
