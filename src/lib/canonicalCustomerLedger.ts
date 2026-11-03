@@ -227,6 +227,12 @@ function cleanNoteText(note?: string | null): string {
   return trimmed;
 }
 
+/** تحويل تاريخ YYYY-MM-DD إلى DD/MM/YYYY للعرض (بدون إزاحة المنطقة الزمنية) */
+export function formatLedgerDate(value?: string | null): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value || '');
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : (value || '—');
+}
+
 /**
  * المحرك المالي المركزي: يبني دفتر الأستاذ الشامل ويحسب الإجماليات بدقة
  */

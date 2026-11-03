@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { useAccountStatementPrint } from './AccountStatementPrint';
 import {
   buildCanonicalCustomerLedger,
+  formatLedgerDate,
   RawCustomerFinancialSources,
   CanonicalCustomerLedgerResult,
   CanonicalLedgerEntry,
@@ -548,7 +549,7 @@ export default function AccountStatementDialog({ open, onOpenChange, customerId,
                           return (
                             <tr key={entry.id} className={isOpening ? 'bg-primary/5 font-semibold' : index % 2 === 0 ? 'bg-background' : 'bg-card/40'}>
                               <td className="p-2.5 text-center text-muted-foreground">{isOpening ? '—' : (hasOpeningRow ? index : index + 1)}</td>
-                              <td className="p-2.5 text-center">{entry.date || '—'}</td>
+                              <td dir="ltr" className="p-2.5 text-center">{formatLedgerDate(entry.date)}</td>
                               <td className="p-2.5 text-right">
                                 <div className="font-semibold">{entry.description}</div>
                                 {entry.subtitle && (
@@ -573,7 +574,7 @@ export default function AccountStatementDialog({ open, onOpenChange, customerId,
                         return (
                           <tr key={entry.id} className={isOpening ? 'bg-primary/5 font-semibold' : index % 2 === 0 ? 'bg-background' : 'bg-card/40'}>
                             <td className="p-2.5 text-center text-muted-foreground">{isOpening ? '—' : (hasOpeningRow ? index : index + 1)}</td>
-                            <td className="p-2.5 text-center">{entry.date || '—'}</td>
+                            <td dir="ltr" className="p-2.5 text-center">{formatLedgerDate(entry.date)}</td>
                             <td className="p-2.5 text-center">
                               <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${badge.className}`}>
                                 {badge.text}

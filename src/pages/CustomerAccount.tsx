@@ -19,7 +19,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
-import { buildCanonicalCustomerLedger } from '@/lib/canonicalCustomerLedger';
+import { buildCanonicalCustomerLedger, formatLedgerDate } from '@/lib/canonicalCustomerLedger';
 import { CASH_TYPES, contractPaid, loadCustomerAccount, resolveCustomerId, round2 } from '@/services/customerAccount';
 import {
   addAccountPayment, addBulkContractPayment, addContractPayment, addDebt, deleteDistributedPayment, deletePayment, updatePayment,
@@ -629,7 +629,7 @@ export default function CustomerAccount() {
                   )}
                   {ledgerView.displayedEntries.filter(e => !e.isInformationalOnly).map(e => (
                     <tr key={e.id} className="hover:bg-muted/20">
-                      <td className="whitespace-nowrap px-3 py-2 text-xs tabular-nums text-muted-foreground">{e.date || '—'}</td>
+                      <td dir="ltr" className="whitespace-nowrap px-3 py-2 text-center text-xs tabular-nums text-muted-foreground">{formatLedgerDate(e.date)}</td>
                       <td className="px-3 py-2">
                         <div className="font-medium">{e.description}</div>
                         {(e.subtitle || e.reference) && <div className="text-xs text-muted-foreground">{e.subtitle || e.reference}</div>}

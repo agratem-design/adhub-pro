@@ -51,6 +51,10 @@ interface ContractCreate {
   end_date: string;
   rent_cost: number;
   discount?: number;
+  pricing_mode?: string;
+  duration_months?: number | null;
+  duration_days?: number | null;
+  use_30_day_month?: boolean | null;
   ad_type?: string;
   billboard_ids?: string[];
   installments?: Array<{ amount: number; months: number; paymentType: string; dueDate?: string }>;
@@ -1713,30 +1717,46 @@ export async function renewContract(originalContractId: string, options?: { star
   // احضر العقد مع اللوحات
   const original = await getContractWithBillboards(String(originalContractId));
 
-  // احسب التواريخ الجديدة
+  // احسب التواريخ الجديدة بنفس طريقة تسعير العقد الأصلي
   const origStart = original.start_date || original['Contract Date'] || '';
   const origEnd = original.end_date || original['End Date'] || '';
+  const origMode = original.pricing_mode === 'days' || original.pricing_mode === 'months' ? original.pricing_mode : null;
+  const origMonths = Number(original.duration_months) || 0;
+  const origDays = Number(original.duration_days) || 0;
+  const origUse30 = typeof original.use_30_day_month === 'boolean' ? original.use_30_day_month : null;
+
+  // تواريخ محلية بدون تحويل UTC لتفادي إزاحة اليوم
+  const toLocalDate = (s: string) => {
+    const [y, m, d] = String(s).slice(0, 10).split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+  const toIsoLocal = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
   let newStart = options?.start_date;
   let newEnd = options?.end_date;
 
   if (!newStart || !newEnd) {
-    const today = new Date();
-    // المدة بالأشهر من العقد الأصلي
-    let months = 1;
-    try {
-      if (origStart && origEnd) {
-        const sd = new Date(origStart);
-        const ed = new Date(origEnd);
-        const diffDays = Math.max(1, Math.ceil(Math.abs(ed.getTime() - sd.getTime()) / 86400000));
-        months = Math.max(1, Math.round(diffDays / 30));
-      }
-    } catch { }
-    const s = today;
+    const s = toLocalDate(newStart || toIsoLocal(new Date()));
     const e = new Date(s);
-    e.setMonth(e.getMonth() + months);
-    newStart = newStart || s.toISOString().slice(0, 10);
-    newEnd = newEnd || e.toISOString().slice(0, 10);
+    if (origMode === 'days' && origDays > 0) {
+      e.setDate(e.getDate() + origDays);
+    } else if (origMode === 'months' && origMonths > 0) {
+      if (origUse30 !== false) {
+        e.setDate(e.getDate() + Math.round(origMonths * 30));
+      } else {
+        e.setMonth(e.getMonth() + Math.floor(origMonths));
+        e.setDate(e.getDate() + Math.round((origMonths % 1) * 30));
+      }
+    } else {
+      // عقد قديم بلا بيانات تسعير: نحافظ على عدد أيام العقد الأصلي
+      const diffDays = origStart && origEnd
+        ? Math.max(1, Math.round((toLocalDate(origEnd).getTime() - toLocalDate(origStart).getTime()) / 86400000))
+        : 30;
+      e.setDate(e.getDate() + diffDays);
+    }
+    newStart = newStart || toIsoLocal(s);
+    newEnd = newEnd || toIsoLocal(e);
   }
 
   // جمع معرفات اللوحات المرتبطة حالياً
@@ -1758,6 +1778,11 @@ export async function renewContract(originalContractId: string, options?: { star
     // ✅ NEW: Copy operating fee rate from original contract
     operating_fee_rate: original.operating_fee_rate || 3,
     previous_contract_number: Number(originalContractId),
+    // ✅ نسخ وضع الحساب حتى لا تعيد شاشة التعديل تخمينه وتغيير تاريخ النهاية
+    pricing_mode: origMode ?? undefined,
+    duration_months: origMode === 'months' ? origMonths : null,
+    duration_days: origMode === 'days' ? origDays : null,
+    use_30_day_month: origUse30,
   };
 
   // حافظ على فئة التسعير إن وجدت

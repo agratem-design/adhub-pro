@@ -5,12 +5,13 @@ export interface CompanyStampSettings {
   width: number;
 }
 
-export const DEFAULT_COMPANY_STAMP: CompanyStampSettings = { visible: true, x: 1604, y: 3060, width: 300 };
+export const DEFAULT_COMPANY_STAMP: CompanyStampSettings = { visible: true, x: 1780, y: 3060, width: 300 };
 
 export function companyStampPosition(settings?: Partial<CompanyStampSettings>) {
   // Upgrade the previous default while preserving explicitly customized layouts.
-  if (settings?.width === 420 && settings.x === 1544 && settings.y === 3000) {
-    settings = { ...settings, x: 1604, y: 3060, width: 300 };
+  if (settings && ((settings.width === 420 && settings.x === 1544 && settings.y === 3000)
+    || (settings.width === 300 && settings.x === 1604 && settings.y === 3060))) {
+    settings = { ...settings, ...DEFAULT_COMPANY_STAMP, visible: settings.visible ?? true };
   }
   const finite = (n: number | undefined, fallback: number, min: number, max: number) =>
     typeof n === 'number' && Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback;

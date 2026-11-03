@@ -22,7 +22,8 @@ describe('customer contract stamp', () => {
 
 describe('compact company stamp', () => {
   it('reduces both new and previously saved default layouts', () => {
-    expect(companyStampPosition()).toMatchObject({ x: 1604, y: 3060, width: 300 });
+    expect(companyStampPosition()).toMatchObject({ x: 1780, y: 3060, width: 300 });
+    expect(companyStampPosition({ visible: true, x: 1604, y: 3060, width: 300 })).toEqual(companyStampPosition());
     expect(companyStampPosition({ visible: true, x: 1544, y: 3000, width: 420 })).toEqual(companyStampPosition());
     expect(companyStampPosition({ visible: false, x: 1544, y: 3000, width: 420 }).visible).toBe(false);
   });

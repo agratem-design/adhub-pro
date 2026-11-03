@@ -12,6 +12,7 @@ import {
   CanonicalLedgerEntry,
   CanonicalCustomerTotals,
   CanonicalCustomerLedgerResult,
+  formatLedgerDate,
 } from '@/lib/canonicalCustomerLedger';
 
 export interface CustomerData {
@@ -43,12 +44,7 @@ export interface AccountStatementData {
 }
 
 function formatDate(dateStr: string): string {
-  if (!dateStr) return '—';
-  try {
-    return new Date(dateStr).toLocaleDateString('ar-LY-u-nu-latn');
-  } catch {
-    return dateStr;
-  }
+  return formatLedgerDate(dateStr);
 }
 
 function fmtNum(num: number): string {
@@ -84,7 +80,7 @@ function generateSimpleStatementRows(
       html += `
         <tr class="subtotal-row" style="background:${t.primaryColor}15 !important;font-weight:bold;">
           <td style="text-align:center;">—</td>
-          <td style="text-align:center;font-size:9px;"><span class="num">${formatDate(entry.date)}</span></td>
+          <td style="text-align:center;font-size:9px;"><span class="num" dir="ltr">${formatDate(entry.date)}</span></td>
           <td style="text-align:right;"><strong>${entry.description}</strong></td>
           <td style="text-align:center;">${entry.displayCharge > 0 ? `<span class="num">${currency.symbol} ${fmtNum(entry.displayCharge)}</span>` : '—'}</td>
           <td style="text-align:center;">${entry.displayReduction > 0 ? `<span class="num">${currency.symbol} ${fmtNum(entry.displayReduction)}</span>` : '—'}</td>
@@ -100,7 +96,7 @@ function generateSimpleStatementRows(
     html += `
       <tr class="${rowClass}">
         <td style="text-align:center;">${index + numOffset}</td>
-        <td style="text-align:center;font-size:9px;"><span class="num">${formatDate(entry.date)}</span></td>
+        <td style="text-align:center;font-size:9px;"><span class="num" dir="ltr">${formatDate(entry.date)}</span></td>
         <td style="text-align:right;">
           <div style="font-weight:600;">${displayTitle}</div>
           ${subtitleHtml}
@@ -179,7 +175,7 @@ function generateDetailedStatementRows(
       html += `
         <tr class="subtotal-row" style="background:${t.primaryColor}15 !important;font-weight:bold;">
           <td style="text-align:center;">—</td>
-          <td style="text-align:center;font-size:9px;"><span class="num">${formatDate(entry.date)}</span></td>
+          <td style="text-align:center;font-size:9px;"><span class="num" dir="ltr">${formatDate(entry.date)}</span></td>
           <td style="text-align:center;"><span style="font-size:8px;padding:2px 6px;border-radius:4px;background:#e2e8f0;color:#334155;font-weight:bold;">رصيد سابق</span></td>
           <td style="text-align:right;"><strong>${entry.description}</strong></td>
           <td style="text-align:center;">${entry.displayCharge > 0 ? `<span class="num">${currency.symbol} ${fmtNum(entry.displayCharge)}</span>` : '—'}</td>
@@ -196,7 +192,7 @@ function generateDetailedStatementRows(
     html += `
       <tr class="${rowClass}">
         <td style="text-align:center;">${index + numOffset}</td>
-        <td style="text-align:center;font-size:9px;"><span class="num">${formatDate(entry.date)}</span></td>
+        <td style="text-align:center;font-size:9px;"><span class="num" dir="ltr">${formatDate(entry.date)}</span></td>
         <td style="text-align:center;">
           <span style="font-size:8px;padding:2px 5px;border-radius:4px;border:1px solid ${typeBadgeColor}40;color:${typeBadgeColor};font-weight:600;white-space:nowrap;">
             ${typeBadgeLabel}
