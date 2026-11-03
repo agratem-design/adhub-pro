@@ -7,6 +7,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { smartArabicMatch } from '@/lib/arabicSearch';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -36,6 +38,8 @@ interface Props {
   taskDesigns: any[];
   contract: any;
   team: any;
+  /** مهام نفس العقد لدى كل الفرق (للتنقّل بفلتر الفرق) */
+  teamTasks?: { taskId: string; teamName: string; count: number }[];
   billboardById: Record<number, any>;
   contractById?: Record<number, any>;
   installationPricingByBillboard: Record<number, number>;
@@ -85,6 +89,15 @@ const statusOf = (items: any[]) => {
   return done === items.length ? 'completed' : done > 0 ? 'in_progress' : 'pending';
 };
 
+type BoardAttr = 'Size' | 'Level' | 'Municipality' | 'City';
+const BOARD_ATTRS: { key: BoardAttr; label: string; all: string }[] = [
+  { key: 'Size', label: 'المقاس', all: 'كل المقاسات' },
+  { key: 'Level', label: 'المستوى', all: 'كل المستويات' },
+  { key: 'Municipality', label: 'البلدية', all: 'كل البلديات' },
+  { key: 'City', label: 'المدينة', all: 'كل المدن' },
+];
+const EMPTY_ATTR_FILTERS: Record<BoardAttr, string> = { Size: 'all', Level: 'all', Municipality: 'all', City: 'all' };
+
 const money = (n: number) => Math.round(n || 0).toLocaleString('ar-LY');
 
 /** بطاقة قسم موحّدة لصفحة المهمة */
@@ -103,7 +116,7 @@ function Panel({ title, icon: Icon, actions, children, className }: {
 }
 
 export const InstallationTaskDetail: React.FC<Props> = ({
-  task, taskItems, taskDesigns, contract, team, billboardById, contractById = {}, installationPricingByBillboard,
+  task, taskItems, taskDesigns, contract, team, teamTasks = [], billboardById, contractById = {}, installationPricingByBillboard,
   selectedItemsForCompletion, selectedItemsForDate, showCompletionDialog, derivedContractIds,
   onBack, onManageDesigns, onDistributeDesigns, onEditTaskType, onTransferBillboards, onPrintAll, onDelete,
   onCreatePrintTask, onCompleteBillboards, onSetInstallationDate, onAddBillboards, onCreateCompositeTask, onUnmerge,
@@ -267,21 +280,32 @@ export const InstallationTaskDetail: React.FC<Props> = ({
   const [contractFilter, setContractFilter] = useState<number | 'all'>('all');
   const [iteration, setIteration] = useState<number | 'all'>('all');
   const iterations = useMemo(() => [...new Set(taskItems.map(i => i.reinstall_count || 0))].sort((a, b) => a - b), [taskItems]);
+  const [attrFilters, setAttrFilters] = useState<Record<BoardAttr, string>>(EMPTY_ATTR_FILTERS);
+  const activeAttrCount = BOARD_ATTRS.filter(a => attrFilters[a.key] !== 'all').length;
+  // خيارات الفلاتر من لوحات المهمة نفسها مع عدد كل خيار
+  const attrOptions = useMemo(() => {
+    const out = {} as Record<BoardAttr, [string, number][]>;
+    BOARD_ATTRS.forEach(({ key }) => {
+      const counts = new Map<string, number>();
+      taskItems.forEach(i => { const v = String(billboardById[i.billboard_id]?.[key] ?? '').trim(); if (v) counts.set(v, (counts.get(v) || 0) + 1); });
+      out[key] = [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ar'));
+    });
+    return out;
+  }, [taskItems, billboardById]);
 
   const rows = useMemo(() => {
-    const q = search.trim().toLowerCase();
     const list = taskItems
       .map(item => ({ item, billboard: billboardById[item.billboard_id], price: installationPricingByBillboard[item.billboard_id] || 0 }))
       .filter(({ item, billboard }) => {
         if (iteration !== 'all' && (item.reinstall_count || 0) !== iteration) return false;
         if (contractFilter !== 'all' && contractOfBillboard.get(Number(item.billboard_id)) !== contractFilter) return false;
-        if (!q) return true;
-        return [billboard?.Billboard_Name, item.billboard_id, billboard?.City, billboard?.Municipality, billboard?.Nearest_Landmark, billboard?.Size]
-          .some(v => String(v ?? '').toLowerCase().includes(q));
+        if (BOARD_ATTRS.some(({ key }) => attrFilters[key] !== 'all' && String(billboard?.[key] ?? '').trim() !== attrFilters[key])) return false;
+        return smartArabicMatch([billboard?.Billboard_Name, item.billboard_id, billboard?.Nearest_Landmark, billboard?.District, billboard?.Location, billboard?.City, billboard?.Municipality, billboard?.Size], search);
       })
       .map(r => ({ ...r, Size: r.billboard?.Size, Level: r.billboard?.Level, Municipality: r.billboard?.Municipality, ID: r.item.billboard_id }));
     return sortBillboardsStandardSync(list);
-  }, [taskItems, billboardById, installationPricingByBillboard, search, iteration, contractFilter, contractOfBillboard]);
+  }, [taskItems, billboardById, installationPricingByBillboard, search, iteration, contractFilter, contractOfBillboard, attrFilters]);
+  const resetBoardFilters = () => { setSearch(''); setContractFilter('all'); setBoardStatus('all'); setIteration('all'); setAttrFilters(EMPTY_ATTR_FILTERS); };
   const pendingRows = rows.filter(r => r.item.status !== 'completed');
   const doneRows = rows.filter(r => r.item.status === 'completed');
 
@@ -305,7 +329,7 @@ export const InstallationTaskDetail: React.FC<Props> = ({
   const [boardLayout, setBoardLayout] = useCardLayout('installation-boards');
   const [managedItemId, setManagedItemId] = useState<string | null>(null);
   const [mediaRequest, setMediaRequest] = useState<{itemId:string; mode:'design'|'photos'; nonce:number} | null>(null);
-  useEffect(() => { setWorkspaceTab('boards'); setManagedItemId(null); setMediaRequest(null); setSearch(''); setContractFilter('all'); setIteration('all'); setBoardStatus('all'); }, [task.id]);
+  useEffect(() => { setWorkspaceTab('boards'); setManagedItemId(null); setMediaRequest(null); setSearch(''); setContractFilter('all'); setIteration('all'); setBoardStatus('all'); setAttrFilters(EMPTY_ATTR_FILTERS); }, [task.id]);
   const visibleRows = rows.filter(r => boardStatus === 'all' || (boardStatus === 'completed' ? r.item.status === 'completed' : r.item.status !== 'completed'));
   const managedItem = taskItems.find(i => i.id === managedItemId);
   const typeLabel = isReinstall ? `إعادة تركيب${task.reinstallation_number ? ` ${task.reinstallation_number}` : ''}` : 'تركيب جديد';
@@ -357,9 +381,27 @@ export const InstallationTaskDetail: React.FC<Props> = ({
 
         <TabsContent value="boards" className="space-y-4">
           <div className="rounded-xl border border-border bg-card p-3 space-y-3">
-            <div className="flex flex-wrap gap-2"><div className="relative min-w-[180px] flex-1"><Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={e => setSearch(e.target.value)} placeholder="ابحث عن لوحة أو موقع..." className="h-10 pr-9" /></div>
+            <div className="flex flex-wrap gap-2"><div className="relative min-w-[180px] flex-1"><Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={e => setSearch(e.target.value)} placeholder="ابحث باسم اللوحة، أقرب نقطة دالة، أو المنطقة..." className="h-10 pr-9" aria-label="بحث في لوحات المهمة" />{search && <button type="button" onClick={() => setSearch('')} className="absolute left-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground" aria-label="مسح البحث"><X className="h-4 w-4" /></button>}</div>
               <div className="flex flex-wrap items-center gap-1" role="group" aria-label="حالة اللوحات">{[{id:'all',label:'الكل',count:taskItems.length},{id:'pending',label:'قيد التنفيذ',count:pendingRows.length},{id:'completed',label:'مكتملة',count:doneRows.length}].map(v => <Button key={v.id} variant={boardStatus === v.id ? 'default' : 'ghost'} size="sm" className="h-10 text-[12px]" onClick={() => setBoardStatus(v.id)} aria-pressed={boardStatus === v.id}>{v.label} {v.count}</Button>)}</div>
             </div>
+            <div className="grid grid-cols-2 gap-2 border-t border-border pt-3 sm:grid-cols-3 lg:grid-cols-5" role="group" aria-label="فلاتر اللوحات">
+              <Select value={task.id} onValueChange={id => id !== task.id && onSwitchTask?.(id)} disabled={teamTasks.length < 2 || !onSwitchTask} dir="rtl">
+                <SelectTrigger className="h-10 text-[12px]" aria-label="الفرقة"><Users className="ml-1 h-4 w-4 shrink-0 text-muted-foreground" /><SelectValue placeholder={team?.team_name || 'الفرقة'} /></SelectTrigger>
+                <SelectContent>
+                  {(teamTasks.length ? teamTasks : [{ taskId: task.id, teamName: team?.team_name || 'بدون فرقة', count: taskItems.length }]).map(t => <SelectItem key={t.taskId} value={t.taskId}>{t.teamName} ({t.count})</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {BOARD_ATTRS.map(({ key, label, all }) => (
+                <Select key={key} value={attrFilters[key]} onValueChange={v => setAttrFilters(f => ({ ...f, [key]: v }))} dir="rtl">
+                  <SelectTrigger className={cn('h-10 text-[12px]', attrFilters[key] !== 'all' && 'border-primary text-primary')} aria-label={label}><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{all}</SelectItem>
+                    {attrOptions[key].map(([v, n]) => <SelectItem key={v} value={v}>{v} ({n})</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              ))}
+            </div>
+            {(activeAttrCount > 0 || search) && <div className="flex items-center justify-between gap-2 text-[12px] text-muted-foreground"><span>{activeAttrCount + (search ? 1 : 0)} فلتر نشط</span><Button variant="ghost" size="sm" className="h-8 gap-1 text-[12px]" onClick={() => { setSearch(''); setAttrFilters(EMPTY_ATTR_FILTERS); }}><X className="h-3.5 w-3.5" />مسح الفلاتر</Button></div>}
             {isMulti && <div className="flex flex-wrap gap-2 border-t border-border pt-3" role="group" aria-label="تصفية حسب العقد"><Button size="sm" variant={contractFilter === 'all' ? 'secondary' : 'ghost'} onClick={() => setContractFilter('all')}>كل العقود</Button>{contracts.map(c => <Button size="sm" key={c.contractId} variant={contractFilter === c.contractId ? 'secondary' : 'ghost'} onClick={() => setContractFilter(c.contractId)}>#{c.contractId}</Button>)}</div>}
             {iterations.length > 1 && <div className="flex flex-wrap gap-1 border-t border-border pt-3" role="group" aria-label="دورة التركيب">{(['all',...iterations] as const).map(v => <Button key={v} size="sm" variant={iteration === v ? 'secondary' : 'ghost'} onClick={() => setIteration(v)}>{v === 'all' ? 'كل الدورات' : v === 0 ? 'التركيب الأول' : `إعادة ${v}`}</Button>)}</div>}
           </div>
@@ -368,7 +410,7 @@ export const InstallationTaskDetail: React.FC<Props> = ({
           <div className={cn('grid gap-4', boardLayout === 'horizontal' ? 'grid-cols-[repeat(auto-fill,minmax(min(100%,560px),1fr))]' : 'grid-cols-[repeat(auto-fill,minmax(min(100%,280px),1fr))]')} style={{ ['--img-w' as any]: '240px' }}>
             {visibleRows.map(({item,billboard}) => <TaskBoardCard horizontal={boardLayout === 'horizontal'} key={item.id} item={item} billboard={billboard} taskType={task.task_type} contractId={contractOfBillboard.get(Number(item.billboard_id)) || (contracts.length === 1 ? contracts[0].contractId : undefined)} design={taskDesigns.find(d => d.id === item.selected_design_id)} selected={selectedItemsForCompletion.includes(item.id) || selectedItemsForDate.includes(item.id)} printActive={printBillboardIds.has(Number(item.billboard_id))} paused={!!pausedMap[Number(item.billboard_id)]} replacement={!!replacementMap[Number(item.billboard_id)]} onSelect={checked => onSelectionChange(item.id,checked)} onPhoto={() => onAddInstalledImage(item)} onManage={() => setManagedItemId(item.id)} onPreview={setLightbox} taskDesigns={taskDesigns} editRequest={mediaRequest?.itemId === item.id ? mediaRequest : undefined} adType={contracts.find(c => c.contractId === contractOfBillboard.get(Number(item.billboard_id)))?.adType || contract?.['Ad Type'] || ''} onRefresh={() => { onRefreshItems(); queryClient.invalidateQueries({queryKey:['task-designs']}); queryClient.invalidateQueries({queryKey:['print-task-items']}); queryClient.invalidateQueries({queryKey:['billboards-for-tasks']}); queryClient.invalidateQueries({queryKey:['composite-tasks']}); }} />)}
           </div>
-          {!visibleRows.length && <div className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground"><Package className="mx-auto mb-3 h-8 w-8" /><p>لا توجد لوحات مطابقة</p><Button variant="outline" size="sm" className="mt-4" onClick={() => { setSearch('');setContractFilter('all');setBoardStatus('all');setIteration('all'); }}>عرض كل اللوحات</Button></div>}
+          {!visibleRows.length && <div className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground"><Package className="mx-auto mb-3 h-8 w-8" /><p>لا توجد لوحات مطابقة</p><Button variant="outline" size="sm" className="mt-4" onClick={resetBoardFilters}>عرض كل اللوحات</Button></div>}
         </TabsContent>
 
         <TabsContent value="designs" className="space-y-4">

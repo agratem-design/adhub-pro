@@ -2300,6 +2300,14 @@ export default function InstallationTasks() {
   }, [selectedTaskId, selectedTaskObj, tasks, designsByTask]);
   const selectedTaskContract = useMemo(() => selectedTaskObj ? contractById[selectedTaskObj.contract_id] : null, [selectedTaskObj, contractById]);
   const selectedTeam = useMemo(() => selectedTaskObj ? teamById[selectedTaskObj.team_id] : null, [selectedTaskObj, teamById]);
+  // مهام نفس العقد/الدورة لدى الفرق الأخرى — لفلتر الفرق في صفحة المهمة
+  const selectedTeamTasks = useMemo(() => {
+    if (!selectedTaskObj) return [];
+    const key = installationGroupKey(selectedTaskObj);
+    return tasks
+      .filter(t => installationGroupKey(t) === key)
+      .map(t => ({ taskId: t.id, teamName: teamById[t.team_id]?.team_name || 'بدون فرقة', count: allTaskItems.filter(i => i.task_id === t.id).length }));
+  }, [selectedTaskObj, tasks, teamById, allTaskItems]);
   const selectedDerivedContractIds = useMemo(() => {
     if (!selectedTaskObj) return [];
     return derivedContractIdsByTaskId.get(selectedTaskObj.id) || (selectedTaskObj.contract_ids || []);
@@ -2325,6 +2333,7 @@ export default function InstallationTasks() {
               taskDesigns={selectedTaskDesigns}
               contract={selectedTaskContract}
               team={selectedTeam}
+              teamTasks={selectedTeamTasks}
               billboardById={billboardById}
               contractById={contractById}
               installationPricingByBillboard={installationPricingByBillboard}
