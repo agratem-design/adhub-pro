@@ -47,7 +47,9 @@ export default defineConfig(({ mode }) => ({
   ].filter(Boolean),
   optimizeDeps: {
     exclude: ["@supabase/supabase-js"],
-    include: ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime", "@tanstack/react-query"],
+    include: ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime", "@tanstack/react-query",
+      // Map libs are only reached through lazy routes; pre-bundle them so first visit doesn't trigger a re-optimize (504 Outdated Optimize Dep).
+      "leaflet", "leaflet.markercluster", "@googlemaps/markerclusterer"],
   },
   build: {
     chunkSizeWarningLimit: 1000,

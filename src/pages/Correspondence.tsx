@@ -10,13 +10,18 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
-import { AlertTriangle, ArrowLeft, ArrowRight, Archive, Building2, CalendarDays, Copy, FileText, FilePlus2, Loader2, Mail, Pencil, Printer, Save, Search, Trash2, Upload, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Archive, Building2, CalendarDays, Copy, FileText, FilePlus2, Loader2, Mail, Pencil, Printer, Save, Search, Trash2, Upload, X } from 'lucide-react';
 import { preparePrintWindow, writePrintWindow } from '@/utils/printWindowHelper';
 import { LetterPreview, MODE_HINT, PrintMenu } from '@/components/correspondence/LetterParts';
+import { LetterBodyEditor } from '@/components/correspondence/LetterBodyEditor';
 import {
   LETTER_FONTS, NUMBER_FONTS, PRINT_MODE_LABELS, deleteLetter, loadCompanies, loadLetters, nextReference, renderLetterHtml, saveCompany, saveLetter,
+  type RenderOptions,
   type Letter, type LetterheadCompany, type LetterPrintMode,
 } from '@/services/correspondence';
+
+/** المراسلات: صفحات متعددة عند امتلاء الصفحة + جداول + ترقيم الصفحات في الأسفل */
+const LETTER_LAYOUT: RenderOptions = { paginate: true, markup: true, alwaysPageNumbers: true };
 
 const today = () => new Date().toISOString().slice(0, 10);
 const emptyLetter = (c?: LetterheadCompany | null, letters: Letter[] = []): Letter => ({
@@ -151,7 +156,7 @@ export default function Correspondence() {
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = usePersistedState<LetterPrintMode>('correspondence.mode', 'full');
   const [yearOnlyDate, setYearOnlyDate] = usePersistedState<boolean>('correspondence.yearOnlyDate', false);
-  const [fit, setFit] = useState<{ scale: number; overflow: boolean }>({ scale: 1, overflow: false });
+  const [pages, setPages] = useState(1);
 
   const company = companies.find(c => c.id === (draft?.company_id || companyId)) || null;
   const list = useMemo(() => {
@@ -162,7 +167,7 @@ export default function Correspondence() {
   const companyLetters = letters.filter(l => !companyId || l.company_id === companyId);
   const monthLetters = companyLetters.filter(l => l.letter_date?.slice(0, 7) === today().slice(0, 7));
 
-  const html = useMemo(() => (company && draft ? renderLetterHtml(company, draft, window.location.origin, { mode, yearOnlyDate }) : ''), [company, draft, mode, yearOnlyDate]);
+  const html = useMemo(() => (company && draft ? renderLetterHtml(company, draft, window.location.origin, { ...LETTER_LAYOUT, mode, yearOnlyDate }) : ''), [company, draft, mode, yearOnlyDate]);
   const set = (patch: Partial<Letter>) => setDraft(d => (d ? { ...d, ...patch } : d));
 
   const print = (l: Letter, m: LetterPrintMode = 'full') => {
@@ -170,7 +175,7 @@ export default function Correspondence() {
     if (!c) return;
     const suffix = m === 'full' ? '' : ` (${PRINT_MODE_LABELS[m]})`;
     const w = preparePrintWindow(`مراسلة ${l.reference_number}`);
-    writePrintWindow(w, renderLetterHtml(c, l, window.location.origin, { mode: m, yearOnlyDate }), { title: m === 'background' ? `ترويسة ${c.name}` : `مراسلة ${l.reference_number} - ${l.subject || ''}${suffix}`.trim(), showDownloadPdf: true, showShare: true, autoPrint: false });
+    writePrintWindow(w, renderLetterHtml(c, l, window.location.origin, { ...LETTER_LAYOUT, mode: m, yearOnlyDate }), { title: m === 'background' ? `ترويسة ${c.name}` : `مراسلة ${l.reference_number} - ${l.subject || ''}${suffix}`.trim(), showDownloadPdf: true, showShare: true, autoPrint: false });
   };
 
   const save = async (andPrint: LetterPrintMode | false = false) => {
@@ -279,9 +284,10 @@ export default function Correspondence() {
             <label className="block space-y-1 text-sm">الموجَّه إليه<Input value={draft.recipient || ''} onChange={e => set({ recipient: e.target.value })} placeholder="السيد الأستاذ/ ... المحترم" /></label>
             <label className="block space-y-1 text-sm">التحية<Input value={draft.greeting || ''} onChange={e => set({ greeting: e.target.value })} /></label>
             <label className="block space-y-1 text-sm">الموضوع<Input placeholder="اكتب عنوانًا واضحًا للمراسلة" value={draft.subject || ''} onChange={e => set({ subject: e.target.value })} /></label>
-            <label className="block space-y-1 text-sm">نص المراسلة <span className="text-xs text-muted-foreground">(سطر فارغ بين الفقرات)</span>
-              <Textarea placeholder="اكتب تفاصيل المراسلة هنا…" rows={12} value={draft.body} onChange={e => set({ body: e.target.value })} style={{ fontFamily: company.font_family }} className="text-base leading-8" />
-            </label>
+            <div className="space-y-1.5 text-sm">
+              <div className="font-semibold">نص المراسلة</div>
+              <LetterBodyEditor key={draft.id || 'new'} value={draft.body} onChange={body => set({ body })} font={company.font_family} />
+            </div>
             <label className="block space-y-1 text-sm">الختام<Input value={draft.closing || ''} onChange={e => set({ closing: e.target.value })} /></label>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1 text-sm">الموقِّع<Input value={draft.signer_name || ''} onChange={e => set({ signer_name: e.target.value })} /></label>
@@ -303,20 +309,14 @@ export default function Correspondence() {
           </section>
           <section className="min-w-0 space-y-3 self-start rounded-2xl border border-border bg-muted/30 p-3 md:p-4 xl:sticky xl:top-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-sm font-semibold text-muted-foreground">معاينة الطباعة <span className="ms-2 text-xs font-normal">A4</span></div>
+              <div className="text-sm font-semibold text-muted-foreground">معاينة الطباعة <span className="ms-2 text-xs font-normal">A4 — {pages} {pages > 2 ? 'صفحات' : pages === 2 ? 'صفحتان' : 'صفحة'}</span></div>
               <div className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-xs">
                 {(Object.keys(PRINT_MODE_LABELS) as LetterPrintMode[]).map(m => (
                   <button key={m} type="button" onClick={() => setMode(m)} aria-pressed={mode === m} className={cn('min-h-10 rounded-md px-3 py-1.5 font-medium transition-colors', mode === m ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>{PRINT_MODE_LABELS[m]}</button>
                 ))}
               </div>
             </div>
-            {mode !== 'background' && fit.overflow && (
-              <div className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive"><AlertTriangle className="h-4 w-4 shrink-0" />النص أطول من منطقة الكتابة حتى بعد تصغير الخط — اختصر النص، فلن يُطبع ما يتجاوز الحدود.</div>
-            )}
-            {mode !== 'background' && !fit.overflow && fit.scale < 0.999 && (
-              <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-400">صُغِّر الخط تلقائياً إلى {Math.round(fit.scale * 100)}% ليبقى النص داخل منطقة الكتابة.</div>
-            )}
-            <LetterPreview html={html} onFit={setFit} />
+            <LetterPreview html={html} onFit={f => setPages(f.pages)} />
             <p className="text-xs text-muted-foreground">{MODE_HINT[mode]}</p>
           </section>
         </div>

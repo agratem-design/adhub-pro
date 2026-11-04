@@ -18,6 +18,7 @@ export interface BoardItem {
   landmark: string | null;
   area: string | null;
   municipality: string | null;
+  level: string | null;
   designA: string | null;
   designB: string | null;
   installedA: string | null;
@@ -43,7 +44,7 @@ export async function loadOperationBoards(op: OperationRow): Promise<BoardItem[]
   const ids = [...new Set((items || []).map((i: any) => Number(i.billboard_id)))];
   const [boards, contractsR] = await Promise.all([
     Promise.all(chunk(ids).map(part => supabase.from('billboards')
-      .select('"ID", "Billboard_Name", "Size", "Faces_Count", "Image_URL", "Nearest_Landmark", "District", "City", "Municipality", friend_company_id').in('ID', part)))
+      .select('"ID", "Billboard_Name", "Size", "Faces_Count", "Image_URL", "Nearest_Landmark", "District", "City", "Municipality", "Level", friend_company_id').in('ID', part)))
       .then(rs => rs.flatMap(r => { if (r.error) throw r.error; return r.data || []; })),
     supabase.from('Contract').select('"Contract_Number", billboard_ids').in('Contract_Number', op.contractIds.length ? op.contractIds : [-1]),
   ]);
@@ -67,6 +68,7 @@ export async function loadOperationBoards(op: OperationRow): Promise<BoardItem[]
       landmark: b.Nearest_Landmark || null,
       area: b.District || b.City || null,
       municipality: b.Municipality || null,
+      level: b.Level || null,
       designA: i.design_face_a || null,
       designB: i.design_face_b || null,
       installedA: i.installed_image_face_a_url || i.installed_image_url || null,

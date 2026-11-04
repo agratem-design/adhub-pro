@@ -195,6 +195,86 @@ export interface RenderOptions {
   paginate?: boolean;
   /** تنسيق مبسّط في النص: «## عنوان»، «- بند»، جداول «| a | b |» */
   markup?: boolean;
+  /** إظهار «صفحة X من N» في أسفل كل صفحة حتى لو كانت صفحة واحدة */
+  alwaysPageNumbers?: boolean;
+}
+
+/** تحويل نص منسوخ من إكسل (أعمدة مفصولة بـ Tab) إلى جدول «| a | b |» — يعيد null إن لم يكن جدولاً */
+export function tsvToMarkupTable(text: string): string | null {
+  const src = String(text || '').replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+  if (!src.includes('\t')) return null;
+  // تحليل TSV مع دعم الخلايا المقتبسة التي تحتوي أسطراً
+  const rows: string[][] = [];
+  let row: string[] = [], cell = '', q = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (q) {
+      if (ch === '"' && src[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') q = false;
+      else cell += ch;
+    } else if (ch === '"' && cell === '') q = true;
+    else if (ch === '\t') { row.push(cell); cell = ''; }
+    else if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += ch;
+  }
+  row.push(cell); rows.push(row);
+  const clean = rows.map(r => r.map(c => c.replace(/\s*\n\s*/g, ' ').replace(/\|/g, '/').trim())).filter(r => r.some(Boolean));
+  if (!clean.length) return null;
+  const cols = Math.max(...clean.map(r => r.length));
+  // حذف الأعمدة الفارغة تماماً في الأطراف
+  let from = 0, to = cols - 1;
+  while (from < to && clean.every(r => !r[from])) from++;
+  while (to > from && clean.every(r => !r[to])) to--;
+  return clean.map(r => `| ${Array.from({ length: to - from + 1 }, (_, i) => r[from + i] || '').join(' | ')} |`).join('\n');
+}
+
+/** تنظيف Markdown المنسوخ من ChatGPT وغيره (أسوار الكود والرموز المضمّنة) */
+export function cleanPastedMarkdown(text: string): string {
+  return String(text || '').replace(/\r\n?/g, '\n').split('\n')
+    .filter(l => !/^\s*```/.test(l))
+    .map(l => l.replace(/`([^`]*)`/g, '$1').replace(/__(.+?)__/g, '**$1**'))
+    .join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/** تحويل HTML المنسوخ (ChatGPT / إكسل / Word / Google Sheets) إلى التنسيق المبسّط مع الحفاظ على الجداول */
+export function htmlToMarkup(html: string): string {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('style,script,meta,title,link').forEach(e => e.remove());
+  const out: string[] = [];
+  const inline = (n: Node): string => {
+    if (n.nodeType === 3) return (n.textContent || '').replace(/ /g, ' ').replace(/\s+/g, ' ');
+    if (n.nodeType !== 1) return '';
+    const el = n as HTMLElement;
+    if (el.tagName === 'BR') return '\n';
+    const inner = Array.from(el.childNodes).map(inline).join('');
+    return /^(B|STRONG)$/.test(el.tagName) && inner.trim() ? `**${inner.trim()}**` : inner;
+  };
+  const oneLine = (el: Element) => inline(el).replace(/\s*\n\s*/g, ' ').trim();
+  const cellText = (el: Element) => oneLine(el).replace(/\*\*/g, '').replace(/\|/g, '/');
+  const BLOCK = /^(P|DIV|H[1-6]|UL|OL|TABLE|BLOCKQUOTE|PRE|SECTION|ARTICLE|HEADER|FOOTER|MAIN|HR|GOOGLE-SHEETS-HTML-ORIGIN)$/;
+  const walk = (parent: Node) => {
+    let buf = '';
+    const flush = () => { const t = buf.split('\n').map(x => x.trim()).join('\n').trim(); if (t) out.push(t, ''); buf = ''; };
+    parent.childNodes.forEach(n => {
+      const el = n as HTMLElement;
+      if (n.nodeType !== 1 || !BLOCK.test(el.tagName)) { buf += inline(n); return; }
+      flush();
+      const tag = el.tagName;
+      if (tag === 'TABLE') {
+        const rows = Array.from(el.querySelectorAll('tr')).filter(tr => tr.closest('table') === el)
+          .map(tr => Array.from(tr.children).filter(c => /^T[HD]$/.test(c.tagName)).map(cellText)).filter(r => r.some(Boolean));
+        const cols = Math.max(0, ...rows.map(r => r.length));
+        if (rows.length) out.push(...rows.map(r => `| ${Array.from({ length: cols }, (_, i) => r[i] || '').join(' | ')} |`), '');
+      } else if (/^H[1-6]$/.test(tag)) { const t = oneLine(el); if (t) out.push(`## ${t}`, ''); }
+      else if (tag === 'UL' || tag === 'OL') {
+        Array.from(el.children).filter(c => c.tagName === 'LI').forEach(li => { const t = oneLine(li); if (t) out.push(`- ${t}`); });
+        out.push('');
+      } else if (tag !== 'HR') walk(el);
+    });
+    flush();
+  };
+  walk(doc.body);
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /** تحويل النص المبسّط إلى كتل HTML (عناوين/فقرات/قوائم/جداول) */
@@ -203,9 +283,11 @@ export function renderMarkup(text: string): string {
   const out: string[] = [];
   let para: string[] = [], list: string[] = [], table: string[][] = [];
   let bid = 0;
-  const cell = (c: string) => nums(esc(c.trim()));
-  const flushPara = () => { if (para.length) { out.push(`<p data-bid="b${bid++}">${para.map(l => nums(esc(l.trim()))).join('<br/>')}</p>`); para = []; } };
-  const flushList = () => { if (list.length) { out.push(`<ul data-bid="b${bid++}">${list.map(l => `<li>${nums(esc(l))}</li>`).join('')}</ul>`); list = []; } };
+  /** نص مع خط الأرقام وتغميق «**نص**» */
+  const fmt = (s: string) => nums(esc(s)).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  const cell = (c: string) => fmt(c.trim());
+  const flushPara = () => { if (para.length) { out.push(`<p data-bid="b${bid++}">${para.map(l => fmt(l.trim())).join('<br/>')}</p>`); para = []; } };
+  const flushList = () => { if (list.length) { out.push(`<ul data-bid="b${bid++}">${list.map(l => `<li>${fmt(l)}</li>`).join('')}</ul>`); list = []; } };
   const flushTable = () => {
     if (!table.length) return;
     const [head, ...rows] = table;
@@ -217,7 +299,9 @@ export function renderMarkup(text: string): string {
     const l = raw.trimEnd();
     const t = l.trim();
     if (!t) { flush(); continue; }
-    if (/^#{1,3}\s+/.test(t)) { flush(); out.push(`<h3 data-bid="b${bid++}">${nums(esc(t.replace(/^#{1,3}\s+/, '')))}</h3>`); continue; }
+    // فواصل Markdown (--- / ***) وأسوار الكود لا تُطبع
+    if (/^(-{3,}|\*{3,}|_{3,}|```.*)$/.test(t)) { flush(); continue; }
+    if (/^#{1,6}\s+/.test(t)) { flush(); out.push(`<h3 data-bid="b${bid++}">${fmt(t.replace(/^#{1,6}\s+/, '').replace(/\*\*/g, ''))}</h3>`); continue; }
     if (/^[-•*]\s+/.test(t)) { flushPara(); flushTable(); list.push(t.replace(/^[-•*]\s+/, '')); continue; }
     if (/^\|.*\|$/.test(t)) {
       flushPara(); flushList();
@@ -377,7 +461,7 @@ export function renderLetterHtml(company: LetterheadCompany, letter: Letter, ori
     }
     var all = pages(), lastPage = all[all.length - 1];
     if (signTpl && signTpl.content.firstElementChild) lastPage.appendChild(signTpl.content.firstElementChild.cloneNode(true));
-    if (all.length > 1) all.forEach(function (p, i) { var d = document.createElement('div'); d.className = 'pno'; d.textContent = 'صفحة ' + (i + 1) + ' من ' + all.length; p.appendChild(d); });
+    if (all.length > 1 || ${!!opts.alwaysPageNumbers}) all.forEach(function (p, i) { var d = document.createElement('div'); d.className = 'pno'; d.textContent = 'صفحة ' + (i + 1) + ' من ' + all.length; p.appendChild(d); });
     try { window.dispatchEvent(new Event('resize')); } catch (e) {}
     report(all.length);
   }

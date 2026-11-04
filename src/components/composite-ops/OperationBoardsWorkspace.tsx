@@ -19,8 +19,9 @@ import { installationTeamCoversBillboard } from '@/utils/teamAssignment';
 import { cn } from '@/lib/utils';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
 import { sortBillboardsStandardSync } from '@/lib/billboardSorter';
+import { smartArabicMatch } from '@/lib/arabicSearch';
 import {
-  Calculator, Camera, CheckCircle2, Sparkles, Star, ShieldOff, ImageIcon, ImagePlus, Loader2, MoreHorizontal, Palette, Plus, Printer, RotateCcw, Search, Trash2, Undo2, Upload, Users, CalendarDays, Rows3, LayoutGrid,
+  Calculator, Camera, X, CheckCircle2, Sparkles, Star, ShieldOff, ImageIcon, ImagePlus, Loader2, MoreHorizontal, Palette, Plus, Printer, RotateCcw, Search, Trash2, Undo2, Upload, Users, CalendarDays, Rows3, LayoutGrid,
 } from 'lucide-react';
 import { AddBillboardsToTaskDialog } from '@/components/installation/AddBillboardsToTaskDialog';
 import {
@@ -34,13 +35,23 @@ import { ScrollTopButton } from '@/components/shared/ScrollTopButton';
 
 const today = () => format(new Date(), 'yyyy-MM-dd');
 /** أدنى عرض للبطاقة في نافذة إدارة اللوحات: الأعمدة تتكيّف مع عرض النافذة */
-const BOARD_CARD_MIN_W = { sm: 300, md: 360, lg: 460 } as const;
+const BOARD_CARD_MIN_W = { xs: 210, sm: 300, md: 360, lg: 460 } as const;
 /** البطاقة بالعرض: أقل عرض للبطاقة وعرض الصورة لكل حجم */
-const BOARD_ROW_MIN_W = { sm: 480, md: 560, lg: 680 } as const;
-const BOARD_ROW_IMG_W = { sm: '230px', md: '270px', lg: '330px' } as const;
+const BOARD_ROW_MIN_W = { xs: 380, sm: 480, md: 560, lg: 680 } as const;
+const BOARD_ROW_IMG_W = { xs: '160px', sm: '230px', md: '270px', lg: '330px' } as const;
+/** ارتفاع صور التصميم/التركيب داخل البطاقة بالطول */
+const BOARD_FACE_H = { xs: '4rem', sm: '6rem', md: '6rem', lg: '6rem' } as const;
 type BoardLayout = 'horizontal' | 'vertical';
 const LAYOUT_KEY = 'operation-boards-layout';
 const readLayout = (): BoardLayout => { try { return localStorage.getItem(LAYOUT_KEY) === 'vertical' ? 'vertical' : 'horizontal'; } catch { return 'horizontal'; } };
+type BoardAttr = 'size' | 'level' | 'municipality' | 'city';
+const BOARD_ATTRS: { key: BoardAttr; label: string; all: string }[] = [
+  { key: 'size', label: 'المقاس', all: 'كل المقاسات' },
+  { key: 'level', label: 'المستوى', all: 'كل المستويات' },
+  { key: 'municipality', label: 'البلدية', all: 'كل البلديات' },
+  { key: 'city', label: 'المدينة', all: 'كل المدن' },
+];
+const EMPTY_ATTRS: Record<BoardAttr, string> = { size: 'all', level: 'all', municipality: 'all', city: 'all' };
 const dmy = (s?: string | null) => (s ? String(s).slice(0, 10).split('-').reverse().join('/') : '');
 
 function PhotoDialog({ item, op, onClose, onSaved }: { item: BoardItem; op: OperationRow; onClose: () => void; onSaved: () => void }) {
@@ -213,7 +224,7 @@ function BoardCard({ horizontal = false, i, gallery, isDone, selected, busy, sho
       </div>
     ) : (
       <BillboardFaceMedia faces={i.selectedFaces.map(face => ({ face, design: face === 1 ? i.designA : face === 2 ? i.designB : null, installed: face === 1 ? i.installedA : face === 2 ? i.installedB : null }))}
-        renderImage={(src, label) => <ZoomImage src={src} alt={label} title={i.name} gallery={gallery} className="h-24 w-full rounded-md" imgClassName="object-contain" />} />
+        renderImage={(src, label) => <ZoomImage src={src} alt={label} title={i.name} gallery={gallery} className="h-[var(--face-h,6rem)] w-full rounded-md" imgClassName="object-contain" />} />
     )}
     {horizontal ? (
       // بالعرض: زران رئيسيان بنص، والفرقة/التصميم أيقونتان بتلميح — لا تداخل في العرض الضيق
@@ -288,15 +299,28 @@ export function OperationBoardsWorkspace({ op, onClose, onChanged, onEditCosts, 
   useEffect(() => { if (items) loadOperationDesigns(op, items).then(setDesigns).catch(() => setDesigns([])); }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const teams = useMemo(() => op.tasks.filter(t => t.installation_task_id).map(t => ({ taskId: t.installation_task_id as string, name: t.teamName as string })), [op]);
+  const [attrs, setAttrs] = useState<Record<BoardAttr, string>>(EMPTY_ATTRS);
+  // خيارات الفلاتر من لوحات العملية مع عدد كل خيار
+  const attrOptions = useMemo(() => {
+    const out = {} as Record<BoardAttr, [string, number][]>;
+    BOARD_ATTRS.forEach(({ key }) => {
+      const counts = new Map<string, number>();
+      (items || []).forEach(i => { const v = String(i[key] ?? '').trim(); if (v && v !== '—') counts.set(v, (counts.get(v) || 0) + 1); });
+      out[key] = [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ar'));
+    });
+    return out;
+  }, [items]);
+  const teamCount = useMemo(() => { const m = new Map<string, number>(); (items || []).forEach(i => m.set(i.taskId, (m.get(i.taskId) || 0) + 1)); return m; }, [items]);
+  const activeFilters = BOARD_ATTRS.filter(a => attrs[a.key] !== 'all').length + Number(team !== 'all') + Number(!!q.trim());
   const visible = useMemo(() => {
-    const s = q.trim().toLowerCase();
     const list = (items || []).filter(i =>
       (team === 'all' || i.taskId === team)
       && (status === 'all' || (status === 'done' ? i.status === 'completed' : i.status !== 'completed'))
       && (contract === 'all' || String(i.contractNumber) === contract)
-      && (!s || [i.name, i.size, i.landmark, i.area, i.municipality, String(i.billboardId)].some(v => String(v || '').toLowerCase().includes(s))));
+      && BOARD_ATTRS.every(({ key }) => attrs[key] === 'all' || String(i[key] ?? '').trim() === attrs[key])
+      && smartArabicMatch([i.name, i.landmark, i.area, i.city, i.municipality, i.size, i.billboardId], q));
     return sortBillboardsStandardSync(list.map(i => ({ ...i, Size: i.size, Billboard_Name: i.name, ID: i.billboardId })) as any) as unknown as BoardItem[];
-  }, [items, q, team, status, contract]);
+  }, [items, q, team, status, contract, attrs]);
 
   const done = (items || []).filter(i => i.status === 'completed').length;
   const total = items?.length || 0;
@@ -386,18 +410,13 @@ export function OperationBoardsWorkspace({ op, onClose, onChanged, onEditCosts, 
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-[220px] flex-1">
               <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={q} onChange={e => setQ(e.target.value)} placeholder="اسم، مقاس، نقطة دالة، منطقة، بلدية" className="h-9 pr-9" />
+              <Input value={q} onChange={e => setQ(e.target.value)} placeholder="ابحث باسم اللوحة، أقرب نقطة دالة، أو المنطقة..." className="h-9 pr-9 pl-8" aria-label="بحث في اللوحات" />
+              {q && <button type="button" onClick={() => setQ('')} className="absolute left-2 top-1/2 -translate-y-1/2 cursor-pointer rounded p-1 text-muted-foreground hover:text-foreground" aria-label="مسح البحث"><X className="h-3.5 w-3.5" /></button>}
             </div>
             <Select value={status} onValueChange={setStatus}>
               <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
               <SelectContent><SelectItem value="all">كل الحالات</SelectItem><SelectItem value="pending">غير مركبة</SelectItem><SelectItem value="done">مركبة</SelectItem></SelectContent>
             </Select>
-            {teams.length > 1 && (
-              <Select value={team} onValueChange={setTeam}>
-                <SelectTrigger className="h-9 w-[150px]"><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="all">كل الفرق</SelectItem>{teams.map(t => <SelectItem key={t.taskId} value={t.taskId}>{t.name}</SelectItem>)}</SelectContent>
-              </Select>
-            )}
             {op.contractIds.length > 1 && (
               <Select value={contract} onValueChange={setContract}>
                 <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
@@ -412,6 +431,21 @@ export function OperationBoardsWorkspace({ op, onClose, onChanged, onEditCosts, 
               <button type="button" role="radio" aria-checked={!horizontal} onClick={() => setLayout('vertical')} className={cn('flex h-8 items-center gap-1 rounded-md px-2.5 text-xs', !horizontal ? 'bg-primary text-primary-foreground' : 'text-muted-foreground')}><LayoutGrid className="h-4 w-4" />بالطول</button>
             </div>
             <CardSizeControl />
+          </div>
+          {/* فلاتر اللوحات: الفرقة، المقاس، المستوى، البلدية، المدينة */}
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="فلاتر اللوحات">
+            <Select value={team} onValueChange={setTeam} dir="rtl">
+              <SelectTrigger className={cn('h-9 w-[170px] text-xs', team !== 'all' && 'border-primary text-primary')} aria-label="الفرقة"><Users className="ml-1 h-3.5 w-3.5 shrink-0" /><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="all">كل الفرق</SelectItem>{teams.map(t => <SelectItem key={t.taskId} value={t.taskId}>{t.name} ({teamCount.get(t.taskId) || 0})</SelectItem>)}</SelectContent>
+            </Select>
+            {BOARD_ATTRS.map(({ key, label, all }) => (
+              <Select key={key} value={attrs[key]} onValueChange={v => setAttrs(f => ({ ...f, [key]: v }))} dir="rtl">
+                <SelectTrigger className={cn('h-9 w-[150px] text-xs', attrs[key] !== 'all' && 'border-primary text-primary')} aria-label={label}><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="all">{all}</SelectItem>{attrOptions[key].map(([v, n]) => <SelectItem key={v} value={v}>{v} ({n})</SelectItem>)}</SelectContent>
+              </Select>
+            ))}
+            {activeFilters > 0 && <Button size="sm" variant="ghost" className="h-8 gap-1 text-xs" onClick={() => { setQ(''); setTeam('all'); setAttrs(EMPTY_ATTRS); }}><X className="h-3.5 w-3.5" />مسح الفلاتر ({activeFilters})</Button>}
+            <span className="ms-auto text-xs text-muted-foreground">{visible.length} من {total} لوحة</span>
           </div>
           {/* أدوات التحديد: تعمل على اللوحات الظاهرة حسب البحث والفلاتر */}
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -428,9 +462,9 @@ export function OperationBoardsWorkspace({ op, onClose, onChanged, onEditCosts, 
           <ScrollTopButton className="absolute bottom-24 right-6" threshold={300} />
           {error ? <div className="p-8 text-center text-destructive">{error}</div>
             : !items ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-56 rounded-xl" />)}</div>
-            : !visible.length ? <div className="rounded-xl border border-dashed border-border p-10 text-center text-muted-foreground">لا توجد لوحات</div>
+            : !visible.length ? <div className="rounded-xl border border-dashed border-border p-10 text-center text-muted-foreground">لا توجد لوحات مطابقة{activeFilters > 0 && <div><Button size="sm" variant="outline" className="mt-3" onClick={() => { setQ(''); setTeam('all'); setAttrs(EMPTY_ATTRS); }}>مسح الفلاتر</Button></div>}</div>
             : (
-              <div className={cn('grid gap-3', CARD_GRID[cardSize].text)} style={{ ...cardVars(cardSize), ['--img-w' as any]: BOARD_ROW_IMG_W[cardSize], gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${(horizontal ? BOARD_ROW_MIN_W : BOARD_CARD_MIN_W)[cardSize]}px), 1fr))` }}>
+              <div className={cn('grid gap-3', CARD_GRID[cardSize].text)} style={{ ...cardVars(cardSize), ['--img-w' as any]: BOARD_ROW_IMG_W[cardSize], ['--face-h' as any]: BOARD_FACE_H[cardSize], gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${(horizontal ? BOARD_ROW_MIN_W : BOARD_CARD_MIN_W)[cardSize]}px), 1fr))` }}>
                 {visible.map(i => {
                   const isDone = i.status === 'completed';
                   const gallery = ([['صورة اللوحة', i.photo], ...i.selectedFaces.flatMap(face => [[`تصميم الوجه ${face}`, face === 1 ? i.designA : face === 2 ? i.designB : null], [`تركيب الوجه ${face}`, face === 1 ? i.installedA : face === 2 ? i.installedB : null]])])
