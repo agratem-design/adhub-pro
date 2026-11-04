@@ -286,7 +286,9 @@ export default function Correspondence() {
             <label className="block space-y-1 text-sm">الموضوع<Input placeholder="اكتب عنوانًا واضحًا للمراسلة" value={draft.subject || ''} onChange={e => set({ subject: e.target.value })} /></label>
             <div className="space-y-1.5 text-sm">
               <div className="font-semibold">نص المراسلة</div>
-              <LetterBodyEditor key={draft.id || 'new'} value={draft.body} onChange={body => set({ body })} font={company.font_family} />
+              <LetterBodyEditor key={draft.id || 'new'} value={draft.body} onChange={body => set({ body })} font={company.font_family}
+                companyNames={[company.name, ...companies.map(c => c.name)]}
+                onLetter={parts => set(Object.fromEntries(Object.entries(parts).filter(([k, v]) => k === 'body' || v)) as Partial<Letter>)} />
             </div>
             <label className="block space-y-1 text-sm">الختام<Input value={draft.closing || ''} onChange={e => set({ closing: e.target.value })} /></label>
             <div className="grid gap-3 sm:grid-cols-2">

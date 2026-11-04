@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { ClipboardPaste, Plus, Table2, Trash2, X } from 'lucide-react';
+import { ClipboardPaste, Plus, Table2, Trash2, Wand2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { cleanPastedMarkdown, htmlToMarkup, tsvToMarkupTable } from '@/services/correspondence';
+import { cleanPastedMarkdown, htmlToMarkup, splitPastedLetter, tsvToMarkupTable, type PastedLetterParts } from '@/services/correspondence';
 
 /** النص مقسّم إلى فقرات نصية وجداول — يُخزَّن في قاعدة البيانات كنص مبسّط «| a | b |» */
 type Seg = { kind: 'text'; value: string } | { kind: 'table'; rows: string[][] };
@@ -130,7 +130,7 @@ function TableBlock({ rows, onChange, onRemove }: { rows: string[][]; onChange: 
 }
 
 /** محرر نص المراسلة: فقرات + جداول مرئية، مع لصق الجداول من ChatGPT وإكسل وWord */
-export function LetterBodyEditor({ value, onChange, font }: { value: string; onChange: (v: string) => void; font?: string }) {
+export function LetterBodyEditor({ value, onChange, font, companyNames = [], onLetter }: { value: string; onChange: (v: string) => void; font?: string; companyNames?: string[]; onLetter?: (parts: PastedLetterParts) => void }) {
   const [segs, setSegs] = useState<Seg[]>(() => parseBody(value));
   const lastOut = useRef(value);
   const caret = useRef<{ i: number; pos: number } | null>(null);
@@ -144,14 +144,27 @@ export function LetterBodyEditor({ value, onChange, font }: { value: string; onC
     const text = s?.kind === 'text' ? s.value : '';
     commit(normalize([...segs.slice(0, i), { kind: 'text', value: text.slice(0, start) }, ...parseBody(markup), { kind: 'text', value: text.slice(end) }, ...segs.slice(i + 1)]));
   };
+  /** مراسلة كاملة ← توزيعها على الحقول (الموجَّه إليه/الموضوع/التحية/الختام) والمتن هنا */
+  const applyLetter = (markup: string) => {
+    const parts = onLetter ? splitPastedLetter(markup, companyNames) : null;
+    if (!parts) return false;
+    onLetter!(parts);
+    const filled = [parts.recipient && 'الموجَّه إليه', parts.subject && 'الموضوع', parts.greeting && 'التحية', parts.closing && 'الختام', parts.signer_title && 'الصفة'].filter(Boolean);
+    toast.success(`تم ترتيب المراسلة${filled.length ? `: ${filled.join('، ')}` : ''}`);
+    return true;
+  };
   const pasteInto = (i: number) => (e: ClipboardEvent<HTMLTextAreaElement>) => {
-    const markup = clipboardToMarkup(e.clipboardData.getData('text/html'), e.clipboardData.getData('text/plain'));
-    if (!markup || !markup.split('\n').some(isRow)) return;
-    e.preventDefault();
+    const html = e.clipboardData.getData('text/html'), plain = e.clipboardData.getData('text/plain');
+    const markup = clipboardToMarkup(html, plain) ?? (html.trim() ? htmlToMarkup(html) : cleanPastedMarkdown(plain));
     const el = e.currentTarget;
+    // لصق مراسلة كاملة في خانة فارغة ← توزيع تلقائي على الحقول
+    if (!serialize(segs).trim() && applyLetter(markup)) { e.preventDefault(); return; }
+    if (!markup.split('\n').some(isRow)) return;
+    e.preventDefault();
     insertAt(i, el.selectionStart, el.selectionEnd, markup);
     toast.success('تم لصق الجدول');
   };
+  const organize = () => { if (!applyLetter(serialize(segs))) toast.info('لم يُعثر على أجزاء مراسلة (الموجَّه إليه، الموضوع، التحية، الختام) لترتيبها'); };
   const insertTable = () => {
     const at = caret.current && segs[caret.current.i]?.kind === 'text' ? caret.current : { i: segs.length - 1, pos: (segs[segs.length - 1] as { value: string }).value.length };
     insertAt(at.i, at.pos, at.pos, '| البند | التفاصيل |\n|  |  |');
@@ -166,8 +179,9 @@ export function LetterBodyEditor({ value, onChange, font }: { value: string; onC
           if (item.types.includes('text/plain')) plain = await (await item.getType('text/plain')).text();
         }
       } else plain = await navigator.clipboard.readText();
-      const markup = clipboardToMarkup(html, plain) ?? cleanPastedMarkdown(plain);
+      const markup = clipboardToMarkup(html, plain) ?? (html.trim() ? htmlToMarkup(html) : cleanPastedMarkdown(plain));
       if (!markup.trim()) { toast.info('الحافظة فارغة'); return; }
+      if (!serialize(segs).trim() && applyLetter(markup)) return;
       const at = caret.current && segs[caret.current.i]?.kind === 'text' ? caret.current : { i: segs.length - 1, pos: (segs[segs.length - 1] as { value: string }).value.length };
       insertAt(at.i, at.pos, at.pos, markup);
       toast.success('تم اللصق');
@@ -179,7 +193,8 @@ export function LetterBodyEditor({ value, onChange, font }: { value: string; onC
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border bg-muted/60 px-2 py-1.5 backdrop-blur">
         <Button type="button" size="sm" variant="outline" className="h-9 bg-background" onClick={insertTable}><Table2 className="h-4 w-4" />إدراج جدول</Button>
         <Button type="button" size="sm" variant="outline" className="h-9 bg-background" onClick={pasteButton}><ClipboardPaste className="h-4 w-4" />لصق</Button>
-        <span className="text-xs text-muted-foreground">الصق جداول من ChatGPT أو إكسل أو Word وستظهر جدولاً</span>
+        {onLetter && <Button type="button" size="sm" variant="outline" className="h-9 bg-background" title="يوزّع الموجَّه إليه والموضوع والتحية والختام على حقولها ويحذف اسم الشركة المكرر" onClick={organize}><Wand2 className="h-4 w-4" />تنظيم المراسلة</Button>}
+        <span className="text-xs text-muted-foreground">الصق مراسلة كاملة من ChatGPT وتُرتَّب تلقائياً، والجداول تظهر جدولاً</span>
       </div>
       <div className="space-y-1 p-1.5">
         {segs.map((s, i) => s.kind === 'text'

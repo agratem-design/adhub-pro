@@ -236,6 +236,83 @@ export function cleanPastedMarkdown(text: string): string {
     .join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+export interface PastedLetterParts {
+  recipient?: string;
+  greeting?: string;
+  subject?: string;
+  body: string;
+  closing?: string;
+  signer_title?: string;
+}
+
+/** بعد normAr (الهمزات ← ا، بدون تنوين) */
+const ORDINALS = 'اولا|ثانيا|ثالثا|رابعا|خامسا|سادسا|سابعا|ثامنا|تاسعا|عاشرا|اخيرا';
+/** نص السطر بدون رموز التنسيق */
+const plainLine = (l: string) => l.replace(/^#{1,6}\s+/, '').replace(/\*\*/g, '').replace(/^[\s>]+/, '').trim();
+const normAr = (s: string) => s.replace(/[إأآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[ً-ْـ]/g, '').replace(/\s+/g, ' ').trim();
+
+/**
+ * تقسيم مراسلة كاملة منسوخة (من ChatGPT وغيره) إلى حقولها:
+ * اسم الشركة يُحذف، «إلى…» ← الموجَّه إليه، «الموضوع:» ← الموضوع، «تحية…» ← التحية،
+ * «وتفضلوا…» ← الختام، وما بعده (عدا اسم الشركة) ← صفة الموقِّع، و«أولاً/ثانياً…» تصبح عناوين.
+ * يعيد null إن لم يكن النص مراسلة.
+ */
+export function splitPastedLetter(markup: string, companyNames: string[] = []): PastedLetterParts | null {
+  const lines = String(markup || '').replace(/\r/g, '').split('\n');
+  const names = companyNames.filter(Boolean).map(normAr);
+  const isCompany = (p: string) => p.length <= 80 && (names.some(n => normAr(p) === n || normAr(p).includes(n)) || /^شركة\s/.test(p));
+  const reRecipient = /^(إلى|الى|إلي)\s*[:：]?\s*\S|^(السيد|السادة|الأخ|الأخوة|الإخوة|الأستاذ|حضرة|معالي|سعادة)(\s|\/|$)/;
+  const reSubject = /^الموضوع\s*[:：\-–/]\s*/;
+  const reGreeting = /^(تحية|السلام عليكم|بعد التحية)/;
+  const reClosing = /^(و?تفضلوا|و?تقبلوا|مع (خالص|فائق)|وشكرا|شاكرين|والسلام عليكم|ودمتم)/;
+  const reMeta = /^(التاريخ|الرقم الإشاري|الرقم الاشاري|الإشاري|المرجع|الرقم)\s*[:：]/;
+  const parts: PastedLetterParts = { body: '' };
+
+  // الرأس: من الأعلى حتى أول سطر من متن المراسلة
+  let i = 0;
+  for (; i < lines.length; i++) {
+    const p = plainLine(lines[i]);
+    if (!p) continue;
+    if (reSubject.test(p) && !parts.subject) { parts.subject = p.replace(reSubject, '').trim(); continue; }
+    if (reGreeting.test(p) && !parts.greeting) { parts.greeting = p; continue; }
+    if (reMeta.test(p)) continue;
+    if (!parts.recipient && !parts.greeting && reRecipient.test(p) && p.length <= 150) { parts.recipient = p; continue; }
+    if (!parts.recipient && !parts.subject && !parts.greeting && isCompany(p)) continue;
+    break;
+  }
+
+  // الذيل: آخر سطر ختام قريب من النهاية
+  let end = lines.length;
+  while (end > i && !plainLine(lines[end - 1])) end--;
+  let closeAt = -1;
+  for (let k = end - 1, seen = 0; k >= i && seen < 8; k--) {
+    const p = plainLine(lines[k]);
+    if (!p) continue;
+    seen++;
+    if (reClosing.test(p) && p.length <= 160) { closeAt = k; break; }
+  }
+  if (closeAt >= 0) {
+    parts.closing = plainLine(lines[closeAt]);
+    const tail = lines.slice(closeAt + 1).map(plainLine).filter(p => p && !isCompany(p) && !/^[.…\-_]+$/.test(p));
+    if (tail.length) parts.signer_title = tail.join(' - ').slice(0, 80);
+    end = closeAt;
+  }
+
+  if (!parts.subject && !parts.greeting && !parts.closing && !parts.recipient) return null;
+
+  // المتن: الأسطر الغامقة بالكامل وأسطر «أولاً:…» تصبح عناوين
+  const reOrdinal = new RegExp(`^(${ORDINALS})\\s*[:：\\-–.]`);
+  parts.body = lines.slice(i, end).map(l => {
+    const t = l.trim();
+    if (!t) return '';
+    const p = plainLine(t);
+    const fullBold = /^\*\*[^*]+\*\*[:：]?$/.test(t) || /^#{1,6}\s/.test(t);
+    if (p.length <= 120 && (fullBold || reOrdinal.test(normAr(p)))) return `## ${p}`;
+    return t;
+  }).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return parts;
+}
+
 /** تحويل HTML المنسوخ (ChatGPT / إكسل / Word / Google Sheets) إلى التنسيق المبسّط مع الحفاظ على الجداول */
 export function htmlToMarkup(html: string): string {
   const doc = new DOMParser().parseFromString(html, 'text/html');
