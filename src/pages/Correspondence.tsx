@@ -1,4 +1,5 @@
 import { usePersistedState } from '@/hooks/usePersistedState';
+import { useDraftBackup } from '@/hooks/useDraftBackup';
 import { useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -10,12 +11,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
-import { ArrowLeft, ArrowRight, Archive, Building2, CalendarDays, Copy, FileText, FilePlus2, Loader2, Mail, Pencil, Printer, Save, Search, Trash2, Upload, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Archive, ArchiveRestore, Building2, CalendarDays, Copy, FileText, FilePlus2, Loader2, Mail, Pencil, Printer, Save, Search, Upload, X } from 'lucide-react';
 import { preparePrintWindow, writePrintWindow } from '@/utils/printWindowHelper';
 import { LetterPreview, MODE_HINT, PrintMenu } from '@/components/correspondence/LetterParts';
 import { LetterBodyEditor } from '@/components/correspondence/LetterBodyEditor';
 import {
-  LETTER_FONTS, NUMBER_FONTS, PRINT_MODE_LABELS, deleteLetter, loadCompanies, loadLetters, nextReference, renderLetterHtml, saveCompany, saveLetter,
+  LETTER_FONTS, NUMBER_FONTS, PRINT_MODE_LABELS, archiveLetter, loadCompanies, loadLetters, nextReference, renderLetterHtml, saveCompany, saveLetter,
   type RenderOptions,
   type Letter, type LetterheadCompany, type LetterPrintMode,
 } from '@/services/correspondence';
@@ -148,9 +149,22 @@ export default function Correspondence() {
   const companies = companiesQ.data || [];
   const allLetters = lettersQ.data || [];
   // التقارير الدورية لها صفحتها الخاصة
-  const letters = useMemo(() => allLetters.filter(l => (l.kind || 'letter') !== 'report'), [allLetters]);
+  const nonReports = useMemo(() => allLetters.filter(l => (l.kind || 'letter') !== 'report'), [allLetters]);
+  const [showArchived, setShowArchived] = useState(false);
+  const letters = useMemo(() => nonReports.filter(l => !l.archived_at), [nonReports]);
+  const archivedCount = nonReports.length - letters.length;
   const [companyId, setCompanyId] = useState<string>('');
   const [draft, setDraft] = useState<Letter | null>(null);
+  // آخر نسخة محفوظة/مفتوحة للمقارنة: أي اختلاف = تعديلات غير محفوظة
+  const [baseline, setBaseline] = useState('');
+  const dirty = !!draft && JSON.stringify(draft) !== baseline;
+  const backup = useDraftBackup<Letter>('correspondence.draftBackup', draft, dirty);
+  const open = (d: Letter | null) => { setBaseline(d ? JSON.stringify(d) : ''); setDraft(d); };
+  /** إغلاق المسودة مع التأكيد إن كانت فيها تعديلات غير محفوظة */
+  const closeDraft = async () => {
+    if (dirty && !(await confirm({ title: 'تعديلات غير محفوظة', message: 'أغلق المراسلة بدون حفظ التعديلات؟', confirmText: 'إغلاق بدون حفظ', cancelText: 'متابعة التعديل', variant: 'destructive' } as any))) return false;
+    backup.clear(); open(null); return true;
+  };
   const [editingCompany, setEditingCompany] = useState<Partial<LetterheadCompany> | null>(null);
   const [q, setQ] = useState('');
   const [saving, setSaving] = useState(false);
@@ -161,8 +175,12 @@ export default function Correspondence() {
   const company = companies.find(c => c.id === (draft?.company_id || companyId)) || null;
   const list = useMemo(() => {
     const s = q.trim();
-    return letters.filter(l => (!companyId || l.company_id === companyId) && (!s || [l.reference_number, l.recipient, l.subject, l.body].some(v => String(v || '').includes(s))));
-  }, [letters, companyId, q]);
+    return nonReports.filter(l => !!l.archived_at === showArchived && (!companyId || l.company_id === companyId) && (!s || [l.reference_number, l.recipient, l.subject, l.body].some(v => String(v || '').includes(s))));
+  }, [nonReports, showArchived, companyId, q]);
+  const setArchived = async (l: Letter, archived: boolean) => {
+    try { await archiveLetter(l.id!, archived); qc.invalidateQueries({ queryKey: ['letters'] }); toast.success(archived ? `أُرشفت المراسلة ${l.reference_number}` : `استُرجعت المراسلة ${l.reference_number}`); }
+    catch (e: any) { toast.error(e.message, { duration: 9000 }); }
+  };
 
   const companyLetters = letters.filter(l => !companyId || l.company_id === companyId);
   const monthLetters = companyLetters.filter(l => l.letter_date?.slice(0, 7) === today().slice(0, 7));
@@ -183,7 +201,8 @@ export default function Correspondence() {
     setSaving(true);
     try {
       const saved = await saveLetter(draft);
-      setDraft(saved);
+      open(saved);
+      backup.clear();
       qc.invalidateQueries({ queryKey: ['letters'] });
       toast.success(`تم حفظ المراسلة ${saved.reference_number}`);
       if (andPrint) print(saved, andPrint);
@@ -200,13 +219,22 @@ export default function Correspondence() {
           <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">أنشئ مراسلاتك بهوية شركتك، وراجعها واحفظها واطبعها من مكان واحد.</p>
         </div>
         <div className="flex w-full flex-wrap gap-2 lg:w-auto">
-          {company ? <Button variant="outline" onClick={() => { setCompanyId(''); setDraft(null); setEditingCompany(null); setQ(''); }}><ArrowRight className="h-4 w-4" />جميع الشركات</Button>
+          {company ? <Button variant="outline" onClick={async () => { if (draft && !(await closeDraft())) return; setCompanyId(''); setEditingCompany(null); setQ(''); }}><ArrowRight className="h-4 w-4" />جميع الشركات</Button>
             : <Button variant="outline" onClick={() => setEditingCompany({})}><Building2 className="h-4 w-4" />إضافة شركة</Button>}
-          {company && <Button onClick={() => setDraft(emptyLetter(company, allLetters))}><FilePlus2 className="h-4 w-4" />مراسلة جديدة</Button>}
+          {company && <Button onClick={async () => { if (!draft || await closeDraft()) open(emptyLetter(company, allLetters)); }}><FilePlus2 className="h-4 w-4" />مراسلة جديدة</Button>}
         </div>
       </header>
 
       {err && <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">{err.message}</div>}
+
+      {!draft && backup.stored && companies.some(c => c.id === backup.stored!.value.company_id) && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+          <Save className="h-4 w-4 shrink-0 text-amber-700" />
+          <span className="min-w-0 flex-1">مسودة غير محفوظة{backup.stored.value.subject ? `: «${backup.stored.value.subject}»` : ''} — {new Date(backup.stored.at).toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' })}</span>
+          <Button size="sm" onClick={() => { const v = backup.stored!.value; setCompanyId(v.company_id); setBaseline(''); setDraft(v); backup.dismiss(); }}>استعادة</Button>
+          <Button size="sm" variant="ghost" onClick={backup.clear}>تجاهل</Button>
+        </div>
+      )}
 
       {editingCompany && (
         <CompanyEditor company={editingCompany} onCancel={() => setEditingCompany(null)}
@@ -270,7 +298,10 @@ export default function Correspondence() {
           <section className="min-w-0 space-y-4 rounded-2xl border border-border bg-card p-4 shadow-sm md:p-6">
             <div className="flex items-center justify-between">
               <h2 className="flex items-center gap-2 font-bold"><FileText className="h-4 w-4 text-primary" />{draft.id ? `تعديل المراسلة ${draft.reference_number}` : 'مراسلة جديدة'}</h2>
-              <Button variant="ghost" size="sm" onClick={() => setDraft(null)}><X className="h-4 w-4" />إغلاق</Button>
+              <div className="flex items-center gap-2">
+                {dirty && <span className="text-xs text-amber-700 dark:text-amber-400" title="محفوظة مؤقتاً على هذا الجهاز">● غير محفوظة</span>}
+                <Button variant="ghost" size="sm" onClick={closeDraft}><X className="h-4 w-4" />إغلاق</Button>
+              </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1 text-sm">الرقم الإشاري <span className="text-xs text-muted-foreground">(قابل للتعديل)</span>
@@ -288,7 +319,7 @@ export default function Correspondence() {
               <div className="font-semibold">نص المراسلة</div>
               <LetterBodyEditor key={draft.id || 'new'} value={draft.body} onChange={body => set({ body })} font={company.font_family}
                 companyNames={[company.name, ...companies.map(c => c.name)]}
-                onLetter={parts => set(Object.fromEntries(Object.entries(parts).filter(([k, v]) => k === 'body' || v)) as Partial<Letter>)} />
+                onLetter={parts => { const prev = draft; set(Object.fromEntries(Object.entries(parts).filter(([k, v]) => k === 'body' || v)) as Partial<Letter>); return () => setDraft(prev); }} />
             </div>
             <label className="block space-y-1 text-sm">الختام<Input value={draft.closing || ''} onChange={e => set({ closing: e.target.value })} /></label>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -325,7 +356,13 @@ export default function Correspondence() {
       ) : (
         <section className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-card p-4">
-            <div><h2 className="font-bold">أرشيف المراسلات</h2><p className="mt-1 text-xs text-muted-foreground">{list.length} مراسلة{q.trim() ? ' تطابق البحث' : ' محفوظة للشركة المحددة'}</p></div>
+            <div>
+              <h2 className="font-bold">{showArchived ? 'المراسلات المؤرشفة' : 'سجل المراسلات'}</h2>
+              <p className="mt-1 text-xs text-muted-foreground">{list.length} مراسلة{q.trim() ? ' تطابق البحث' : showArchived ? ' في الأرشيف' : ' محفوظة للشركة المحددة'}</p>
+              <button type="button" onClick={() => setShowArchived(v => !v)} className="mt-1.5 inline-flex min-h-8 items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline">
+                {showArchived ? <><ArrowRight className="h-3.5 w-3.5" />العودة للمراسلات النشطة</> : <><Archive className="h-3.5 w-3.5" />الأرشيف ({archivedCount})</>}
+              </button>
+            </div>
           <div className="relative w-full sm:max-w-md">
             <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input value={q} onChange={e => setQ(e.target.value)} aria-label="البحث في المراسلات" placeholder="ابحث بالرقم أو المستلم أو الموضوع…" className="h-11 pr-9 pl-10" />
@@ -337,7 +374,7 @@ export default function Correspondence() {
               <span className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary"><Mail className="h-8 w-8" /></span>
               <h3 className="text-lg font-bold">{q.trim() ? 'لا توجد نتائج مطابقة' : company ? 'ابدأ مراسلتك الأولى' : 'أضف شركتك للبدء'}</h3>
               <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">{q.trim() ? 'جرّب رقمًا إشاريًا أو اسم مستلم أو موضوعًا آخر.' : company ? 'أنشئ خطابًا رسميًا بترويسة شركتك، مع معاينة مباشرة قبل الطباعة.' : 'أدخل بيانات الشركة وشعارها لتجهيز ترويسة مراسلاتك الرسمية.'}</p>
-              <Button className="mt-5" variant={q.trim() ? 'outline' : 'default'} onClick={() => q.trim() ? setQ('') : company ? setDraft(emptyLetter(company, allLetters)) : setEditingCompany({})}>{q.trim() ? <X className="h-4 w-4" /> : <FilePlus2 className="h-4 w-4" />}{q.trim() ? 'مسح البحث' : company ? 'إنشاء مراسلة' : 'إضافة شركة'}</Button>
+              <Button className="mt-5" variant={q.trim() ? 'outline' : 'default'} onClick={() => q.trim() ? setQ('') : company ? open(emptyLetter(company, allLetters)) : setEditingCompany({})}>{q.trim() ? <X className="h-4 w-4" /> : <FilePlus2 className="h-4 w-4" />}{q.trim() ? 'مسح البحث' : company ? 'إنشاء مراسلة' : 'إضافة شركة'}</Button>
             </div>
             : (
               <div className="overflow-x-auto rounded-xl border border-border bg-card">
@@ -353,13 +390,15 @@ export default function Correspondence() {
                         <td className="col-span-2 p-2 md:p-3"><div className="font-semibold">{l.recipient?.trim() || l.subject?.trim() || '—'}</div>{l.recipient?.trim() && <div className="text-xs text-muted-foreground">{l.subject}</div>}</td>
                         <td className="col-span-2 p-2 md:p-3">
                           <div className="flex flex-wrap items-center justify-end gap-1">
-                            <Button size="sm" variant="outline" className="h-8" onClick={() => setDraft(l)}><Pencil className="h-3.5 w-3.5" />تعديل</Button>
+                            {!showArchived && <Button size="sm" variant="outline" className="h-8" onClick={() => open(l)}><Pencil className="h-3.5 w-3.5" />تعديل</Button>}
                             <PrintMenu size="sm" onPrint={m => print(l, m)} yearOnlyDate={yearOnlyDate} onYearOnlyDateChange={setYearOnlyDate} />
-                            <Button size="sm" variant="ghost" className="h-10 w-10" aria-label="نسخ كمراسلة جديدة" title="نسخ كمراسلة جديدة" onClick={() => { const c = companies.find(x => x.id === l.company_id); setDraft({ ...l, id: undefined, created_at: undefined, letter_date: today(), reference_number: nextReference(c?.reference_prefix || '', allLetters.filter(x => x.company_id === l.company_id)) }); }}><Copy className="h-3.5 w-3.5" /></Button>
-                            <Button size="sm" variant="ghost" aria-label={`حذف المراسلة ${l.reference_number}`} title="حذف المراسلة" className="h-10 w-10 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={async () => {
-                              if (!(await confirm({ title: 'حذف المراسلة', message: `حذف المراسلة ${l.reference_number} نهائياً؟`, confirmText: 'حذف', variant: 'destructive' } as any))) return;
-                              try { await deleteLetter(l.id!); qc.invalidateQueries({ queryKey: ['letters'] }); toast.success('تم الحذف'); } catch (e: any) { toast.error(e.message); }
-                            }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                            <Button size="sm" variant="ghost" className="h-10 w-10" aria-label="نسخ كمراسلة جديدة" title="نسخ كمراسلة جديدة" onClick={() => { const c = companies.find(x => x.id === l.company_id); open({ ...l, id: undefined, created_at: undefined, archived_at: undefined, letter_date: today(), reference_number: nextReference(c?.reference_prefix || '', allLetters.filter(x => x.company_id === l.company_id)) }); }}><Copy className="h-3.5 w-3.5" /></Button>
+                            {showArchived
+                              ? <Button size="sm" variant="outline" className="h-8" onClick={() => setArchived(l, false)}><ArchiveRestore className="h-3.5 w-3.5" />استرجاع</Button>
+                              : <Button size="sm" variant="ghost" aria-label={`أرشفة المراسلة ${l.reference_number}`} title="أرشفة المراسلة (يمكن استرجاعها)" className="h-10 w-10 text-muted-foreground hover:bg-amber-500/10 hover:text-amber-700" onClick={async () => {
+                                if (!(await confirm({ title: 'أرشفة المراسلة', message: `نقل المراسلة ${l.reference_number} إلى الأرشيف؟ يمكنك استرجاعها لاحقاً.`, confirmText: 'أرشفة' } as any))) return;
+                                setArchived(l, true);
+                              }}><Archive className="h-3.5 w-3.5" /></Button>}
                           </div>
                         </td>
                       </tr>

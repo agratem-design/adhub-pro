@@ -4,17 +4,17 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
-import { CalendarRange, FileBarChart2, Loader2, Pencil, RefreshCw, Save, Shuffle, Trash2, X } from 'lucide-react';
+import { Archive, ArchiveRestore, CalendarRange, FileBarChart2, Loader2, Pencil, RefreshCw, Save, Shuffle, X } from 'lucide-react';
 import { preparePrintWindow, writePrintWindow } from '@/utils/printWindowHelper';
 import { LetterPreview, PrintMenu } from '@/components/correspondence/LetterParts';
+import { LetterBodyEditor } from '@/components/correspondence/LetterBodyEditor';
 import {
-  PRINT_MODE_LABELS, deleteLetter, loadCompanies, loadLetters, nextReference, renderLetterHtml, saveLetter,
+  PRINT_MODE_LABELS, archiveLetter, loadCompanies, loadLetters, nextReference, renderLetterHtml, saveLetter,
   type Letter, type LetterPrintMode,
 } from '@/services/correspondence';
 import {
@@ -33,7 +33,14 @@ export default function PeriodicReports() {
   const lettersQ = useQuery({ queryKey: ['letters'], queryFn: () => loadLetters(), enabled: companiesQ.isSuccess });
   const companies = companiesQ.data || [];
   const allLetters = lettersQ.data || [];
-  const reports = useMemo(() => allLetters.filter(l => l.kind === 'report'), [allLetters]);
+  const [showArchived, setShowArchived] = useState(false);
+  const allReports = useMemo(() => allLetters.filter(l => l.kind === 'report'), [allLetters]);
+  const reports = useMemo(() => allReports.filter(l => !!l.archived_at === showArchived), [allReports, showArchived]);
+  const archivedCount = allReports.filter(l => l.archived_at).length;
+  const setArchived = async (r: Letter, archived: boolean) => {
+    try { await archiveLetter(r.id!, archived); qc.invalidateQueries({ queryKey: ['letters'] }); toast.success(archived ? `أُرشف التقرير ${r.reference_number}` : `استُرجع التقرير ${r.reference_number}`); }
+    catch (e: any) { toast.error(e.message, { duration: 9000 }); }
+  };
 
   const [companyId, setCompanyId] = useState('');
   const [period, setPeriod] = usePersistedState<ReportPeriod>('periodicReports.period', 'week');
@@ -208,10 +215,10 @@ export default function PeriodicReports() {
             </div>
             <label className="block space-y-1 text-sm">الموجَّه إليه<Input value={draft.recipient || ''} onChange={e => set({ recipient: e.target.value })} /></label>
             <label className="block space-y-1 text-sm">الموضوع<Input value={draft.subject || ''} onChange={e => set({ subject: e.target.value })} /></label>
-            <label className="block space-y-1 text-sm">
-              نص التقرير <span className="text-xs text-muted-foreground">— عدّل بحرية. «## » عنوان، «- » بند، سطر فارغ بين الفقرات، والجداول «| عمود | عمود |»</span>
-              <Textarea rows={22} value={draft.body} onChange={e => set({ body: e.target.value })} style={{ fontFamily: company.font_family }} className="text-[15px] leading-8" />
-            </label>
+            <div className="space-y-1.5 text-sm">
+              <div className="font-semibold">نص التقرير <span className="text-xs font-normal text-muted-foreground">— عدّل بحرية، والجداول قابلة للتعديل مباشرة</span></div>
+              <LetterBodyEditor key={draft.id || 'new'} value={draft.body} onChange={body => set({ body })} font={company.font_family} />
+            </div>
             <label className="block space-y-1 text-sm">الختام<Input value={draft.closing || ''} onChange={e => set({ closing: e.target.value })} /></label>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1 text-sm">الموقِّع<Input value={draft.signer_name || ''} onChange={e => set({ signer_name: e.target.value })} /></label>
@@ -240,9 +247,12 @@ export default function PeriodicReports() {
         </div>
       ) : (
         <section className="space-y-2">
-          <h2 className="text-sm font-semibold text-muted-foreground">التقارير المحفوظة</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-muted-foreground">{showArchived ? 'التقارير المؤرشفة' : 'التقارير المحفوظة'}</h2>
+            <button type="button" onClick={() => setShowArchived(v => !v)} className="inline-flex min-h-8 items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline"><Archive className="h-3.5 w-3.5" />{showArchived ? 'العودة للتقارير النشطة' : `الأرشيف (${archivedCount})`}</button>
+          </div>
           {lettersQ.isLoading ? <Skeleton className="h-24 w-full" />
-            : !reports.length ? <div className="rounded-xl border border-dashed border-border p-10 text-center text-muted-foreground">اختر الفترة ثم «إنشاء التقرير»</div>
+            : !reports.length ? <div className="rounded-xl border border-dashed border-border p-10 text-center text-muted-foreground">{showArchived ? 'لا توجد تقارير مؤرشفة' : 'اختر الفترة ثم «إنشاء التقرير»'}</div>
             : (
               <div className="overflow-x-auto rounded-xl border border-border bg-card">
                 <table className="w-full min-w-[720px] text-sm">
@@ -259,10 +269,12 @@ export default function PeriodicReports() {
                           <div className="flex justify-end gap-1">
                             <Button size="sm" variant="outline" className="h-8" onClick={() => { setDraft(r); if (r.report_period) setPeriod(r.report_period as ReportPeriod); if (r.period_end) setEnd(r.period_end); if (r.period_start) setCustomFrom(r.period_start); }}><Pencil className="h-3.5 w-3.5" />تعديل</Button>
                             <PrintMenu size="sm" onPrint={m => print(r, m)} />
-                            <Button size="sm" variant="ghost" className="h-8 text-destructive" onClick={async () => {
-                              if (!(await confirm({ title: 'حذف التقرير', message: `حذف التقرير ${r.reference_number} نهائياً؟`, confirmText: 'حذف', variant: 'destructive' } as any))) return;
-                              try { await deleteLetter(r.id!); qc.invalidateQueries({ queryKey: ['letters'] }); toast.success('تم الحذف'); } catch (e: any) { toast.error(e.message); }
-                            }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                            {showArchived
+                              ? <Button size="sm" variant="outline" className="h-8" onClick={() => setArchived(r, false)}><ArchiveRestore className="h-3.5 w-3.5" />استرجاع</Button>
+                              : <Button size="sm" variant="ghost" className="h-8 text-muted-foreground hover:text-amber-700" title="أرشفة التقرير (يمكن استرجاعه)" aria-label={`أرشفة التقرير ${r.reference_number}`} onClick={async () => {
+                                if (!(await confirm({ title: 'أرشفة التقرير', message: `نقل التقرير ${r.reference_number} إلى الأرشيف؟ يمكنك استرجاعه لاحقاً.`, confirmText: 'أرشفة' } as any))) return;
+                                setArchived(r, true);
+                              }}><Archive className="h-3.5 w-3.5" /></Button>}
                           </div>
                         </td>
                       </tr>

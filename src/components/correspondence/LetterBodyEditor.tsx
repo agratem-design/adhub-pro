@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { ClipboardPaste, Plus, Table2, Trash2, Wand2, X } from 'lucide-react';
+import { Bold, ClipboardPaste, Heading, List, Plus, Sigma, Table2, Trash2, Wand2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { cleanPastedMarkdown, htmlToMarkup, splitPastedLetter, tsvToMarkupTable, type PastedLetterParts } from '@/services/correspondence';
+import { useSystemDialog } from '@/contexts/SystemDialogContext';
+import { cleanPastedMarkdown, htmlToMarkup, isTotalLabel, parseCellNumber, splitPastedLetter, tsvToMarkupTable, type PastedLetterParts } from '@/services/correspondence';
 
 /** النص مقسّم إلى فقرات نصية وجداول — يُخزَّن في قاعدة البيانات كنص مبسّط «| a | b |» */
 type Seg = { kind: 'text'; value: string } | { kind: 'table'; rows: string[][] };
@@ -58,16 +59,32 @@ function clipboardToMarkup(html: string, plain: string): string | null {
   return null;
 }
 
-function AutoTextarea({ value, onChange, onPaste, onSelect, placeholder, font, className }: { value: string; onChange: (v: string) => void; onPaste: (e: ClipboardEvent<HTMLTextAreaElement>) => void; onSelect: (pos: number) => void; placeholder?: string; font?: string; className?: string }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
+function AutoTextarea({ value, onChange, onPaste, onSelect, inputRef, placeholder, font, className }: { value: string; onChange: (v: string) => void; onPaste: (e: ClipboardEvent<HTMLTextAreaElement>) => void; onSelect: (start: number, end: number) => void; inputRef: (el: HTMLTextAreaElement | null) => void; placeholder?: string; font?: string; className?: string }) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
   useLayoutEffect(() => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight + 2}px`; } }, [value]);
-  const track = () => onSelect(ref.current?.selectionStart ?? value.length);
+  const track = () => { const el = ref.current; onSelect(el?.selectionStart ?? value.length, el?.selectionEnd ?? value.length); };
   return (
-    <textarea ref={ref} value={value} dir="rtl" placeholder={placeholder} rows={2}
-      onChange={e => { onChange(e.target.value); onSelect(e.target.selectionStart); }} onPaste={onPaste} onSelect={track} onFocus={track}
+    <textarea ref={el => { ref.current = el; inputRef(el); }} value={value} dir="rtl" placeholder={placeholder} rows={2}
+      onChange={e => { onChange(e.target.value); onSelect(e.target.selectionStart, e.target.selectionEnd); }} onPaste={onPaste} onSelect={track} onFocus={track}
       style={{ fontFamily: font }}
       className={cn('block w-full resize-none overflow-hidden bg-transparent px-3 py-2.5 text-base leading-8 outline-none placeholder:text-muted-foreground/70 md:text-[17px]', className)} />
   );
+}
+
+const fmtNumber = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+
+/** صف «الإجمالي»: يجمع كل عمود أرقام (ويستبدل صف إجمالي سابق) — يعيد null إن لم توجد أعمدة أرقام */
+function withTotalRow(rows: string[][]): string[][] | null {
+  const [head, ...rest] = rows;
+  const body = rest.filter(r => !isTotalLabel(r[0] || '') && r.some(c => c.trim()));
+  const total = head.map((_, c) => {
+    if (c === 0) return 'الإجمالي';
+    const cells = body.map(r => (r[c] || '').trim()).filter(Boolean);
+    const nums = cells.map(parseCellNumber);
+    return cells.length && nums.every(n => n !== null) ? fmtNumber(nums.reduce((s, n) => s + (n as number), 0)) : '';
+  });
+  if (total.slice(1).every(v => !v)) return null;
+  return [head, ...body, total];
 }
 
 function TableBlock({ rows, onChange, onRemove }: { rows: string[][]; onChange: (rows: string[][]) => void; onRemove: () => void }) {
@@ -75,15 +92,18 @@ function TableBlock({ rows, onChange, onRemove }: { rows: string[][]; onChange: 
   const cols = rows[0]?.length || 1;
   const focusCell = (r: number, c: number) => requestAnimationFrame(() => box.current?.querySelector<HTMLInputElement>(`[data-cell="${r}-${c}"]`)?.focus());
   const setCell = (r: number, c: number, v: string) => onChange(rows.map((row, i) => (i === r ? row.map((x, j) => (j === c ? v : x)) : row)));
-  const addRow = (after = rows.length - 1) => { const next = [...rows]; next.splice(after + 1, 0, Array(cols).fill('')); onChange(next); return after + 1; };
+  // الصف الجديد يُضاف قبل صف الإجمالي إن وُجد
+  const totalAt = rows.length > 1 && isTotalLabel(rows[rows.length - 1][0] || '') ? rows.length - 1 : -1;
+  const addRow = (after = (totalAt > 0 ? totalAt : rows.length) - 1) => { const next = [...rows]; next.splice(after + 1, 0, Array(cols).fill('')); onChange(next); return after + 1; };
   const removeRow = (r: number) => rows.length > 1 && onChange(rows.filter((_, i) => i !== r));
   const addCol = () => onChange(rows.map(r => [...r, '']));
   const removeCol = (c: number) => cols > 1 && onChange(rows.map(r => r.filter((_, j) => j !== c)));
+  const addTotal = () => { const next = withTotalRow(rows); if (next) { onChange(next); toast.success('حُسب الإجمالي'); } else toast.info('لا توجد أعمدة أرقام لجمعها'); };
   const onKey = (e: KeyboardEvent<HTMLInputElement>, r: number, c: number) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
-    // Enter = الخانة التالية في نفس العمود، ويُضاف صف جديد عند آخر صف
-    if (r === rows.length - 1) addRow(r);
+    // Enter = الخانة التالية في نفس العمود، ويُضاف صف جديد عند آخر صف (قبل الإجمالي)
+    if (r === rows.length - 1 || r + 1 === totalAt) addRow(r);
     focusCell(r + 1, c);
   };
   return (
@@ -92,6 +112,7 @@ function TableBlock({ rows, onChange, onRemove }: { rows: string[][]; onChange: 
         <span className="me-auto flex items-center gap-1.5 px-1 text-sm font-semibold"><Table2 className="h-4 w-4 text-primary" />جدول <span className="text-xs font-normal text-muted-foreground">{rows.length} صف × {cols} عمود</span></span>
         <Button type="button" size="sm" variant="outline" className="h-9 bg-background" onClick={() => { const r = addRow(); focusCell(r, 0); }}><Plus className="h-3.5 w-3.5" />صف</Button>
         <Button type="button" size="sm" variant="outline" className="h-9 bg-background" onClick={addCol}><Plus className="h-3.5 w-3.5" />عمود</Button>
+        <Button type="button" size="sm" variant="outline" className="h-9 bg-background" title="يضيف صفاً يجمع أعمدة الأرقام (أو يحدّثه)" onClick={addTotal}><Sigma className="h-3.5 w-3.5" />الإجمالي</Button>
         <Button type="button" size="sm" variant="ghost" className="h-9 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={onRemove}><Trash2 className="h-3.5 w-3.5" />حذف الجدول</Button>
       </div>
       <div className="overflow-x-auto overscroll-x-contain">
@@ -112,8 +133,9 @@ function TableBlock({ rows, onChange, onRemove }: { rows: string[][]; onChange: 
                 {row.map((v, c) => (
                   <td key={c} className="border border-primary/25 p-0">
                     <input data-cell={`${r}-${c}`} value={v} dir="rtl" enterKeyHint="next" onChange={e => setCell(r, c, e.target.value)} onKeyDown={e => onKey(e, r, c)}
-                      placeholder={r === 0 ? `عنوان ${c + 1}` : ''}
-                      className={cn('h-11 w-full min-w-[7.5rem] bg-transparent px-2.5 text-base outline-none focus:bg-background focus:ring-2 focus:ring-inset focus:ring-primary/60', r === 0 && 'bg-primary/10 font-bold')} />
+                      placeholder={r === 0 ? `عنوان ${c + 1}` : ''} inputMode={r > 0 && c > 0 && parseCellNumber(v) !== null ? 'decimal' : undefined}
+                      className={cn('h-11 w-full min-w-[7.5rem] bg-transparent px-2.5 text-base outline-none focus:bg-background focus:ring-2 focus:ring-inset focus:ring-primary/60',
+                        r === 0 && 'bg-primary/10 text-center font-bold', r === totalAt && 'bg-primary/15 font-bold', r > 0 && parseCellNumber(v) !== null && 'text-center tabular-nums')} />
                   </td>
                 ))}
                 <td className="w-10 p-0.5 text-center">
@@ -129,46 +151,75 @@ function TableBlock({ rows, onChange, onRemove }: { rows: string[][]; onChange: 
   );
 }
 
-/** محرر نص المراسلة: فقرات + جداول مرئية، مع لصق الجداول من ChatGPT وإكسل وWord */
-export function LetterBodyEditor({ value, onChange, font, companyNames = [], onLetter }: { value: string; onChange: (v: string) => void; font?: string; companyNames?: string[]; onLetter?: (parts: PastedLetterParts) => void }) {
+type Caret = { i: number; start: number; end: number };
+
+/** محرر نص المراسلة: فقرات + جداول مرئية، مع لصق الجداول والمراسلات الكاملة من ChatGPT وإكسل وWord */
+export function LetterBodyEditor({ value, onChange, font, companyNames = [], onLetter }: {
+  value: string; onChange: (v: string) => void; font?: string; companyNames?: string[];
+  /** توزيع مراسلة ملصوقة على الحقول — يعيد دالة للتراجع */
+  onLetter?: (parts: PastedLetterParts) => (() => void) | void;
+}) {
+  const { confirm } = useSystemDialog();
   const [segs, setSegs] = useState<Seg[]>(() => parseBody(value));
   const lastOut = useRef(value);
-  const caret = useRef<{ i: number; pos: number } | null>(null);
+  const caret = useRef<Caret | null>(null);
+  const els = useRef(new Map<number, HTMLTextAreaElement>());
   // تحميل مراسلة أخرى (أو تغيير خارجي) يعيد بناء المحرر
   useEffect(() => { if (value !== lastOut.current) { lastOut.current = value; setSegs(parseBody(value)); } }, [value]);
   const commit = (next: Seg[]) => { setSegs(next); const s = serialize(next); lastOut.current = s; onChange(s); };
+  /** تنفيذ تغيير كبير مع زر «تراجع» في الإشعار */
+  const commitUndoable = (next: Seg[], msg: string) => {
+    const prev = segs;
+    commit(next);
+    toast.success(msg, { action: { label: 'تراجع', onClick: () => commit(prev) } });
+  };
+  const caretOrEnd = (): Caret => {
+    const c = caret.current;
+    if (c && segs[c.i]?.kind === 'text') return c;
+    const i = segs.length - 1, len = (segs[i] as { value: string }).value.length;
+    return { i, start: len, end: len };
+  };
 
   /** إدراج نص مبسّط (قد يحتوي جداول) في موضع المؤشر داخل الفقرة i */
-  const insertAt = (i: number, start: number, end: number, markup: string) => {
+  const insertAt = (i: number, start: number, end: number, markup: string, msg: string) => {
     const s = segs[i];
     const text = s?.kind === 'text' ? s.value : '';
-    commit(normalize([...segs.slice(0, i), { kind: 'text', value: text.slice(0, start) }, ...parseBody(markup), { kind: 'text', value: text.slice(end) }, ...segs.slice(i + 1)]));
+    commitUndoable(normalize([...segs.slice(0, i), { kind: 'text', value: text.slice(0, start) }, ...parseBody(markup), { kind: 'text', value: text.slice(end) }, ...segs.slice(i + 1)]), msg);
   };
   /** مراسلة كاملة ← توزيعها على الحقول (الموجَّه إليه/الموضوع/التحية/الختام) والمتن هنا */
-  const applyLetter = (markup: string) => {
-    const parts = onLetter ? splitPastedLetter(markup, companyNames) : null;
-    if (!parts) return false;
-    onLetter!(parts);
+  const applyLetter = (parts: PastedLetterParts) => {
+    const undo = onLetter!(parts);
     const filled = [parts.recipient && 'الموجَّه إليه', parts.subject && 'الموضوع', parts.greeting && 'التحية', parts.closing && 'الختام', parts.signer_title && 'الصفة'].filter(Boolean);
-    toast.success(`تم ترتيب المراسلة${filled.length ? `: ${filled.join('، ')}` : ''}`);
-    return true;
+    toast.success(`تم ترتيب المراسلة${filled.length ? `: ${filled.join('، ')}` : ''}`, undo ? { action: { label: 'تراجع', onClick: undo } } : undefined);
+  };
+  const letterParts = (markup: string) => (onLetter ? splitPastedLetter(markup, companyNames) : null);
+  /** لصق محتوى: مراسلة كاملة ← ترتيب (مع سؤال الاستبدال إن كان هناك نص)، جدول ← إدراج */
+  const handlePasted = async (markup: string, at: Caret, alwaysInsert: boolean) => {
+    const parts = letterParts(markup);
+    if (parts && (parts.subject || parts.greeting)) {
+      if (!serialize(segs).trim()) { applyLetter(parts); return true; }
+      const replace = await confirm({ title: 'لصق مراسلة كاملة', message: 'النص الملصوق مراسلة كاملة. هل تستبدل بها المراسلة الحالية وتُرتَّب في الحقول، أم تُضاف في مكان المؤشر؟', confirmText: 'استبدال وترتيب', cancelText: 'إضافة في مكان المؤشر' } as any);
+      if (replace) applyLetter(parts); else insertAt(at.i, at.start, at.end, markup, 'تم اللصق');
+      return true;
+    }
+    if (alwaysInsert || markup.split('\n').some(isRow)) { insertAt(at.i, at.start, at.end, markup, markup.split('\n').some(isRow) ? 'تم لصق الجدول' : 'تم اللصق'); return true; }
+    return false;
   };
   const pasteInto = (i: number) => (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const html = e.clipboardData.getData('text/html'), plain = e.clipboardData.getData('text/plain');
     const markup = clipboardToMarkup(html, plain) ?? (html.trim() ? htmlToMarkup(html) : cleanPastedMarkdown(plain));
-    const el = e.currentTarget;
-    // لصق مراسلة كاملة في خانة فارغة ← توزيع تلقائي على الحقول
-    if (!serialize(segs).trim() && applyLetter(markup)) { e.preventDefault(); return; }
-    if (!markup.split('\n').some(isRow)) return;
+    const el = e.currentTarget, at = { i, start: el.selectionStart, end: el.selectionEnd };
+    const parts = letterParts(markup);
+    // نص عادي بدون جداول ولا مراسلة كاملة ← لصق المتصفح العادي
+    if (!(parts && (parts.subject || parts.greeting)) && !markup.split('\n').some(isRow)) return;
     e.preventDefault();
-    insertAt(i, el.selectionStart, el.selectionEnd, markup);
-    toast.success('تم لصق الجدول');
+    void handlePasted(markup, at, true);
   };
-  const organize = () => { if (!applyLetter(serialize(segs))) toast.info('لم يُعثر على أجزاء مراسلة (الموجَّه إليه، الموضوع، التحية، الختام) لترتيبها'); };
-  const insertTable = () => {
-    const at = caret.current && segs[caret.current.i]?.kind === 'text' ? caret.current : { i: segs.length - 1, pos: (segs[segs.length - 1] as { value: string }).value.length };
-    insertAt(at.i, at.pos, at.pos, '| البند | التفاصيل |\n|  |  |');
+  const organize = () => {
+    const parts = letterParts(serialize(segs));
+    if (parts) applyLetter(parts); else toast.info('لم يُعثر على أجزاء مراسلة (الموجَّه إليه، الموضوع، التحية، الختام) لترتيبها');
   };
+  const insertTable = () => { const at = caretOrEnd(); insertAt(at.i, at.end, at.end, '| البند | التفاصيل |\n|  |  |', 'أُدرج جدول'); };
   /** لصق من زر (مفيد على الهاتف) عبر Clipboard API */
   const pasteButton = async () => {
     try {
@@ -181,28 +232,57 @@ export function LetterBodyEditor({ value, onChange, font, companyNames = [], onL
       } else plain = await navigator.clipboard.readText();
       const markup = clipboardToMarkup(html, plain) ?? (html.trim() ? htmlToMarkup(html) : cleanPastedMarkdown(plain));
       if (!markup.trim()) { toast.info('الحافظة فارغة'); return; }
-      if (!serialize(segs).trim() && applyLetter(markup)) return;
-      const at = caret.current && segs[caret.current.i]?.kind === 'text' ? caret.current : { i: segs.length - 1, pos: (segs[segs.length - 1] as { value: string }).value.length };
-      insertAt(at.i, at.pos, at.pos, markup);
-      toast.success('تم اللصق');
+      await handlePasted(markup, caretOrEnd(), true);
     } catch { toast.error('اسمح للمتصفح بالوصول إلى الحافظة، أو الصق مباشرة داخل الخانة'); }
   };
 
+  /** تنسيق النص المحدد: غامق / عنوان / قائمة */
+  const format = (kind: 'bold' | 'heading' | 'list') => {
+    const at = caretOrEnd(), seg = segs[at.i] as { kind: 'text'; value: string };
+    const v = seg.value;
+    let next = v, selStart = at.start, selEnd = at.end;
+    if (kind === 'bold') {
+      const sel = v.slice(at.start, at.end);
+      next = `${v.slice(0, at.start)}**${sel}**${v.slice(at.end)}`;
+      selStart = at.start + 2; selEnd = at.end + 2;
+    } else {
+      const ls = v.lastIndexOf('\n', at.start - 1) + 1;
+      const le = v.indexOf('\n', Math.max(at.end - (at.end > at.start ? 1 : 0), ls));
+      const block = v.slice(ls, le < 0 ? v.length : le);
+      const mark = kind === 'heading' ? '## ' : '- ';
+      const lines = block.split('\n');
+      const on = lines.every(l => !l.trim() || l.startsWith(mark));
+      const out = lines.map(l => (!l.trim() ? l : on ? l.slice(mark.length) : `${mark}${l.replace(/^(## |- )/, '')}`)).join('\n');
+      next = v.slice(0, ls) + out + v.slice(le < 0 ? v.length : le);
+      selStart = ls; selEnd = ls + out.length;
+    }
+    commit(segs.map((x, j) => (j === at.i ? { kind: 'text', value: next } : x)));
+    caret.current = { i: at.i, start: selStart, end: selEnd };
+    requestAnimationFrame(() => { const el = els.current.get(at.i); if (el) { el.focus(); el.setSelectionRange(selStart, selEnd); } });
+  };
+  const keep = (e: { preventDefault: () => void }) => e.preventDefault(); // يبقي التحديد في الخانة عند الضغط على الأزرار
+
+  const tool = 'h-9 bg-background px-2.5';
   return (
     <div className="overflow-hidden rounded-xl border-2 border-border bg-background shadow-sm transition-colors focus-within:border-primary/60">
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b border-border bg-muted/60 px-2 py-1.5 backdrop-blur">
-        <Button type="button" size="sm" variant="outline" className="h-9 bg-background" onClick={insertTable}><Table2 className="h-4 w-4" />إدراج جدول</Button>
-        <Button type="button" size="sm" variant="outline" className="h-9 bg-background" onClick={pasteButton}><ClipboardPaste className="h-4 w-4" />لصق</Button>
-        {onLetter && <Button type="button" size="sm" variant="outline" className="h-9 bg-background" title="يوزّع الموجَّه إليه والموضوع والتحية والختام على حقولها ويحذف اسم الشركة المكرر" onClick={organize}><Wand2 className="h-4 w-4" />تنظيم المراسلة</Button>}
-        <span className="text-xs text-muted-foreground">الصق مراسلة كاملة من ChatGPT وتُرتَّب تلقائياً، والجداول تظهر جدولاً</span>
+        <Button type="button" size="sm" variant="outline" className={tool} onMouseDown={keep} onClick={() => format('bold')} title="غامق" aria-label="غامق"><Bold className="h-4 w-4" /></Button>
+        <Button type="button" size="sm" variant="outline" className={tool} onMouseDown={keep} onClick={() => format('heading')} title="عنوان"><Heading className="h-4 w-4" /><span className="hidden sm:inline">عنوان</span></Button>
+        <Button type="button" size="sm" variant="outline" className={tool} onMouseDown={keep} onClick={() => format('list')} title="قائمة نقاط"><List className="h-4 w-4" /><span className="hidden sm:inline">قائمة</span></Button>
+        <span className="mx-0.5 h-6 w-px bg-border" aria-hidden="true" />
+        <Button type="button" size="sm" variant="outline" className={tool} onMouseDown={keep} onClick={insertTable}><Table2 className="h-4 w-4" />جدول</Button>
+        <Button type="button" size="sm" variant="outline" className={tool} onClick={pasteButton}><ClipboardPaste className="h-4 w-4" />لصق</Button>
+        {onLetter && <Button type="button" size="sm" variant="outline" className={tool} title="يوزّع الموجَّه إليه والموضوع والتحية والختام على حقولها ويحذف اسم الشركة المكرر" onClick={organize}><Wand2 className="h-4 w-4" />تنظيم</Button>}
+        <span className="hidden text-xs text-muted-foreground lg:inline">الصق مراسلة كاملة من ChatGPT وتُرتَّب تلقائياً، والجداول تظهر جدولاً</span>
       </div>
       <div className="space-y-1 p-1.5">
         {segs.map((s, i) => s.kind === 'text'
-          ? <AutoTextarea key={i} value={s.value} font={font} onPaste={pasteInto(i)} onSelect={pos => { caret.current = { i, pos }; }}
+          ? <AutoTextarea key={i} value={s.value} font={font} onPaste={pasteInto(i)} onSelect={(start, end) => { caret.current = { i, start, end }; }}
+              inputRef={el => { if (el) els.current.set(i, el); else els.current.delete(i); }}
               onChange={v => commit(segs.map((x, j) => (j === i ? { kind: 'text', value: v } : x)))}
-              placeholder={i === 0 ? 'اكتب تفاصيل المراسلة هنا… (سطر فارغ بين الفقرات)' : i === segs.length - 1 ? 'تابع الكتابة هنا…' : ''}
+              placeholder={i === 0 ? 'اكتب تفاصيل المراسلة هنا… أو الصق مراسلة كاملة من ChatGPT' : i === segs.length - 1 ? 'تابع الكتابة هنا…' : ''}
               className={cn(i === 0 && segs.length === 1 && 'min-h-[14rem]', segs.length > 1 && !s.value && 'py-1 leading-6')} />
-          : <TableBlock key={i} rows={s.rows} onChange={rows => commit(segs.map((x, j) => (j === i ? { kind: 'table', rows } : x)))} onRemove={() => commit(normalize(segs.filter((_, j) => j !== i)))} />)}
+          : <TableBlock key={i} rows={s.rows} onChange={rows => commit(segs.map((x, j) => (j === i ? { kind: 'table', rows } : x)))} onRemove={() => commitUndoable(normalize(segs.filter((_, j) => j !== i)), 'حُذف الجدول')} />)}
       </div>
     </div>
   );

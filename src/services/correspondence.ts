@@ -46,6 +46,8 @@ export interface Letter {
   report_period?: string | null;
   period_start?: string | null;
   period_end?: string | null;
+  /** تاريخ الأرشفة (null = نشطة) */
+  archived_at?: string | null;
   created_at?: string;
 }
 
@@ -119,6 +121,13 @@ export async function saveLetter(l: Letter): Promise<Letter> {
 export async function deleteLetter(id: string) {
   const { error } = await (supabase as any).from('letters').delete().eq('id', id);
   if (error) throw new Error(error.message);
+}
+
+export const MISSING_ARCHIVE_COLUMN = 'لتفعيل الأرشفة طبّق ملف sql/29_letters_archive.sql في محرر SQL في سوبابيس ثم أعد تحميل الصفحة.';
+/** أرشفة (أو استرجاع) مراسلة بدل حذفها نهائياً */
+export async function archiveLetter(id: string, archived = true) {
+  const { error } = await (supabase as any).from('letters').update({ archived_at: archived ? new Date().toISOString() : null }).eq('id', id);
+  if (error) throw new Error(/archived_at/.test(String(error.message)) ? MISSING_ARCHIVE_COLUMN : error.message);
 }
 
 /** الرقم الإشاري التالي: البادئة + أكبر رقم مستخدم + 1 (مثل F171 ← F172) */
@@ -354,6 +363,14 @@ export function htmlToMarkup(html: string): string {
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/** رقم/مبلغ في خانة جدول (يُوسَّط في الطباعة ويُجمع في صف الإجمالي) */
+export const parseCellNumber = (c: string): number | null => {
+  const s = String(c || '').replace(/\*\*/g, '').replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660)).replace(/٫/g, '.').replace(/[,٬\s]/g, '').replace(/(د\.?ل|LYD|دينار)$/i, '');
+  return /^-?\d+(\.\d+)?%?$/.test(s) ? Number(s.replace('%', '')) : null;
+};
+const isNumericCell = (c: string) => parseCellNumber(c) !== null;
+export const isTotalLabel = (c: string) => /^(\*\*)?\s*(الإجمالي|الاجمالي|المجموع|الإجمالي العام|المجموع الكلي)\s*(\*\*)?$/.test(c.trim());
+
 /** تحويل النص المبسّط إلى كتل HTML (عناوين/فقرات/قوائم/جداول) */
 export function renderMarkup(text: string): string {
   const lines = String(text || '').replace(/\r/g, '').split('\n');
@@ -368,7 +385,8 @@ export function renderMarkup(text: string): string {
   const flushTable = () => {
     if (!table.length) return;
     const [head, ...rows] = table;
-    out.push(`<table data-bid="b${bid++}"><thead><tr>${head.map(c => `<th>${cell(c)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${cell(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+    const td = (c: string) => `<td${isNumericCell(c) ? ' class="num"' : ''}>${cell(c)}</td>`;
+    out.push(`<table data-bid="b${bid++}"><thead><tr>${head.map(c => `<th>${cell(c)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr${isTotalLabel(r[0] || '') ? ' class="total"' : ''}>${r.map(td).join('')}</tr>`).join('')}</tbody></table>`);
     table = [];
   };
   const flush = () => { flushPara(); flushList(); flushTable(); };
@@ -537,7 +555,16 @@ export function renderLetterHtml(company: LetterheadCompany, letter: Letter, ori
       for (var j = pages().length - 1; j < pages().length && guard < 20000; j++) fill(j, SIGNH);
     }
     var all = pages(), lastPage = all[all.length - 1];
-    if (signTpl && signTpl.content.firstElementChild) lastPage.appendChild(signTpl.content.firstElementChild.cloneNode(true));
+    if (signTpl && signTpl.content.firstElementChild) {
+      lastPage.appendChild(signTpl.content.firstElementChild.cloneNode(true));
+      // نص قصير في الصفحة الأخيرة: التوقيع والختم يقتربان من النص بدل أسفل الصفحة
+      lastPage.classList.remove('short-letter');
+      var lf = flowOf(lastPage);
+      if (lf && lf.getBoundingClientRect().height * 0.75 <= SIGNH * 0.65) {
+        lastPage.classList.add('short-letter');
+        lastPage.style.setProperty('--letter-sign-top', (${BODY.top} + lf.getBoundingClientRect().height * 0.75 + 24) + 'pt');
+      }
+    }
     if (all.length > 1 || ${!!opts.alwaysPageNumbers}) all.forEach(function (p, i) { var d = document.createElement('div'); d.className = 'pno'; d.textContent = 'صفحة ' + (i + 1) + ' من ' + all.length; p.appendChild(d); });
     try { window.dispatchEvent(new Event('resize')); } catch (e) {}
     report(all.length);
@@ -610,6 +637,9 @@ ${fontLink}${doranFace}
   .content table { width: 100%; border-collapse: collapse; margin: .2em 0 .9em; font-size: .86em; line-height: 1.45; }
   .content th { background: ${color}22; font-weight: 800; }
   .content th, .content td { border: .6pt solid ${color}88; padding: 3pt 5pt; text-align: right; vertical-align: top; }
+  .content th { text-align: center; }
+  .content td.num { text-align: center; white-space: nowrap; }
+  .content tr.total td { font-weight: 800; background: ${color}14; border-top: 1.2pt solid ${color}; }
   .content .closing { font-weight: 700; }
   .sign-wrap { position: absolute; inset: 0; pointer-events: none; }
   .sign { position: absolute; left: 30pt; width: 175pt; top: 657pt; height: 100pt; text-align: center; font-size: 13pt; line-height: 1.45; overflow: hidden; }
