@@ -367,7 +367,7 @@ export const CutoutPerBillboardEditor: React.FC<Props> = ({ items, onChange, onE
                   {/* Image / upload wrapper */}
                   <div className="flex flex-col items-center">
                     <input
-                      ref={(el) => (fileRefs.current[it.id] = el)}
+                      ref={(el) => { fileRefs.current[it.id] = el; }}
                       type="file"
                       accept="image/*"
                       className="hidden"

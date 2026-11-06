@@ -7,6 +7,7 @@ import { invoiceSummaryHtml, invoiceNotesHtml } from './invoiceBrandLayout';
 import { resolveInvoiceStyles, formatNum, formatDateForPrint, wrapInDocument, generateCustomerHTML, type ResolvedPrintStyles } from './unifiedInvoiceBase';
 import { hexToRgba } from '@/hooks/useInvoiceSettingsSync';
 import { numberToArabicWords } from '@/lib/printUtils';
+import { supabase } from '@/integrations/supabase/client';
 
 export interface PrintItem {
   size: string;
@@ -31,6 +32,8 @@ export interface PrintInvoiceData {
   customerId?: string;
   customerPhone?: string;
   contractNumbers?: string[];
+  /** نوع الإعلان؛ إن لم يُمرَّر يُجلب من العقود المرتبطة */
+  adType?: string;
   items: PrintItem[];
   currency: { code: string; name: string; symbol: string };
   discount?: number;
@@ -157,6 +160,16 @@ function generateTablePrinterMode(t: ResolvedPrintStyles, data: PrintInvoiceData
   `;
 }
 
+/** أنواع الإعلان (بدون تكرار) للعقود المرتبطة بالفاتورة */
+async function loadContractsAdType(contractNumbers?: string[]): Promise<string> {
+  const nums = [...new Set((contractNumbers || []).flatMap(c => String(c).split(/[,،\s-]+/)).map(Number).filter(n => Number.isFinite(n) && n > 0))];
+  if (!nums.length) return '';
+  try {
+    const { data } = await supabase.from('Contract').select('"Ad Type"').in('Contract_Number', nums);
+    return [...new Set((data || []).map((c: any) => String(c['Ad Type'] || '').trim()).filter(Boolean))].join(' / ');
+  } catch { return ''; }
+}
+
 export async function generatePrintInvoiceHTML(data: PrintInvoiceData, previewStyles?: ResolvedPrintStyles): Promise<string> {
   const showPrices = !data.printerForDisplay;
   
@@ -212,6 +225,8 @@ export async function generatePrintInvoiceHTML(data: PrintInvoiceData, previewSt
   if (data.contractNumbers?.length) {
     metaLines.push(`العقود: <span class="num">${data.contractNumbers.join(' - ')}</span>`);
   }
+  const adType = data.adType?.trim() || (previewStyles ? '' : await loadContractsAdType(data.contractNumbers));
+  if (adType) metaLines.push(`نوع الإعلان: <strong>${adType.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!))}</strong>`);
 
   const customerHtml = generateCustomerHTML(t, {
     brandLayout: true,

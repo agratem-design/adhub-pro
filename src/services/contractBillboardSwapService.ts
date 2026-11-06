@@ -265,6 +265,13 @@ export async function executeInstantBillboardSwap(
       ? rpcRes.new_billboard_ids.map(String)
       : [];
 
+    // التبديل ينشئ إيقافاً وبديلة: نُبلغ حسابات الإيقاف والبدائل لتعيد التحميل فوراً
+    try {
+      window.dispatchEvent(new CustomEvent('paused-billboards-changed', {
+        detail: { contractNumber: Number(contractNumber), billboardId: Number(originalBillboardId), action: 'instant-swap' },
+      }));
+    } catch { /* بيئة بدون window */ }
+
     return {
       success: true,
       swapRequestId: stableSwapRequestId,

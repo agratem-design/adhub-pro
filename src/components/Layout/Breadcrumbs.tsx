@@ -29,7 +29,7 @@ const LABELS: Record<string, string> = {
   'payments-receipts-page': 'الدفعات والإيصالات',
   'printed-invoices-page': 'فواتير الطباعة',
   revenue: 'الإيرادات',
-  'overdue-payments': 'الدفعات المتأخرة',
+  'overdue-payments': 'تنبيهات الزبائن',
   'account-overdue-payments': 'الفواتير والحسابات المتأخرة',
   expenses: 'المصروفات',
   'expense-management': 'إدارة المصروفات',

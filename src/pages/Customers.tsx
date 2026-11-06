@@ -1,3 +1,4 @@
+import { printUnifiedDocument, escHtml, docMoney, docDate } from '@/lib/unifiedDocument';
 import { CustomerStampEditor } from '@/components/customers/CustomerStampEditor';
 // @ts-nocheck
 import { usePersistedState } from '@/hooks/usePersistedState';
@@ -1556,120 +1557,58 @@ export default function Customers() {
 
     const finalTotal = contractTotal + printTotal + (includeAccountBalance ? accountBalance : 0);
 
-    const contractRows = selectedContractData.map(contract => `
-      <tr>
-        <td>${contract.Contract_Number}</td>
-        <td>${contract['Ad Type'] || '—'}</td>
-        <td>${contract['Start Date'] ? new Date(contract['Start Date']).toLocaleDateString('ar-LY') : '—'}</td>
-        <td>${contract['End Date'] ? new Date(contract['End Date']).toLocaleDateString('ar-LY') : '—'}</td>
-        <td>${(Number(contract['Total']) || 0).toLocaleString('ar-LY')} د.ل</td>
-      </tr>
-    `).join('');
-
-    const printRows = Object.entries(sizeCounts).map(([size, qty]) => {
-      const unitPrice = printPrices[size] || 0;
-      const lineTotal = qty * unitPrice;
-      return `
-        <tr>
-          <td>${size}</td>
-          <td>${qty}</td>
-          <td>${unitPrice.toLocaleString('ar-LY')} د.ل</td>
-          <td>${lineTotal.toLocaleString('ar-LY')} د.ل</td>
-        </tr>
-      `;
-    }).join('');
-
-    const html = `<!DOCTYPE html><html dir="rtl"><head><meta charset="utf-8">
-      <title>فاتورة شاملة - ${selectedCustomerName}</title>
-      <style>
-        body{font-family:Arial,sans-serif;padding:20px;max-width:900px;margin:auto}
-        h1{font-size:24px;text-align:center;margin-bottom:20px}
-        .customer-info{margin-bottom:20px;background:#f9f9f9;padding:15px;border-radius:5px}
-        table{width:100%;border-collapse:collapse;margin:10px 0}
-        th,td{border:1px solid #ddd;padding:8px;text-align:center}
-        th{background:#f5f5f5;font-weight:bold}
-        .total-row{background:#e8f5e8;font-weight:bold}
-        .section-title{font-size:18px;font-weight:bold;margin:20px 0 10px 0;color:#333}
-        .footer{margin-top:30px;text-align:center;color:#666}
-      </style></head><body>
-      <h1>فاتورة شاملة</h1>
-      <div class="customer-info">
-        <strong>العميل:</strong> ${selectedCustomerName}<br>
-        <strong>التاريخ:</strong> ${new Date().toLocaleDateString('ar-LY')}<br>
-        <strong>عدد العقود:</strong> ${selectedContractsForInv.length}
-      </div>
-      
-      ${contractRows ? `
-      <div class="section-title">تفاصيل العقود:</div>
-      <table>
-        <thead>
-          <tr>
-            <th>رقم العقد</th>
-            <th>نوع الإعلان</th>
-            <th>تاريخ البداية</th>
-            <th>تاريخ النهاية</th>
-            <th>المبلغ</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${contractRows}
-          <tr class="total-row">
-            <td colspan="4">إجمالي العقود</td>
-            <td>${contractTotal.toLocaleString('ar-LY')} د.ل</td>
-          </tr>
-        </tbody>
-      </table>
-      ` : ''}
-      
-      ${printRows ? `
-      <div class="section-title">تفاصيل الطباعة:</div>
-      <table>
-        <thead>
-          <tr>
-            <th>المقاس</th>
-            <th>الكمية</th>
-            <th>سعر الوحدة</th>
-            <th>الإجمالي</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${printRows}
-          <tr class="total-row">
-            <td colspan="3">إجمالي الطباعة</td>
-            <td>${printTotal.toLocaleString('ar-LY')} د.ل</td>
-          </tr>
-        </tbody>
-      </table>
-      ` : ''}
-      
-      <table>
-        <tbody>
-          ${includeAccountBalance ? `
-          <tr>
-            <td colspan="4">رصيد الحساب العام</td>
-            <td>${accountBalance.toLocaleString('ar-LY')} د.ل</td>
-          </tr>
-          ` : ''}
-          <tr class="total-row">
-            <td colspan="4">الإجمالي النهائي</td>
-            <td>${finalTotal.toLocaleString('ar-LY')} د.ل</td>
-          </tr>
-        </tbody>
-      </table>
-      
-      <div class="footer">
-        <p>شكراً لتعاملكم معنا</p>
-      </div>
-      
-      <script>window.onload=function(){window.print();}</script>
-      </body></html>`;
-
-    const w = window.open('', '_blank'); 
-    if (w) { 
-      w.document.open(); 
-      w.document.write(html); 
-      w.document.close(); 
-    }
+    // ✅ المستند الموحد — نفس قالب كل الفواتير، والألوان من إعدادات الطباعة (فاتورة الزبون)
+    const sizeEntries = Object.entries(sizeCounts);
+    void printUnifiedDocument('customer_invoice', {
+      title: 'فاتورة شاملة',
+      subtitle: 'العقود وأعمال الطباعة',
+      pageTitle: `فاتورة شاملة - ${selectedCustomerName}`,
+      info: [
+        { label: 'العميل', value: escHtml(selectedCustomerName) },
+        { label: 'عدد العقود', value: selectedContractsForInv.length },
+        { label: 'التاريخ', value: docDate(new Date()) },
+      ],
+      total: { label: 'الإجمالي النهائي', value: docMoney(finalTotal) },
+      sections: [
+        ...(selectedContractData.length ? [{
+          title: `تفاصيل العقود (${selectedContractData.length})`,
+          aside: docMoney(contractTotal),
+          columns: [
+            { key: 'n', header: 'رقم العقد', width: '14%' },
+            { key: 'ad', header: 'نوع الإعلان', align: 'right' as const },
+            { key: 's', header: 'تاريخ البداية', width: '15%' },
+            { key: 'e', header: 'تاريخ النهاية', width: '15%' },
+            { key: 't', header: 'المبلغ', width: '17%' },
+          ],
+          rows: selectedContractData.map(c => ({
+            n: `#${c.Contract_Number}`, ad: escHtml(c['Ad Type'] || '—'),
+            s: c['Start Date'] ? docDate(c['Start Date']) : '—', e: c['End Date'] ? docDate(c['End Date']) : '—',
+            t: `<span class="os-amt">${docMoney(Number(c['Total']) || 0)}</span>`,
+          })),
+          footer: [{ label: 'إجمالي العقود', value: docMoney(contractTotal) }],
+        }] : []),
+        ...(sizeEntries.length ? [{
+          title: 'تفاصيل الطباعة',
+          aside: docMoney(printTotal),
+          columns: [
+            { key: 'size', header: 'المقاس', align: 'right' as const },
+            { key: 'qty', header: 'الكمية', width: '15%' },
+            { key: 'unit', header: 'سعر الوحدة', width: '20%' },
+            { key: 'total', header: 'الإجمالي', width: '20%' },
+          ],
+          rows: sizeEntries.map(([size, qty]) => ({
+            size: `<bdi>${escHtml(size)}</bdi>`, qty, unit: docMoney(printPrices[size] || 0), total: docMoney(qty * (printPrices[size] || 0)),
+          })),
+          footer: [{ label: 'إجمالي الطباعة', value: docMoney(printTotal) }],
+        }] : []),
+      ],
+      summary: [
+        { label: 'إجمالي العقود', value: docMoney(contractTotal) },
+        ...(printTotal ? [{ label: 'إجمالي الطباعة', value: docMoney(printTotal) }] : []),
+        ...(includeAccountBalance ? [{ label: 'رصيد الحساب العام', value: docMoney(accountBalance) }] : []),
+        { label: 'الإجمالي النهائي', value: docMoney(finalTotal) },
+      ],
+    }).catch(() => toast.error('تعذرت الطباعة'));
   };
 
   const visible = filteredAndSortedCustomers;
@@ -1744,7 +1683,7 @@ export default function Customers() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="outline" onClick={() => navigate('/admin/overdue-payments')} className="h-10 cursor-pointer gap-2 border-destructive/35 text-destructive transition-all duration-200 hover:bg-destructive/10 hover:text-destructive active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
+            <Button type="button" variant="outline" onClick={() => navigate('/admin/alerts-center?range=overdue')} className="h-10 cursor-pointer gap-2 border-destructive/35 text-destructive transition-all duration-200 hover:bg-destructive/10 hover:text-destructive active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
               <AlertTriangle className="h-4 w-4" />الدفعات المتأخرة
             </Button>
             <Button type="button" variant="outline" onClick={() => setBulkStatementOpen(true)} className="h-10 cursor-pointer gap-2 transition-all duration-200 hover:border-primary/40 hover:bg-primary/10 active:scale-95 motion-reduce:transform-none motion-reduce:transition-none">
@@ -2835,7 +2774,7 @@ export default function Customers() {
         <CustomerAlertsSyncDialog
           customerId={selectedCustomerForAlerts.id}
           customerName={selectedCustomerForAlerts.name}
-          customerEmail={selectedCustomerForAlerts.email}
+          initialEmail={selectedCustomerForAlerts.email}
           open={!!selectedCustomerForAlerts}
           onOpenChange={(open) => {
             if (!open) setSelectedCustomerForAlerts(null);

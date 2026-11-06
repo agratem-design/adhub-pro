@@ -428,18 +428,14 @@ export function buildUnifiedReceiptPrintOptions(
         
         const imagesHtml = imageUrls.map((url, i) => `
           <img src="${url}" alt="إيصال الدفع ${i + 1}" 
-            style="max-width: ${singleMaxW}mm; max-height: ${singleMaxH}mm; width: auto; height: auto; border-radius: 6px; border: 1px solid #bfdbfe; display: inline-block; margin: 4px;" 
+            style="max-width: ${singleMaxW}mm; max-height: ${singleMaxH}mm; width: auto; height: auto; border-radius: 6px; border: 1px solid #e5e7eb; display: inline-block; margin: 4px;" 
             onerror="this.style.display='none'" />
         `).join('');
 
         additionalContent = `
-          <div class="receipt-transfer" style="margin: 10px 0; page-break-inside: avoid;">
-            <div style="background: #f0f7ff; border: 2px solid #3b82f6; border-radius: 10px; padding: 10px; text-align: center;">
-              <div style="font-size: 13px; font-weight: 700; color: #1e40af; margin-bottom: 8px;">
- مرفق: صورة إيصال الدفع${imageUrls.length > 1 ? ` (${imageUrls.length})` : ''}
-              </div>
-              ${imagesHtml}
-            </div>
+          <div class="receipt-transfer" style="break-inside: avoid;">
+            <div class="os-section"><span>مرفق: صورة إيصال الدفع${imageUrls.length > 1 ? ` (${imageUrls.length})` : ''}</span></div>
+            <div style="text-align: center;">${imagesHtml}</div>
           </div>
         `;
       }

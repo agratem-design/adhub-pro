@@ -9,6 +9,7 @@ import { receiptAmountHtml, receiptSignatureHtml, receiptPresentationCss, type R
  */
 
 import { PrintConfig, PrintColumn, PrintTotalsItem, PrintPartyData, PrintDocumentData } from './printMeasurementsTypes';
+import { renderUnifiedDocument, type DocInfoItem, type DocSection, type UnifiedDoc } from './unifiedDocument';
 
 export interface MeasurementsHTMLOptions {
   config: PrintConfig;
@@ -691,56 +692,94 @@ const generatePaymentDetailsTable = (
  * Generate complete HTML document for measurements-style print
  */
 export const generateMeasurementsHTML = (options: MeasurementsHTMLOptions): string => {
-  const { config, documentData, partyData, columns, rows, totals, totalsTitle, notes, statisticsCards, paymentDetailsTable, customHeaderHtml, additionalContent, headerSwap } = options;
+  // ✅ النمط الموحد: نفس قالب كشف المستحقات المتأخرة، والألوان من إعدادات الطباعة
+  const { config, documentData, partyData, columns, rows, totals, notes, statisticsCards, paymentDetailsTable, customHeaderHtml, additionalContent, headerSwap } = options;
+  // ألوان الإعداد نفسه احتياطاً، ثم إعدادات الطباعة الرسمية فوقها
+  const fromConfig: Record<string, any> = {
+    primaryColor: config.header.title.color,
+    tableHeaderBgColor: config.table.header.backgroundColor,
+    tableHeaderTextColor: config.table.header.textColor,
+    tableBorderColor: config.table.border.color,
+    tableRowEvenColor: config.table.body.evenRowBackground,
+    tableRowOddColor: config.table.body.oddRowBackground,
+    tableTextColor: config.table.body.textColor,
+    totalBgColor: config.totals.backgroundColor,
+    totalTextColor: config.totals.textColor,
+    notesBgColor: config.notes.backgroundColor,
+    notesBorderColor: config.notes.borderColor,
+    notesTextColor: config.notes.color,
+    fontFamily: config.page.fontFamily,
+    showFooter: config.footer.enabled,
+    footerText: config.footer.enabled ? config.footer.text : '',
+  };
+  const styles: Record<string, any> = {
+    ...fromConfig,
+    ...(config.officialStyles || {}),
+    fullLogoUrl: config.header.logo.enabled ? config.header.logo.url : '',
+    showLogo: config.header.logo.enabled && !!config.header.logo.url,
+    headerSwap: headerSwap ?? config.officialStyles?.headerSwap,
+    companyPhone: config.officialStyles?.companyPhone || config.companyInfo.phone,
+    companyAddress: config.officialStyles?.companyAddress || config.companyInfo.address,
+  };
 
-  const styles = config.officialStyles;
-  const css = generateMeasurementsCSS(config) + (styles ? unifiedHeaderFooterCss(styles) : '');
-  const metaLinesHtml = [
-    ...(documentData.date ? [{ label: 'التاريخ', value: documentData.date }] : []),
-    ...(documentData.documentNumber ? [{ label: documentData.documentNumberLabel || 'رقم المستند', value: documentData.documentNumber }] : []),
-    ...(documentData.additionalInfo || []),
-  ].map(info => `<div class="u-meta-row"><span>${info.label}:</span><strong><bdi>${info.value}</bdi></strong></div>`).join('');
-  const headerHTML = styles ? (config.header.enabled ? unifiedHeaderHtml({
-    styles: { ...styles, headerSwap: headerSwap ?? styles.headerSwap },
-    fullLogoUrl: config.header.logo.url,
-    titleAr: documentData.title || config.header.title.text,
-    titleEn: styles.invoiceTitleEn,
-    metaLinesHtml,
-  }) : '') : generateHeader(config, documentData, headerSwap);
-  const partyHTML = generatePartySection(config, partyData, statisticsCards);
-  const paymentDetailsHTML = generatePaymentDetailsTable(config, paymentDetailsTable);
-  const tableHTML = generateTable(config, columns, rows, options.receiptPresentation ? totals?.slice(1) : totals, totalsTitle);
-  const notesHTML = generateNotes(config, notes);
-  const footerHTML = styles ? unifiedFooterHtml({
-    ...styles,
-    companyPhone: styles.companyPhone || config.companyInfo.phone,
-    companyAddress: styles.companyAddress || config.companyInfo.address,
-  }) : generateFooter(config);
+  const info: DocInfoItem[] = [];
+  if (partyData?.name) {
+    const extra = [partyData.company, partyData.phone ? `<bdi dir="ltr">${partyData.phone}</bdi>` : ''].filter(Boolean).join(' · ');
+    info.push({ label: partyData.title || 'العميل', value: `${partyData.name}${extra ? `<div class="os-muted">${extra}</div>` : ''}` });
+  }
+  partyData?.additionalFields?.forEach(f => info.push(f));
+  const meta: DocInfoItem[] = [];
+  if (documentData.date) meta.push({ label: 'التاريخ', value: documentData.date });
+  if (documentData.documentNumber) meta.push({ label: documentData.documentNumberLabel || 'رقم المستند', value: documentData.documentNumber });
+  documentData.additionalInfo?.forEach(f => meta.push(f));
+  statisticsCards?.forEach(c => info.push({ label: c.label, value: `${typeof c.value === 'number' ? c.value.toLocaleString('en-US') : c.value}${c.unit ? ` ${c.unit}` : ''}` }));
 
-  return `
-    <!DOCTYPE html>
-    <html dir="${config.page.direction}" lang="ar">
-    <head>
-      <meta charset="UTF-8">
-      <title>${documentData.title || 'طباعة'}</title>
-      <style>${css}${PRINT_INK_SAVER_CSS}${options.receiptPresentation ? receiptPresentationCss : ''}</style>
-    </head>
-    <body${options.receiptPresentation ? ' data-payment-receipt' : ''}>
-      <div class="measurements-container paper">
-        ${headerHTML}
-        ${partyHTML}
-        ${options.receiptPresentation ? receiptAmountHtml(options.receiptPresentation) : ''}
-        ${customHeaderHtml || ''}
-        ${paymentDetailsHTML}
-        ${tableHTML}
-        ${options.receiptPresentation ? receiptSignatureHtml(options.receiptPresentation) : ''}
-        ${additionalContent || ''}
-        ${notesHTML}
-        ${footerHTML}
-      </div>
-    </body>
-    </html>
-  `;
+  const fmtTotal = (v: string | number) => (typeof v === 'number' ? v.toLocaleString('en-US') : v);
+  let total: UnifiedDoc['total'];
+  let summaryItems = [...(config.totals.enabled ? totals || [] : [])];
+  if (options.receiptPresentation) {
+    total = { label: 'المبلغ المستلم بموجب هذا الوصل', value: options.receiptPresentation.amount };
+    summaryItems = summaryItems.slice(1);
+  } else if (summaryItems.length) {
+    const pick = summaryItems.find(t => t.highlight) ?? summaryItems[summaryItems.length - 1];
+    total = { label: pick.label, value: String(fmtTotal(pick.value)) };
+    summaryItems = summaryItems.filter(t => t !== pick);
+  }
+
+  const sections: DocSection[] = [];
+  if (customHeaderHtml) sections.push({ kind: 'html', html: customHeaderHtml });
+  if (paymentDetailsTable?.length) {
+    sections.push({
+      title: 'تفاصيل السداد',
+      className: 'payment-details-section',
+      columns: [{ key: 'label', header: 'البيان', width: '40%', align: 'right' }, { key: 'value', header: 'القيمة' }],
+      rows: paymentDetailsTable,
+    });
+  }
+  if (columns.length && rows.length) {
+    sections.push({
+      tableClass: 'measurements-table',
+      columns: columns.map(c => ({ key: c.key, header: c.header, width: c.width, align: c.align === 'right' || c.align === 'left' ? c.align : 'center', format: c.format })),
+      rows,
+    });
+  } else {
+    sections.push({ kind: 'html', html: '<table class="measurements-table"></table>' });
+  }
+
+  return renderUnifiedDocument(styles, {
+    title: documentData.title || config.header.title.text,
+    pageTitle: documentData.title,
+    meta,
+    info,
+    total,
+    sections,
+    summary: summaryItems.length ? summaryItems.map(t => ({ label: t.label, value: String(fmtTotal(t.value)) })) : undefined,
+    html: additionalContent || '',
+    notes,
+    signatures: options.receiptPresentation
+      ? [{ label: 'اسم المستلم', value: options.receiptPresentation.receiver }, { label: 'توقيع المستلم' }, { label: 'الختم' }]
+      : undefined,
+  }, { bodyAttrs: options.receiptPresentation ? 'data-payment-receipt' : '', extraCss: generateMeasurementsCSS(config) });
 };
 
 /**

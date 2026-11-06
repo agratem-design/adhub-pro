@@ -578,7 +578,7 @@ export default function CustomerAccount() {
                 </table>
               </div>
             )}
-            {invoiceTab === 'sales' && <SalesSection customerId={customerId} invoices={data.salesInvoices} onRefresh={refresh} />}
+            {invoiceTab === 'sales' && <SalesSection embedded customerId={customerId} invoices={data.salesInvoices} onRefresh={refresh} />}
             {invoiceTab === 'purchase' && <PurchaseInvoicesSection customerId={customerId} customerName={c.name} invoices={data.purchaseInvoices as any} onRefresh={refresh} />}
           </section>
         )}

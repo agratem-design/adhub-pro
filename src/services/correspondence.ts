@@ -134,9 +134,11 @@ export async function archiveLetter(id: string, archived = true) {
 export function nextReference(prefix: string, letters: Letter[]): string {
   const p = prefix || '';
   let max = 0;
+  // البادئة ثم أرقام فقط: «F12» يُحسب لـ F، أما «FR3» (تقارير) فلا يدخل في تسلسل المراسلات
+  const re = new RegExp(`^${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*(\\d+)\\s*$`);
   letters.forEach(l => {
-    const m = String(l.reference_number || '').match(/(\d+)\s*$/);
-    if (m && String(l.reference_number).startsWith(p)) max = Math.max(max, Number(m[1]));
+    const m = String(l.reference_number || '').trim().match(re);
+    if (m) max = Math.max(max, Number(m[1]));
   });
   return `${p}${max + 1}`;
 }
@@ -206,6 +208,16 @@ export interface RenderOptions {
   markup?: boolean;
   /** إظهار «صفحة X من N» في أسفل كل صفحة حتى لو كانت صفحة واحدة */
   alwaysPageNumbers?: boolean;
+  /** إخفاء الرقم الإشاري من الورقة (التقارير الدورية: يكفي التاريخ) */
+  hideReference?: boolean;
+  /** إخفاء خانة التوقيع (الاسم والصفة والنقاط)؛ الختم وصورة التوقيع يتبعان اختيار المستخدم */
+  hideSign?: boolean;
+  /** إخفاء سطر الموجَّه إليه (مثل «السادة/ مجلس الإدارة المحترمين») */
+  hideRecipient?: boolean;
+  /** إخفاء سطر التحية */
+  hideGreeting?: boolean;
+  /** إخفاء سطر الختام (مثل «وتفضلوا بقبول فائق الاحترام») */
+  hideClosing?: boolean;
 }
 
 /** تحويل نص منسوخ من إكسل (أعمدة مفصولة بـ Tab) إلى جدول «| a | b |» — يعيد null إن لم يكن جدولاً */
@@ -428,8 +440,8 @@ export function renderLetterHtml(company: LetterheadCompany, letter: Letter, ori
   const bodyHtml = opts.markup
     ? renderMarkup(letter.body)
     : String(letter.body || '').split(/\n\s*\n/).filter(p => p.trim()).map((p, i) => `<p data-bid="p${i}">${nums(esc(p.trim())).replace(/\n/g, '<br/>')}</p>`).join('');
-  const signer = (letter.signer_name ?? '') || company.signer_name || '';
-  const signerTitle = (letter.signer_title ?? '') || company.signer_title || '';
+  const signer = opts.hideSign ? '' : (letter.signer_name ?? '') || company.signer_name || '';
+  const signerTitle = opts.hideSign ? '' : (letter.signer_title ?? '') || company.signer_title || '';
   const withStamp = letter.with_stamp !== false && !!stamp;
   const withSig = letter.with_signature !== false && !!sigImg;
   const hasSign = !!(signer || signerTitle || withStamp || withSig);
@@ -454,14 +466,14 @@ export function renderLetterHtml(company: LetterheadCompany, letter: Letter, ori
   <div class="abs meta" style="${box(478, 527, 58)}">${opts.yearOnlyDate ? '' : esc(d || '')}</div>
   <div class="abs meta" style="${box(433, 474, 58)}">${opts.yearOnlyDate ? '' : esc(mo || '')}</div>
   <div class="abs meta" style="${box(384, 427, 58)}">${esc(y || '')}</div>
-  <div class="abs meta" style="${box(399, 494, 81)}">${esc(letter.reference_number)}</div>`;
+  ${opts.hideReference ? '' : `<div class="abs meta" style="${box(399, 494, 81)}">${esc(letter.reference_number)}</div>`}`;
 
   const blocks = `
-      ${letter.recipient ? `<div class="to" data-bid="to">${nums(esc(letter.recipient))}</div>` : ''}
-      ${letter.greeting ? `<div class="greet" data-bid="gr">${nums(esc(letter.greeting))}</div>` : ''}
+      ${letter.recipient && !opts.hideRecipient ? `<div class="to" data-bid="to">${nums(esc(letter.recipient))}</div>` : ''}
+      ${letter.greeting && !opts.hideGreeting ? `<div class="greet" data-bid="gr">${nums(esc(letter.greeting))}</div>` : ''}
       ${letter.subject ? `<div class="subject" data-bid="sj">الموضوع: ${nums(esc(letter.subject))}</div>` : ''}
       ${bodyHtml}
-      ${letter.closing ? `<div class="closing" data-bid="cl">${nums(esc(letter.closing))}</div>` : ''}`;
+      ${letter.closing && !opts.hideClosing ? `<div class="closing" data-bid="cl">${nums(esc(letter.closing))}</div>` : ''}`;
   const bodyBox = (inner: string, bottom: number, ids = false) => !showText ? '' : `
   <div ${ids ? 'id="body" ' : ''}class="content body${!paginate ? ' letter-body' : ''}" style="top:${BODY.top}pt;left:${BODY.side}pt;right:${BODY.side}pt;height:${bottom - BODY.top}pt">
     <div ${ids ? 'id="flow" ' : ''}class="flow">${inner}</div>
@@ -472,7 +484,7 @@ export function renderLetterHtml(company: LetterheadCompany, letter: Letter, ori
     ${signer ? `<div class="sn">${esc(signer)}</div>` : ''}
     ${signerTitle ? `<div class="st">${esc(signerTitle)}</div>` : ''}
     ${withSig ? `<div class="sig-area"><img src="${esc(sigImg)}" alt=""/></div>` : ''}
-    <div class="dots">……………………………………</div>
+    ${opts.hideSign ? '' : '<div class="dots">……………………………………</div>'}
   </div>
   ${withStamp ? `<img class="stamp" src="${esc(stamp)}" alt=""/>` : ''}
 </div>`;
@@ -495,7 +507,8 @@ export function renderLetterHtml(company: LetterheadCompany, letter: Letter, ori
   function bodyOf(p) { return p.querySelector('.body'); }
   function flowOf(p) { return p.querySelector('.flow'); }
   function hostOf(p) { return (p.closest && p.closest('.page-scale-wrapper')) || p; }
-  function over(p) { var b = bodyOf(p), f = flowOf(p); return !!(b && f && f.scrollHeight > b.clientHeight + 1); }
+  // هامش أمان أسفل الصفحة حتى لا يُقص السطر الأخير عند اختلاف قياس الخط بين المعاينة والطباعة
+  function over(p) { var b = bodyOf(p), f = flowOf(p); return !!(b && f && f.scrollHeight > b.clientHeight - 8); }
   function newPageAfter(p) {
     var n = tpl.content.firstElementChild.cloneNode(true), h = hostOf(p);
     h.parentNode.insertBefore(n, h.nextSibling);

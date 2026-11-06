@@ -9,7 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { ChevronDown, Bell, CalendarClock, CalendarPlus, FileText, Loader2, MessageCircle, Receipt, RefreshCw, Search, Settings, Wallet, Check } from 'lucide-react';
+import { ChevronDown, Bell, CalendarClock, CalendarPlus, FileText, Loader2, MessageCircle, Receipt, RefreshCw, Search, Settings, Wallet, Check, Printer, BarChart3 } from 'lucide-react';
 import {
   buildContractDesignsMap, extractCalendarEvents, filterChangedCalendarEvents, getCalendarConfig, loadCalendarRecords,
   syncEventsToGoogleCalendar, type GoogleCalendarEvent,
@@ -61,12 +61,13 @@ const messageTitle = (e: GoogleCalendarEvent) => {
 /** عنوان الفاتورة في رسالة الزبون بدون رقمها: الخدمة الفعلية من البنود إن عُرفت، ثم عنوان الفاتورة */
 const invoiceMessageTitle = (e: GoogleCalendarEvent) => {
   const contract = e.contractNumber ? ` — عقد #${e.contractNumber}` : '';
+  const ad = e.adType ? ` (${e.adType})` : '';
   const base = e.invoiceName ? (e.invoiceName.startsWith('فاتورة') ? e.invoiceName : `فاتورة «${e.invoiceName}»`)
     : e.serviceLabel ? `فاتورة ${e.serviceLabel}`
     : 'فاتورة';
-  return base + contract;
+  return base + contract + ad;
 };
-const PAY_NOTE = 'وفي حال تم السداد مسبقاً نرجو التكرم بتجاهل هذه الرسالة، ويسعدنا تواصلكم معنا لأي استفسار.';
+const PAY_NOTE = 'وفي حال إتمام السداد، يُرجى اعتبار هذه الرسالة للعلم فقط، مع تزويدنا بما يفيد السداد لتحديث حسابكم لدينا. ويسعدنا تواصلكم معنا لأي استفسار.';
 
 /** وصف مختصر للتنبيه: الفاتورة تظهر بعنوانها إن وُجد */
 export function alertLabel(e: GoogleCalendarEvent): string {
@@ -106,7 +107,7 @@ function messageFor(e: GoogleCalendarEvent): string {
  */
 function buildTaskInvoiceEvents(customers: CustomerAccountOverdue[]): GoogleCalendarEvent[] {
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const build = (o: { id: string; tag: string; number: string; name: string; date: string; customerId?: string | null; customerName?: string | null; amount: number; contract?: number | null }): GoogleCalendarEvent | null => {
+  const build = (o: { id: string; tag: string; number: string; name: string; date: string; customerId?: string | null; customerName?: string | null; amount: number; contract?: number | null; adType?: string }): GoogleCalendarEvent | null => {
     if (o.amount <= 0.5 || !o.date || !Number.isFinite(Date.parse(o.date))) return null;
     const d = new Date(o.date); d.setHours(0, 0, 0, 0);
     const diff = Math.ceil((today.getTime() - d.getTime()) / 86_400_000);
@@ -115,7 +116,7 @@ function buildTaskInvoiceEvents(customers: CustomerAccountOverdue[]): GoogleCale
       description: [`${o.name}${o.number ? ` رقم ${o.number}` : ''}`, `العميل: ${o.customerName || ''}`, o.contract ? `رقم العقد: #${o.contract}` : '', `المبلغ المتبقي: ${fmt(o.amount)}`].filter(Boolean).join('\n'),
       startDate: o.date.slice(0, 10), allDay: false,
       invoiceNumber: o.number, invoiceName: o.name, customerId: o.customerId, customerName: o.customerName || 'عميل غير محدد',
-      contractNumber: o.contract ?? undefined, amount: o.amount, daysRemainingOrOverdue: diff, isOverdue: diff > 0, isContractActive: true,
+      contractNumber: o.contract ?? undefined, adType: o.adType || undefined, amount: o.amount, daysRemainingOrOverdue: diff, isOverdue: diff > 0, isContractActive: true,
       statusText: diff > 0 ? `متأخرة ${diff} يوم` : 'حديثة',
     };
   };
@@ -128,14 +129,14 @@ function buildTaskInvoiceEvents(customers: CustomerAccountOverdue[]): GoogleCale
       return build({
         id: `pinv-${inv.invoiceId}`, tag: `[ADHUB:PINV:${inv.invoiceId}]`, number: inv.invoiceNumber || '', name: 'فاتورة طباعة',
         date: inv.createdAt, customerId: inv.customerId, customerName: inv.customerName,
-        amount: inv.amount, contract: firstContract(inv.contractNumber),
+        amount: inv.amount, contract: firstContract(inv.contractNumber), adType: inv.adType,
       });
     }
     if (inv.type === 'composite') {
       return build({
         id: `ct-${inv.invoiceId}`, tag: `[ADHUB:CT:${inv.invoiceId}]`, number: (inv.invoiceNumber || '').replace(/^أمر عمل #/, ''), name: inv.invoiceTitle || 'فاتورة أعمال',
         date: inv.createdAt, customerId: inv.customerId, customerName: inv.customerName,
-        amount: inv.amount, contract: firstContract(inv.contractNumber),
+        amount: inv.amount, contract: firstContract(inv.contractNumber), adType: inv.adType,
       });
     }
     return null; // فواتير المبيعات تأتي من أحداث التقويم (وسومها INV)
@@ -154,7 +155,7 @@ export default function AlertsCenter() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [kind, setKind] = useState<Kind>('payments');
-  const [range, setRange] = useState('30');
+  const [range, setRange] = useState(params.get('range') || '30');
   const [q, setQ] = useState(params.get('customer') || '');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sendInvites, setSendInvites] = useState(false);
@@ -186,10 +187,11 @@ export default function AlertsCenter() {
         return name && name !== e.customerName ? { ...e, customerName: name } : e;
       });
       const phones = new Map<string, string>((r.customers || []).map((c: any) => [c.id, c.phone]));
+      const companies = new Map<string, string>((r.customers || []).filter((c: any) => c.company?.trim()).map((c: any) => [c.id, c.company.trim()]));
       // المتبقي الفعلي على حساب الزبون (لتطابق الإجمالي مع كشف الحساب)
       const accountRemaining = new Map<string, number>();
       invoiceCustomers.forEach(c => { if (c.accountRemaining != null) accountRemaining.set(customerKeyOf(c), c.accountRemaining); });
-      return { config, events, phones, accountRemaining };
+      return { config, events, phones, companies, accountRemaining };
     },
   });
 
@@ -302,6 +304,31 @@ export default function AlertsCenter() {
     finally { setBusy(null); }
   };
 
+  /** فاتورة المتأخرات للزبون: البنود المتأخرة ذات المبلغ + الإجمالي المتأخر بعد خصم رصيد الحساب */
+  const printOverdueInvoice = async (items: GoogleCalendarEvent[]) => {
+    const due = items.filter(e => (Number(e.amount) || 0) > 0.5);
+    const overdue = due.filter(e => e.isOverdue);
+    if (!overdue.length) { toast.info('لا توجد مبالغ متأخرة لهذا الزبون'); return; }
+    const { overdueTotal } = groupTotals(due);
+    const gross = overdue.reduce((s2, e) => s2 + (Number(e.amount) || 0), 0);
+    setBusy('print');
+    try {
+      const { generateOverdueStatementHTML } = await import('@/lib/overdueNoticeGenerator');
+      const html = await generateOverdueStatementHTML({
+        customerName: items[0].customerName || '—',
+        customerPhone: data?.phones.get(String(items[0].customerId)) || undefined,
+        customerCompany: data?.companies.get(String(items[0].customerId)) || undefined,
+        items: overdue.map(e => ({ label: messageTitle(e), kind: TYPE_LABEL[e.type], date: e.startDate, overdueDays: e.daysRemainingOrOverdue, amount: Number(e.amount) || 0 })),
+        grossTotal: gross,
+        total: overdueTotal,
+        credit: gross - overdueTotal,
+      });
+      const { showPrintPreview } = await import('@/components/print/PrintPreviewDialog');
+      showPrintPreview(html, `فاتورة متأخرات - ${items[0].customerName || ''}`, 'billing-overdue', data?.phones.get(String(items[0].customerId)) || undefined);
+    } catch (e: any) { toast.error(e.message || 'تعذر تجهيز فاتورة المتأخرات'); }
+    finally { setBusy(null); }
+  };
+
   const kpi = (k: Kind) => ({
     count: byKind[k].length,
     overdue: byKind[k].filter(e => e.isOverdue).length,
@@ -313,9 +340,10 @@ export default function AlertsCenter() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold"><Bell className="h-6 w-6" />تنبيهات الزبائن</h1>
-          <p className="text-sm text-muted-foreground">الدفعات والعقود والفواتير في مكان واحد — الإرسال يدوي، لكل نوع أو لكل تنبيه</p>
+          <p className="text-sm text-muted-foreground">كل متأخرات ومستحقات الزبائن (الدفعات والفواتير) والعقود في مكان واحد — مع طباعة فاتورة المتأخرات لكل زبون</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => navigate('/admin/periodic-reports')}><BarChart3 className="h-4 w-4" />التقارير الأسبوعية والشهرية</Button>
           <Button variant="outline" onClick={() => navigate('/admin/google-calendar')}><Settings className="h-4 w-4" />إعدادات التقويم</Button>
           <Button variant="outline" onClick={() => refetch()} disabled={isFetching}><RefreshCw className={cn('h-4 w-4', isFetching && 'animate-spin')} />تحديث</Button>
         </div>
@@ -400,6 +428,7 @@ export default function AlertsCenter() {
                       </div>
                     </div>
                     <div className="flex gap-1">
+                      {kind !== 'contracts' && overdueAmt > 0 && <Button size="sm" variant="outline" className="h-8 border-destructive/40 text-destructive hover:bg-destructive/10" disabled={!!busy} onClick={() => printOverdueInvoice(g.items)}><Printer className="h-3.5 w-3.5" />فاتورة المتأخرات</Button>}
                       <Button size="sm" variant="outline" className="h-8" disabled={!phone} onClick={() => openWhatsAppGroup(g.items)}><MessageCircle className="h-3.5 w-3.5" />رسالة واحدة بكل التنبيهات</Button>
                       <Button size="sm" variant="ghost" className="h-8" disabled={!!busy} onClick={() => sendCalendar(g.items)} aria-label="إرسال للتقويم"><CalendarClock className="h-3.5 w-3.5" /></Button>
                     </div>

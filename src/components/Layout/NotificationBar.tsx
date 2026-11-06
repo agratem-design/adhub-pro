@@ -18,7 +18,7 @@ interface Notification {
 }
 
 const categoryConfig: Record<string, { icon: typeof Bell; link: string; color: string; bg: string }> = {
-  'دفعات متأخرة':      { icon: DollarSign,    link: '/admin/overdue-payments',      color: 'text-red-600 dark:text-red-400',        bg: 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800/50' },
+  'دفعات متأخرة':      { icon: DollarSign,    link: '/admin/alerts-center',      color: 'text-red-600 dark:text-red-400',        bg: 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800/50' },
   'عقود تنتهي قريباً':  { icon: CalendarClock, link: '/admin/contracts',             color: 'text-amber-600 dark:text-amber-400',    bg: 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/50' },
   'أوامر تركيب':        { icon: Wrench,         link: '/admin/installation-tasks',    color: 'text-blue-600 dark:text-blue-400',      bg: 'bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800/50' },
   'مهام إزالة':        { icon: Trash2,         link: '/admin/removal-tasks',         color: 'text-orange-600 dark:text-orange-400',  bg: 'bg-orange-50 dark:bg-orange-950/40 border-orange-200 dark:border-orange-800/50' },

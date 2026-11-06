@@ -873,7 +873,14 @@ export function UnifiedPrintAllDialog({
         const sizeRankB = getSizeRank(sizeB);
         if (sizeRankA !== sizeRankB) return sizeRankA - sizeRankB;
 
-        // 2. الترتيب الثاني: المدينة / البلدية
+        // 2. الترتيب الثاني: المستوى
+        const levelA = billboardA?.Level || (billboardA as any)?.level || billboardA?.Category_Level || '';
+        const levelB = billboardB?.Level || (billboardB as any)?.level || billboardB?.Category_Level || '';
+        const levelRankA = getLevelRank(levelA);
+        const levelRankB = getLevelRank(levelB);
+        if (levelRankA !== levelRankB) return levelRankA - levelRankB;
+
+        // 3. الترتيب الثالث: المدينة / البلدية
         const primaryA = printCityInsteadOfMunicipality ? (billboardA?.City || '') : (billboardA?.Municipality || '');
         const fallbackA = printCityInsteadOfMunicipality ? (billboardA?.Municipality || '') : (billboardA?.City || '');
         const primaryB = printCityInsteadOfMunicipality ? (billboardB?.City || '') : (billboardB?.Municipality || '');
@@ -882,13 +889,6 @@ export function UnifiedPrintAllDialog({
         const muniRankA = getMuniRank(primaryA, fallbackA);
         const muniRankB = getMuniRank(primaryB, fallbackB);
         if (muniRankA !== muniRankB) return muniRankA - muniRankB;
-
-        // 3. الترتيب الثالث: المستوى
-        const levelA = billboardA?.Level || (billboardA as any)?.level || billboardA?.Category_Level || '';
-        const levelB = billboardB?.Level || (billboardB as any)?.level || billboardB?.Category_Level || '';
-        const levelRankA = getLevelRank(levelA);
-        const levelRankB = getLevelRank(levelB);
-        if (levelRankA !== levelRankB) return levelRankA - levelRankB;
 
         // 4. ترتيب ثانوي لضمان الثبات: رقم اللوحة ثم الاسم
         const idA = Number(billboardA?.ID || a.billboard_id || 0);

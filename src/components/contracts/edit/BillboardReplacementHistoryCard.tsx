@@ -79,7 +79,7 @@ export function BillboardReplacementHistoryCard({ contractNumber, refreshKey }: 
                   </div>
 
                   {/* Swap Flow: Old -> New */}
-                  <div className="grid grid-cols-[1fr,auto,1fr] items-center gap-2 pt-1">
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 pt-1">
                     {/* Old Billboard */}
                     <div className="p-2 rounded-lg bg-muted/40 border border-border/50 space-y-1">
                       <span className="text-[10px] text-muted-foreground block font-medium">اللوحة السابقة</span>

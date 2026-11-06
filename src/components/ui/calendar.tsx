@@ -1,13 +1,15 @@
 import * as React from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { DayPicker, CaptionProps, useNavigation } from "react-day-picker";
+import { DayPicker, useDayPicker, type MonthCaptionProps } from "react-day-picker";
 import { format, setMonth, setYear } from "date-fns";
 import { ar } from "date-fns/locale";
 
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
-function CustomCaption({ displayMonth }: CaptionProps) {
-  const { goToMonth, previousMonth, nextMonth } = useNavigation();
+
+function CustomCaption({ calendarMonth }: MonthCaptionProps) {
+  const { goToMonth, previousMonth, nextMonth } = useDayPicker();
+  const displayMonth = calendarMonth.date;
 
   const months = Array.from({ length: 12 }, (_, i) => {
     const date = new Date(2024, i, 1);
@@ -21,13 +23,11 @@ function CustomCaption({ displayMonth }: CaptionProps) {
   });
 
   const handleMonthChange = (value: string) => {
-    const newDate = setMonth(displayMonth, parseInt(value));
-    goToMonth(newDate);
+    goToMonth(setMonth(displayMonth, parseInt(value)));
   };
 
   const handleYearChange = (value: string) => {
-    const newDate = setYear(displayMonth, parseInt(value));
-    goToMonth(newDate);
+    goToMonth(setYear(displayMonth, parseInt(value)));
   };
 
   return (
@@ -83,7 +83,7 @@ function CustomCaption({ displayMonth }: CaptionProps) {
 }
 
 function CalendarFooter({ onSelect, mode }: { onSelect?: any; mode?: string }) {
-  const { goToMonth } = useNavigation();
+  const { goToMonth } = useDayPicker();
 
   const handleToday = () => {
     const today = new Date();
@@ -92,7 +92,7 @@ function CalendarFooter({ onSelect, mode }: { onSelect?: any; mode?: string }) {
       if (mode === "single") {
         onSelect(today, today, { selected: true } as any);
       } else if (mode === "multiple") {
-        onSelect([today], { selected: true } as any);
+        onSelect([today], today, { selected: true } as any);
       } else if (mode === "range") {
         onSelect({ from: today, to: today }, today, { selected: true } as any);
       }
@@ -115,51 +115,52 @@ function CalendarFooter({ onSelect, mode }: { onSelect?: any; mode?: string }) {
   );
 }
 
-export type CalendarProps = React.ComponentProps<typeof DayPicker>;
+// v8 كان يقبل initialFocus؛ في الإصدارات الجديدة اسمه autoFocus
+export type CalendarProps = React.ComponentProps<typeof DayPicker> & { initialFocus?: boolean };
 
-function Calendar({ className, classNames, showOutsideDays = true, ...props }: CalendarProps) {
-  const defaultMonth = props.defaultMonth || 
-    (props.mode === "single" && (props as any).selected instanceof Date 
-      ? (props as any).selected 
+function Calendar({ className, classNames, showOutsideDays = true, initialFocus, ...props }: CalendarProps) {
+  const defaultMonth = props.defaultMonth ||
+    (props.mode === "single" && (props as any).selected instanceof Date
+      ? (props as any).selected
       : undefined);
+  const onSelect = (props as any).onSelect;
 
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
       defaultMonth={defaultMonth}
+      autoFocus={initialFocus}
+      hideNavigation
       className={cn("p-3 pointer-events-auto", className)}
       classNames={{
-        months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
+        months: "relative flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
         month: "space-y-4",
-        caption: "flex justify-center pt-1 relative items-center",
+        month_caption: "flex justify-center pt-1 relative items-center",
         caption_label: "hidden",
         nav: "hidden",
-        table: "w-full border-collapse border border-border/20",
-        head_row: "flex bg-muted/30 border-b border-border/30",
-        head_cell: "text-muted-foreground w-9 font-semibold text-[0.75rem] text-center py-1.5",
-        row: "flex w-full border-b border-border/10 last:border-b-0",
-        cell: "h-9 w-9 text-center text-sm p-0 relative border-r border-border/20 last:border-r-0 [&:has([aria-selected].day-range-end)]:rounded-none [&:has([aria-selected].day-outside)]:bg-accent/10 [&:has([aria-selected])]:bg-accent/30 focus-within:relative focus-within:z-20",
-        day: cn(
+        month_grid: "w-full border-collapse border border-border/20",
+        weekdays: "flex bg-muted/30 border-b border-border/30",
+        weekday: "text-muted-foreground w-9 font-semibold text-[0.75rem] text-center py-1.5",
+        week: "flex w-full border-b border-border/10 last:border-b-0",
+        day: "h-9 w-9 text-center text-sm p-0 relative border-r border-border/20 last:border-r-0 focus-within:relative focus-within:z-20 [&.rdp-selected]:bg-accent/30 [&.rdp-outside.rdp-selected]:bg-accent/10",
+        day_button: cn(
           buttonVariants({ variant: "ghost" }),
-          "h-full w-full p-0 font-medium aria-selected:opacity-100 rounded-none transition-all duration-150 flex items-center justify-center hover:bg-primary hover:text-primary-foreground cursor-pointer"
+          "h-full w-full p-0 font-medium rounded-none transition-all duration-150 flex items-center justify-center hover:bg-primary hover:text-primary-foreground cursor-pointer"
         ),
-        day_range_end: "day-range-end",
-        day_selected:
-          "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground shadow-md font-bold",
-        day_today: "bg-accent/40 text-accent-foreground font-extrabold ring-1 ring-primary/45",
-        day_outside:
-          "day-outside text-muted-foreground/30 hover:bg-primary/20 hover:text-primary-foreground aria-selected:bg-accent/20",
-        day_disabled: "text-muted-foreground/20 cursor-not-allowed",
-        day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
-        day_hidden: "invisible",
+        range_start: "rdp-range_start",
+        range_end: "rdp-range_end",
+        selected:
+          "rdp-selected [&>button]:bg-primary [&>button]:text-primary-foreground [&>button]:hover:bg-primary [&>button]:hover:text-primary-foreground [&>button]:shadow-md [&>button]:font-bold",
+        today: "[&>button]:bg-accent/40 [&>button]:text-accent-foreground [&>button]:font-extrabold [&>button]:ring-1 [&>button]:ring-primary/45",
+        outside:
+          "rdp-outside [&>button]:text-muted-foreground/30 [&>button]:hover:bg-primary/20",
+        disabled: "[&>button]:text-muted-foreground/20 [&>button]:cursor-not-allowed",
+        range_middle: "[&>button]:bg-accent [&>button]:text-accent-foreground",
+        hidden: "invisible",
         ...classNames,
       }}
-      components={{
-        Caption: CustomCaption,
-        IconLeft: ({ ..._props }) => <ChevronLeft className="h-4 w-4" />,
-        IconRight: ({ ..._props }) => <ChevronRight className="h-4 w-4" />,
-      }}
-      footer={(props as any).onSelect ? <CalendarFooter onSelect={(props as any).onSelect} mode={props.mode} /> : undefined}
+      components={{ MonthCaption: CustomCaption }}
+      footer={onSelect ? <CalendarFooter onSelect={onSelect} mode={props.mode} /> : undefined}
       {...props}
     />
   );

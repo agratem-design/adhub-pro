@@ -56,7 +56,7 @@ function parseSizeToMeters(size?: string): number {
 export async function generatePurchaseInvoiceHTML(data: PurchaseInvoiceData, previewStyles?: ResolvedPrintStyles): Promise<string> {
   const [t, extras] = await Promise.all([
     previewStyles ?? resolveInvoiceStyles('purchase_invoice', {
-      titleAr: data.invoiceName || 'فاتورة مشتريات',
+      titleAr: 'فاتورة مشتريات',
       titleEn: 'PURCHASE INVOICE',
     }),
     previewStyles ? Promise.resolve({ bankAccounts: [], stampImageUrl: '' }) : fetchInvoiceExtras(),

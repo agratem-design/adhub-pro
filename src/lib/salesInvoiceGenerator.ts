@@ -37,7 +37,7 @@ export interface SalesInvoiceData {
 export async function generateSalesInvoiceHTML(data: SalesInvoiceData, previewStyles?: ResolvedPrintStyles): Promise<string> {
   const [t, extras] = await Promise.all([
     previewStyles ?? resolveInvoiceStyles('sales_invoice', {
-      titleAr: data.invoiceName || 'فاتورة مبيعات',
+      titleAr: 'فاتورة مبيعات',
       titleEn: 'SALES INVOICE',
     }),
     previewStyles ? Promise.resolve({ bankAccounts: [], stampImageUrl: '' }) : fetchInvoiceExtras(),

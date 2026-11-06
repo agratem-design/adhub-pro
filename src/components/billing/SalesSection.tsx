@@ -1,87 +1,85 @@
-import { useState } from 'react';
-import { formatAmount } from '@/lib/formatUtils';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Printer, Trash2, Edit, DollarSign, Coins, Wallet } from 'lucide-react';
+import { Fragment, useMemo, useState } from 'react';
+import { ChevronDown, DollarSign, Edit, MoreHorizontal, Printer, ShoppingBag, Trash2 } from 'lucide-react';
+import { Button, buttonVariants } from '@/components/ui/button';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import { useSystemDialog } from '@/contexts/SystemDialogContext';
 import { generateSalesInvoiceHTML } from './InvoiceTemplates';
 import { SalesInvoiceEditDialog } from './SalesInvoiceEditDialog';
 import { SalesInvoicePaymentDialog } from './SalesInvoicePaymentDialog';
-
-interface SalesItem {
-  item_name: string;
-  quantity: number;
-  unit_price: number;
-  total_price: number;
-}
+import {
+  InvoiceItemsTable, InvoiceSummary, InvoiceToolbar, PaidStatus, fmtDate, fmtMoney, type InvoiceFilter,
+} from './InvoiceListParts';
 
 interface SalesSectionProps {
   customerId: string;
   invoices: any[];
   onRefresh: () => void;
+  /** داخل تبويب له عنوانه بالفعل (صفحة الزبون) */
+  embedded?: boolean;
 }
 
-export function SalesSection({
-  customerId,
-  invoices,
-  onRefresh
-}: SalesSectionProps) {
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
-  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [selectedForPayment, setSelectedForPayment] = useState<any>(null);
-  const [selectedInvoices, setSelectedInvoices] = useState<Set<string>>(new Set());
+const parseItems = (raw: any): any[] => {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; } catch { return []; }
+};
 
-  const toggleInvoice = (invoiceId: string) => {
-    const newSelected = new Set(selectedInvoices);
-    if (newSelected.has(invoiceId)) {
-      newSelected.delete(invoiceId);
-    } else {
-      newSelected.add(invoiceId);
-    }
-    setSelectedInvoices(newSelected);
+export function SalesSection({ customerId, invoices, onRefresh, embedded = false }: SalesSectionProps) {
+  const { confirm: systemConfirm } = useSystemDialog();
+  const [editInvoice, setEditInvoice] = useState<any>(null);
+  const [payInvoice, setPayInvoice] = useState<any>(null);
+  const [filter, setFilter] = useState<InvoiceFilter>('all');
+  const [search, setSearch] = useState('');
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const rows = useMemo(() => invoices
+    .map(inv => {
+      const total = Number(inv.total_amount) || 0;
+      const paid = Number(inv.paid_amount) || 0;
+      const remaining = Math.max(0, total - paid);
+      return { inv, total, paid, remaining, isPaid: remaining <= 0.01, items: parseItems(inv.items) };
+    })
+    .sort((a, b) => {
+      // غير المسددة أولاً ثم الأحدث
+      if (a.isPaid !== b.isPaid) return a.isPaid ? 1 : -1;
+      return String(b.inv.invoice_date || b.inv.created_at || '').localeCompare(String(a.inv.invoice_date || a.inv.created_at || ''));
+    }), [invoices]);
+
+  const counts = {
+    all: rows.length,
+    open: rows.filter(r => !r.isPaid).length,
+    settled: rows.filter(r => r.isPaid).length,
   };
 
-  const toggleAll = () => {
-    if (selectedInvoices.size === invoices.length) {
-      setSelectedInvoices(new Set());
-    } else {
-      setSelectedInvoices(new Set(invoices.map(inv => inv.id)));
-    }
-  };
+  const visible = rows.filter(r => {
+    if (filter === 'open' && r.isPaid) return false;
+    if (filter === 'settled' && !r.isPaid) return false;
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [r.inv.invoice_number, r.inv.invoice_name, r.inv.notes].some(v => String(v || '').toLowerCase().includes(q));
+  });
 
-  const handleEdit = (invoice: any) => {
-    setSelectedInvoice(invoice);
-    setEditDialogOpen(true);
-  };
+  const totalAmount = rows.reduce((s, r) => s + r.total, 0);
+  const totalPaid = rows.reduce((s, r) => s + Math.min(r.paid, r.total), 0);
+  const totalRemaining = rows.reduce((s, r) => s + r.remaining, 0);
 
-  const handleAddPayment = (invoice: any) => {
-    setSelectedForPayment(invoice);
-    setPaymentDialogOpen(true);
-  };
-
-  const handleDelete = async (invoiceId: string, invoiceNumber: string) => {
-    if (!window.confirm('هل أنت متأكد من حذف هذه الفاتورة؟')) return;
-
+  const handleDelete = async (invoice: any) => {
+    const ok = await systemConfirm({
+      title: 'حذف فاتورة المبيعات',
+      message: `سيتم حذف الفاتورة #${invoice.invoice_number} والدفعات المرتبطة بها. متابعة؟`,
+      variant: 'destructive',
+      confirmText: 'حذف',
+    });
+    if (!ok) return;
     try {
-      // حذف الدفعة المرتبطة أولاً
-      await supabase
-        .from('customer_payments')
-        .delete()
-        .eq('sales_invoice_id', invoiceId);
-
-      // حذف الفاتورة
-      const { error } = await supabase
-        .from('sales_invoices')
-        .delete()
-        .eq('id', invoiceId);
-
+      await supabase.from('customer_payments').delete().eq('sales_invoice_id', invoice.id);
+      const { error } = await supabase.from('sales_invoices').delete().eq('id', invoice.id);
       if (error) throw error;
-
       toast.success('تم حذف الفاتورة بنجاح');
       onRefresh();
     } catch (error) {
@@ -91,8 +89,8 @@ export function SalesSection({
   };
 
   const handlePrint = async (invoice: any) => {
-    const items = typeof invoice.items === 'string' ? JSON.parse(invoice.items) : invoice.items;
-    const invoiceData = {
+    const items = parseItems(invoice.items);
+    const html = await generateSalesInvoiceHTML({
       invoiceNumber: invoice.invoice_number,
       invoiceDate: invoice.invoice_date,
       invoiceName: invoice.invoice_name || undefined,
@@ -103,240 +101,141 @@ export function SalesSection({
         unit: item.unit || '',
         unitPrice: item.unit_price,
         total: item.total_price,
-        image_url: item.image_url || undefined
+        image_url: item.image_url || undefined,
       })),
       discount: invoice.discount || 0,
       totalAmount: invoice.total_amount,
-      notes: invoice.notes || undefined
-    };
-
-    const html = await generateSalesInvoiceHTML(invoiceData);
+      notes: invoice.notes || undefined,
+    } as any);
     const { showPrintPreview } = await import('@/components/print/PrintPreviewDialog');
     showPrintPreview(html, `فاتورة مبيعات ${invoice.invoice_number}${invoice.invoice_name ? ' - ' + invoice.invoice_name : ''}`, 'billing-invoices');
   };
 
-  // حساب الإحصائيات
-  const totalAmount = invoices.reduce((sum, inv) => sum + (Number(inv.total_amount) || 0), 0);
-  const totalPaid = invoices.reduce((sum, inv) => sum + (Number(inv.paid_amount) || 0), 0);
-  const totalRemaining = Math.max(0, totalAmount - totalPaid);
-  const paidCount = invoices.filter(inv => (Number(inv.total_amount) || 0) - (Number(inv.paid_amount) || 0) <= 0.01).length;
-
   return (
-    <>
-    <Card className="border border-emerald-500/20 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 shadow-2xl overflow-hidden relative group transition-all duration-300 hover:border-emerald-500/30 rounded-2xl mt-6">
-      <CardHeader className="bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-transparent border-b border-emerald-500/20 text-white py-5">
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 w-full">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-emerald-500/15 border border-emerald-500/30 rounded-xl flex items-center justify-center shadow-lg">
-              <DollarSign className="h-6 w-6 text-emerald-500" />
-            </div>
-            <div>
-              <CardTitle className="text-xl font-bold text-white">فواتير المبيعات</CardTitle>
-              <p className="text-white/70 text-sm mt-0.5">{invoices.length} فاتورة • {paidCount} مسددة</p>
-            </div>
+    <section className={cn('space-y-3', !embedded && 'mt-6 rounded-2xl border border-border bg-card p-4')}>
+      {!embedded && (
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+            <ShoppingBag className="h-5 w-5" />
           </div>
-
-          {selectedInvoices.size > 0 && (
-            <span className="text-sm text-white/70">
-              تم اختيار {selectedInvoices.size} فاتورة
-            </span>
-          )}
+          <div>
+            <h3 className="text-base font-bold">فواتير المبيعات</h3>
+            <p className="text-xs text-muted-foreground">{counts.all} فاتورة · {counts.settled} مسددة · {counts.open} مفتوحة</p>
+          </div>
         </div>
-      </CardHeader>
-      <CardContent className="pt-6 px-6 pb-6">
-        {invoices.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mb-5 select-none">
-            {/* Total Card */}
-            <div className="bg-slate-950/45 backdrop-blur-md border border-white/5 hover:border-emerald-500/30 rounded-2xl p-4 flex items-center justify-between shadow-sm transition-all duration-300 hover:-translate-y-0.5 group">
-              <div className="space-y-1 text-right">
-                <span className="text-[10px] sm:text-xs font-bold text-muted-foreground/75">إجمالي المبلغ</span>
-                <p className="text-base sm:text-lg lg:text-xl font-black text-white">
-                  {totalAmount.toLocaleString('ar-LY')} <span className="text-xs font-normal text-white/50 font-tajawal">د.ل</span>
-                </p>
-              </div>
-              <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 group-hover:scale-110 transition-transform shrink-0">
-                <DollarSign className="h-4.5 w-4.5" />
-              </div>
-            </div>
+      )}
 
-            {/* Paid Card */}
-            <div className="bg-slate-950/45 backdrop-blur-md border border-white/5 hover:border-green-500/30 rounded-2xl p-4 flex items-center justify-between shadow-sm transition-all duration-300 hover:-translate-y-0.5 group">
-              <div className="space-y-1 text-right">
-                <span className="text-[10px] sm:text-xs font-bold text-muted-foreground/75">إجمالي المدفوع</span>
-                <p className="text-base sm:text-lg lg:text-xl font-black text-green-400">
-                  {totalPaid.toLocaleString('ar-LY')} <span className="text-xs font-normal text-white/50 font-tajawal">د.ل</span>
-                </p>
-              </div>
-              <div className="p-2.5 rounded-xl bg-green-500/10 text-green-400 group-hover:scale-110 transition-transform shrink-0">
-                <Coins className="h-4.5 w-4.5" />
-              </div>
-            </div>
+      {rows.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-12 text-muted-foreground">
+          <ShoppingBag className="mb-3 h-10 w-10 opacity-30" />
+          <p className="text-sm font-medium">لا توجد فواتير مبيعات لهذا الزبون</p>
+        </div>
+      ) : (
+        <>
+          <InvoiceSummary total={totalAmount} paid={totalPaid} remaining={totalRemaining} />
+          <InvoiceToolbar search={search} onSearch={setSearch} filter={filter} onFilter={setFilter} counts={counts} />
 
-            {/* Remaining Card */}
-            <div className="bg-slate-950/45 backdrop-blur-md border border-white/5 hover:border-rose-500/30 rounded-2xl p-4 flex items-center justify-between shadow-sm transition-all duration-300 hover:-translate-y-0.5 group">
-              <div className="space-y-1 text-right">
-                <span className="text-[10px] sm:text-xs font-bold text-muted-foreground/75">المبلغ المتبقي</span>
-                <p className="text-base sm:text-lg lg:text-xl font-black text-rose-400">
-                  {totalRemaining.toLocaleString('ar-LY')} <span className="text-xs font-normal text-white/50 font-tajawal">د.ل</span>
-                </p>
-              </div>
-              <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-400 group-hover:scale-110 transition-transform shrink-0">
-                <Wallet className="h-4.5 w-4.5" />
-              </div>
-            </div>
-          </div>
-        )}
-        {invoices.length > 0 ? (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/50 hover:bg-muted/50">
-                  <TableHead className="text-right font-bold w-12">
-                    <Checkbox 
-                      checked={selectedInvoices.size === invoices.length && invoices.length > 0}
-                      onCheckedChange={toggleAll}
-                    />
-                  </TableHead>
-                  <TableHead className="text-right font-bold">رقم الفاتورة</TableHead>
-                  <TableHead className="text-right font-bold">عنوان الفاتورة</TableHead>
-                  <TableHead className="text-right font-bold">التاريخ</TableHead>
-                  <TableHead className="text-right font-bold">المبلغ الإجمالي</TableHead>
-                  <TableHead className="text-right font-bold">المدفوع</TableHead>
-                  <TableHead className="text-right font-bold">المتبقي</TableHead>
-                  <TableHead className="text-right font-bold">الحالة</TableHead>
-                  <TableHead className="text-right font-bold">الإجراءات</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {invoices.map((invoice, idx) => {
-                  const invoiceTotal = Number(invoice.total_amount) || 0;
-                  const paidAmount = Number(invoice.paid_amount) || 0;
-                  const remaining = invoiceTotal - paidAmount;
-                  const isPaid = remaining <= 0.01;
-                  const paymentPercentage = invoiceTotal > 0 ? Math.round((paidAmount / invoiceTotal) * 100) : 0;
-
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="bg-muted/40 text-xs text-muted-foreground">
+                <tr>
+                  <th className="w-8 px-2 py-2" />
+                  <th className="px-3 py-2 text-right font-medium">الفاتورة</th>
+                  <th className="px-3 py-2 text-right font-medium">التاريخ</th>
+                  <th className="px-3 py-2 text-left font-medium">الإجمالي</th>
+                  <th className="px-3 py-2 text-left font-medium">المدفوع</th>
+                  <th className="px-3 py-2 text-left font-medium">المتبقي</th>
+                  <th className="px-3 py-2 text-right font-medium">الحالة</th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {visible.map(({ inv, total, paid, remaining, isPaid, items }) => {
+                  const open = expanded === inv.id;
                   return (
-                    <TableRow 
-                      key={invoice.id} 
-                      className={`group transition-all duration-200 ${
-                        selectedInvoices.has(invoice.id) 
-                          ? 'bg-green-500/10' 
-                          : isPaid 
-                            ? 'bg-green-50/50 dark:bg-green-900/10' 
-                            : idx % 2 === 0 
-                              ? 'bg-background hover:bg-accent/50' 
-                              : 'hover:bg-accent/50'
-                      }`}
-                    >
-                      <TableCell className="py-4">
-                        <Checkbox
-                          checked={selectedInvoices.has(invoice.id)}
-                          onCheckedChange={() => toggleInvoice(invoice.id)}
-                        />
-                      </TableCell>
-                      <TableCell className="font-bold text-primary py-4">
-                        #{invoice.invoice_number}
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <span className="font-medium">{invoice.invoice_name || '—'}</span>
-                      </TableCell>
-                      <TableCell className="py-4 text-muted-foreground">
-                        {invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString('ar-LY') : '—'}
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <span className="font-bold text-foreground">{formatAmount(invoiceTotal)}</span>
-                        <span className="text-xs text-muted-foreground mr-1">د.ل</span>
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">{formatAmount(paidAmount)}</span>
-                        <span className="text-xs text-muted-foreground mr-1">د.ل</span>
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <span className={`font-bold ${remaining > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
-                          {formatAmount(remaining)}
-                        </span>
-                        <span className="text-xs text-muted-foreground mr-1">د.ل</span>
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <Badge className={`text-xs ${
-                          isPaid 
-                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' 
-                            : paymentPercentage >= 50
-                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                              : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
-                        }`} variant="outline">
-                          {isPaid ? 'مسددة' : `${paymentPercentage}% مدفوع`}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right py-4">
-                        <div className="flex gap-2 justify-end">
-                          {!isPaid && (
-                            <Button
-                              size="sm"
-                              variant="default"
-                              onClick={() => handleAddPayment(invoice)}
-                              className="bg-blue-600 hover:bg-blue-700"
-                            >
-                              <DollarSign className="h-4 w-4 ml-1" />
-                              سداد
-                            </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleEdit(invoice)}
-                          >
-                            <Edit className="h-4 w-4 ml-1" />
-                            تعديل
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handlePrint(invoice)}
-                          >
-                            <Printer className="h-4 w-4 ml-1" />
-                            طباعة
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => handleDelete(invoice.id, invoice.invoice_number)}
-                          >
-                            <Trash2 className="h-4 w-4 ml-1" />
-                            حذف
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                    <Fragment key={inv.id}>
+                      <tr className={cn('hover:bg-muted/20', open && 'bg-muted/20')}>
+                        <td className="px-2 py-2">
+                          <button type="button" onClick={() => setExpanded(open ? null : inv.id)}
+                            aria-expanded={open} aria-label="عرض البنود"
+                            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+                            <ChevronDown className={cn('h-4 w-4 transition-transform', open && 'rotate-180')} />
+                          </button>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="font-semibold">{inv.invoice_name || 'فاتورة مبيعات'}</div>
+                          <div className="text-xs tabular-nums text-muted-foreground">#{inv.invoice_number} · {items.length} بند</div>
+                        </td>
+                        <td className="px-3 py-2 text-xs tabular-nums text-muted-foreground">{fmtDate(inv.invoice_date || inv.created_at)}</td>
+                        <td className="px-3 py-2 text-left font-semibold tabular-nums">{fmtMoney(total)}</td>
+                        <td className="px-3 py-2 text-left tabular-nums text-emerald-600 dark:text-emerald-400">{fmtMoney(paid)}</td>
+                        <td className={cn('px-3 py-2 text-left font-semibold tabular-nums', isPaid ? 'text-muted-foreground' : 'text-destructive')}>{isPaid ? '—' : fmtMoney(remaining)}</td>
+                        <td className="px-3 py-2"><PaidStatus total={total} settled={paid} /></td>
+                        <td className="px-3 py-2">
+                          <div className="flex justify-end gap-1">
+                            {!isPaid && (
+                              <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={() => setPayInvoice(inv)}>
+                                <DollarSign className="h-3.5 w-3.5" />سداد
+                              </Button>
+                            )}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-8 w-8 p-0')} aria-label="إجراءات الفاتورة">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-40 text-right">
+                                <DropdownMenuItem onClick={() => handlePrint(inv)}><Printer className="ml-2 h-4 w-4" />طباعة</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setEditInvoice(inv)}><Edit className="ml-2 h-4 w-4" />تعديل</DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleDelete(inv)}><Trash2 className="ml-2 h-4 w-4" />حذف</DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </div>
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr className="bg-muted/10">
+                          <td />
+                          <td colSpan={7} className="px-3 pb-3 pt-1">
+                            <div className="rounded-lg border border-border bg-card p-2">
+                              <InvoiceItemsTable items={items.map((it: any) => ({
+                                name: it.item_name, quantity: Number(it.quantity) || 0, unit: it.unit,
+                                unitPrice: Number(it.unit_price) || 0, total: Number(it.total_price) || 0,
+                              }))} />
+                              {(Number(inv.discount) > 0 || inv.notes) && (
+                                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 border-t border-border/60 px-2 pt-2 text-xs text-muted-foreground">
+                                  {Number(inv.discount) > 0 && <span>الخصم: <b className="tabular-nums text-foreground">{fmtMoney(Number(inv.discount))} د.ل</b></span>}
+                                  {inv.notes && <span>ملاحظات: {inv.notes}</span>}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
-              </TableBody>
-            </Table>
+                {!visible.length && (
+                  <tr><td colSpan={8} className="px-3 py-10 text-center text-sm text-muted-foreground">لا توجد فواتير مطابقة</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <DollarSign className="h-12 w-12 mb-4 opacity-30" />
-            <p className="text-lg font-medium">لا توجد فواتير مبيعات</p>
-            <p className="text-sm">لم يتم العثور على فواتير مبيعات لهذا العميل</p>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        </>
+      )}
 
-    <SalesInvoiceEditDialog
-      open={editDialogOpen}
-      onOpenChange={setEditDialogOpen}
-      invoice={selectedInvoice}
-      onSuccess={onRefresh}
-    />
-
-    <SalesInvoicePaymentDialog
-      open={paymentDialogOpen}
-      onOpenChange={setPaymentDialogOpen}
-      invoice={selectedForPayment}
-      customerId={customerId}
-      onPaymentAdded={onRefresh}
-    />
-    </>
+      <SalesInvoiceEditDialog
+        open={!!editInvoice}
+        onOpenChange={(o) => { if (!o) setEditInvoice(null); }}
+        invoice={editInvoice}
+        onSuccess={onRefresh}
+      />
+      <SalesInvoicePaymentDialog
+        open={!!payInvoice}
+        onOpenChange={(o) => { if (!o) setPayInvoice(null); }}
+        invoice={payInvoice}
+        customerId={customerId}
+        onPaymentAdded={onRefresh}
+      />
+    </section>
   );
 }

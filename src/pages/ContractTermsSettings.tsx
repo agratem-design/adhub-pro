@@ -87,13 +87,13 @@ const rtlSafe = (text: string) => `${ALM}${text ?? ''}`;
 // عزل المقاطع اللاتينية/الأرقام داخل tspan LTR لمنع قفز ترتيب النص المختلط داخل SVG
 const LTR_RUN_REGEX = /[A-Za-z0-9+][A-Za-z0-9 .,&()_+\/-]*/g;
 
-function renderMixedDirectionTspans(text: string): Array<string | JSX.Element> {
+function renderMixedDirectionTspans(text: string): Array<string | React.JSX.Element> {
   const value = `${text ?? ''}`;
   const matches = Array.from(value.matchAll(LTR_RUN_REGEX));
 
   if (!matches.length) return [value];
 
-  const parts: Array<string | JSX.Element> = [];
+  const parts: Array<string | React.JSX.Element> = [];
   let lastIndex = 0;
 
   matches.forEach((match, index) => {

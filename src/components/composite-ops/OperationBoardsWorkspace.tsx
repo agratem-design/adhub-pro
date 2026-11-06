@@ -19,6 +19,7 @@ import { installationTeamCoversBillboard } from '@/utils/teamAssignment';
 import { cn } from '@/lib/utils';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
 import { sortBillboardsStandardSync } from '@/lib/billboardSorter';
+import { useBillboardSortRanks } from '@/hooks/useBillboardSortRanks';
 import { smartArabicMatch } from '@/lib/arabicSearch';
 import {
   Calculator, Camera, X, CheckCircle2, Sparkles, Star, ShieldOff, ImageIcon, ImagePlus, Loader2, MoreHorizontal, Palette, Plus, Printer, RotateCcw, Search, Trash2, Undo2, Upload, Users, CalendarDays, Rows3, LayoutGrid,
@@ -263,6 +264,7 @@ export function OperationBoardsWorkspace({ op, onClose, onChanged, onEditCosts, 
   onPrint: (itemIds?: string[]) => void;
 }) {
   const { confirm } = useSystemDialog();
+  const sortReady = useBillboardSortRanks();
   const [items, setItems] = useState<BoardItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState('');
@@ -320,7 +322,7 @@ export function OperationBoardsWorkspace({ op, onClose, onChanged, onEditCosts, 
       && BOARD_ATTRS.every(({ key }) => attrs[key] === 'all' || String(i[key] ?? '').trim() === attrs[key])
       && smartArabicMatch([i.name, i.landmark, i.area, i.city, i.municipality, i.size, i.billboardId], q));
     return sortBillboardsStandardSync(list.map(i => ({ ...i, Size: i.size, Billboard_Name: i.name, ID: i.billboardId })) as any) as unknown as BoardItem[];
-  }, [items, q, team, status, contract, attrs]);
+  }, [items, q, team, status, contract, attrs, sortReady]);
 
   const done = (items || []).filter(i => i.status === 'completed').length;
   const total = items?.length || 0;

@@ -82,8 +82,8 @@ const CustomerMerge = lazyRetry(() => import("./pages/CustomerMerge"));
 const BookingRequests = lazyRetry(() => import("./pages/BookingRequests"));
 const SharedBillboards = lazyRetry(() => import("./pages/SharedBillboards"));
 const SharedCompanies = lazyRetry(() => import("./pages/SharedCompanies"));
-const OverduePayments = lazyRetry(() => import("./pages/OverduePayments"));
-const AccountOverduePayments = lazyRetry(() => import("./pages/AccountOverduePayments"));
+/** صفحات المتأخرات القديمة تحوّل إلى صفحة «تنبيهات الزبائن» الموحدة */
+const ToAlertsCenter = (() => <Navigate to="/admin/alerts-center" replace />) as any;
 const ExpenseManagement = lazyRetry(() => import("./pages/ExpenseManagement"));
 const ExpensesReport = lazyRetry(() => import("./pages/ExpensesReport"));
 const PrintedInvoicesPage = lazyRetry(() => import("./pages/PrintedInvoicesPage"));
@@ -179,8 +179,8 @@ const adminRoutes: { path: string; Component: React.LazyExoticComponent<any>; pe
   { path: "customer-billing", Component: CustomerBilling, permission: "customer_billing" },
   { path: "customer-account", Component: CustomerAccount, permission: "customer_billing" },
   { path: "customer-merge", Component: CustomerMerge, permission: "customer_merge" },
-  { path: "overdue-payments", Component: OverduePayments, permission: "overdue_payments" },
-  { path: "account-overdue-payments", Component: AccountOverduePayments, permission: "overdue_payments" },
+  { path: "overdue-payments", Component: ToAlertsCenter, permission: "overdue_payments" }, // دُمجت في تنبيهات الزبائن
+  { path: "account-overdue-payments", Component: ToAlertsCenter, permission: "overdue_payments" }, // دُمجت في تنبيهات الزبائن
   { path: "booking-requests", Component: BookingRequests, permission: "booking_requests" },
   { path: "users", Component: Users, permission: "users" },
   { path: "roles", Component: RolesManagement, permission: "roles" },
@@ -281,7 +281,7 @@ const App = () => (
               <NetworkStatusNotifier />
               <PwaUpdatePrompt />
               
-              <RouterComponent future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+              <RouterComponent>
                 <AuthProvider>
                   <SessionTimeoutGuard />
                   <GlobalImagePaste />

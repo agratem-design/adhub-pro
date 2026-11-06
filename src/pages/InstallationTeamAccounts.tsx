@@ -1,3 +1,4 @@
+import { renderUnifiedDocument, escHtml, docMoney } from '@/lib/unifiedDocument';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useEffect, useState, useMemo } from 'react';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
@@ -438,10 +439,12 @@ export default function InstallationTeamAccounts() {
     let logoPath = '';
     let fontFamily = 'Doran';
     let footerText = 'شكراً لتعاملكم معنا';
+    let docStyles: Record<string, any> = {};
     try {
       const { getMergedInvoiceStylesAsync } = await import('@/hooks/useInvoiceSettingsSync');
       const styles = await getMergedInvoiceStylesAsync('installation');
       if (styles) {
+        docStyles = styles;
         logoPath = styles.showLogo !== false ? (styles.logoPath || '') : '';
         fontFamily = styles.fontFamily || 'Doran';
         footerText = styles.footerText || footerText;
@@ -744,118 +747,28 @@ export default function InstallationTeamAccounts() {
     const fullLogoUrl = logoPath ? (logoPath.startsWith('http') ? logoPath : `${baseUrl}${logoPath}`) : '';
     const today = new Date().toLocaleDateString('ar-LY', { year: 'numeric', month: 'long', day: 'numeric' });
 
-    const html = `
-      <!DOCTYPE html>
-      <html dir="rtl" lang="ar">
-      <head>
-        <meta charset="UTF-8">
-        <title>${contractStatementId ? `كشف عقد ${contractStatementId}` : 'كشف حساب كامل'} - ${selectedTeam?.team_name}</title>
-        <style>
-          @font-face { font-family: 'Doran'; src: url('/Doran-Regular.otf') format('opentype'); font-weight: 400; }
-          @font-face { font-family: 'Doran'; src: url('/Doran-Bold.otf') format('opentype'); font-weight: 700; }
-          @font-face { font-family: 'Manrope'; src: url('/Manrope-Regular.otf') format('opentype'); font-weight: 400; }
-          @font-face { font-family: 'Manrope'; src: url('/Manrope-Bold.otf') format('opentype'); font-weight: 700; }
-          * { margin:0; padding:0; box-sizing:border-box; -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
-          html,body { font-family:'${fontFamily}','Noto Sans Arabic',Arial,sans-serif; direction:rtl; background:white; color:#000; font-size:10px; }
-          .print-container { width:210mm; min-height:297mm; padding:15mm; background:#fff; margin:0 auto; }
-          @media print { @page { size:A4; margin:15mm; } .print-container { width:100%; min-height:auto; padding:0; } }
-        </style>
-      </head>
-      <body>
-        <div class="print-container">
-          <!-- Header -->
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:15px;border-bottom:3px solid #1a1a1a;">
-           <div style="flex:1;">
-              <h1 style="font-size:32px;font-weight:bold;color:#1a1a1a;margin-bottom:8px;">${contractStatementId ? `كشف حساب عقد #${contractStatementId}` : 'كشف حساب فريق التركيب'}</h1>
-              <div style="font-size:12px;color:#666;line-height:1.8;">
-                <div>التاريخ: ${today}</div>
-                <div>عدد العقود: ${sortedContractIds.length} · عدد التركيبات: ${filteredAccounts.length}</div>
-              </div>
-            </div>
-            ${fullLogoUrl ? `<img src="${fullLogoUrl}" style="height:100px;object-fit:contain;" onerror="this.style.display='none'" />` : ''}
-          </div>
-
-          <!-- Team Info -->
-          <div style="background:linear-gradient(135deg, #f5f5f5, #ffffff);padding:20px;margin-bottom:24px;border-radius:12px;border-right:5px solid #1a1a1a;box-shadow:0 2px 12px rgba(0,0,0,0.06);">
-            <div style="display:flex;justify-content:space-between;align-items:center;">
-              <div>
-                <div style="font-size:14px;color:#666;margin-bottom:4px;">فريق التركيب</div>
-                <div style="font-size:28px;font-weight:bold;color:#1a1a1a;">${selectedTeam?.team_name || ''}</div>
-              </div>
-              <div style="display:flex;gap:24px;">
-                <div style="text-align:center;">
-                  <div style="font-size:24px;font-weight:bold;color:#D4AF37;font-family:Manrope;">${sortedContractIds.length}</div>
-                  <div style="font-size:12px;color:#666;">عقد</div>
-                </div>
-                <div style="text-align:center;">
-                  <div style="font-size:24px;font-weight:bold;color:#D4AF37;font-family:Manrope;">${accounts.length}</div>
-                  <div style="font-size:12px;color:#666;">تركيب</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          ${options.showCost ? `
-          <!-- Summary Stats -->
-          <div style="background:#f8f9fa;padding:12px 16px;margin-bottom:20px;border-radius:8px;border:1px solid #e9ecef;">
-            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;">
-              <span style="font-size:12px;font-weight:bold;color:#495057;">ملخص:</span>
-              <span style="background:#fff;padding:4px 8px;border-radius:6px;font-size:11px;color:#333;border:1px solid #dee2e6;">
-                إجمالي التركيب: <strong style="font-family:Manrope;">${totalInstallation.toLocaleString()}</strong> د.ل
-              </span>
-              ${totalExpenses > 0 ? `<span style="background:#fff;padding:4px 8px;border-radius:6px;font-size:11px;color:#333;border:1px solid #dee2e6;">
-                مصاريف إضافية: <strong style="font-family:Manrope;">${totalExpenses.toLocaleString()}</strong> د.ل
-              </span>` : ''}
-              <span style="background:#fef3c7;padding:4px 8px;border-radius:6px;font-size:11px;color:#92400e;border:1px solid #fde68a;font-weight:bold;">
-                معلق: <strong style="font-family:Manrope;">${pendingTotal.toLocaleString()}</strong> د.ل
-              </span>
-              <span style="background:#dcfce7;padding:4px 8px;border-radius:6px;font-size:11px;color:#166534;border:1px solid #bbf7d0;font-weight:bold;">
-                مدفوع: <strong style="font-family:Manrope;">${paidTotal.toLocaleString()}</strong> د.ل
-              </span>
-            </div>
-          </div>
-          ` : ''}
-
-          <!-- Contract Details -->
-          ${contractSections}
-
-          ${options.showCost ? `
-          <!-- Total Section -->
-          <div style="background:linear-gradient(135deg, #1a1a1a, #000);padding:20px;text-align:center;border-radius:8px;margin-top:20px;">
-            <div style="font-size:14px;color:#fff;opacity:0.9;margin-bottom:6px;">الإجمالي المستحق</div>
-            <div style="font-size:28px;font-weight:bold;color:#D4AF37;font-family:Manrope;">
-              ${grandTotal.toLocaleString()}
-              <span style="font-size:16px;margin-right:8px;">دينار ليبي</span>
-            </div>
-            <div style="display:flex;justify-content:center;gap:30px;margin-top:8px;font-size:11px;">
-              <span style="color:#fca5a5;">معلق: ${pendingTotal.toLocaleString()} د.ل</span>
-              <span style="color:#86efac;">مدفوع: ${paidTotal.toLocaleString()} د.ل</span>
-            </div>
-          </div>
-          ` : ''}
-
-          ${options.showStampSignature ? `
-          <div style="margin-top:40px;padding-top:20px;border-top:2px dashed #ccc;">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-              <div style="flex:1;text-align:center;padding-left:20px;">
-                <div style="font-size:14px;font-weight:bold;color:#333;margin-bottom:60px;">الختم</div>
-                <div style="border-top:2px solid #333;width:120px;margin:0 auto;"></div>
-              </div>
-              <div style="flex:1;text-align:center;padding-right:20px;">
-                <div style="font-size:14px;font-weight:bold;color:#333;margin-bottom:60px;">التوقيع</div>
-                <div style="border-top:2px solid #333;width:120px;margin:0 auto;"></div>
-              </div>
-            </div>
-          </div>
-          ` : ''}
-
-          <div style="margin-top:30px;padding-top:15px;border-top:1px solid #D4AF37;text-align:center;font-size:10px;color:#666;">
-            ${footerText}
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
+    // ✅ المستند الموحد — نفس قالب كل الكشوفات، والألوان من إعدادات الطباعة (فاتورة التركيب)
+    const html = renderUnifiedDocument(docStyles, {
+      title: contractStatementId ? `كشف حساب عقد #${contractStatementId}` : 'كشف حساب فريق التركيب',
+      subtitle: 'بيان تفصيلي بالتركيبات والمصاريف',
+      pageTitle: `${contractStatementId ? `كشف عقد ${contractStatementId}` : 'كشف حساب كامل'} - ${selectedTeam?.team_name || ''}`,
+      info: [
+        { label: 'فريق التركيب', value: escHtml(selectedTeam?.team_name || '—') },
+        { label: 'عدد العقود', value: sortedContractIds.length },
+        { label: 'عدد التركيبات', value: filteredAccounts.length },
+        { label: 'التاريخ', value: today },
+      ],
+      total: options.showCost ? { label: 'الإجمالي المستحق', value: docMoney(grandTotal) } : undefined,
+      summary: options.showCost ? [
+        { label: 'إجمالي التركيب', value: docMoney(totalInstallation) },
+        ...(totalExpenses > 0 ? [{ label: 'مصاريف إضافية', value: docMoney(totalExpenses) }] : []),
+        { label: 'مدفوع', value: docMoney(paidTotal) },
+        { label: 'معلق (المتبقي)', value: docMoney(pendingTotal) },
+      ] : undefined,
+      sections: [{ kind: 'html', html: contractSections }],
+      signatures: options.showStampSignature ? [{ label: 'الختم' }, { label: 'التوقيع' }] : undefined,
+    });
+    void footerText; void fontFamily; void fullLogoUrl;
 
     const w = window.open('', '_blank');
     if (w) {

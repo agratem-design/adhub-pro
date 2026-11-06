@@ -33,22 +33,27 @@ export interface CustomerAccountOverdue {
   accountRemaining?: number;
 }
 
-export async function loadCustomerOverdueInvoices(): Promise<CustomerAccountOverdue[]> {
+export async function loadCustomerOverdueInvoices(
+  opts: { customerId?: string | null } = {},
+): Promise<CustomerAccountOverdue[]> {
+  const only = <Q extends { eq: (col: string, v: string) => Q }>(q: Q): Q =>
+    opts.customerId ? q.eq('customer_id', opts.customerId) : q;
   const [initialPrintedRes, initialSalesRes, initialCompositeRes] = await Promise.all([
-    supabase
+    only(supabase
       .from('printed_invoices')
       .select(`id, contract_number, customer_name, customer_id, total_amount, created_at, paid, notes`)
-      .eq('paid', false),
-    supabase
+      .eq('paid', false) as any),
+    // علامة paid قد تكون null في الفواتير القديمة؛ المتبقي الفعلي يُحسب أدناه
+    only(supabase
       .from('sales_invoices')
       .select(`id, invoice_number, invoice_name, customer_name, customer_id, total_amount, remaining_amount, paid_amount, created_at, invoice_date, paid, notes`)
-      .eq('paid', false),
-    supabase
+      .or('paid.is.null,paid.eq.false') as any),
+    only(supabase
       .from('composite_tasks')
       .select(`id, task_number, task_type, customer_name, customer_id, customer_print_cost, customer_installation_cost, customer_cutout_cost, customer_total, paid_amount, discount_amount, created_at, status, contract_id, combined_invoice_id, installation_task_id, print_task_id, cutout_task_id`)
       .is('combined_invoice_id', null)
-      .neq('status', 'cancelled')
-  ]);
+      .neq('status', 'cancelled') as any)
+  ]) as any[];
 
   if (initialPrintedRes.error) {
     console.error('Error loading unpaid printed invoices:', initialPrintedRes.error);
@@ -323,7 +328,11 @@ export async function loadCustomerOverdueInvoices(): Promise<CustomerAccountOver
   for (const sale of initialSalesRes.data || []) {
     const createdAt = sale.invoice_date || sale.created_at || new Date().toISOString();
     const diffDays = Math.ceil((today.getTime() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24));
-    const amount = Number(sale.remaining_amount ?? (Number(sale.total_amount) - Number(sale.paid_amount || 0))) || 0;
+    // المتبقي = الإجمالي − المدفوع (نفس حساب قسم فواتير المبيعات)؛ remaining_amount احتياطي فقط
+    const saleTotal = Number(sale.total_amount) || 0;
+    const amount = saleTotal > 0
+      ? Math.max(0, saleTotal - (Number(sale.paid_amount) || 0))
+      : Number(sale.remaining_amount) || 0;
     if (amount <= 0.5) continue;
 
     const item: UnpaidInvoice = {

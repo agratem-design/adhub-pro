@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { listPausedBillboards, PausedBillboard } from '@/services/pausedBillboardsService';
-import { historicalPauseContribution, purePauseContribution } from '@/utils/pausedReplacementAccounting';
+import { historicalPauseContribution, purePauseContribution, pauseIdsWithConsumedInReplacement } from '@/utils/pausedReplacementAccounting';
 import { calculateDaysBetween } from '@/utils/contractBillboardCalculations';
 
 export interface PausedItemWithPricing {
@@ -60,6 +60,8 @@ export interface PausedItemWithPricing {
   hasReplacement: boolean;
   status: 'paused' | 'replaced';
   consumed: number;
+  /** هل يدخل consumed في إجمالي العقد (false فقط إذا كان سعر البديلة يشمله) */
+  countsConsumedInTotal: boolean;
   isManualRefund: boolean;
   effectivePauseDate: string;
 }
@@ -111,6 +113,7 @@ export function usePausedBillboardsPricing(
   const [rows, setRows] = useState<PausedBillboard[]>([]);
   const [billboardsMap, setBillboardsMap] = useState<Record<number, any>>({});
   const [replacementsByPausedId, setReplacementsByPausedId] = useState<Record<string, { allocated: number; replacementId: number; replacementName?: string }>>({});
+  const [consumedInReplacement, setConsumedInReplacement] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const fetchVersion = useRef(0);
@@ -121,21 +124,29 @@ export function usePausedBillboardsPricing(
       setRows([]);
       setBillboardsMap({});
       setReplacementsByPausedId({});
+      setConsumedInReplacement(new Set());
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const [pausedRows, replacements] = await Promise.all([
+      const [pausedRows, replacements, contractPrices] = await Promise.all([
         listPausedBillboards(Number(contractNumber)),
         supabase
           .from('paused_billboard_replacements' as any)
           .select('*')
           .eq('contract_number', Number(contractNumber)),
+        supabase
+          .from('Contract')
+          .select('billboard_prices')
+          .eq('Contract_Number', Number(contractNumber))
+          .maybeSingle(),
       ]);
 
       if (version !== fetchVersion.current) return;
       if (replacements.error) throw replacements.error;
+      if (contractPrices.error) throw contractPrices.error;
+      setConsumedInReplacement(pauseIdsWithConsumedInReplacement((contractPrices.data as any)?.billboard_prices));
       const replMap: Record<string, { allocated: number; replacementId: number; replacementName?: string }> = {};
       for (const r of (replacements.data || []) as any[]) {
         replMap[String(r.paused_billboard_id)] = {
@@ -241,6 +252,7 @@ export function usePausedBillboardsPricing(
           allocatedForReplacement: Number(replacement?.allocated || 0),
           replacementDifference: replacement ? Number(replacement.allocated || 0) - refund : 0,
           hasReplacement: !!replacement, status: replacement ? 'replaced' : 'paused', consumed,
+          countsConsumedInTotal: !(replacement && consumedInReplacement.has(String(r.id))),
           isManualRefund: r.manual_refund != null, effectivePauseDate: r.pause_date,
         };
       }
@@ -371,11 +383,13 @@ export function usePausedBillboardsPricing(
         hasReplacement,
         status: hasReplacement ? 'replaced' : 'paused',
         consumed,
+        // المسار الحي (بدون أسعار محفوظة) يحسب المستبدلة كاملة داخل consumed، فلا تُضاف هنا
+        countsConsumedInTotal: !hasReplacement,
         isManualRefund,
         effectivePauseDate,
       };
     });
-  }, [rows, billboardsMap, replacementsByPausedId, contractStartDate, contractEndDate, options, printMap, installMap]);
+  }, [rows, billboardsMap, replacementsByPausedId, consumedInReplacement, contractStartDate, contractEndDate, options, printMap, installMap]);
 
   const totals = useMemo<PausedTotals>(() => {
     const purePaused = items.filter((i) => !i.hasReplacement);
@@ -388,8 +402,8 @@ export function usePausedBillboardsPricing(
       purePausedCount: purePaused.length,
       replacedCount: replaced.length,
       fullSum: financialItems.reduce((s, i) => s + i.fullPrice, 0),
-      // الموقوفة المستبدلة: جزؤها المستهلك داخل سعر البديلة (وحدة واحدة)، فلا يُحسب مرة ثانية
-      consumedSum: purePaused.reduce((s, i) => s + i.consumed, 0),
+      // مستهلك الموقوفة + مخصص البديلة = السعر الكامل؛ يُستثنى المستهلك فقط إذا صرّح صف البديلة أنه يشمله
+      consumedSum: items.reduce((s, i) => s + (i.countsConsumedInTotal ? i.consumed : 0), 0),
       // ✅ RefundSum يشمل فقط اللوحات الموقوفة بدون استبدال
       refundSum: purePaused.reduce((s, i) => s + i.refund, 0),
       effectiveRefundSum: purePaused.reduce((s, i) => s + (i.effectiveRefund || 0), 0),

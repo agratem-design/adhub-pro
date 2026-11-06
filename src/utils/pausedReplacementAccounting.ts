@@ -5,6 +5,35 @@ export function purePauseContribution(fullPrice: number, refund: number): number
   return refund === 0 ? 0 : money(Math.max(0, fullPrice - refund));
 }
 
+/**
+ * القاعدة: مستهلك الموقوفة + مخصص البديلة = السعر الكامل، فيُحسب مستهلك الموقوفة
+ * في الإجمالي حتى لو لها بديلة. الاستثناء الوحيد صف بديلة يصرّح أن سعرها يشمل
+ * المستهلك (remainingRental موجود، مثل تصحيح العقد #1320)، فلا يُحسب مرتين.
+ * consumedCarryover وحده معلومة وصفية ولا يعني أن السعر يشمله.
+ */
+export function replacementPriceIncludesConsumed(row: Record<string, unknown> | null | undefined): boolean {
+  if (!row) return false;
+  const remaining = row.remainingRental;
+  return remaining !== undefined && remaining !== null && remaining !== '' && Number.isFinite(Number(remaining));
+}
+
+/** معرّفات الإيقافات التي يشمل سعر بديلتها الجزء المستهلك */
+export function pauseIdsWithConsumedInReplacement(priceRows: unknown): Set<string> {
+  let rows: unknown = priceRows;
+  try {
+    while (typeof rows === 'string') rows = rows.trim() ? JSON.parse(rows) : [];
+  } catch {
+    rows = [];
+  }
+  const ids = new Set<string>();
+  if (!Array.isArray(rows)) return ids;
+  for (const row of rows as Record<string, unknown>[]) {
+    const pauseId = row?._replacement_of;
+    if (pauseId != null && pauseId !== '' && replacementPriceIncludesConsumed(row)) ids.add(String(pauseId));
+  }
+  return ids;
+}
+
 export function isRetainedPause(row: { lifecycle_state?: string | null }): boolean {
   return row.lifecycle_state !== 'cancelled';
 }

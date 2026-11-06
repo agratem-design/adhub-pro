@@ -59,7 +59,11 @@ export interface SyncResult {
   error?: string;
   rateLimited?: boolean;
   lastProcessedIndex?: number;
+  /** مواعيد فشل إرسالها مع السبب (لا تُعلَّم كمُرسلة فتُعاد في المزامنة القادمة) */
+  failed?: CalendarSyncFailure[];
 }
+
+export interface CalendarSyncFailure { tag?: string; title: string; customerName?: string; error: string }
 
 export interface SyncOptions {
   sendInvites?: boolean;
@@ -127,7 +131,7 @@ export async function loadCalendarRecords() {
   let customers: any[] = [];
   try {
     customers = await readPages((from, to) => supabase.from('customers')
-      .select('id, name, email, phone')
+      .select('id, name, email, phone, company')
       .order('id').range(from, to));
   } catch (e) {
     console.warn('Could not read customers:', e);
@@ -1028,6 +1032,58 @@ export function generateGoogleCalendarWebUrl(
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
+/* ── تشخيص أخطاء الإرسال وترجمتها لسبب واضح ── */
+export function explainCalendarError(raw: string): string {
+  const m = String(raw || '');
+  if (isCalendarRateLimit(m)) return formatGoogleRateLimitError(m);
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(m))
+    return 'تعذر الوصول إلى سكريبت Google: تأكد من الاتصال بالإنترنت، وأن الرابط ينتهي بـ /exec، وأن النشر مضبوط على «Who has access: Anyone».';
+  if (/action not allowed/i.test(m)) return 'رفض Google إضافة الضيوف لهذا الموعد (Action not allowed) — غالبًا بريد غير صالح أو تجاوز حد الدعوات اليومي.';
+  if (/invalid argument.*guest|invalid email|invalid.*email/i.test(m)) return 'بريد إلكتروني غير صالح ضمن المستلمين أو بريد الزبون. ' + m;
+  if (/authorization|not have permission|لا يملك|صلاحي/i.test(m)) return 'السكريبت يحتاج إعادة منح الصلاحيات: افتحه في script.google.com، شغّل أي دالة واقبل الصلاحيات، ثم انشر نسخة جديدة. ' + m;
+  if (/calendar api|has not been used|is disabled/i.test(m)) return 'خدمة Google Calendar API غير مفعّلة في مشروع السكريبت (مطلوبة لإرسال دعوات الزبون). ' + m;
+  return m;
+}
+
+const CAL_LOG_KEY = 'gcal-sync-log';
+export interface CalendarSyncLogEntry { at: string; source: string; ok: boolean; sent: number; total: number; error?: string; failed?: CalendarSyncFailure[] }
+export function getCalendarSyncLog(): CalendarSyncLogEntry[] {
+  try { return JSON.parse(localStorage.getItem(CAL_LOG_KEY) || '[]') || []; } catch { return []; }
+}
+export function addCalendarSyncLog(entry: Omit<CalendarSyncLogEntry, 'at'>) {
+  try {
+    const list = [{ ...entry, at: new Date().toISOString() }, ...getCalendarSyncLog()].slice(0, 40);
+    localStorage.setItem(CAL_LOG_KEY, JSON.stringify(list));
+    window.dispatchEvent(new Event('gcal-sync-log'));
+  } catch { /* التخزين غير متاح */ }
+}
+export function clearCalendarSyncLog() {
+  try { localStorage.removeItem(CAL_LOG_KEY); window.dispatchEvent(new Event('gcal-sync-log')); } catch { /* ignore */ }
+}
+
+/** طلب للسكريبت مع رسائل واضحة عند انقطاع الشبكة أو رجوع صفحة دخول بدل JSON */
+async function postToCalendarScript(url: string, payload: unknown): Promise<{ status: number; ok: boolean; data: any }> {
+  let response: Response;
+  try {
+    response = await fetch(url, { method: 'POST', mode: 'cors', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+  } catch (e: any) {
+    throw new Error(explainCalendarError(e?.message || 'Failed to fetch'));
+  }
+  if (response.status === 429) return { status: 429, ok: false, data: { success: false, rateLimited: true, error: 'Google Rate Limit' } };
+  if (typeof response.text !== 'function') return { status: response.status, ok: response.ok, data: await response.json() };
+  const text = await response.text();
+  try {
+    return { status: response.status, ok: response.ok, data: JSON.parse(text) };
+  } catch {
+    if (/<html|<!doctype/i.test(text)) {
+      throw new Error(/doPost|Script function not found/i.test(text)
+        ? 'السكريبت المنشور لا يحتوي دالة doPost: الصق كود التقويم كاملاً وانشر نسخة جديدة.'
+        : 'رجع Google صفحة ويب بدل الرد (' + response.status + '): النشر غالبًا ليس «Anyone» أو الرابط لنسخة قديمة/محذوفة. أعد النشر وانسخ رابط /exec الجديد.');
+    }
+    throw new Error('استجابة غير صحيحة من سكريبت جوجل (' + response.status + ')');
+  }
+}
+
 function isCalendarRateLimit(message: string) {
   return /rate.?limit|too many|quota|كبيرًا جدًا|الحد الأقصى/i.test(message);
 }
@@ -1122,6 +1178,7 @@ async function performCalendarSync(
   let totalUpdated = 0;
   let totalDeleted = 0;
   let totalProcessed = 0;
+  const failedAll: CalendarSyncFailure[] = [];
 
   for (let bIndex = 0; bIndex < batches.length; bIndex++) {
     const batchEvents = batches[bIndex];
@@ -1157,20 +1214,9 @@ async function performCalendarSync(
       reminders: config.reminders,
     };
 
-    const response = await fetch(config.scriptUrl, {
-      method: 'POST',
-      mode: 'cors',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const result = response.status === 429
-      ? { success: false, rateLimited: true, error: 'Google Rate Limit' }
-      : await response.json();
-    if (!response.ok && !result.rateLimited && !isCalendarRateLimit(result.error || '')) {
-      throw new Error('استجابة غير صحيحة من سكريبت جوجل (' + response.status + ')');
+    const { status, ok, data: result } = await postToCalendarScript(config.scriptUrl, payload);
+    if (!ok && !result.rateLimited && !isCalendarRateLimit(result.error || '')) {
+      throw new Error('استجابة غير صحيحة من سكريبت جوجل (' + status + ')');
     }
     if (!result.success) {
       const errStr = result.error || '';
@@ -1193,7 +1239,18 @@ async function performCalendarSync(
           error: formatGoogleRateLimitError(errStr),
         };
       }
-      throw new Error(formatGoogleRateLimitError(errStr || 'حدث خطأ أثناء المزامنة في سكريبت جوجل'));
+      // السكريبت القديم يتوقف عند أول موعد فاشل: احفظ ما نجح قبله وسمِّ الموعد المسبب
+      const done = Math.min(batchEvents.length, Math.max(0, Number(result.totalProcessed) || 0));
+      if (done) markEventsSynced(config, batchEvents.slice(0, done));
+      const bad = batchEvents[done];
+      const reason = explainCalendarError(errStr || 'حدث خطأ أثناء المزامنة في سكريبت جوجل');
+      const err = new Error(bad ? `فشل عند الموعد «${bad.title}»${bad.customerName ? ' — ' + bad.customerName : ''}: ${reason}` : reason) as Error & { syncResult?: SyncResult };
+      err.syncResult = {
+        success: false, createdCount: totalCreated + (Number(result.createdCount) || 0), updatedCount: totalUpdated + (Number(result.updatedCount) || 0),
+        deletedCount: totalDeleted, totalProcessed: startIndex + totalProcessed + done, lastProcessedIndex: startIndex + totalProcessed + done, error: reason,
+        failed: bad ? [{ tag: bad.tag, title: bad.title, customerName: bad.customerName, error: reason }] : [],
+      };
+      throw err;
     }
 
     if (options?.sendInvites && result.invitationsSupported !== true) throw new Error('السكريبت المنشور قديم: حدّث كود التقويم وانشر إصدارًا جديدًا لتفعيل إرسال دعوات الزبون.');
@@ -1201,7 +1258,14 @@ async function performCalendarSync(
     totalUpdated += result.updatedCount || 0;
     totalDeleted += result.deletedCount || 0;
     totalProcessed += batchEvents.length;
-    markEventsSynced(config, batchEvents);
+    // السكريبت الجديد يكمل بعد الموعد الفاشل ويُرجع قائمة failed: لا تُعلَّم كمُرسلة
+    const batchFailed: CalendarSyncFailure[] = Array.isArray(result.failed) ? result.failed.map((f: any) => {
+      const ev = batchEvents.find(e => e.tag && e.tag === f.tag);
+      return { tag: f.tag, title: f.title || ev?.title || '', customerName: ev?.customerName, error: explainCalendarError(f.error || '') };
+    }) : [];
+    failedAll.push(...batchFailed);
+    const failedTags = new Set(batchFailed.map(f => f.tag).filter(Boolean));
+    markEventsSynced(config, batchEvents.filter(e => !failedTags.has(e.tag)));
 
     options?.onProgress?.({
       currentBatch: bIndex + 1,
@@ -1226,6 +1290,7 @@ async function performCalendarSync(
     updatedCount: totalUpdated,
     deletedCount: totalDeleted,
     totalProcessed: events.length,
+    failed: failedAll,
   };
 }
 
@@ -1287,22 +1352,10 @@ export async function sendTestGoogleCalendarAlert(
     emails: config.emails,
   };
 
-  const response = await fetch(config.scriptUrl, {
-    method: 'POST',
-    mode: 'cors',
-    headers: {
-      'Content-Type': 'text/plain;charset=utf-8',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    throw new Error(`استجابة غير صحيحة من سكريبت جوجل (${response.status})`);
-  }
-
-  const result = await response.json();
+  const { status, ok, data: result } = await postToCalendarScript(config.scriptUrl, payload);
+  if (!ok) throw new Error(`استجابة غير صحيحة من سكريبت جوجل (${status})`);
   if (!result.success) {
-    throw new Error(result.error || 'فشل إرسال الحدث التجريبي');
+    throw new Error(explainCalendarError(result.error || 'فشل إرسال الحدث التجريبي'));
   }
 
   return {
@@ -1482,6 +1535,7 @@ function doPost(e) {
     var events = data.events || [];
     var reminders = data.reminders || [1440, 4320];
     var processedCount = 0;
+    var failed = [];
     var createdCount = 0;
     var updatedCount = 0;
     var deletedCount = 0;
@@ -1597,7 +1651,10 @@ function doPost(e) {
         } catch (regErr) {}
         processedCount++;
       } catch (itemErr) {
-        throw itemErr;
+        // حد Google يوقف الدفعة؛ أي خطأ آخر يُسجَّل لهذا الموعد ونكمل الباقي
+        if (isRateLimitError(itemErr)) throw itemErr;
+        failed.push({ tag: item.tag || '', title: item.title || '', error: String(itemErr) });
+        processedCount++;
       }
     }
 
@@ -1607,6 +1664,7 @@ function doPost(e) {
       updatedCount: updatedCount,
       deletedCount: deletedCount,
       totalProcessed: processedCount,
+      failed: failed,
       invitationsSupported: true
     });
 

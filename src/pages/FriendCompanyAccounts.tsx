@@ -1,3 +1,5 @@
+import { printUnifiedDocument, escHtml, docMoney, docDate } from '@/lib/unifiedDocument';
+import { toast } from 'sonner';
 import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -165,314 +167,43 @@ export default function FriendCompanyAccounts() {
   const totalProfit = financials?.reduce((sum, f) => sum + (Number(f.total_profit) || 0), 0) || 0;
 
   const handlePrintInvoice = (contract: ContractGroup) => {
+    // ✅ المستند الموحد — نفس قالب كل الفواتير، والألوان من إعدادات الطباعة (فاتورة المشتريات)
     const durationDays = contract.rentals[0]?.duration_days || 0;
     const durationMonths = Math.ceil(durationDays / 30);
-    const formattedDate = new Date().toLocaleDateString('ar-LY');
-    
-    const invoiceHTML = `
-      <!DOCTYPE html>
-      <html lang="ar" dir="rtl">
-      <head>
-        <meta charset="UTF-8">
-        <title>فاتورة مشتريات - ${contract.friend_company_name}</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          @page { size: A4 portrait; margin: 0 !important; padding: 0 !important; }
-          html, body {
-            width: 210mm;
-            height: 297mm;
-            margin: 0;
-            padding: 0;
-            font-family: 'Segoe UI', Tahoma, sans-serif;
-            direction: rtl;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-            color-adjust: exact;
-          }
-          .invoice-container {
-            width: 210mm;
-            min-height: 297mm;
-            padding: 10mm;
-            box-sizing: border-box;
-            display: flex;
-            flex-direction: column;
-            background: white;
-          }
-          .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            padding-bottom: 15px;
-            border-bottom: 2px solid #000;
-            margin-bottom: 20px;
-          }
-          .company-info {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-end;
-            text-align: right;
-          }
-          .company-logo {
-            max-width: 180px;
-            height: auto;
-            margin-bottom: 8px;
-          }
-          .company-details {
-            font-size: 11px;
-            color: #666;
-            line-height: 1.6;
-          }
-          .invoice-info {
-            text-align: left;
-          }
-          .invoice-title {
-            font-size: 24px;
-            font-weight: bold;
-            color: #dc2626;
-            margin-bottom: 10px;
-          }
-          .invoice-details {
-            font-size: 12px;
-            line-height: 1.8;
-            color: #333;
-          }
-          .customer-info {
-            background: #f8f9fa;
-            padding: 15px 20px;
-            border-radius: 0;
-            margin-bottom: 20px;
-            border-right: 4px solid #dc2626;
-          }
-          .customer-title {
-            font-size: 14px;
-            font-weight: bold;
-            margin-bottom: 8px;
-            color: #000;
-          }
-          .customer-details {
-            font-size: 12px;
-            line-height: 1.8;
-          }
-          .items-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-          }
-          .items-table th {
-            background: #000;
-            color: white;
-            padding: 10px 8px;
-            text-align: center;
-            font-weight: bold;
-            border: 1px solid #000;
-            font-size: 11px;
-          }
-          .items-table td {
-            padding: 10px 8px;
-            text-align: center;
-            border: 1px solid #ddd;
-            font-size: 11px;
-            vertical-align: middle;
-          }
-          .items-table tbody tr:nth-child(even) {
-            background: #f8f9fa;
-          }
-          .duration-section {
-            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
-            border: 2px solid #f59e0b;
-            text-align: center;
-          }
-          .duration-section h3 {
-            color: #92400e;
-            font-size: 14px;
-            margin-bottom: 8px;
-          }
-          .duration-section .duration {
-            font-size: 20px;
-            font-weight: bold;
-            color: #b45309;
-          }
-          .duration-section .dates {
-            font-size: 12px;
-            color: #78350f;
-            margin-top: 8px;
-          }
-          .total-section {
-            border-top: 2px solid #000;
-            padding-top: 15px;
-            margin-top: auto;
-          }
-          .total-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 0;
-            font-size: 14px;
-          }
-          .total-row.grand-total {
-            font-size: 18px;
-            font-weight: bold;
-            background: #dc2626;
-            color: white;
-            padding: 15px 20px;
-            margin-top: 10px;
-          }
-          .signatures {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 40px;
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 2px dashed #cbd5e1;
-          }
-          .signature-box {
-            text-align: center;
-          }
-          .signature-box .label {
-            font-size: 12px;
-            color: #64748b;
-            margin-bottom: 40px;
-          }
-          .signature-box .line {
-            border-bottom: 2px solid #000;
-            width: 120px;
-            margin: 0 auto;
-          }
-          .footer {
-            margin-top: 20px;
-            text-align: center;
-            font-size: 10px;
-            color: #666;
-            border-top: 1px solid #ddd;
-            padding-top: 10px;
-          }
-          @media print {
-            .invoice-container {
-              width: 210mm !important;
-              min-height: 297mm !important;
-              padding: 10mm !important;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="invoice-container">
-          <div class="header">
-            <div class="company-info">
-              <img src="/logofaresgold.svg" alt="شعار الشركة" class="company-logo" onerror="this.style.display='none'">
-            </div>
-            
-            <div class="invoice-info">
-              <div class="invoice-title">فاتورة مشتريات</div>
-              <div class="invoice-details">
-                رقم الفاتورة: FBR-${contract.contract_number}<br>
-                التاريخ: ${formattedDate}<br>
-                العملة: دينار ليبي
-              </div>
-            </div>
-          </div>
-          
-          <div class="customer-info">
-            <div class="customer-title">بيانات المورد (الشركة الصديقة)</div>
-            <div class="customer-details">
-              <strong>الشركة:</strong> ${contract.friend_company_name}<br>
-              <strong>رقم العقد:</strong> ${contract.contract_number}
-            </div>
-          </div>
-          
-          <table class="items-table">
-            <thead>
-              <tr>
-                <th style="width: 8%">#</th>
-                <th style="width: 32%">اللوحة</th>
-                <th style="width: 12%">المقاس</th>
-                <th style="width: 33%">الموقع</th>
-                <th style="width: 15%">تكلفة الإيجار (د.ل)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <!-- صف العقد الرئيسي -->
-              <tr style="background: rgba(220, 38, 38, 0.05); font-weight: bold;">
-                <td>1</td>
-                <td style="font-weight: bold;">عقد رقم ${contract.contract_number}</td>
-                <td>—</td>
-                <td style="font-weight: 500;">عقد بقيمة إجمالية</td>
-                <td style="font-weight: bold; color: #dc2626;">${contract.total_cost.toLocaleString('ar-LY')}</td>
-              </tr>
-              <!-- لوحات العقد الفرعية -->
-              ${contract.rentals.map((rental, index) => {
-                const location = [
-                  `البلدية: ${rental.municipality || '—'}`,
-                  `المنطقة: ${rental.district || '—'}`,
-                  `أقرب نقطة: ${rental.nearest_landmark || '—'}`,
-                  `نوع الإعلان: ${rental.ad_type || '—'}`
-                ].join(' • ');
-
-                return `
-                  <tr style="font-size: 10px; opacity: 0.95;">
-                    <td>↳</td>
-                    <td style="font-weight: 500;">لوحة: ${rental.billboard_name}</td>
-                    <td><span style="background: #e5e7eb; padding: 2px 6px; border-radius: 4px;">${rental.billboard_size}</span></td>
-                    <td style="text-align: right; font-size: 10px;">${location}</td>
-                    <td style="color: #777; font-weight: normal; font-size: 10px;">مضمن في العقد</td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-          
-          <div class="duration-section">
-            <h3>مدة الإيجار</h3>
-            <div class="duration">${durationDays} يوم (${durationMonths} شهر)</div>
-            <div class="dates">
-              من ${new Date(contract.start_date).toLocaleDateString('ar-LY')} 
-              إلى ${new Date(contract.end_date).toLocaleDateString('ar-LY')}
-            </div>
-          </div>
-          
-          <div class="total-section">
-            <div class="total-row">
-              <span>عدد اللوحات:</span>
-              <span>${contract.rentals.length} لوحة</span>
-            </div>
-            <div class="total-row grand-total">
-              <span>إجمالي المستحق للشركة الصديقة:</span>
-              <span>${contract.total_cost.toLocaleString('ar-LY')} د.ل</span>
-            </div>
-          </div>
-          
-          <div class="signatures">
-            <div class="signature-box">
-              <div class="label">توقيع المستلم</div>
-              <div class="line"></div>
-            </div>
-            <div class="signature-box">
-              <div class="label">ختم الشركة</div>
-              <div class="line"></div>
-            </div>
-          </div>
-          
-          <div class="footer">
-            <p>هذه الفاتورة تمثل تكلفة استئجار لوحات من شركة صديقة</p>
-            <p>تم إصدارها بتاريخ: ${formattedDate}</p>
-          </div>
-        </div>
-        
-        <script>
-          window.onload = function() { window.print(); }
-        </script>
-      </body>
-      </html>
-    `;
-    
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(invoiceHTML);
-      printWindow.document.close();
-    }
+    void printUnifiedDocument('purchase_invoice', {
+      title: 'فاتورة مشتريات',
+      subtitle: 'تكلفة استئجار لوحات من شركة صديقة',
+      pageTitle: `فاتورة مشتريات FBR-${contract.contract_number} - ${contract.friend_company_name}`,
+      info: [
+        { label: 'المورد (الشركة الصديقة)', value: escHtml(contract.friend_company_name) },
+        { label: 'رقم الفاتورة', value: `<bdi>FBR-${contract.contract_number}</bdi>` },
+        { label: 'رقم العقد', value: `#${contract.contract_number}` },
+        { label: 'مدة الإيجار', value: `${durationDays} يوم (${durationMonths} شهر)` },
+        { label: 'الفترة', value: `${docDate(contract.start_date)} — ${docDate(contract.end_date)}` },
+        { label: 'تاريخ الإصدار', value: docDate(new Date()) },
+      ],
+      total: { label: 'إجمالي المستحق للشركة الصديقة', value: docMoney(contract.total_cost) },
+      sections: [{
+        title: `لوحات العقد (${contract.rentals.length})`,
+        aside: `عقد #${contract.contract_number}`,
+        columns: [
+          { key: 'i', header: '#', width: '5%' },
+          { key: 'name', header: 'اللوحة', width: '24%', align: 'right' },
+          { key: 'size', header: 'المقاس', width: '11%' },
+          { key: 'loc', header: 'الموقع', align: 'right' },
+          { key: 'ad', header: 'نوع الإعلان', width: '14%' },
+        ],
+        rows: contract.rentals.map((r, i) => ({
+          i: i + 1,
+          name: escHtml(r.billboard_name),
+          size: `<bdi>${escHtml(r.billboard_size)}</bdi>`,
+          loc: escHtml([r.municipality, r.district, r.nearest_landmark].filter(Boolean).join(' • ') || '—'),
+          ad: escHtml(r.ad_type || '—'),
+        })),
+        footer: [{ label: 'قيمة العقد (شاملة كل اللوحات)', value: docMoney(contract.total_cost) }],
+      }],
+      signatures: [{ label: 'توقيع المستلم' }, { label: 'ختم الشركة' }],
+    }, { driveFolder: 'billing-purchases' }).catch(() => toast.error('تعذرت الطباعة'));
   };
 
   return (

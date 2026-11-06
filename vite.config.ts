@@ -1,8 +1,32 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
+import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { VitePWA } from "vite-plugin-pwa";
+import type { Plugin } from "vite";
+
+// Tailwind 4 يولّد @property { syntax: "<color>" }. معاينات الطباعة تنسخ أنماط الصفحة ثم تمرّرها على DOMPurify،
+// وهو يحذف أي <style> يحتوي "<كلمة" (حماية mXSS) فتضيع كل أنماط Tailwind من المعاينة/الـPDF.
+// نكتب "<" بصيغة الهروب المكافئة في CSS ‏(\3c ) — المعنى نفسه تماماً.
+const escapeCssSyntaxLt = (css: string) => css.replace(/(syntax:\s*")</g, "$1\\3c ");
+function cssSyntaxEscapeForDomPurify(): Plugin {
+  return {
+    name: "css-syntax-escape-for-dompurify",
+    transform(code, id) {
+      if (!/\.css(\?|$)/.test(id) || !code.includes("syntax")) return null;
+      const out = escapeCssSyntaxLt(code);
+      return out === code ? null : { code: out, map: null };
+    },
+    generateBundle(_options, bundle) {
+      for (const file of Object.values(bundle)) {
+        if (file.type === "asset" && file.fileName.endsWith(".css") && typeof file.source === "string") {
+          file.source = escapeCssSyntaxLt(file.source);
+        }
+      }
+    },
+  };
+}
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -17,6 +41,8 @@ export default defineConfig(({ mode }) => ({
   },
   plugins: [
     react(),
+    tailwindcss(),
+    cssSyntaxEscapeForDomPurify(),
     mode === "development" && componentTagger(),
     VitePWA({
       registerType: "autoUpdate",
@@ -49,16 +75,26 @@ export default defineConfig(({ mode }) => ({
     exclude: ["@supabase/supabase-js"],
     include: ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime", "@tanstack/react-query",
       // Map libs are only reached through lazy routes; pre-bundle them so first visit doesn't trigger a re-optimize (504 Outdated Optimize Dep).
-      "leaflet", "leaflet.markercluster", "@googlemaps/markerclusterer"],
+      "leaflet", "leaflet.markercluster", "@googlemaps/markerclusterer",
+      // Same for the dashboard/animation libs (lazy pages): avoids "Failed to fetch dynamically imported module" after a re-optimize.
+      "framer-motion", "recharts"],
   },
   build: {
     chunkSizeWarningLimit: 1000,
-    rollupOptions: {
+    rolldownOptions: {
+      // inlineConst الافتراضي ينسخ صورة الختم (~4MB) داخل كل ملف يستخدمها في شرط
+      optimization: { inlineConst: false },
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-query': ['@tanstack/react-query'],
-          'vendor-ui': [
+        // Vite 8 (Rolldown) يقبل manualChunks كدالة فقط؛ نفس المجموعات السابقة
+        manualChunks(id: string) {
+          // ختم العقد (?inline، ~4MB) مستورد من ملفين: نسخة واحدة مشتركة بدل تكراره
+          if (id.includes('company-contract-stamp.png')) return 'asset-contract-stamp';
+          const m = id.replace(/\\/g, '/').match(/\/node_modules\/((?:@[^/]+\/)?[^/]+)\//);
+          if (!m) return undefined;
+          const pkg = m[1];
+          if (['react', 'react-dom', 'react-router-dom', 'react-router', 'scheduler'].includes(pkg)) return 'vendor-react';
+          if (pkg === '@tanstack/react-query' || pkg === '@tanstack/query-core') return 'vendor-query';
+          if ([
             '@radix-ui/react-dialog',
             '@radix-ui/react-select',
             '@radix-ui/react-tabs',
@@ -66,7 +102,8 @@ export default defineConfig(({ mode }) => ({
             '@radix-ui/react-popover',
             'lucide-react',
             'framer-motion',
-          ],
+          ].includes(pkg)) return 'vendor-ui';
+          return undefined;
         },
       },
     },

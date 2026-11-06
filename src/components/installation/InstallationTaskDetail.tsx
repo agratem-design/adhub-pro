@@ -30,6 +30,7 @@ import { TaskTotalCostSummary } from '@/components/tasks/TaskTotalCostSummary';
 import ImageLightbox from '@/components/Map/ImageLightbox';
 import { cn } from '@/lib/utils';
 import { sortBillboardsStandardSync } from '@/lib/billboardSorter';
+import { useBillboardSortRanks } from '@/hooks/useBillboardSortRanks';
 import { buildTaskName, syncInstallationTaskContracts, type TaskContractInfo } from '@/services/installationTaskContracts';
 
 interface Props {
@@ -293,6 +294,7 @@ export const InstallationTaskDetail: React.FC<Props> = ({
     return out;
   }, [taskItems, billboardById]);
 
+  const sortReady = useBillboardSortRanks();
   const rows = useMemo(() => {
     const list = taskItems
       .map(item => ({ item, billboard: billboardById[item.billboard_id], price: installationPricingByBillboard[item.billboard_id] || 0 }))
@@ -304,7 +306,7 @@ export const InstallationTaskDetail: React.FC<Props> = ({
       })
       .map(r => ({ ...r, Size: r.billboard?.Size, Level: r.billboard?.Level, Municipality: r.billboard?.Municipality, ID: r.item.billboard_id }));
     return sortBillboardsStandardSync(list);
-  }, [taskItems, billboardById, installationPricingByBillboard, search, iteration, contractFilter, contractOfBillboard, attrFilters]);
+  }, [taskItems, billboardById, installationPricingByBillboard, search, iteration, contractFilter, contractOfBillboard, attrFilters, sortReady]);
   const resetBoardFilters = () => { setSearch(''); setContractFilter('all'); setBoardStatus('all'); setIteration('all'); setAttrFilters(EMPTY_ATTR_FILTERS); };
   const pendingRows = rows.filter(r => r.item.status !== 'completed');
   const doneRows = rows.filter(r => r.item.status === 'completed');

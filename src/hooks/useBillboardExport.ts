@@ -157,37 +157,11 @@ export const useBillboardExport = () => {
     }
   };
 
-  // ✅ UPDATED: Sort billboards by database municipality AND size order
+  // الترتيب الموحد في كل النظام: المقاس ← المستوى ← البلدية
   const sortBillboardsBySize = async (billboards: any[]): Promise<any[]> => {
-    const sizeOrderMap = await getSizeOrderFromDB();
-    const municipalityOrderMap = await getMunicipalityOrderFromDB();
-    
-    return [...billboards].sort((a, b) => {
-      const sizeA = a.Size || a.size || '';
-      const sizeB = b.Size || b.size || '';
-      
-      const orderA = sizeOrderMap[sizeA] || 999;
-      const orderB = sizeOrderMap[sizeB] || 999;
-      
-      if (orderA !== orderB) {
-        return orderA - orderB;
-      }
-
-      const munA = a.Municipality || a.municipality || '';
-      const munB = b.Municipality || b.municipality || '';
-      
-      const munOrderA = municipalityOrderMap[munA] || 999;
-      const munOrderB = municipalityOrderMap[munB] || 999;
-      
-      if (munOrderA !== munOrderB) {
-        return munOrderA - munOrderB;
-      }
-      
-      // If same size order, sort by billboard ID
-      const idA = a.ID || a.id || 0;
-      const idB = b.ID || b.id || 0;
-      return idA - idB;
-    });
+    const { getBillboardsSortMaps, sortBillboardsStandardSync } = await import('@/lib/billboardSorter');
+    await getBillboardsSortMaps();
+    return sortBillboardsStandardSync(billboards);
   };
 
   // ✅ Get current customer name from active contracts.

@@ -127,17 +127,17 @@ export function unifiedInvoiceBodyCss(styles: Record<string, any>): string {
   }
   ${PRINT_INK_SAVER_CSS}
   /* Fine rules carry the brand identity without large solid ink areas. */
-  html body:not([data-keep-print-colors]) :is(.items-table, .billboards-table, .movements-table, .rental-table) thead th {
+  html body:not([data-keep-print-colors]):not(:has(.os-mark)) :is(.items-table, .billboards-table, .movements-table, .rental-table) thead th {
     border-top:2px solid ${accent} !important; border-bottom:1px solid ${border} !important;
     padding-top:11px !important; padding-bottom:11px !important;
   }
-  html body:not([data-keep-print-colors]) .items-table tbody tr.subtotal-row td {
+  html body:not([data-keep-print-colors]):not(:has(.os-mark)) .items-table tbody tr.subtotal-row td {
     background:#fff !important; padding:7px !important; font-weight:400;
   }
-  html body:not([data-keep-print-colors]) .items-table tbody tr.grand-total-row td {
+  html body:not([data-keep-print-colors]):not(:has(.os-mark)) .items-table tbody tr.grand-total-row td {
     border-top:2px solid ${accent} !important; padding:12px 7px !important; font-weight:700;
   }
-  html body:not([data-keep-print-colors]) :is(.total-section, .total-amount, .amount-section, .final-balance) {
+  html body:not([data-keep-print-colors]):not(:has(.os-mark)) :is(.total-section, .total-amount, .amount-section, .final-balance) {
     border-inline-start:3px solid ${accent} !important;
   }
   `;

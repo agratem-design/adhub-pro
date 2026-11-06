@@ -9,21 +9,23 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
-import { Archive, ArchiveRestore, CalendarRange, FileBarChart2, Loader2, Pencil, RefreshCw, Save, Shuffle, X } from 'lucide-react';
+import { Archive, ArchiveRestore, CalendarClock, CalendarRange, FileBarChart2, Loader2, Pencil, RefreshCw, Save, Shuffle, X } from 'lucide-react';
 import { preparePrintWindow, writePrintWindow } from '@/utils/printWindowHelper';
 import { LetterPreview, PrintMenu } from '@/components/correspondence/LetterParts';
 import { LetterBodyEditor } from '@/components/correspondence/LetterBodyEditor';
+import { ReportBackfillPanel } from '@/components/periodic-reports/ReportBackfillPanel';
+import { printReportsBatch } from '@/services/reportsBatchPrint';
 import {
-  PRINT_MODE_LABELS, archiveLetter, loadCompanies, loadLetters, nextReference, renderLetterHtml, saveLetter,
+  PRINT_MODE_LABELS, archiveLetter, deleteLetter, loadCompanies, loadLetters, nextReference, renderLetterHtml, saveLetter,
   type Letter, type LetterPrintMode,
 } from '@/services/correspondence';
 import {
-  DEFAULT_SECTIONS, PERIODS, dmy, loadReportData, periodRange, todayIso, writeReport,
+  DEFAULT_SECTIONS, PERIODS, REPORT_SIGNER, deleteReportSnapshots, hasDeclines, reportPrefix, stripDeclines, dmy, loadContractAdjustments, loadReportData, saveReportSnapshot, periodRange, todayIso, writeReport,
   type ReportData, type ReportPeriod, type ReportSections,
 } from '@/services/periodicReports';
 
 const SECTION_LABELS: Record<keyof ReportSections, string> = {
-  contracts: 'العقود الجديدة', installs: 'التركيبات', removals: 'المحالة للإزالة', payments: 'الدخولات المالية', details: 'القوائم التفصيلية',
+  contracts: 'العقود الجديدة', installs: 'التركيبات', removals: 'المحالة للإزالة', payments: 'الدخولات المالية', details: 'القوائم التفصيلية', declines: 'المقارنة بالفترة السابقة',
 };
 
 export default function PeriodicReports() {
@@ -54,6 +56,18 @@ export default function PeriodicReports() {
   const [mode, setMode] = usePersistedState<LetterPrintMode>('periodicReports.mode', 'full');
   const [pages, setPages] = useState(1);
   const [saving, setSaving] = useState(false);
+  const [backfill, setBackfill] = useState(false);
+  // خانة التوقيع والرقم الإشاري اختياريان (مخفيان افتراضياً)
+  const [showSign, setShowSign] = usePersistedState<boolean>('periodicReports.showSign', false);
+  const [showRef, setShowRef] = usePersistedState<boolean>('periodicReports.showRef2', true);
+  const [showRecipient, setShowRecipient] = usePersistedState<boolean>('periodicReports.showRecipient', false);
+  const [showGreeting, setShowGreeting] = usePersistedState<boolean>('periodicReports.showGreeting2', false);
+  const [showClosing, setShowClosing] = usePersistedState<boolean>('periodicReports.showClosing', false);
+  const docOpts = { hideReference: !showRef, hideSign: !showSign, hideRecipient: !showRecipient, hideGreeting: !showGreeting, hideClosing: !showClosing };
+  const [fixing, setFixing] = useState(false);
+  // تقرير يحتاج تصحيحاً: عبارات مقارنة/توصيات/مجاملة أو أقسام فارغة أو حقول مجاملة
+  const needsFix = (r: Letter) => hasDeclines(r.body) || !!(r.recipient || r.greeting || r.closing);
+  const [batchPrinting, setBatchPrinting] = useState(false);
 
   useEffect(() => { if (!companyId && companies.length) setCompanyId((companies.find(c => c.is_default) || companies[0]).id); }, [companies, companyId]);
   const company = companies.find(c => c.id === (draft?.company_id || companyId)) || null;
@@ -71,17 +85,18 @@ export default function PeriodicReports() {
         report_period: period,
         period_start: d.from,
         period_end: d.to,
-        reference_number: base?.reference_number || nextReference(company.reference_prefix, allLetters.filter(l => l.company_id === company.id)),
+        reference_number: base?.reference_number || nextReference(reportPrefix(company.reference_prefix), allReports.filter(l => l.company_id === company.id)),
         letter_date: base?.letter_date || todayIso(),
-        recipient: base?.recipient ?? r.recipient,
-        greeting: base?.greeting ?? 'تحية طيبة، وبعد،',
+        recipient: base?.recipient ?? '',
+        greeting: base?.greeting ?? '',
         subject: r.subject,
         body: r.body,
-        closing: base?.closing ?? 'وتفضلوا بقبول فائق الاحترام والتقدير.',
-        signer_name: base?.signer_name ?? company.signer_name ?? '',
-        signer_title: base?.signer_title ?? company.signer_title ?? '',
-        with_stamp: base?.with_stamp ?? true,
-        with_signature: base?.with_signature ?? true,
+        closing: base?.closing ?? '',
+        signer_name: base?.signer_name ?? REPORT_SIGNER.name,
+        signer_title: base?.signer_title ?? REPORT_SIGNER.title,
+        // التقارير بدون ختم وتوقيع افتراضياً، ويمكن تفعيلهما من المحرر
+        with_stamp: base?.with_stamp ?? false,
+        with_signature: base?.with_signature ?? false,
       } as Letter;
     });
   };
@@ -92,6 +107,8 @@ export default function PeriodicReports() {
     setLoading(true);
     try {
       const d = await loadReportData(range.from, range.to);
+      // تعديلات قيم العقود منذ آخر تقرير ذكرها
+      d.adjustments = await loadContractAdjustments(d.from, allReports.filter(r => r.company_id === company.id && r.id !== draft?.id)).catch(() => []);
       setData(d);
       compose(d, sections, seed, draft?.id ? null : draft);
     } catch (e: any) { toast.error(e.message || 'تعذّر جمع البيانات'); } finally { setLoading(false); }
@@ -105,14 +122,14 @@ export default function PeriodicReports() {
     toast.success('أُعيدت الصياغة بأسلوب آخر');
   };
 
-  const html = useMemo(() => (company && draft ? renderLetterHtml(company, draft, window.location.origin, { mode, paginate: true, markup: true }) : ''), [company, draft, mode]);
+  const html = useMemo(() => (company && draft ? renderLetterHtml(company, draft, window.location.origin, { mode, paginate: true, markup: true, ...docOpts }) : ''), [company, draft, mode, showSign, showRef, showRecipient, showGreeting, showClosing]);
   const set = (patch: Partial<Letter>) => setDraft(d => (d ? { ...d, ...patch } : d));
 
   const print = (l: Letter, m: LetterPrintMode = 'full') => {
     const c = companies.find(x => x.id === l.company_id);
     if (!c) return;
     const w = preparePrintWindow(`تقرير ${l.reference_number}`);
-    writePrintWindow(w, renderLetterHtml(c, l, window.location.origin, { mode: m, paginate: true, markup: true }), {
+    writePrintWindow(w, renderLetterHtml(c, l, window.location.origin, { mode: m, paginate: true, markup: true, ...docOpts }), {
       title: `${l.subject || 'تقرير'}${m === 'full' ? '' : ` (${PRINT_MODE_LABELS[m]})`}`, showDownloadPdf: true, showShare: true, autoPrint: false,
     });
   };
@@ -122,6 +139,7 @@ export default function PeriodicReports() {
     setSaving(true);
     try {
       const saved = await saveLetter({ ...draft, kind: 'report' });
+      if (saved.id && data && data.from === saved.period_start && data.to === saved.period_end) await saveReportSnapshot(saved.id, data);
       setDraft(saved);
       qc.invalidateQueries({ queryKey: ['letters'] });
       if (saved.kind !== 'report') toast.warning('حُفظ التقرير، لكن لتمييزه عن المراسلات طبّق ملف sql/05_letters_reports.sql', { duration: 9000 });
@@ -139,13 +157,21 @@ export default function PeriodicReports() {
           <h1 className="flex items-center gap-2 text-2xl font-bold"><FileBarChart2 className="h-6 w-6" />التقارير الدورية</h1>
           <p className="text-sm text-muted-foreground">تقرير مكتوب عن العقود والتركيبات والإزالة والدخولات، على ورقة المراسلات الرسمية وقابل للتعديل</p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" disabled={!company} onClick={() => setBackfill(v => !v)}><CalendarClock className="h-4 w-4" />التقارير الفائتة</Button>
         {companies.length > 1 && (
           <Select value={companyId} onValueChange={v => { setCompanyId(v); setDraft(d => (d ? { ...d, company_id: v } : d)); }}>
             <SelectTrigger className="h-10 w-[240px]"><SelectValue /></SelectTrigger>
             <SelectContent>{companies.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
           </Select>
         )}
+        </div>
       </header>
+
+      {backfill && company && (
+        <ReportBackfillPanel company={company} reports={allReports} allLetters={allLetters} sections={sections} docOpts={docOpts}
+          onSaved={() => qc.invalidateQueries({ queryKey: ['letters'] })} onClose={() => setBackfill(false)} />
+      )}
 
       {err && <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">{err.message}</div>}
 
@@ -198,20 +224,14 @@ export default function PeriodicReports() {
         <div className="grid grid-cols-[minmax(0,1fr)] gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <section className="min-w-0 space-y-3 rounded-xl border border-border bg-card p-4">
             <div className="flex items-center justify-between gap-2">
-              <h2 className="font-bold">{draft.id ? `تعديل التقرير ${draft.reference_number}` : 'تقرير جديد'}</h2>
+              <h2 className="font-bold">{draft.id ? `تعديل تقرير ${dmy(draft.letter_date)}` : 'تقرير جديد'}</h2>
               <div className="flex gap-1">
                 <Button variant="outline" size="sm" disabled={!data} onClick={rephrase} title="نفس الأرقام بصياغة مختلفة"><Shuffle className="h-4 w-4" />صياغة أخرى</Button>
                 <Button variant="ghost" size="sm" onClick={() => setDraft(null)}><X className="h-4 w-4" />إغلاق</Button>
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="space-y-1 text-sm">الرقم الإشاري
-                <div className="flex gap-1">
-                  <Input dir="ltr" value={draft.reference_number} onChange={e => set({ reference_number: e.target.value })} className="min-w-0 flex-1 text-center font-bold" />
-                  <Button type="button" variant="outline" size="sm" className="h-10" onClick={() => set({ reference_number: nextReference(company.reference_prefix, allLetters.filter(l => l.company_id === company.id && l.id !== draft.id)) })}>التالي</Button>
-                </div>
-              </label>
-              <label className="space-y-1 text-sm">تاريخ التقرير<Input type="date" value={draft.letter_date} onChange={e => set({ letter_date: e.target.value })} /></label>
+              <label className="space-y-1 text-sm sm:col-span-2">تاريخ التقرير<Input type="date" value={draft.letter_date} onChange={e => set({ letter_date: e.target.value })} /></label>
             </div>
             <label className="block space-y-1 text-sm">الموجَّه إليه<Input value={draft.recipient || ''} onChange={e => set({ recipient: e.target.value })} /></label>
             <label className="block space-y-1 text-sm">الموضوع<Input value={draft.subject || ''} onChange={e => set({ subject: e.target.value })} /></label>
@@ -225,6 +245,11 @@ export default function PeriodicReports() {
               <label className="space-y-1 text-sm">الصفة<Input value={draft.signer_title || ''} onChange={e => set({ signer_title: e.target.value })} /></label>
             </div>
             <div className="flex flex-wrap gap-4 rounded-lg bg-muted/40 p-2.5 text-sm">
+              <label className="flex items-center gap-2"><Switch checked={showSign} onCheckedChange={setShowSign} />خانة التوقيع (الاسم والصفة)</label>
+              <label className="flex items-center gap-2"><Switch checked={showRef} onCheckedChange={setShowRef} />الرقم الإشاري</label>
+              <label className="flex items-center gap-2"><Switch checked={showRecipient} onCheckedChange={setShowRecipient} />الموجَّه إليه (السادة/…)</label>
+              <label className="flex items-center gap-2"><Switch checked={showGreeting} onCheckedChange={setShowGreeting} />التحية</label>
+              <label className="flex items-center gap-2"><Switch checked={showClosing} onCheckedChange={setShowClosing} />الختام</label>
               <label className={cn('flex items-center gap-2', !company.stamp_url && 'opacity-50')}><Switch disabled={!company.stamp_url} checked={draft.with_stamp !== false && !!company.stamp_url} onCheckedChange={v => set({ with_stamp: v })} />مختوم</label>
               <label className={cn('flex items-center gap-2', !company.signature_url && 'opacity-50')}><Switch disabled={!company.signature_url} checked={draft.with_signature !== false && !!company.signature_url} onCheckedChange={v => set({ with_signature: v })} />صورة التوقيع</label>
             </div>
@@ -249,6 +274,72 @@ export default function PeriodicReports() {
         <section className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-sm font-semibold text-muted-foreground">{showArchived ? 'التقارير المؤرشفة' : 'التقارير المحفوظة'}</h2>
+            {!showArchived && reports.some(needsFix) && <Button size="sm" variant="outline" disabled={fixing} onClick={async () => {
+              const list = reports.filter(needsFix);
+              if (!(await confirm({ title: 'تصحيح التقارير المحفوظة', message: `حذف عبارات المقارنة بالفترة السابقة (مثل «بزيادة تقارب 458%» أو «بتراجع نسبته 71%») والتوصيات (مثل «نوصي بمتابعة المستحقات») والأقسام الفارغة وعبارات المجاملة (الموجَّه إليه، التحية، «ونبقى على استعداد…»، الختام) من ${list.length} تقرير محفوظ؟ بقية النص وتعديلاتك اليدوية تبقى كما هي.`, confirmText: 'تصحيح' } as any))) return;
+              setFixing(true);
+              let ok = 0;
+              try { for (const r of list) { await saveLetter({ ...r, body: stripDeclines(r.body), recipient: '', greeting: '', closing: '' }); ok++; } toast.success(`صُحّح ${ok} تقرير`); }
+              catch (e: any) { toast.error(`صُحّح ${ok} ثم تعذر الباقي: ${e.message || e}`, { duration: 9000 }); }
+              finally { setFixing(false); qc.invalidateQueries({ queryKey: ['letters'] }); }
+            }}>{fixing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Shuffle className="h-3.5 w-3.5" />}تصحيح الصياغة: المقارنات والتوصيات والأقسام الفارغة ({reports.filter(needsFix).length})</Button>}
+            {!showArchived && company && (() => {
+              // ترقيم التقارير تسلسلياً حسب تاريخها: FR1، FR2، ... (منفصل عن المراسلات)
+              const p = reportPrefix(company.reference_prefix);
+              const byDate = (a: Letter, b: Letter) => String(a.period_start || a.letter_date).localeCompare(String(b.period_start || b.letter_date))
+                || String(a.period_end || a.letter_date).localeCompare(String(b.period_end || b.letter_date)) || String(a.created_at || '').localeCompare(String(b.created_at || ''));
+              // التقارير النشطة فقط، من الأقدم إلى الأحدث
+              const ordered = allReports.filter(r => r.company_id === company.id && !r.archived_at).sort(byDate);
+              const targets = new Set(ordered.map((_, i) => `${p}${i + 1}`));
+              // تقارير مؤرشفة تحمل أحد الأرقام المطلوبة تُعاد تسميتها حتى لا يتعارض الترقيم
+              const blocking = allReports.filter(r => r.company_id === company.id && r.archived_at && targets.has(String(r.reference_number).trim()));
+              const wrong = ordered.filter((r, i) => r.reference_number !== `${p}${i + 1}`).length;
+              if (!wrong) return null;
+              return <Button size="sm" variant="outline" disabled={fixing} title={`يعيد ترقيم التقارير النشطة من ${p}1 من الأقدم إلى الأحدث`} onClick={async () => {
+                if (!(await confirm({ title: 'ترقيم التقارير', message: `إعادة ترقيم ${ordered.length} تقرير نشط من الأقدم إلى الأحدث حسب تاريخ الفترة (${p}1 إلى ${p}${ordered.length})؟ الترقيم منفصل عن المراسلات${blocking.length ? `، وتُغيَّر أرقام ${blocking.length} تقرير مؤرشف تحمل نفس الأرقام` : ''}.`, confirmText: 'ترقيم' } as any))) return;
+                setFixing(true);
+                try {
+                  // مرحلتان لتجنب تعارض الأرقام المكررة أثناء الترقيم
+                  for (const r of blocking) await saveLetter({ ...r, reference_number: `أرشيف-${r.reference_number}-${String(r.id).slice(0, 6)}` });
+                  for (const r of ordered) await saveLetter({ ...r, reference_number: `tmp-${r.id}` });
+                  for (let i = 0; i < ordered.length; i++) await saveLetter({ ...ordered[i], reference_number: `${p}${i + 1}` });
+                  toast.success(`رُقّمت ${ordered.length} تقرير من ${p}1`);
+                } catch (e: any) { toast.error(e.message || 'تعذر الترقيم', { duration: 9000 }); }
+                finally { setFixing(false); qc.invalidateQueries({ queryKey: ['letters'] }); }
+              }}>ترقيم التقارير من الأقدم للأحدث ({wrong})</Button>;
+            })()}
+            {!showArchived && reports.length > 0 && <Button size="sm" variant="outline" className="text-destructive hover:bg-destructive/10" disabled={fixing} onClick={async () => {
+              if (!(await confirm({ title: 'إزالة كل التقارير', message: `نقل كل التقارير المعروضة (${reports.length}) إلى الأرشيف؟ تختفي من القائمة والطباعة، ويمكن استرجاعها من «الأرشيف» عند الحاجة.`, confirmText: 'أرشفة الكل', variant: 'destructive' } as any))) return;
+              setFixing(true);
+              let ok = 0;
+              try { for (const r of reports) { await archiveLetter(r.id!, true); ok++; } toast.success(`أُرشف ${ok} تقرير`); }
+              catch (e: any) { toast.error(`أُرشف ${ok} ثم تعذر الباقي: ${e.message || e}`, { duration: 9000 }); }
+              finally { setFixing(false); qc.invalidateQueries({ queryKey: ['letters'] }); }
+            }}><Archive className="h-3.5 w-3.5" />إزالة كل التقارير ({reports.length})</Button>}
+            {reports.length > 1 && company && <PrintMenu size="sm" label={batchPrinting ? 'جارٍ التجهيز…' : `طباعة المعروضة دفعة واحدة (${reports.length})`} onPrint={async m => {
+              const c = companies.find(x => x.id === reports[0].company_id) || company;
+              const list = [...reports].filter(r => r.company_id === c.id).sort((a, b) => String(a.period_start || a.letter_date).localeCompare(String(b.period_start || b.letter_date)));
+              setBatchPrinting(true);
+              try { await printReportsBatch(c, list, m, `التقارير الدورية (${list.length})`, undefined, docOpts); } catch (e: any) { toast.error(e.message || 'تعذر تجهيز الطباعة'); } finally { setBatchPrinting(false); }
+            }} />}
+            {showArchived && reports.length > 0 && <Button size="sm" variant="outline" className="text-destructive hover:bg-destructive/10" disabled={fixing} onClick={async () => {
+              if (!(await confirm({ title: 'مسح الأرشيف نهائياً', message: `حذف ${reports.length} تقرير مؤرشف نهائياً؟ لا يمكن استرجاعها بعد الحذف. ستُنزَّل نسخة احتياطية منها (ملف JSON) على جهازك قبل الحذف.`, confirmText: 'حذف نهائي', variant: 'destructive' } as any))) return;
+              setFixing(true);
+              let ok = 0;
+              try {
+                // نسخة احتياطية على الجهاز قبل الحذف
+                const blob = new Blob([JSON.stringify(reports, null, 2)], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `archived-reports-backup-${todayIso()}.json`;
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+                for (const r of reports) { await deleteLetter(r.id!); ok++; }
+                await deleteReportSnapshots(reports.map(r => r.id!)).catch(() => {});
+                toast.success(`حُذف ${ok} تقرير مؤرشف نهائياً`);
+              } catch (e: any) { toast.error(`حُذف ${ok} ثم تعذر الباقي: ${e.message || e}`, { duration: 9000 }); }
+              finally { setFixing(false); qc.invalidateQueries({ queryKey: ['letters'] }); }
+            }}><Archive className="h-3.5 w-3.5" />مسح الأرشيف نهائياً ({reports.length})</Button>}
             <button type="button" onClick={() => setShowArchived(v => !v)} className="inline-flex min-h-8 items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline"><Archive className="h-3.5 w-3.5" />{showArchived ? 'العودة للتقارير النشطة' : `الأرشيف (${archivedCount})`}</button>
           </div>
           {lettersQ.isLoading ? <Skeleton className="h-24 w-full" />
@@ -257,12 +348,12 @@ export default function PeriodicReports() {
               <div className="overflow-x-auto rounded-xl border border-border bg-card">
                 <table className="w-full min-w-[720px] text-sm">
                   <thead className="bg-muted/50 text-xs text-muted-foreground">
-                    <tr><th className="p-3 text-right">الرقم الإشاري</th><th className="p-3 text-right">الفترة</th><th className="p-3 text-right">الموضوع</th><th className="p-3" /></tr>
+                    <tr><th className="p-3 text-right">تاريخ التقرير</th><th className="p-3 text-right">الفترة</th><th className="p-3 text-right">الموضوع</th><th className="p-3" /></tr>
                   </thead>
                   <tbody className="divide-y divide-border">
                     {reports.map(r => (
                       <tr key={r.id} className="hover:bg-muted/30">
-                        <td className="p-3 font-bold" dir="ltr" style={{ textAlign: 'right' }}>{r.reference_number}</td>
+                        <td className="p-3 font-bold tabular-nums">{dmy(r.letter_date)}</td>
                         <td className="p-3 tabular-nums">{r.period_start ? `${dmy(r.period_start)} – ${dmy(r.period_end || '')}` : dmy(r.letter_date)}</td>
                         <td className="p-3">{r.subject}</td>
                         <td className="p-3">

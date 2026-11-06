@@ -79,7 +79,7 @@ const SelectContent = React.forwardRef<
     let count = 0;
     const countItems = (ch: React.ReactNode) => {
       React.Children.forEach(ch, (child) => {
-        if (!React.isValidElement(child)) return;
+        if (!React.isValidElement<{ value?: unknown; children?: React.ReactNode }>(child)) return;
         // Check if it's a SelectItem by checking for value prop
         if (child.props?.value !== undefined) {
           count++;
@@ -225,7 +225,7 @@ function extractText(children: React.ReactNode): string {
   if (typeof children === "string") return children;
   if (typeof children === "number") return String(children);
   if (Array.isArray(children)) return children.map(extractText).join(" ");
-  if (React.isValidElement(children)) return extractText(children.props?.children);
+  if (React.isValidElement<{ children?: React.ReactNode }>(children)) return extractText(children.props?.children);
   return "";
 }
 

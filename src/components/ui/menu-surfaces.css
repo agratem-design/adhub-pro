@@ -1,11 +1,17 @@
 /* Shared surfaces for selects, action menus and searchable pickers. */
-.app-menu-surface {
-  border: 1px solid hsl(var(--border));
-  border-radius: 12px;
-  background: hsl(var(--popover));
-  color: hsl(var(--popover-foreground));
-  font-family: 'Tajawal', sans-serif;
-  box-shadow: 0 12px 32px -12px rgb(0 0 0 / .3);
+/* Tailwind 4 يضع أصنافه في طبقات CSS. في v3 كانت أصناف العنصر نفسه (border-0 / rounded-xl...) تغلب
+   القاعدة الجذرية لأن هذا الملف يُحمَّل قبل index.css؛ نضعها في طبقة components لنفس النتيجة.
+   باقي القواعد أعلى خصوصية فتبقى خارج الطبقات كما كانت. */
+@layer theme, base, components, utilities;
+@layer components {
+  .app-menu-surface {
+    border: 1px solid hsl(var(--border));
+    border-radius: 12px;
+    background: hsl(var(--popover));
+    color: hsl(var(--popover-foreground));
+    font-family: 'Tajawal', sans-serif;
+    box-shadow: 0 12px 32px -12px rgb(0 0 0 / .3);
+  }
 }
 .app-menu-surface :is([role='option'], [role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio'], [cmdk-item]) {
   min-height: 44px;

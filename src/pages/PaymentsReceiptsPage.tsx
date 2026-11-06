@@ -793,6 +793,19 @@ export default function PaymentsReceiptsPage() {
     return cn ? `مقايضة · إيجار عقد #${cn}${friendContractsMap[cn] ? ` · ${friendContractsMap[cn]}` : ''}` : 'مقايضة · إيجار لوحة';
   };
 
+  // طباعة الإيصال مباشرة من القائمة — نفس قالب الإيصال الموحد المستخدم في نافذة التفاصيل
+  const [printingKey, setPrintingKey] = useState<string | null>(null);
+  const handlePrintReceipt = async (r: Row) => {
+    setPrintingKey(r.key);
+    try {
+      await printDistributedUnifiedReceipt(r.rows as any, r.customer || '', r.total, printReceipt);
+    } catch (e: any) {
+      toast.error(e?.message || 'تعذرت طباعة الإيصال');
+    } finally {
+      setPrintingKey(null);
+    }
+  };
+
   const openDetails = async (r: Row) => {
     if (r.isGroup) { handleViewDistributedPayment(r.key); return; }
     setSelectedDistributedPayments(r.rows);
@@ -907,7 +920,7 @@ export default function PaymentsReceiptsPage() {
         <div className="rounded-xl border border-dashed border-border p-10 text-center text-muted-foreground">لا توجد عمليات في هذه الفترة</div>
       ) : (
         <section className="overflow-hidden rounded-xl border border-border bg-card">
-          <div className="hidden grid-cols-[92px_minmax(0,1.4fr)_minmax(0,1.6fr)_120px_110px_110px_88px] gap-3 border-b border-border bg-muted/50 px-4 py-2 text-xs font-semibold text-muted-foreground lg:grid">
+          <div className="hidden grid-cols-[92px_minmax(0,1.4fr)_minmax(0,1.6fr)_120px_110px_110px_124px] gap-3 border-b border-border bg-muted/50 px-4 py-2 text-xs font-semibold text-muted-foreground lg:grid">
             <span>التاريخ</span><span>الزبون</span><span>الوجهة</span><span className="text-left">المبلغ المستلم</span><span className="text-left">المتبقي</span><span>الطريقة</span><span />
           </div>
           {rowsInView.slice(0, visibleCount).map(r => {
@@ -923,7 +936,7 @@ export default function PaymentsReceiptsPage() {
             const dist = CREDIT.includes(first.entry_type) ? distributionOf(r.rows, r.total) : null;
             return (
               <div key={r.key} className="border-b border-border last:border-b-0">
-                <div className="grid grid-cols-2 items-center gap-x-3 gap-y-1 px-4 py-3 lg:grid-cols-[92px_minmax(0,1.4fr)_minmax(0,1.6fr)_120px_110px_110px_88px]">
+                <div className="grid grid-cols-2 items-center gap-x-3 gap-y-1 px-4 py-3 lg:grid-cols-[92px_minmax(0,1.4fr)_minmax(0,1.6fr)_120px_110px_110px_124px]">
                   <span className="text-xs tabular-nums text-muted-foreground">{String(r.date || '').slice(0, 10).split('-').reverse().join('/')}</span>
                   <button type="button" className="min-w-0 text-right" onClick={() => navigate(`/admin/customer-account?id=${r.customerId}&name=${encodeURIComponent(r.customer || '')}`)}>
                     <span className="block truncate font-semibold hover:text-primary">{r.customer || '—'}</span>
@@ -970,6 +983,12 @@ export default function PaymentsReceiptsPage() {
                   })()}
                   <span className="text-xs text-muted-foreground">{first.method || '—'}</span>
                   <div className="flex justify-end gap-1">
+                    {CREDIT.includes(first.entry_type) && (
+                      <Button size="sm" variant="outline" className="h-8 w-8 p-0" title="طباعة الإيصال" aria-label="طباعة الإيصال" disabled={printingKey === r.key}
+                        onClick={() => handlePrintReceipt(r)}>
+                        <Printer className={`h-3.5 w-3.5 ${printingKey === r.key ? 'animate-pulse' : ''}`} />
+                      </Button>
+                    )}
                     <Button size="sm" variant="outline" className="h-8 px-2 text-xs" onClick={() => openDetails(r)}><Edit className="h-3.5 w-3.5" />تفاصيل</Button>
                   </div>
                 </div>

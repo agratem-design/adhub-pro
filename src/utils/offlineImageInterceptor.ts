@@ -90,6 +90,28 @@ function resolveCandidate(candidate: string): string {
   return memoryCache.get(candidate) || candidate;
 }
 
+/**
+ * صور Google Drive (lh3.googleusercontent.com وغيرها) تُرفض عندما يحمل الطلب
+ * Referer لأصل غير معتمد مثل http://localhost، فتسقط إلى الصورة البديلة.
+ * بدون Referer تُحمَّل في كل البيئات، لذا نزيله لهذه الصور فقط
+ * (لا نغيّره عالمياً لأن مفاتيح Google Maps مقيّدة بالـ Referer).
+ */
+export function needsNoReferrer(url: string | null | undefined): boolean {
+  if (!url || !/^https?:\/\//i.test(url)) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host.endsWith('.googleusercontent.com') || host === 'drive.google.com' || host === 'docs.google.com';
+  } catch {
+    return false;
+  }
+}
+
+function applyReferrerPolicy(img: HTMLImageElement, src: string): boolean {
+  if (!needsNoReferrer(src) || img.getAttribute('referrerpolicy') === 'no-referrer') return false;
+  img.setAttribute('referrerpolicy', 'no-referrer');
+  return true;
+}
+
 function setImageSrc(img: HTMLImageElement, src: string) {
   internalSrcUpdates.add(img);
   img.dataset.fallbackCurrent = src;
@@ -124,6 +146,13 @@ function handleImageError(img: HTMLImageElement) {
   if (img.dataset.fallbackExhausted === '1') return;
 
   const { sources, index } = getFallbackState(img);
+
+  // فشل بسبب الـ Referer: أعد نفس الرابط بدون Referer قبل الانتقال للبدائل
+  const failed = img.getAttribute('src') || '';
+  if (applyReferrerPolicy(img, failed)) {
+    setImageSrc(img, failed);
+    return;
+  }
   const nextIndex = index + 1;
 
   if (nextIndex >= sources.length) {
@@ -132,7 +161,9 @@ function handleImageError(img: HTMLImageElement) {
   }
 
   img.dataset.fallbackIndex = String(nextIndex);
-  setImageSrc(img, resolveCandidate(sources[nextIndex]));
+  const next = resolveCandidate(sources[nextIndex]);
+  applyReferrerPolicy(img, next);
+  setImageSrc(img, next);
 }
 
 /**
@@ -178,7 +209,8 @@ export async function preloadImageCache(force: boolean = false): Promise<void> {
  * Inserts before </head> if present, otherwise prepends to HTML.
  */
 function injectFallbackScriptIntoHtml(html: string): string {
-  const script = getDSFallbackScript();
+  // نوافذ الطباعة: صور Google Drive تحتاج طلباً بدون Referer (لا خرائط تفاعلية هنا)
+  const script = (/name=["']?referrer/i.test(html) ? '' : '<meta name="referrer" content="no-referrer">') + getDSFallbackScript();
   if (html.includes('</head>')) {
     return html.replace('</head>', script + '</head>');
   }
@@ -232,6 +264,12 @@ export function installImageInterceptor(): (() => void) | undefined {
     if (internalSrcUpdates.has(img)) {
       internalSrcUpdates.delete(img);
       return;
+    }
+
+    // قبل أول تحميل: صور Google بدون Referer (يعمل على localhost والإنتاج)
+    if (applyReferrerPolicy(img, src) && img.complete && img.naturalWidth === 0) {
+      // بدأ الطلب قبل وضع السياسة وفشل: أعده بالسياسة الجديدة
+      setImageSrc(img, src);
     }
 
     // Ensure error handler is attached once

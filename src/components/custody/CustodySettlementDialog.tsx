@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { renderUnifiedDocument, escHtml, docMoney, docDate } from '@/lib/unifiedDocument';
+import { getMergedInvoiceStylesAsync } from '@/hooks/useInvoiceSettingsSync';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -148,11 +150,12 @@ export function CustodySettlementDialog({
     }
   };
 
-  const handlePrintSettlement = () => {
+  const handlePrintSettlement = async () => {
     const docTitle = `إيصال_تسليم_العهدة_${account.account_number}`;
     const printWindow = preparePrintWindow(docTitle);
     const returned = parseFloat(returnedAmount) || 0;
-    const html = generateSettlementReceiptHTML(account, expenses, returned, settlementNotes);
+    const styles = await getMergedInvoiceStylesAsync('custody');
+    const html = generateSettlementReceiptHTML(styles, account, expenses, returned, settlementNotes);
 
     writePrintWindow(printWindow, html, {
       title: docTitle,
@@ -305,272 +308,54 @@ export function CustodySettlementDialog({
 }
 
 function generateSettlementReceiptHTML(
+  styles: Record<string, any>,
   account: CustodyAccount,
   expenses: CustodyExpense[],
   returnedAmount: number,
   notes: string
 ): string {
-  const receiptDate = new Date().toLocaleDateString('ar-LY');
+  // ✅ المستند الموحد — نفس قالب كل الإيصالات، والألوان من إعدادات الطباعة (كشف العهدة)
   const receiptNumber = `SET-${Date.now()}`;
   const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
-
-  return `<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>واصل تسليم عهدة - ${account.account_number}</title>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;700&display=swap');
-    
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    
-    html, body {
-      width: 210mm;
-      height: 297mm;
-      font-family: 'Noto Sans Arabic', Arial, sans-serif;
-      direction: rtl;
-      text-align: right;
-      background: white;
-      color: #000;
-      font-size: 11px;
-      line-height: 1.3;
-    }
-    
-    .receipt-container {
-      width: 210mm;
-      min-height: 297mm;
-      padding: 12mm;
-      display: flex;
-      flex-direction: column;
-    }
-    
-    .header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 20px;
-      border-bottom: 2px solid #000;
-      padding-bottom: 15px;
-    }
-    
-    .receipt-info { text-align: left; direction: ltr; order: 2; }
-    .receipt-title { font-size: 24px; font-weight: bold; color: #000; margin-bottom: 8px; }
-    .receipt-details { font-size: 11px; color: #666; line-height: 1.5; }
-    
-    .company-info { display: flex; flex-direction: column; align-items: flex-end; text-align: right; order: 1; }
-    .company-logo { max-width: 400px; height: auto; margin-bottom: 5px; }
-    .company-details { font-size: 12px; color: #666; line-height: 1.6; }
-    
-    .info-section {
-      background: #f8f9fa;
-      padding: 15px;
-      margin-bottom: 18px;
-      border-right: 4px solid #000;
-    }
-    
-    .info-title { font-size: 14px; font-weight: bold; margin-bottom: 8px; color: #000; }
-    .info-details { font-size: 12px; line-height: 1.5; }
-    
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 15px;
-      margin-bottom: 20px;
-    }
-    
-    .summary-box {
-      padding: 15px;
-      border-radius: 8px;
-      text-align: center;
-    }
-    
-    .summary-box.initial { background: #e0f2fe; border: 1px solid #0284c7; }
-    .summary-box.expenses { background: #fee2e2; border: 1px solid #dc2626; }
-    .summary-box.returned { background: #dcfce7; border: 1px solid #16a34a; }
-    
-    .summary-label { font-size: 11px; color: #666; margin-bottom: 5px; }
-    .summary-value { font-size: 18px; font-weight: bold; }
-    
-    .expenses-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 20px;
-    }
-    
-    .expenses-table th {
-      background: #000;
-      color: white;
-      padding: 10px 8px;
-      text-align: center;
-      font-size: 11px;
-    }
-    
-    .expenses-table td {
-      padding: 8px;
-      text-align: center;
-      border: 1px solid #ddd;
-      font-size: 10px;
-    }
-    
-    .expenses-table tbody tr:nth-child(even) { background: #f8f9fa; }
-    
-    .amount-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 18px;
-      font-weight: bold;
-      background: #16a34a;
-      color: white;
-      padding: 15px 20px;
-      margin-top: 15px;
-    }
-    
-    .currency { color: #FFD700; text-shadow: 1px 1px 2px rgba(0,0,0,0.3); }
-    
-    .signature-section {
-      margin-top: 30px;
-      display: flex;
-      justify-content: space-between;
-    }
-    
-    .signature-box {
-      text-align: center;
-      border-top: 2px solid #000;
-      padding-top: 8px;
-      min-width: 140px;
-    }
-    
-    .signature-name { margin-top: 8px; font-size: 12px; color: #666; }
-    
-    .footer {
-      margin-top: auto;
-      text-align: center;
-      font-size: 11px;
-      color: #666;
-      border-top: 1px solid #ddd;
-      padding-top: 15px;
-    }
-    
-    @media print {
-      html, body { width: 210mm !important; margin: 0 !important; }
-      .receipt-container { padding: 12mm !important; }
-      @page { size: A4 portrait; margin: 0 !important; }
-    }
-  </style>
-</head>
-<body>
-  <div class="receipt-container">
-    <div class="header">
-      <div class="company-info">
-        <img src="/logofaresgold.svg" alt="شعار الشركة" class="company-logo" onerror="this.style.display='none'">
-        <div class="company-details">طرابلس – طريق المطار، حي الزهور<br>هاتف: 0912612255</div>
-      </div>
-      <div class="receipt-info">
-        <div class="receipt-title">واصل تسليم عهدة</div>
-        <div class="receipt-details">
-          رقم الواصل: ${receiptNumber}<br>
-          التاريخ: ${receiptDate}<br>
-          رقم العهدة: ${account.account_number}
-        </div>
-      </div>
-    </div>
-    
-    <div class="info-section">
-      <div class="info-title">بيانات الموظف</div>
-      <div class="info-details">
-        <strong>اسم الموظف:</strong> ${account.employee?.name || '-'}<br>
-        <strong>الوظيفة:</strong> ${account.employee?.position || '-'}<br>
-        <strong>تاريخ استلام العهدة:</strong> ${new Date(account.assigned_date).toLocaleDateString('ar-LY')}
-      </div>
-    </div>
-    
-    <div class="summary-grid">
-      <div class="summary-box initial">
-        <div class="summary-label">المبلغ الأولي</div>
-        <div class="summary-value">${formatArabicNumber(account.initial_amount)} د.ل</div>
-      </div>
-      <div class="summary-box expenses">
-        <div class="summary-label">إجمالي المصروفات</div>
-        <div class="summary-value" style="color: #dc2626;">${formatArabicNumber(totalExpenses)} د.ل</div>
-      </div>
-      <div class="summary-box returned">
-        <div class="summary-label">المبلغ المرتجع</div>
-        <div class="summary-value" style="color: #16a34a;">${formatArabicNumber(returnedAmount)} د.ل</div>
-      </div>
-    </div>
-    
-    ${expenses.length > 0 ? `
-    <div style="margin-bottom: 15px;">
-      <div class="info-title" style="margin-bottom: 10px;">تفصيل المصروفات</div>
-      <table class="expenses-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>التاريخ</th>
-            <th>الوصف</th>
-            <th>التصنيف</th>
-            <th>المبلغ</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${expenses.map((exp, idx) => `
-          <tr>
-            <td>${idx + 1}</td>
-            <td>${new Date(exp.expense_date).toLocaleDateString('ar-LY')}</td>
-            <td style="text-align: right;">${exp.description}</td>
-            <td>${exp.expense_category}</td>
-            <td style="color: #dc2626; font-weight: bold;">${formatArabicNumber(exp.amount)} د.ل</td>
-          </tr>
-          `).join('')}
-          <tr style="background: #f0f0f0; font-weight: bold;">
-            <td colspan="4" style="text-align: left;">الإجمالي</td>
-            <td style="color: #dc2626;">${formatArabicNumber(totalExpenses)} د.ل</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    ` : '<p style="margin-bottom: 15px; color: #666;">لا توجد مصروفات مسجلة</p>'}
-    
-    <div class="amount-row">
-      <span>المبلغ المرتجع للشركة:</span>
-      <span class="currency">${formatArabicNumber(returnedAmount)} د.ل</span>
-    </div>
-    
-    ${notes ? `
-    <div class="info-section" style="margin-top: 15px;">
-      <div class="info-title">ملاحظات التسليم</div>
-      <div class="info-details">${notes}</div>
-    </div>
-    ` : ''}
-    
-    <div class="info-section" style="margin-top: 15px; background: #e0f2fe; border-right-color: #0284c7;">
-      <strong>إقرار:</strong> أقر أنا الموقع أدناه <strong>${account.employee?.name || '_______________'}</strong> بأنني قمت بتسليم العهدة المالية المذكورة أعلاه وأن المبلغ المرتجع هو <strong>${formatArabicNumber(returnedAmount)} دينار ليبي</strong>.
-    </div>
-    
-    <div class="signature-section">
-      <div class="signature-box">
-        <div>توقيع المسلم (الموظف)</div>
-        <div class="signature-name">${account.employee?.name || ''}</div>
-      </div>
-      <div class="signature-box">
-        <div>توقيع المستلم (الإدارة)</div>
-        <div class="signature-name">شركة فارس للدعاية والإعلان</div>
-      </div>
-    </div>
-    
-    <div class="footer">
-      شكراً لتعاونكم | Thank you for your cooperation<br>
-      هذا إيصال إلكتروني ولا يحتاج إلى ختم أو توقيع إضافي
-    </div>
-  </div>
-  
-  <script>
-    window.addEventListener('load', function() {
-      setTimeout(function() { window.focus(); window.print(); }, 500);
-    });
-  </script>
-</body>
-</html>`;
+  return renderUnifiedDocument(styles, {
+    title: 'واصل تسليم عهدة',
+    subtitle: 'تسوية العهدة المالية وإرجاع المتبقي للشركة',
+    pageTitle: `واصل تسليم عهدة - ${account.account_number}`,
+    info: [
+      { label: 'اسم الموظف', value: escHtml(account.employee?.name || '—') },
+      { label: 'الوظيفة', value: escHtml(account.employee?.position || '—') },
+      { label: 'رقم العهدة', value: `<bdi>${escHtml(account.account_number)}</bdi>` },
+      { label: 'رقم الواصل', value: `<bdi>${receiptNumber}</bdi>` },
+      { label: 'تاريخ استلام العهدة', value: docDate(account.assigned_date) },
+      { label: 'تاريخ التسليم', value: docDate(new Date()) },
+    ],
+    total: { label: 'المبلغ المرتجع للشركة', value: docMoney(returnedAmount) },
+    sections: [{
+      title: `تفصيل المصروفات (${expenses.length})`,
+      aside: docMoney(totalExpenses),
+      empty: 'لا توجد مصروفات مسجلة',
+      columns: [
+        { key: 'i', header: '#', width: '5%' },
+        { key: 'date', header: 'التاريخ', width: '14%' },
+        { key: 'desc', header: 'الوصف', align: 'right' },
+        { key: 'cat', header: 'التصنيف', width: '16%' },
+        { key: 'amount', header: 'المبلغ', width: '16%' },
+      ],
+      rows: expenses.map((exp, idx) => ({
+        i: idx + 1,
+        date: docDate(exp.expense_date),
+        desc: escHtml(exp.description),
+        cat: escHtml(exp.expense_category),
+        amount: `<span class="os-due">${docMoney(exp.amount)}</span>`,
+      })),
+      footer: expenses.length ? [{ label: 'الإجمالي', value: docMoney(totalExpenses) }] : undefined,
+    }],
+    summary: [
+      { label: 'المبلغ الأولي', value: docMoney(account.initial_amount) },
+      { label: 'إجمالي المصروفات', value: `− ${docMoney(totalExpenses)}` },
+      { label: 'المبلغ المرتجع', value: docMoney(returnedAmount) },
+    ],
+    notes,
+    signatures: [{ label: 'توقيع الموظف', value: account.employee?.name }, { label: 'توقيع المستلم' }, { label: 'الختم' }],
+  });
 }

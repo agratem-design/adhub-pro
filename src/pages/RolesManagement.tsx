@@ -631,7 +631,7 @@ export default function RolesManagement() {
                       {/* Permission items table */}
                       <div className="space-y-1">
                         {/* Header */}
-                        <div className="grid grid-cols-[1fr,80px,80px] gap-2 px-3 py-2 text-xs font-medium text-muted-foreground">
+                        <div className="grid grid-cols-[1fr_80px_80px] gap-2 px-3 py-2 text-xs font-medium text-muted-foreground">
                           <span>الصلاحية</span>
                           <span className="text-center">عرض</span>
                           <span className="text-center">تعديل</span>
@@ -644,7 +644,7 @@ export default function RolesManagement() {
                           return (
                             <div
                               key={perm.id}
-                              className={`grid grid-cols-[1fr,80px,80px] gap-2 items-center px-3 py-2.5 rounded-lg border transition-colors ${
+                              className={`grid grid-cols-[1fr_80px_80px] gap-2 items-center px-3 py-2.5 rounded-lg border transition-colors ${
                                 hasView ? 'bg-primary/5 border-primary/20' : 'border-transparent hover:bg-muted/50'
                               }`}
                             >

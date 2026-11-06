@@ -79,6 +79,8 @@ import type { FriendRentalSnapshot } from '@/utils/friendRentalPricing';
 import { LevelDiscountsCard } from '@/components/contracts/edit/LevelDiscountsCard';
 import { SmartBillboardConfirmDialog } from '@/components/contracts/edit/SmartBillboardConfirmDialog';
 import { BillboardSwapDialog } from '@/components/contracts/edit/BillboardSwapDialog';
+import { type PendingBillboardSwap, upsertPendingSwap, validatePendingSwaps } from '@/lib/pendingBillboardSwaps';
+import { executeInstantBillboardSwap } from '@/services/contractBillboardSwapService';
 import { BorrowBillboardDialog } from '@/components/contracts/edit/BorrowBillboardDialog';
 import { AddPausedFromContractDialog } from '@/components/contracts/edit/AddPausedFromContractDialog';
 import { usePausedBillboardsPricing } from '@/hooks/usePausedBillboardsPricing';
@@ -171,6 +173,9 @@ export default function ContractEdit() {
   const [smartBillboardLinks, setSmartBillboardLinks] = useState<BillboardTaskLinks[]>([]);
   const [pendingSaveCallback, setPendingSaveCallback] = useState<((types: TaskTypeSelection) => Promise<void>) | null>(null);
   const [pendingRemovalIds, setPendingRemovalIds] = useState<string[]>([]);
+  // تبديلات اللوحات المعلّقة: تُنفَّذ فقط بعد نجاح «حفظ العقد»
+  const [pendingSwaps, setPendingSwaps] = useState<PendingBillboardSwap[]>([]);
+  const restorePendingSwapsRef = useRef<PendingBillboardSwap[] | null>(null);
   const [swapDialogOpen, setSwapDialogOpen] = useState(false);
   const [swapDialogMode, setSwapDialogMode] = useState<'swap' | 'move'>('swap');
   const [borrowDialogOpen, setBorrowDialogOpen] = useState(false);
@@ -809,6 +814,8 @@ export default function ContractEdit() {
         setContractHydrated(false);
         setDraftBaseline(null);
         setBillboardBaseline(null);
+        setPendingSwaps(restorePendingSwapsRef.current ?? []);
+        restorePendingSwapsRef.current = null;
         const c = await getContractWithBillboards(contractNumber);
         
         setCurrentContract(c);
@@ -2134,6 +2141,16 @@ export default function ContractEdit() {
         return {
           billboardId: r.billboardId,
           _resume_of: storedPriceMap.get(r.billboardId)?._resume_of,
+          // حقول ربط البديلة بإيقافها تبقى كما هي حتى لا يتغير حساب المستهلك بعد الحفظ
+          ...(() => {
+            const s: any = storedPriceMap.get(r.billboardId);
+            if (!s?._replacement_of) return {};
+            const keep: Record<string, unknown> = { _replacement_of: s._replacement_of };
+            for (const k of ['remainingRental', 'consumedCarryover', 'carriedFromBillboardId', 'pricingNote']) {
+              if (s[k] !== undefined && s[k] !== null) keep[k] = s[k];
+            }
+            return keep;
+          })(),
           isContractualAllocation: !!storedPriceMap.get(r.billboardId)?.isContractualAllocation,
           isSingleFace: singleFaceBillboards.has(r.billboardId) || Number((billboards.find(b => String((b as any).ID) === r.billboardId) as any)?.Faces_Count) === 1,
           schemaVersion: 2,
@@ -2171,7 +2188,7 @@ export default function ContractEdit() {
         };
       })
       .filter(Boolean);
-  }, [selected, unifiedPricingByBillboard, pricingCategory, pricingMode, durationMonths, durationDays, individualDiscounts, levelDiscounts, billboardCustomDates, contractCurrency, exchangeRate, singleFaceBillboards, billboards, printCostEnabled, installationEnabled, validFriendCosts, friendRentalIncludesPrint]);
+  }, [selected, unifiedPricingByBillboard, storedPriceMap, pricingCategory, pricingMode, durationMonths, durationDays, individualDiscounts, levelDiscounts, billboardCustomDates, contractCurrency, exchangeRate, singleFaceBillboards, billboards, printCostEnabled, installationEnabled, validFriendCosts, friendRentalIncludesPrint]);
 
   // Historical prices are loaded once and shared by the display and save.
   const pausedTotals = pausedPricingFirst.totals;
@@ -3014,6 +3031,8 @@ export default function ContractEdit() {
       }
       
       if (discountAmount < historicalDiscount || discountAmount > combinedDiscountBase) { toast.error('الخصم يتجاوز قيمة الإيجار القابلة للخصم أو يلغي خصماً تاريخياً محفوظاً'); return; }
+      const pendingSwapError = validatePendingSwaps(pendingSwaps, selected);
+      if (pendingSwapError) { setWorkspaceSection('boards'); toast.error(pendingSwapError); return; }
       const validation = validateInstallments();
       if (!validation.isValid) {
         toast.error(validation.message);
@@ -3232,6 +3251,35 @@ export default function ContractEdit() {
         setCurrentContract(saveResult);
       }
 
+      // التبديلات المعلّقة تُنفَّذ بعد نجاح الحفظ فقط؛ كل تبديل ذرّي ولا يغيّر إجمالي العقد.
+      // الفاشل يبقى معلّقاً ليعاد حفظه أو يُلغى، ولا يُلغى الحفظ الذي تم.
+      const failedSwaps: PendingBillboardSwap[] = [];
+      const swapErrors: string[] = [];
+      for (const swap of pendingSwaps) {
+        const res = await executeInstantBillboardSwap({
+          contractNumber: Number(contractNumber),
+          originalBillboardId: Number(swap.originalBillboardId),
+          replacementBillboardId: Number(swap.replacementBillboardId),
+          swapRequestId: swap.requestId,
+          reason: swap.reason,
+        });
+        if (!res.success) {
+          failedSwaps.push(swap);
+          swapErrors.push(`${swap.originalBillboardName}: ${res.error || 'تعذر التبديل'}`);
+        }
+      }
+      if (pendingSwaps.length > 0) {
+        if (failedSwaps.length > 0) {
+          toast.error(`تم حفظ العقد، لكن تعذر تنفيذ ${failedSwaps.length} تبديل:\n${swapErrors.join('\n')}`);
+          // إعادة التحميل تبدأ بقائمة معلّقات فارغة؛ نسلّمها الفاشلة لتبقى ظاهرة
+          restorePendingSwapsRef.current = failedSwaps;
+          await refreshContractData();
+          setWorkspaceSection('boards');
+          return;
+        }
+        toast.success(`تم اعتماد ${pendingSwaps.length} تبديل للوحات مع الحفظ`);
+      }
+
       let savedAsAmendment = amendmentStatus?.enabled;
       let savedNumber = (amendmentStatus?.latestNumber || 0) + 1;
       try {
@@ -3333,7 +3381,8 @@ export default function ContractEdit() {
   // InstallmentsManager owns automatic redistribution; manual schedules remain untouched.
 
 
-  const hasDraftChanges = draftBaseline !== null && draftFingerprint !== draftBaseline;
+  // أي تبديل معلّق تغيير غير محفوظ حتى يُعتمد بالحفظ
+  const hasDraftChanges = (draftBaseline !== null && draftFingerprint !== draftBaseline) || pendingSwaps.length > 0;
   useEffect(() => {
     if (!hasDraftChanges) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
@@ -3706,6 +3755,9 @@ export default function ContractEdit() {
               customerName={customerName}
               adType={adType}
               onRefresh={refreshContractData}
+              pendingSwaps={pendingSwaps}
+              onQueueSwap={(swap) => setPendingSwaps((prev) => upsertPendingSwap(prev, swap))}
+              onCancelPendingSwap={(id) => setPendingSwaps((prev) => prev.filter((s) => s.originalBillboardId !== id))}
             />
             )}
 

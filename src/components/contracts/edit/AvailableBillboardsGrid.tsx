@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import { isBillboardAvailable, getDaysUntilExpiry } from '@/utils/contractUtils';
 import { checkMaintenanceOrRemoval } from '@/services/billboardAvailabilityService';
 import { sortBillboardsStandardSync } from '@/lib/billboardSorter';
+import { useBillboardSortRanks } from '@/hooks/useBillboardSortRanks';
 import { cn } from '@/lib/utils';
 import { BillboardImage } from '@/components/BillboardImage';
 import { Badge } from '@/components/ui/badge';
@@ -146,9 +147,10 @@ export function AvailableBillboardsGrid({
     }
   };
 
+  const sortReady = useBillboardSortRanks();
   const sortedBillboards = React.useMemo(() => {
     return sortBillboardsStandardSync(billboards);
-  }, [billboards]);
+  }, [billboards, sortReady]);
 
   const totalPages = Math.ceil(sortedBillboards.length / PAGE_SIZE);
   const startIndex = (currentPage - 1) * PAGE_SIZE;

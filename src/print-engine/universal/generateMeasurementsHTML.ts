@@ -1,3 +1,4 @@
+import { generateMeasurementsHTML as unifiedMeasurementsHTML } from '@/lib/printMeasurementsHTML';
 /**
  * Generate Measurements-Style HTML for Print
  * توليد HTML بنمط المقاسات للطباعة
@@ -576,6 +577,12 @@ const generatePaymentDetailsTable = (
  * Generate complete HTML document for measurements-style print
  */
 export const generateMeasurementsHTML = (options: MeasurementsHTMLOptions): string => {
+  // ✅ المحرك الموحد: نفس قالب كل المستندات (src/lib/printMeasurementsHTML → unifiedDocument)
+  return unifiedMeasurementsHTML(options as any);
+}
+
+/** @deprecated التصميم القديم — يُحتفظ به للمرجعية فقط */
+export const legacyGenerateMeasurementsHTML = (options: MeasurementsHTMLOptions): string => {
   const { config, documentData, partyData, columns, rows, totals, totalsTitle, notes, statisticsCards, paymentDetailsTable, customHeaderHtml, additionalContent, headerSwap } = options;
 
   const css = generateMeasurementsCSS(config);

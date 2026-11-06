@@ -28,6 +28,7 @@ import { BulkRegisterPausedDialog } from './BulkRegisterPausedDialog';
 import { PausedBillboardsList } from './PausedBillboardsList';
 import { BillboardReplacementHistoryCard } from './BillboardReplacementHistoryCard';
 import { InstantBillboardSwapDialog } from './InstantBillboardSwapDialog';
+import type { PendingBillboardSwap } from '@/lib/pendingBillboardSwaps';
 import { QuickPauseBillboardDialog } from './QuickPauseBillboardDialog';
 import { toast } from 'sonner';
 import { pauseBillboardFromContract } from '@/services/billboardPauseService';
@@ -148,6 +149,10 @@ interface SelectedBillboardsCardProps {
   adType?: string;
   /** لوحات مؤجرة حالياً (id -> تاريخ انتهاء الإيجار) — تمييزها في القائمة (صفحة العروض) */
   rentedBillboards?: Map<string, string | null>;
+  /** تبديلات معلّقة لا تُنفَّذ إلا عند حفظ العقد (عند تمرير onQueueSwap) */
+  pendingSwaps?: PendingBillboardSwap[];
+  onQueueSwap?: (swap: PendingBillboardSwap) => void;
+  onCancelPendingSwap?: (originalBillboardId: string) => void;
 }
 
 export function SelectedBillboardsCard({
@@ -200,7 +205,14 @@ export function SelectedBillboardsCard({
   customerName = '',
   adType = '',
   rentedBillboards,
+  pendingSwaps = [],
+  onQueueSwap,
+  onCancelPendingSwap,
 }: SelectedBillboardsCardProps) {
+  const pendingSwapByOriginal = useMemo(
+    () => new Map(pendingSwaps.map((s) => [String(s.originalBillboardId), s])),
+    [pendingSwaps],
+  );
   const { map: activeLoansByBillboard } = useActiveLoansByBillboard();
 
   const [partnershipInfoMap, setPartnershipInfoMap] = useState<Map<string, PartnershipInfo>>(new Map());
@@ -1182,7 +1194,9 @@ export function SelectedBillboardsCard({
                             onClick={() => { if (!bulkSelectMode) setBulkSelectMode(true); toggleBulkSelect(billboardId); }}
                           />
                         )}
-                        <CardIconButton icon={ArrowLeftRight} tone="primary" title="تبديل اللوحة" onClick={() => { setSwappingBillboard(b); setSwapDialogOpen(true); }} />
+                        <span data-draft-operation={onQueueSwap ? '' : undefined} className="contents">
+                          <CardIconButton icon={ArrowLeftRight} tone="primary" title={pendingSwapByOriginal.has(billboardId) ? 'تغيير التبديل المعلّق' : 'تبديل اللوحة'} onClick={() => { setSwappingBillboard(b); setSwapDialogOpen(true); }} />
+                        </span>
                         <CardIconButton icon={PauseCircle} tone="warning" title="إيقاف مؤقت للوحة" onClick={() => { setQuickPausingBillboard(b); setQuickPauseOpen(true); }} />
                         <CardIconButton
                           icon={X}
@@ -1229,7 +1243,22 @@ export function SelectedBillboardsCard({
                         </DropdownMenu>
                       </>
                     }
-                    banner={replacementsMap.has(billboardId) && (() => {
+                    banner={pendingSwapByOriginal.has(billboardId) ? (() => {
+                      const pending = pendingSwapByOriginal.get(billboardId)!;
+                      return (
+                        <div className="relative z-10 flex items-center gap-2 border-b border-amber-500/40 bg-amber-500/90 px-3 py-1.5 text-xs font-bold text-black">
+                          <ArrowLeftRight className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">سيُستبدل بـ «{pending.replacementBillboardName}» عند حفظ العقد</span>
+                          {onCancelPendingSwap && (
+                            <span data-draft-operation="" className="mr-auto">
+                              <button type="button" className="cursor-pointer rounded bg-black/20 px-1.5 py-0.5 hover:bg-black/30" onClick={(e) => { e.stopPropagation(); onCancelPendingSwap(billboardId); }}>
+                                إلغاء
+                              </button>
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })() : replacementsMap.has(billboardId) && (() => {
                       const info = replacementsMap.get(billboardId)!;
                       return (
                         <div className="relative z-10 bg-primary/95 text-primary-foreground px-3 py-1.5 border-b border-primary/30 shadow-sm">
@@ -1794,6 +1823,10 @@ export function SelectedBillboardsCard({
           customerName={customerName || undefined}
           adType={adType || undefined}
           contractedPrice={pricingByBillboardId.get(String(swappingBillboard.ID))?.totalForBoard}
+          onQueue={onQueueSwap ? (swap) => { setSwappingBillboard(null); onQueueSwap(swap); } : undefined}
+          excludeBillboardIds={pendingSwaps
+            .filter((s) => String(s.originalBillboardId) !== String(swappingBillboard.ID))
+            .map((s) => String(s.replacementBillboardId))}
           onSwapped={() => {
             setSwappingBillboard(null);
             setPausedRefreshKey(k => k + 1);

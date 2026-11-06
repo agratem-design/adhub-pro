@@ -53,6 +53,7 @@ import {
   cleanOldGoogleCalendarEvents,
   downloadICalendarFile,
   updateCustomerAlertEmail,
+  addCalendarSyncLog,
 } from '@/services/googleCalendarService';
 
 interface CustomerAlertsSyncDialogProps {
@@ -369,9 +370,16 @@ export function CustomerAlertsSyncDialog({
       );
 
       if (!res.success) throw new Error(`تمت معالجة ${res.totalProcessed || 0} من ${eventsToSync.length} موعد. ${res.error || 'توقفت المزامنة'}`);
+      const failedList = res.failed || [];
+      addCalendarSyncLog({ source: `إرسال للزبون ${customerName}`, ok: !failedList.length, sent: eventsToSync.length - failedList.length, total: eventsToSync.length, failed: failedList });
+      if (failedList.length) {
+        toast.error(`فشل إرسال ${failedList.length} موعد للزبون. السبب: ${failedList[0].error}`, { duration: 12000 });
+        return;
+      }
       const cleanMsg = res.deletedCount && res.deletedCount > 0 ? `، وحذف ${res.deletedCount} موعد قديم ومكرر` : '';
       toast.success(`تمت مزامنة ${eventsToSync.length} موعد قادم للعميل بنجاح مع تقويم Google${cleanMsg}!`);
     } catch (err: any) {
+      addCalendarSyncLog({ source: `إرسال للزبون ${customerName}`, ok: false, sent: err?.syncResult?.totalProcessed || 0, total: eventsToSync.length, error: err?.message, failed: err?.syncResult?.failed });
       toast.error('فشل المزامنة مع تقويم جوجل: ' + (err.message || 'خطأ غير متوقع'), {
         duration: 9000,
       });
@@ -414,6 +422,7 @@ export function CustomerAlertsSyncDialog({
       setSyncingSingleId(eventItem.id);
       const result = await syncEventsToGoogleCalendar(config, [{ ...eventItem, customerEmail: cleanEmail }], targetEmails, { cleanOld: false, sendInvites: true });
       if (!result.success) throw new Error(result.error || 'توقفت المزامنة مؤقتًا');
+      if (result.failed?.length) throw new Error(result.failed[0].error);
       toast.success(`تمت مزامنة الموعد بنجاح في تقويم Google`);
     } catch (err: any) {
       toast.error('فشلت المزامنة: ' + (err.message || 'خطأ غير معروف'));

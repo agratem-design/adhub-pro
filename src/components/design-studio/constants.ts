@@ -11,12 +11,10 @@ import {
   Info,
   Sparkles,
   Smile,
-  Instagram,
-  Facebook,
-  Twitter,
   Gift,
   Award,
 } from 'lucide-react';
+import { Instagram, Facebook, Twitter } from '@/components/icons/brandIcons';
 import { CanvasElement, LocationStripStyle } from './types';
 
 // ====================== ICONS MAPPER ======================

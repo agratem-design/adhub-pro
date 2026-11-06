@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { ImageViewer } from '@/components/shared/ImageViewer';
+import { CustomerAlertsSyncDialog } from '@/components/customers/CustomerAlertsSyncDialog';
 import { 
   getCalendarRetrySeconds,
   loadCalendarRecords,
@@ -63,6 +64,11 @@ import {
   generateGoogleCalendarWebUrl, 
   downloadICalendarFile, 
   getAppsScriptSourceCode,
+  getCalendarSyncLog,
+  addCalendarSyncLog,
+  clearCalendarSyncLog,
+  type CalendarSyncLogEntry,
+  type SyncResult,
   type GoogleCalendarConfig,
   type GoogleCalendarEvent
 } from '@/services/googleCalendarService';
@@ -113,6 +119,15 @@ export default function GoogleCalendarSyncPage() {
   const [typeFilter, setTypeFilter] = useState<'all' | 'installment' | 'contract_end' | 'contract_start' | 'invoice'>('all');
   const [scopeFilter, setScopeFilter] = useState<'upcoming_only' | 'active_and_upcoming' | 'overdue' | 'all'>('active_and_upcoming');
   const [monthFilter, setMonthFilter] = useState<string>('all');
+  // فلتر الزبون: المفتاح = معرف الزبون أو name:<الاسم>
+  const [customerFilter, setCustomerFilter] = useState<string>('all');
+  const [customerDialog, setCustomerDialog] = useState<{ id: string; name: string; email?: string } | null>(null);
+  const [syncLog, setSyncLog] = useState<CalendarSyncLogEntry[]>(() => getCalendarSyncLog());
+  useEffect(() => {
+    const refresh = () => setSyncLog(getCalendarSyncLog());
+    window.addEventListener('gcal-sync-log', refresh);
+    return () => window.removeEventListener('gcal-sync-log', refresh);
+  }, []);
 
   // Preview Design Dialog state
   const [previewDesign, setPreviewDesign] = useState<{ url: string; title: string; contractNumber?: number } | null>(null);
@@ -296,7 +311,8 @@ export default function GoogleCalendarSyncPage() {
       : events.filter(e => {
           const matchScope = e.isContractActive && !e.isOverdue;
           const matchMonth = monthFilter === 'all' || (e.startDate && e.startDate.startsWith(monthFilter));
-          return matchScope && matchMonth;
+          const matchCustomer = customerFilter === 'all' || customerKeyOf(e) === customerFilter;
+          return matchScope && matchMonth && matchCustomer;
         });
 
     if (eventsToSync.length === 0) {
@@ -342,6 +358,15 @@ export default function GoogleCalendarSyncPage() {
         }
       );
 
+      const failedList = res.failed || [];
+      addCalendarSyncLog({
+        source: selectedCustomer ? `مزامنة الزبون ${selectedCustomer.name}` : 'مزامنة جماعية',
+        ok: res.success && !failedList.length, sent: res.totalProcessed - failedList.length, total: eventsToSync.length,
+        error: res.error, failed: failedList,
+      });
+      if (failedList.length) {
+        toast.error(`فشل إرسال ${failedList.length} موعد — راجع «سجل الإرسال والأخطاء» أسفل الجدول. أول سبب: ${failedList[0].error}`, { duration: 12000 });
+      }
       if (res.rateLimited) {
         // Paused by Google quota rate limit
         const nextIdx = res.lastProcessedIndex ?? res.totalProcessed;
@@ -359,12 +384,23 @@ export default function GoogleCalendarSyncPage() {
         setResumeState(null);
         const cleanMsg = res.deletedCount && res.deletedCount > 0 ? `، وحذف ${res.deletedCount} موعد قديم ومكرر من التقويم` : '';
         const monthLabel = monthFilter !== 'all' ? ` لشهر ${availableMonths.find(m => m.key === monthFilter)?.label || monthFilter}` : '';
-        toast.success(`تمت مزامنة ${eventsToSync.length} موعد قادم بنجاح مع تقويم Google${monthLabel}${cleanMsg}!`);
+        const okCount = eventsToSync.length - failedList.length;
+        if (okCount > 0) toast.success(`تمت مزامنة ${okCount} موعد قادم بنجاح مع تقويم Google${monthLabel}${cleanMsg}!`);
         setConfig(prev => ({ ...prev, lastSync: new Date().toISOString() }));
       }
     } catch (err: any) {
+      const partial: SyncResult | undefined = err?.syncResult;
+      addCalendarSyncLog({
+        source: selectedCustomer ? `مزامنة الزبون ${selectedCustomer.name}` : 'مزامنة جماعية',
+        ok: false, sent: partial ? partial.totalProcessed : startIndex, total: eventsToSync.length,
+        error: err?.message || 'خطأ غير متوقع', failed: partial?.failed,
+      });
+      // اسمح بالاستئناف بعد الموعد الفاشل بدل إعادة الإرسال من البداية
+      if (partial && typeof partial.lastProcessedIndex === 'number' && partial.lastProcessedIndex + 1 < eventsToSync.length) {
+        setResumeState({ events: eventsToSync, startIndex: partial.lastProcessedIndex + 1, totalSynced: partial.totalProcessed, totalTarget: eventsToSync.length });
+      }
       toast.error('فشل المزامنة مع تقويم جوجل: ' + (err.message || 'خطأ غير متوقع'), {
-        duration: 9000,
+        duration: 12000,
       });
     } finally {
       setSyncingAll(false);
@@ -408,8 +444,11 @@ export default function GoogleCalendarSyncPage() {
       setSyncingSingleId(eventItem.id);
       const res = await syncEventsToGoogleCalendar(config, [eventItem], undefined, { cleanOld: false });
       if (!res.success) throw new Error(res.error || 'توقفت المزامنة مؤقتًا');
+      if (res.failed?.length) throw new Error(res.failed[0].error);
+      addCalendarSyncLog({ source: `موعد: ${eventItem.title}`, ok: true, sent: 1, total: 1 });
       toast.success(`تمت مزامنة الموعد بنجاح في تقويم جوجل`);
     } catch (err: any) {
+      addCalendarSyncLog({ source: `موعد: ${eventItem.title}`, ok: false, sent: 0, total: 1, error: err?.message, failed: [{ tag: eventItem.tag, title: eventItem.title, customerName: eventItem.customerName, error: err?.message || '' }] });
       toast.error('خطأ: ' + (err.message || 'فشلت المزامنة'));
     } finally {
       setSyncingSingleId(null);
@@ -478,6 +517,21 @@ export default function GoogleCalendarSyncPage() {
     return Array.from(monthMap.values()).sort((a, b) => a.key.localeCompare(b.key));
   }, [events]);
 
+  const customerKeyOf = (e: GoogleCalendarEvent) => (e.customerId ? String(e.customerId) : 'name:' + (e.customerName || '').trim());
+  const customerOptions = useMemo(() => {
+    const map = new Map<string, { key: string; name: string; email?: string; count: number }>();
+    events.forEach(e => {
+      if (!e.isContractActive) return;
+      const key = customerKeyOf(e);
+      const cur = map.get(key) || { key, name: e.customerName || 'بدون اسم', email: e.customerEmail, count: 0 };
+      cur.count += 1;
+      if (!cur.email && e.customerEmail) cur.email = e.customerEmail;
+      map.set(key, cur);
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+  }, [events]);
+  const selectedCustomer = customerOptions.find(c => c.key === customerFilter) || null;
+
   // Filtered Events
   const filteredEvents = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -519,9 +573,11 @@ export default function GoogleCalendarSyncPage() {
       // Month filter
       const matchMonth = monthFilter === 'all' || (e.startDate && e.startDate.startsWith(monthFilter));
 
-      return matchSearch && matchType && matchScope && matchMonth;
+      const matchCustomer = customerFilter === 'all' || customerKeyOf(e) === customerFilter;
+
+      return matchSearch && matchType && matchScope && matchMonth && matchCustomer;
     });
-  }, [events, searchQuery, typeFilter, scopeFilter, monthFilter]);
+  }, [events, searchQuery, typeFilter, scopeFilter, monthFilter, customerFilter]);
 
   // Statistics
   const stats = useMemo(() => {
@@ -817,6 +873,33 @@ export default function GoogleCalendarSyncPage() {
                     )}
                   </div>
 
+                  {/* Customer filter + send to customer */}
+                  <div className="flex items-center gap-2">
+                    <select
+                      aria-label="فلتر الزبون"
+                      value={customerFilter}
+                      onChange={e => setCustomerFilter(e.target.value)}
+                      className="h-9 min-w-0 max-w-[220px] rounded-md border border-input bg-background px-2 text-sm"
+                    >
+                      <option value="all">كل الزبائن ({customerOptions.length})</option>
+                      {customerOptions.map(c => (
+                        <option key={c.key} value={c.key}>{c.name} ({c.count}){c.email ? '' : ' — بلا بريد'}</option>
+                      ))}
+                    </select>
+                    {selectedCustomer && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="cursor-pointer gap-1.5 shrink-0"
+                        onClick={() => setCustomerDialog({ id: selectedCustomer.key, name: selectedCustomer.name, email: selectedCustomer.email })}
+                        title="إرسال مواعيد هذا الزبون إلى تقويمه مع دعوة على بريده"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        إرسال للزبون
+                      </Button>
+                    )}
+                  </div>
+
                   {/* Scope Filter Pills */}
                   <div className="flex flex-wrap items-center gap-1.5 border rounded-lg p-1 bg-background">
                     <Button
@@ -910,7 +993,7 @@ export default function GoogleCalendarSyncPage() {
                     )}
                   </div>
 
-                  {(searchQuery || typeFilter !== 'all' || scopeFilter !== 'active_and_upcoming' || monthFilter !== 'all') && (
+                  {(searchQuery || typeFilter !== 'all' || scopeFilter !== 'active_and_upcoming' || monthFilter !== 'all' || customerFilter !== 'all') && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -919,6 +1002,7 @@ export default function GoogleCalendarSyncPage() {
                         setTypeFilter('all');
                         setScopeFilter('active_and_upcoming');
                         setMonthFilter('all');
+                        setCustomerFilter('all');
                       }}
                       className="cursor-pointer h-6 text-xs text-muted-foreground hover:text-foreground gap-1"
                     >
@@ -1282,6 +1366,50 @@ export default function GoogleCalendarSyncPage() {
                   </div>
                 )}
               </div>
+            </CardContent>
+          </Card>
+
+          {/* سجل الإرسال والأخطاء */}
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-base font-bold flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-primary" />
+                  سجل الإرسال والأخطاء
+                  {syncLog.some(l => !l.ok) && <Badge variant="destructive">{syncLog.filter(l => !l.ok).length} فشل</Badge>}
+                </CardTitle>
+                {syncLog.length > 0 && (
+                  <Button variant="ghost" size="sm" className="cursor-pointer h-7 text-xs" onClick={clearCalendarSyncLog}>مسح السجل</Button>
+                )}
+              </div>
+              <CardDescription>آخر عمليات الإرسال على هذا الجهاز. المواعيد الفاشلة لا تُعلَّم كمُرسلة، فتُعاد تلقائيًا في المزامنة القادمة.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {syncLog.length === 0 ? (
+                <p className="text-sm text-muted-foreground">لا توجد عمليات إرسال مسجلة بعد.</p>
+              ) : (
+                <div className="space-y-2 max-h-80 overflow-y-auto">
+                  {syncLog.map((l, i) => (
+                    <div key={i} className={`rounded-lg border p-2.5 text-sm ${l.ok ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/40 bg-destructive/5'}`}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-semibold flex items-center gap-1.5">
+                          {l.ok ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <AlertTriangle className="h-4 w-4 text-destructive" />}
+                          {l.source}
+                        </span>
+                        <span className="text-xs text-muted-foreground">{new Date(l.at).toLocaleString('ar-LY')} · أُرسل {Math.max(0, l.sent)} من {l.total}</span>
+                      </div>
+                      {l.error && <p className="mt-1 text-xs text-destructive break-words">{l.error}</p>}
+                      {!!l.failed?.length && (
+                        <ul className="mt-1.5 space-y-1 text-xs">
+                          {l.failed.map((f, j) => (
+                            <li key={j} className="break-words"><span className="font-medium">{f.title}</span>{f.customerName ? ` — ${f.customerName}` : ''}: <span className="text-muted-foreground">{f.error}</span></li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -1687,6 +1815,16 @@ export default function GoogleCalendarSyncPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {customerDialog && (
+        <CustomerAlertsSyncDialog
+          open={!!customerDialog}
+          onOpenChange={open => { if (!open) setCustomerDialog(null); }}
+          customerId={customerDialog.id}
+          customerName={customerDialog.name}
+          initialEmail={customerDialog.email}
+        />
+      )}
 
       {/* Design Preview Dialog */}
       {previewDesign && <ImageViewer images={[{ src: previewDesign.url }]} onClose={() => setPreviewDesign(null)} title="" />}

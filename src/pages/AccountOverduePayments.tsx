@@ -17,6 +17,7 @@ import { useNavigate } from 'react-router-dom';
 import { useSendWhatsApp } from '@/hooks/useSendWhatsApp';
 import { loadCustomerOverdueInvoices, type UnpaidInvoice, type CustomerAccountOverdue } from '@/services/overdueInvoices';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { OverduePaymentsPrintDialog } from '@/components/billing/OverduePaymentsPrintDialog';
 
 
 export default function AccountOverduePayments() {
@@ -37,6 +38,7 @@ export default function AccountOverduePayments() {
     customer: null,
   });
   const [copied, setCopied] = useState(false);
+  const [printCustomer, setPrintCustomer] = useState<CustomerAccountOverdue | null>(null);
 
   // فلاتر
   const [searchTerm, setSearchTerm] = usePersistedState('accountOverduePayments.searchTerm', '');
@@ -295,6 +297,7 @@ export default function AccountOverduePayments() {
         search={searchTerm} onSearch={setSearchTerm} minDays={minDays} onMinDays={setMinDays} minAmount={minAmount} onMinAmount={setMinAmount} sort={sortBy} onSort={setSortBy} onRefresh={loadData}
         customers={sortedAndFiltered.map(customer=>({key:customer.customerId || customer.customerName,name:customer.customerName,amount:customer.totalOverdue,count:customer.invoicesCount,days:customer.oldestDaysOverdue,phone:getPhone(customer),
           onAccount:()=>navigate(`/admin/customer-billing?${customer.customerId?`id=${customer.customerId}&`:''}name=${encodeURIComponent(customer.customerName)}`),
+          onPrint:()=>setPrintCustomer(customer),
           onReminder:()=>setWhatsappChoiceDialog({open:true,invoice:null,customer}),reminderDisabled:sendingId===(customer.customerId||customer.customerName)||!getPhone(customer),
           extra:customer.invoices.reduce((sum,invoice)=>sum+invoice.amount,0)-customer.totalOverdue>0.5?<div className="rounded-lg border border-info/25 bg-info/5 p-3 text-xs"><p className="font-semibold">رصيد الحساب محسوب في المستحق</p><p className="mt-1 leading-relaxed text-muted-foreground">مجموع أرصدة الفواتير {customer.invoices.reduce((sum,invoice)=>sum+invoice.amount,0).toLocaleString('ar-LY')} د.ل، والمستحق بعد تسوية رصيد الحساب {customer.totalOverdue.toLocaleString('ar-LY')} د.ل.</p></div>:undefined,
           items:customer.invoices.slice().sort((a,b)=>b.daysOverdue-a.daysOverdue).map(invoice=>({key:`${invoice.type}-${invoice.invoiceId}`,
@@ -303,6 +306,22 @@ export default function AccountOverduePayments() {
             onSettle:()=>markItemPaid(invoice),onReminder:()=>setWhatsappChoiceDialog({open:true,invoice,customer:null}),reminderDisabled:sendingId===invoice.invoiceId||!getPhone(invoice),
           })),
         }))}/>
+
+      {printCustomer && (
+        <OverduePaymentsPrintDialog
+          open={!!printCustomer}
+          onOpenChange={(open) => { if (!open) setPrintCustomer(null); }}
+          customerOverdue={{
+            customerId: printCustomer.customerId,
+            customerName: printCustomer.customerName,
+            totalOverdue: printCustomer.totalOverdue,
+            oldestDaysOverdue: printCustomer.oldestDaysOverdue,
+            accountRemaining: printCustomer.accountRemaining,
+            installments: [],
+            unpaidInvoices: printCustomer.invoices,
+          }}
+        />
+      )}
 
       {/* WhatsApp Choice Dialog */}
       <Dialog open={whatsappChoiceDialog.open} onOpenChange={(open) => {

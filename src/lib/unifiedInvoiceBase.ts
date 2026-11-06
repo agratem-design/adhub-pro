@@ -1,4 +1,5 @@
 import { unifiedInvoiceBodyCss } from './unifiedInvoiceBody';
+import { unifiedDocumentCss, unifiedDocFootHtml } from './unifiedDocument';
 import { invoiceBrandCss } from './invoiceBrandLayout';
 import { readablePrintColor } from './printColorContrast';
 /**
@@ -624,7 +625,7 @@ export function wrapInDocument(t: ResolvedPrintStyles, opts: {
     ${opts.brandLayout ? invoiceBrandCss : ''}
   </style>
 </head>
-<body${opts.brandLayout ? ' class="invoice-brand" data-keep-print-colors' : ''}>
+<body class="os-doc${opts.brandLayout ? ' invoice-brand' : ''}" data-keep-print-colors>
   <div class="paper">
     ${t.bgImageUrl ? '<div class="bg-layer"></div>' : ''}
     <div class="content">
@@ -873,6 +874,7 @@ export function unifiedHeaderFooterCss(styles: UnifiedPrintStyles) {
     .u-header { box-shadow: none !important; }
   }
   ${unifiedInvoiceBodyCss(styles)}
+  ${unifiedDocumentCss(styles as Record<string, any>)}
   `;
 }
 
@@ -909,7 +911,7 @@ export function unifiedHeaderHtml(opts: {
   // ===== headerStyle: centered =====
   if (headerStyle === 'centered') {
     return `
-    <div class="u-header" style="flex-direction:column;align-items:center;text-align:center;">
+    <div class="u-header os-mark" style="flex-direction:column;align-items:center;text-align:center;">
       ${logoBlock}
       ${styles.showCompanyInfo !== false && styles.showCompanyName && styles.companyName ? `<div class="u-company-name" style="text-align:center;">${styles.companyName}</div>` : ''}
       ${titleAr ? `<div class="u-invoice-title" style="text-align:center;">${titleAr}</div>` : ''}
@@ -923,7 +925,7 @@ export function unifiedHeaderHtml(opts: {
   // ===== headerStyle: simple =====
   if (headerStyle === 'simple') {
     return `
-    <div class="u-header" style="flex-direction:column;align-items:center;text-align:center;gap:6px;">
+    <div class="u-header os-mark" style="flex-direction:column;align-items:center;text-align:center;gap:6px;">
       ${logoBlock}
       ${styles.showCompanyInfo !== false && styles.showCompanyName && styles.companyName ? `<div class="u-company-name" style="text-align:center;">${styles.companyName}</div>` : ''}
       <div class="u-invoice-title">${titleAr || titleEn}</div>
@@ -935,7 +937,7 @@ export function unifiedHeaderHtml(opts: {
   // ===== headerStyle: minimal =====
   if (headerStyle === 'minimal') {
     return `
-    <div class="u-header" style="flex-direction:row;align-items:center;gap:10px;padding-bottom:8px;">
+    <div class="u-header os-mark" style="flex-direction:row;align-items:center;gap:10px;padding-bottom:8px;">
       ${showLogo ? `<img src="${fullLogoUrl}" alt="Logo" class="u-logo" style="height:24px;max-width:none;" onerror="this.style.display='none'"/>` : ''}
       ${styles.showCompanyInfo !== false && styles.showCompanyName && styles.companyName ? `<span class="u-company-name" style="font-size:12px;margin:0;">${styles.companyName}</span>` : ''}
       <span style="flex:1;"></span>
@@ -985,7 +987,7 @@ export function unifiedHeaderHtml(opts: {
   const secondStyle = firstIsTitle ? companyTextAlign : titleAlign;
 
   return `
-  <div class="u-header">
+  <div class="u-header os-mark">
     <div style="flex:1;min-width:0;${firstStyle}">${firstContent}</div>
     <div style="flex:1;min-width:0;${secondStyle}">${secondContent}</div>
   </div>
@@ -993,30 +995,5 @@ export function unifiedHeaderHtml(opts: {
 }
 
 export function unifiedFooterHtml(styles: UnifiedPrintStyles, pageText = 'صفحة 1 من 1') {
-  if (styles.showFooter === false) return '';
-  const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]!));
-  const settings = styles as Record<string, any>;
-  const icon = (label: string) => {
-    const paths: Record<string, string> = {
-      'هاتف': '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7l.5 3a2 2 0 0 1-.6 1.7L7.7 9.7a16 16 0 0 0 6.6 6.6l1.3-1.3a2 2 0 0 1 1.7-.6l3 .5a2 2 0 0 1 1.7 2z"/>',
-      'العنوان': '<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0z"/><circle cx="12" cy="10" r="3"/>',
-      'البريد الإلكتروني': '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 5 9 7 9-7"/>',
-      'الموقع الإلكتروني': '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18z"/>',
-      'صفحة': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h5"/>',
-    };
-    return `<svg aria-hidden="true" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-inline-end:4px;">${paths[label]}</svg>`;
-  };
-  const contacts = [
-    { label: 'هاتف', value: settings.companyPhone || settings.company_phone },
-    { label: 'العنوان', value: settings.companyAddress || settings.company_address },
-    { label: 'البريد الإلكتروني', value: settings.companyEmail || settings.company_email },
-    { label: 'الموقع الإلكتروني', value: settings.companyWebsite || settings.company_website },
-  ].filter(item => String(item.value || '').trim());
-  return `
-  ${styles.footerText ? `<div class="u-closing-message" style="text-align:center;font-size:10px;line-height:1.8;padding:6px 0;color:#666;break-inside:avoid;">${escape(styles.footerText)}</div>` : ''}
-  <div class="u-footer" style="display:flex;justify-content:space-between;align-items:center;gap:12px;direction:rtl;margin-bottom:0;padding:9px 4px 4px;box-sizing:border-box;border-top:1px solid #dedede;line-height:1.8;font-size:10px;">
-    <div class="u-footer-contacts" style="display:flex;flex:1;flex-wrap:wrap;justify-content:center;align-items:center;gap:6px 18px;text-align:right;">${contacts.map(item => `<span class="u-footer-contact" style="display:inline-flex;align-items:center;gap:5px;max-width:100%;overflow-wrap:anywhere;">${icon(item.label)}<bdi>${escape(item.value)}</bdi></span>`).join('')}</div>
-    ${styles.showPageNumber !== false && pageText.trim() ? `<span class="u-page-number" style="display:inline-block;margin:0;white-space:nowrap;">${icon('صفحة')}<span class="u-page-number-text">${escape(pageText)}</span></span>` : ''}
-  </div>
-  `;
+  return unifiedDocFootHtml(styles as Record<string, any>, pageText);
 }

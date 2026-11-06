@@ -56,7 +56,7 @@ const sidebarInventory: SidebarSection[] = [
     title: 'المهام',
     icon: Calendar,
     items: [
-      { id: 'tasks', label: 'المهمات اليومية', icon: Calendar, path: '/admin/tasks' },
+      { id: 'tasks', label: 'المهمات', icon: Calendar, path: '/admin/tasks' },
       {
         id: 'comprehensive_installation_tasks',
         label: 'أوامر العمل (التركيب)',
@@ -75,10 +75,8 @@ const sidebarInventory: SidebarSection[] = [
     title: 'المالية',
     icon: DollarSign,
     items: [
-      { id: 'google_calendar', label: 'تقويم جوجل والتنبيهات', icon: Calendar, path: '/admin/google-calendar' },
-      { id: 'alerts_center', label: 'تنبيهات الزبائن', icon: AlertCircle, path: '/admin/alerts-center', permission: 'overdue_payments' },
-      { id: 'overdue_payments', label: 'الدفعات المتأخرة', icon: AlertTriangle, path: '/admin/overdue-payments' },
-      { id: 'account_overdue_payments', label: 'متأخرات الحسابات والفواتير', icon: Receipt, path: '/admin/account-overdue-payments' },
+      { id: 'google_calendar', label: 'إعدادات تقويم جوجل', icon: Calendar, path: '/admin/google-calendar' },
+      { id: 'alerts_center', label: 'تنبيهات الزبائن والمتأخرات', icon: AlertCircle, path: '/admin/alerts-center', permission: 'overdue_payments' },
       { id: 'payments', label: 'الدفعات والإيصالات', icon: CreditCard, path: '/admin/payments-receipts-page' },
       { id: 'contract_closure_simulator', label: 'محاكي تسوية العقود', icon: Calculator, path: '/admin/contract-closure-simulator', permission: 'contracts' },
       { id: 'revenue', label: 'الإيرادات', icon: TrendingUp, path: '/admin/revenue' },
@@ -147,7 +145,7 @@ const sidebarInventory: SidebarSection[] = [
     items: [
       { id: 'activity_log', label: 'سجل الحركات', icon: Activity, path: '/admin/activity-log' },
       { id: 'reports', label: 'التقارير والإحصائيات', icon: BarChart3, path: '/admin/reports' },
-      { id: 'periodic_reports', label: 'التقارير الدورية (مكتوبة)', icon: FileText, path: '/admin/periodic-reports', permission: 'reports' },
+      { id: 'periodic_reports', label: 'التقارير الأسبوعية والشهرية', icon: FileText, path: '/admin/periodic-reports', permission: 'reports' },
       { id: 'kpi_dashboard', label: 'مؤشرات الأداء', icon: TrendingUp, path: '/admin/kpi-dashboard' },
       { id: 'profitability_reports', label: 'تقارير الربحية', icon: DollarSign, path: '/admin/profitability-reports' },
     ],
@@ -198,10 +196,11 @@ const quickLabels: Record<string, string> = {
   comprehensive_installation_tasks: 'التركيب',
   pricing: 'الأسعار',
   municipality_organizer: 'تنظيم البلديات',
+  google_calendar: 'تقويم جوجل',
 };
 const quickItems: SidebarItem[] = [
   'dashboard', 'offers', 'contracts', 'comprehensive_installation_tasks', 'removal_tasks', 'customers', 'pricing',
-  'municipality_organizer', 'correspondence', 'overdue_payments', 'billboards', 'alerts_center',
+  'municipality_organizer', 'correspondence', 'periodic_reports', 'tasks', 'alerts_center', 'google_calendar', 'billboards',
   'payments', 'events_contracts', 'events_pricing', 'booking_requests',
 ].map(id => coreMap.get(id) || allSidebarItems.get(id)!).filter(Boolean)
   .map(item => (quickLabels[item.id] ? { ...item, label: quickLabels[item.id] } : item));
@@ -210,7 +209,7 @@ const sidebarSections: SidebarSection[] = [
   group('sales', 'الأسعار والعملاء', Calculator, ['pricing_factors', 'export_pricing', 'customer_merge']),
   group('billboards', 'إدارة اللوحات والمواقع', MapPin, ['billboard_photos', 'extended_billboards', 'delayed_billboards', 'billboard_maintenance', 'smart_distribution', 'billboard_cleanup']),
   group('operations', 'التنفيذ والتصميم', FolderKanban, ['tasks', 'design_studio', 'image_gallery', 'field_photos', 'rephotography', 'drive_uploader']),
-  group('finance', 'المالية والحسابات', DollarSign, ['account_overdue_payments', 'revenue', 'expenses', 'custody', 'salaries', 'printed_invoices_page', 'printer_accounts', 'installation_team_accounts', 'contract_closure_simulator', 'google_calendar']),
+  group('finance', 'المالية والحسابات', DollarSign, ['revenue', 'expenses', 'custody', 'salaries', 'printed_invoices_page', 'printer_accounts', 'installation_team_accounts', 'contract_closure_simulator', 'google_calendar']),
   group('partnerships', 'الشركات والشراكات', Building2, ['company_management', 'shared_companies', 'shared_billboards', 'friend_billboards', 'friend_accounts', 'logo_management']),
   group('municipalities', 'البلديات', MapPin, ['municipality_stickers', 'municipality_rent_prices', 'municipality_stats']),
   group('reports', 'التقارير والأداء', BarChart3, ['reports', 'periodic_reports', 'kpi_dashboard', 'profitability_reports', 'activity_log']),

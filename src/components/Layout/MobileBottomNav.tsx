@@ -8,7 +8,7 @@ const mobileNavItems = [
   { id: 'dashboard', label: 'الرئيسية', icon: Home, path: '/admin' },
   { id: 'billboards', label: 'اللوحات', icon: MapPin, path: '/admin/billboards' },
   { id: 'contracts', label: 'العقود', icon: FileText, path: '/admin/contracts' },
-  { id: 'finance', label: 'المالية', icon: DollarSign, path: '/admin/overdue-payments' },
+  { id: 'finance', label: 'المالية', icon: DollarSign, path: '/admin/alerts-center' },
 ];
 
 export function MobileBottomNav() {
@@ -21,7 +21,7 @@ export function MobileBottomNav() {
     return location.pathname.startsWith(path);
   };
 
-  const isFinanceActive = ['/admin/overdue-payments', '/admin/payments-receipts-page', '/admin/revenue', '/admin/expense-management', '/admin/salaries', '/admin/custody-management'].some(p => location.pathname.startsWith(p));
+  const isFinanceActive = ['/admin/alerts-center', '/admin/payments-receipts-page', '/admin/revenue', '/admin/expense-management', '/admin/salaries', '/admin/custody-management'].some(p => location.pathname.startsWith(p));
 
   return (
     <>

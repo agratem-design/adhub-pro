@@ -31,6 +31,7 @@ import {
 import { BillboardImage } from '@/components/BillboardImage';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import type { PendingBillboardSwap } from '@/lib/pendingBillboardSwaps';
 
 interface Props {
   open: boolean;
@@ -43,6 +44,10 @@ interface Props {
   adType?: string | null;
   contractedPrice?: number;
   onSwapped?: (result: InstantBillboardSwapResult) => void;
+  /** عند تمريره: لا يُنفَّذ التبديل فوراً، بل يُسجَّل معلّقاً ويُنفَّذ عند حفظ العقد */
+  onQueue?: (swap: PendingBillboardSwap) => void;
+  /** لوحات محجوزة كبدائل معلّقة لا تظهر كمرشحة */
+  excludeBillboardIds?: string[];
 }
 
 export function isSameCanonicalSize(
@@ -104,7 +109,10 @@ export function InstantBillboardSwapDialog({
   adType,
   contractedPrice,
   onSwapped,
+  onQueue,
+  excludeBillboardIds,
 }: Props) {
+  const deferred = typeof onQueue === 'function';
   const [allBillboards, setAllBillboards] = useState<any[]>([]);
   const [loadingBillboards, setLoadingBillboards] = useState(false);
   const [search, setSearch] = useState('');
@@ -193,6 +201,10 @@ export function InstantBillboardSwapDialog({
     if (!originalBillboard || allBillboards.length === 0) return [];
 
     let list = allBillboards;
+    if (excludeBillboardIds?.length) {
+      const excluded = new Set(excludeBillboardIds.map(String));
+      list = list.filter((b) => !excluded.has(String(b.ID)));
+    }
 
     // 1. فلتر نفس المقاس باستخدام المعرف الرسمي المعتمد (size_id)
     if (filterSameSizeOnly) {
@@ -289,6 +301,7 @@ export function InstantBillboardSwapDialog({
     filterSameCityOnly,
     filterSameLevelOnly,
     deferredSearch,
+    excludeBillboardIds,
   ]);
 
   // تنفيذ الاستبدال الفوري الذري
@@ -297,6 +310,21 @@ export function InstantBillboardSwapDialog({
 
     if (!swapRequestIdRef.current) {
       swapRequestIdRef.current = createRequestId();
+    }
+
+    if (deferred) {
+      onQueue!({
+        originalBillboardId: String(originalBillboard.ID),
+        originalBillboardName: originalBillboard.Billboard_Name || `#${originalBillboard.ID}`,
+        replacementBillboardId: String(selectedCandidate.ID),
+        replacementBillboardName: selectedCandidate.Billboard_Name || `#${selectedCandidate.ID}`,
+        reason: swapReason,
+        requestId: swapRequestIdRef.current!,
+      });
+      swapRequestIdRef.current = null;
+      toast.info('تم تسجيل التبديل؛ سيُعتمد عند الضغط على «حفظ العقد»');
+      onOpenChange(false);
+      return;
     }
 
     setIsExecuting(true);
@@ -334,6 +362,7 @@ export function InstantBillboardSwapDialog({
         <DialogContent
           className="max-w-4xl max-h-[92vh] flex flex-col p-0 overflow-hidden bg-background border-border shadow-md"
           dir="rtl"
+          data-draft-operation={deferred ? '' : undefined}
         >
           {/* Header */}
           <DialogHeader className="p-4 bg-muted/40 border-b border-border/80">
@@ -350,7 +379,9 @@ export function InstantBillboardSwapDialog({
                     </Badge>
                   </DialogTitle>
                   <DialogDescription className="text-xs text-muted-foreground mt-0.5">
-                    استبدال اللوحة الحالية بلوحة بديلة متاحة داخل نفس العقد مع الحفاظ التام على السعر
+                    {deferred
+                      ? 'اختر البديلة؛ لا يتغير شيء حتى تضغط «حفظ العقد»'
+                      : 'استبدال اللوحة الحالية بلوحة بديلة متاحة داخل نفس العقد مع الحفاظ التام على السعر'}
                   </DialogDescription>
                 </div>
               </div>
@@ -778,7 +809,7 @@ export function InstantBillboardSwapDialog({
                   ) : (
                     <>
                       <Check className="w-4 h-4" />
-                      <span>تأكيد واستبدال الآن</span>
+                      <span>{deferred ? 'اعتماد التبديل عند حفظ العقد' : 'تأكيد واستبدال الآن'}</span>
                     </>
                   )}
                 </Button>

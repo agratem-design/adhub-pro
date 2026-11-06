@@ -2718,7 +2718,8 @@ export function UnifiedTaskInvoice({
   const taskSymbols = allTasks.map(buildTaskSymbol);
   const taskSymbolDisplay = taskSymbols.join(' , ');
   // Keep lengthy campaign lists out of the header and contract badges.
-  const showAdType = adType.trim().length > 0 && adType.trim().length <= 60;
+  const showAdType = adType.trim().length > 0;
+  const adTypeHeader = adType.trim().length > 80 ? `${adType.trim().slice(0, 78)}…` : adType.trim();
 
   const taskTypeDetailedLabel = hasReinstallation && hasNewInstallation
     ? `تركيب جديد + إعادة تركيب ${reinstallIcon}`
@@ -2733,7 +2734,7 @@ export function UnifiedTaskInvoice({
       : `#${contractIds[0] ?? task.contract_id ?? ''}`
     }</strong></div>
     <div><span>رمز المهمة</span><strong>${taskSymbolDisplay}</strong></div>
-    ${showAdType ? `<div><span>نوع الإعلان</span><strong>${adType}</strong></div>` : ''}
+    ${showAdType ? `<div><span>نوع الإعلان</span><strong>${adTypeHeader}</strong></div>` : ''}
     <div><span>نوع العمل</span><strong>${taskTypeDetailedLabel}</strong></div>
   `;
 
