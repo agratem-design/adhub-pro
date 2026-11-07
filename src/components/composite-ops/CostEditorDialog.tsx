@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { Wrench, Printer, Scissors, Percent, Search, Loader2, ShieldCheck, Save, AlertTriangle, Check, MapPin } from 'lucide-react';
-import { money, changeCostLineFaces, applyBulkPrice, computeOperation, lineArea, smartDistribute, type BulkMode, type BulkTarget } from '@/lib/compositeCosts';
+import { money, changeCostLineFaces, applyBulkPrice, computeOperation, lineArea, linePrintRate, r2, smartDistribute, type BulkMode, type BulkTarget } from '@/lib/compositeCosts';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
 import { ZoomImage } from '@/components/composite-ops/ImageZoom';
 import { loadEditor, saveEditor, discountAmount, type DiscountMode, type EditorLine, type EditorState, type OperationRow } from '@/services/compositeOperations';
@@ -36,6 +36,20 @@ function Num({ value, onChange, disabled, className, label }: { value: number; o
       onFocus={e => e.currentTarget.select()}
       className={cn('h-9 text-center tabular-nums', className)}
     />
+  );
+}
+
+/** حقل سعر المتر المربع للوحة: مُثبَّت (أزرق) أو محسوب من المبلغ ÷ المساحة (باهت) */
+function MeterRate({ value, pinned, disabled, onChange, label, onReset }: { value: number; pinned: boolean; disabled?: boolean; onChange: (v: number) => void; label: string; onReset?: () => void }) {
+  return (
+    <div className="mt-1 flex items-center gap-1" title={pinned ? 'سعر متر خاص بهذه اللوحة' : 'محسوب من المبلغ ÷ المساحة — عدّله لتثبيت سعر المتر'}>
+      <Num label={label} value={value} disabled={disabled} onChange={onChange}
+        className={cn('h-7 px-1 text-[11px]', pinned ? 'border-primary/50 bg-primary/5 font-semibold text-primary' : 'text-muted-foreground')} />
+      <span className="shrink-0 text-[10px] text-muted-foreground">/م<sup>2</sup></span>
+      {onReset && pinned && !disabled && (
+        <button type="button" onClick={onReset} className="shrink-0 text-[10px] text-muted-foreground hover:text-primary" title="رجوع للسعر العام" aria-label={`رجوع للسعر العام — ${label}`}>↺</button>
+      )}
+    </div>
   );
 }
 
@@ -432,15 +446,15 @@ export function CostEditorDialog({ op, open, onOpenChange, onSaved }: { op: Oper
                     </div>
 
                     <div className="rounded-xl border border-border">
-                      <table className="w-full min-w-[860px] text-sm">
+                      <table className="w-full min-w-[900px] text-sm">
                         <thead className="sticky -top-4 z-10 bg-muted text-[11px] text-muted-foreground shadow-[0_1px_0_hsl(var(--border))]">
                           <tr>
                             <th className="w-10 p-2"><Checkbox aria-label="تحديد الكل" checked={visible.length > 0 && visible.every(l => selected.has(l.id))}
                               onCheckedChange={c => setSelected(c ? new Set(visible.map(l => l.id)) : new Set())} /></th>
                             <th className="p-2 text-right">اللوحة</th>
                             <th className="p-2">الأوجه</th>
-                            <th className="p-2">سعر الزبون</th>
-                            <th className="p-2">تكلفة الفرقة</th>
+                            <th className="p-2">سعر الزبون<div className="font-normal text-[10px] opacity-80">المبلغ / سعر المتر</div></th>
+                            <th className="p-2">تكلفة الفرقة<div className="font-normal text-[10px] opacity-80">المبلغ / سعر المتر</div></th>
                             <th className="p-2">إضافي زبون</th>
                             <th className="p-2">إضافي شركة</th>
                             <th className="p-2 text-left">الربح</th>
@@ -449,6 +463,7 @@ export function CostEditorDialog({ op, open, onOpenChange, onSaved }: { op: Oper
                         <tbody>
                           {visible.map(l => {
                             const noPrice = !instIncluded && !(l.customer > 0);
+                            const area = lineArea(l);
                             const lineProfit = (instIncluded ? 0 : l.customer) + l.customerExtra - (instIncluded ? l.companyExtra : l.company + l.companyExtra);
                             return (
                             <tr key={l.id} className={cn('border-t border-border transition-colors hover:bg-muted/30', selected.has(l.id) && 'bg-primary/5')}>
@@ -456,13 +471,20 @@ export function CostEditorDialog({ op, open, onOpenChange, onSaved }: { op: Oper
                                 onCheckedChange={c => setSelected(prev => { const n = new Set(prev); c ? n.add(l.id) : n.delete(l.id); return n; })} /></td>
                               <td className="p-2"><BoardCell l={l} extra={[teams.length > 1 ? l.teamName : '', op && op.contractIds.length > 1 && l.contractNumber ? `عقد #${l.contractNumber}${adTypeOf.get(l.contractNumber) ? ` · ${adTypeOf.get(l.contractNumber)}` : ''}` : ''].filter(Boolean).join(' · ')} /></td>
                               <td className="p-2 text-center"><FacesPicker l={l} onToggle={f => handleToggleLineFace(l, f)} /></td>
-                              <td className="p-2 w-[120px]">
+                              <td className="p-2 w-[130px] align-top">
                                 <Num label="سعر الزبون" value={l.customer} disabled={instIncluded} onChange={v => update(l.id, { customer: v, customerPerMeter: null })}
                                   className={noPrice ? 'border-amber-500/70 bg-amber-500/5' : undefined} />
-                                {!instIncluded && l.customerPerMeter ? <div className="mt-0.5 text-center text-[10px] tabular-nums text-primary">{l.customerPerMeter} د.ل/م²</div> : null}
+                                {!instIncluded && (
+                                  <MeterRate label={`سعر متر الزبون — ${l.name}`} disabled={!(area > 0)} pinned={!!l.customerPerMeter}
+                                    value={l.customerPerMeter || (area > 0 ? r2(l.customer / area) : 0)}
+                                    onChange={v => update(l.id, { customer: r2(v * area), customerPerMeter: v > 0 ? v : null })} />
+                                )}
                               </td>
-                              <td className="p-2 w-[120px]">
+                              <td className="p-2 w-[130px] align-top">
                                 <Num label="تكلفة الفرقة" value={l.company} onChange={v => update(l.id, { company: v, companyPerMeter: null })} />
+                                <MeterRate label={`سعر متر الفرقة — ${l.name}`} disabled={!(area > 0)} pinned={l.companyPerMeter != null}
+                                  value={l.companyPerMeter ?? (area > 0 ? r2(l.company / area) : 0)}
+                                  onChange={v => update(l.id, { company: r2(v * area), companyPerMeter: v > 0 ? v : null })} />
                                 {l.sizeInstallPrice > 0 && l.company !== l.sizeInstallPrice && (
                                   <button type="button" className="mt-0.5 w-full text-center text-[10px] text-primary hover:underline" onClick={() => update(l.id, { company: l.sizeInstallPrice, companyPerMeter: null })}>الافتراضي {l.sizeInstallPrice}</button>
                                 )}
@@ -518,18 +540,49 @@ export function CostEditorDialog({ op, open, onOpenChange, onSaved }: { op: Oper
                             <Button variant="outline" size="sm" onClick={() => setLines(p => p.map(l => ({ ...l, inPrint: false })))}>إلغاء الكل</Button>
                           </span>
                         </div>
-                        <div className="grid gap-2 md:grid-cols-2">
-                          {lines.map(l => (
-                            <label key={l.id} className={cn('flex cursor-pointer items-center gap-2 rounded-lg border p-2 text-sm transition-colors', l.inPrint ? 'border-primary/50 bg-primary/5' : 'border-border opacity-60')}>
-                              <Checkbox checked={l.inPrint} onCheckedChange={c => update(l.id, { inPrint: !!c })} />
-                              <div className="min-w-0 flex-1"><BoardCell l={l} /></div>
-                              <div className="shrink-0 text-left text-xs tabular-nums">
-                                <div className="font-semibold"><Area value={lineArea(l)} /></div>
-                                <div className="text-muted-foreground">{l.faces} وجه</div>
-                                {l.inPrint && !printIncluded && printCust > 0 && <div className="text-muted-foreground">{money(lineArea(l) * printCust)}</div>}
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
+                          <span>السعر العام أعلاه يُطبَّق على كل لوحة. لتسعير لوحة بسعر متر مختلف عدّل الحقل أمامها؛ <b className="text-primary">الأزرق</b> = سعر خاص.</span>
+                          {lines.some(l => l.printCustomerPerMeter != null || l.printCompanyPerMeter != null) && (
+                            <Button variant="ghost" size="sm" className="h-7 text-[11px]" onClick={() => setLines(p => p.map(l => ({ ...l, printCustomerPerMeter: null, printCompanyPerMeter: null })))}>توحيد الكل على السعر العام</Button>
+                          )}
+                        </div>
+                        <div className="grid gap-2 xl:grid-cols-2">
+                          {lines.map(l => {
+                            const area = lineArea(l);
+                            const cRate = linePrintRate(l, { printCustomerPerMeter: printCust, printCompanyPerMeter: printComp }, 'customer');
+                            const kRate = linePrintRate(l, { printCustomerPerMeter: printCust, printCompanyPerMeter: printComp }, 'company');
+                            // يُحفظ كسعر خاص فقط إذا اختلف عن السعر العام
+                            const pin = (v: number, def: number) => (Math.abs(v - def) < 0.005 ? null : v);
+                            return (
+                              <div key={l.id} className={cn('flex items-center gap-2 rounded-lg border p-2 text-sm transition-colors', l.inPrint ? 'border-primary/50 bg-primary/5' : 'border-border opacity-60')}>
+                                <Checkbox checked={l.inPrint} onCheckedChange={c => update(l.id, { inPrint: !!c })} aria-label={`طباعة ${l.name}`} />
+                                <div className="min-w-0 flex-1"><BoardCell l={l} /></div>
+                                <div className="shrink-0 text-center text-xs tabular-nums">
+                                  <div className="font-semibold"><Area value={area} /></div>
+                                  <div className="text-muted-foreground">{l.faces} وجه</div>
+                                </div>
+                                {l.inPrint && (
+                                  <div className="grid w-[150px] shrink-0 gap-0.5">
+                                    {!printIncluded && (
+                                      <div>
+                                        <div className="text-[10px] text-muted-foreground">متر الزبون</div>
+                                        <MeterRate label={`سعر متر الطباعة على الزبون — ${l.name}`} pinned={l.printCustomerPerMeter != null} value={cRate}
+                                          onChange={v => update(l.id, { printCustomerPerMeter: pin(v, printCust) })} onReset={() => update(l.id, { printCustomerPerMeter: null })} />
+                                      </div>
+                                    )}
+                                    <div>
+                                      <div className="text-[10px] text-muted-foreground">متر الشركة</div>
+                                      <MeterRate label={`تكلفة متر الطباعة على الشركة — ${l.name}`} pinned={l.printCompanyPerMeter != null} value={kRate}
+                                        onChange={v => update(l.id, { printCompanyPerMeter: pin(v, printComp) })} onReset={() => update(l.id, { printCompanyPerMeter: null })} />
+                                    </div>
+                                    <div className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
+                                      {!printIncluded && <>زبون <b className="text-foreground">{money(area * cRate)}</b> · </>}شركة {money(area * kRate)}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
-                            </label>
-                          ))}
+                            );
+                          })}
                         </div>
                       </>
                     )}

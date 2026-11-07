@@ -27,6 +27,10 @@ export interface CostLine {
   customerExtra: number;
   companyExtra: number;
   inPrint: boolean;
+  /** سعر متر الطباعة على الزبون لهذه اللوحة (null = السعر العام للعملية) */
+  printCustomerPerMeter?: number | null;
+  /** تكلفة متر الطباعة على الشركة لهذه اللوحة (null = السعر العام للعملية) */
+  printCompanyPerMeter?: number | null;
   hasCutout: boolean;
   cutoutCount: number;
   cutoutCustomerUnit: number;
@@ -99,12 +103,18 @@ export function changeCostLineFaces<T extends CostLine & { maxFaces: number; siz
   };
 }
 
+/** سعر متر الطباعة الفعلي للوحة: الخاص بها إن حُدد، وإلا السعر العام للعملية */
+export function linePrintRate(l: Pick<CostLine, 'printCustomerPerMeter' | 'printCompanyPerMeter'>, d: Pick<OperationDraft, 'printCustomerPerMeter' | 'printCompanyPerMeter'>, target: BulkTarget): number {
+  const own = target === 'customer' ? l.printCustomerPerMeter : l.printCompanyPerMeter;
+  return pos(own != null ? own : target === 'customer' ? d.printCustomerPerMeter : d.printCompanyPerMeter);
+}
+
 export function computeOperation(d: OperationDraft): OperationTotals {
   const instIncluded = isIncluded(d.type, d.contractIncludesInstallation);
   const printIncluded = isIncluded(d.type, d.contractIncludesPrint);
 
   let iCust = 0, iComp = 0, eCust = 0, eComp = 0;
-  let pArea = 0, pBoards = 0;
+  let pArea = 0, pBoards = 0, pCust = 0, pComp = 0;
   let cCount = 0, cCust = 0, cComp = 0;
 
   for (const l of d.lines) {
@@ -112,7 +122,12 @@ export function computeOperation(d: OperationDraft): OperationTotals {
     iComp += pos(l.company);
     eCust += pos(l.customerExtra);
     eComp += pos(l.companyExtra);
-    if (d.printEnabled && l.inPrint) { pArea += lineArea(l); pBoards += 1; }
+    if (d.printEnabled && l.inPrint) {
+      const a = lineArea(l);
+      pArea += a; pBoards += 1;
+      pCust += a * linePrintRate(l, d, 'customer');
+      pComp += a * linePrintRate(l, d, 'company');
+    }
     if (l.hasCutout) {
       const q = Math.max(1, Math.round(Number(l.cutoutCount) || 1));
       cCount += q;
@@ -129,9 +144,9 @@ export function computeOperation(d: OperationDraft): OperationTotals {
     extrasCustomer: r2(eCust),
     extrasCompany: r2(eComp),
   };
-  const printCompany = r2(pArea * pos(d.printCompanyPerMeter));
+  const printCompany = r2(pComp);
   const print = {
-    customer: printIncluded ? 0 : r2(pArea * pos(d.printCustomerPerMeter)),
+    customer: printIncluded ? 0 : r2(pCust),
     company: printCompany,
     included: printIncluded,
     contractExpense: printIncluded ? printCompany : 0,

@@ -54,6 +54,7 @@ import {
   downloadICalendarFile,
   updateCustomerAlertEmail,
   addCalendarSyncLog,
+  syncEventsAutoContinue,
 } from '@/services/googleCalendarService';
 
 interface CustomerAlertsSyncDialogProps {
@@ -351,13 +352,15 @@ export function CustomerAlertsSyncDialog({
         totalBatches: Math.ceil(eventsToSync.length / 15),
       });
 
-      const res = await syncEventsToGoogleCalendar(
+      const res = await syncEventsAutoContinue(
         config,
         eventsToSync.map(event => ({ ...event, customerEmail: cleanEmail })),
         targetEmails,
         {
           cleanOld: false,
           sendInvites: true,
+          batchSize: 5,
+          delayMs: 3000,
           onProgress: (p) => {
             setSyncProgress({
               current: p.processed,
@@ -369,8 +372,12 @@ export function CustomerAlertsSyncDialog({
         }
       );
 
-      if (!res.success) throw new Error(`تمت معالجة ${res.totalProcessed || 0} من ${eventsToSync.length} موعد. ${res.error || 'توقفت المزامنة'}`);
       const failedList = res.failed || [];
+      if (!res.success) {
+        const err = new Error(`تمت معالجة ${res.totalProcessed || 0} من ${eventsToSync.length} موعد. ${res.error || 'توقفت المزامنة'}`) as Error & { syncResult?: typeof res };
+        err.syncResult = res;
+        throw err;
+      }
       addCalendarSyncLog({ source: `إرسال للزبون ${customerName}`, ok: !failedList.length, sent: eventsToSync.length - failedList.length, total: eventsToSync.length, failed: failedList });
       if (failedList.length) {
         toast.error(`فشل إرسال ${failedList.length} موعد للزبون. السبب: ${failedList[0].error}`, { duration: 12000 });

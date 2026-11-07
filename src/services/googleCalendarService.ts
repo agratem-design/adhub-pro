@@ -1085,7 +1085,7 @@ async function postToCalendarScript(url: string, payload: unknown): Promise<{ st
 }
 
 function isCalendarRateLimit(message: string) {
-  return /rate.?limit|too many|quota|كبيرًا جدًا|الحد الأقصى/i.test(message);
+  return /rate.?limit|too many|quota|usage limit|كبيرًا جدًا|الحد الأقصى/i.test(message);
 }
 function formatGoogleRateLimitError(message: string): string {
   return isCalendarRateLimit(message)
@@ -1134,6 +1134,70 @@ export async function syncEventsToGoogleCalendar(config: GoogleCalendarConfig, e
   calendarRequests.add(config.scriptUrl);
   try { return await performCalendarSync(config, events, targetEmails, options); }
   finally { calendarRequests.delete(config.scriptUrl); }
+}
+
+export interface AutoSyncOptions extends SyncOptions {
+  /** ثوانٍ متبقية لانتظار قيد Google (0 = انتهى الانتظار) */
+  onWait?: (seconds: number) => void;
+  shouldStop?: () => boolean;
+  maxRateWaits?: number;
+}
+
+/**
+ * إرسال كل المواعيد حتى النهاية: ينتظر قيد Google تلقائيًا ويستأنف، ويتخطى الموعد الفاشل ويكمل.
+ * لا يرمي أخطاء؛ يُرجع lastProcessedIndex = الموضع الذي يُستأنف منه عند التوقف.
+ */
+export async function syncEventsAutoContinue(
+  config: GoogleCalendarConfig,
+  events: GoogleCalendarEvent[],
+  targetEmails?: string[],
+  options: AutoSyncOptions = {}
+): Promise<SyncResult> {
+  const { onWait, shouldStop, maxRateWaits = 10, ...syncOptions } = options;
+  let start = syncOptions.startIndex || 0;
+  let created = 0, updated = 0, deleted = 0, rateWaits = 0;
+  const failed: CalendarSyncFailure[] = [];
+  const stopped = (error: string, rateLimited = false): SyncResult => ({
+    success: false, createdCount: created, updatedCount: updated, deletedCount: deleted,
+    totalProcessed: start, lastProcessedIndex: start, failed, error, rateLimited,
+  });
+
+  while (start < events.length) {
+    for (let wait = getCalendarRetrySeconds(config.scriptUrl); wait > 0; wait = getCalendarRetrySeconds(config.scriptUrl)) {
+      onWait?.(wait);
+      if (shouldStop?.()) return stopped('أوقفت الإرسال يدويًا.');
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    onWait?.(0);
+    if (shouldStop?.()) return stopped('أوقفت الإرسال يدويًا.');
+
+    let res: SyncResult;
+    try {
+      res = await syncEventsToGoogleCalendar(config, events, targetEmails, { ...syncOptions, startIndex: start, cleanOld: start === 0 ? syncOptions.cleanOld : false });
+    } catch (e: any) {
+      const part: SyncResult | undefined = e?.syncResult;
+      if (part && typeof part.lastProcessedIndex === 'number') {
+        // موعد واحد فشل (السكريبت القديم يتوقف عنده): سجّله وأكمل بعده
+        created += part.createdCount || 0; updated += part.updatedCount || 0;
+        failed.push(...(part.failed || []));
+        start = part.lastProcessedIndex + 1;
+        continue;
+      }
+      return stopped(e?.message || 'خطأ غير متوقع');
+    }
+
+    created += res.createdCount || 0; updated += res.updatedCount || 0; deleted += res.deletedCount || 0;
+    failed.push(...(res.failed || []));
+    if (res.rateLimited) {
+      const next = res.lastProcessedIndex ?? res.totalProcessed;
+      rateWaits = next > start ? 0 : rateWaits + 1;
+      start = next;
+      if (rateWaits >= maxRateWaits) return stopped(res.error || 'وصل حساب Google إلى حد العمليات.', true);
+      continue;
+    }
+    start = events.length;
+  }
+  return { success: true, createdCount: created, updatedCount: updated, deletedCount: deleted, totalProcessed: events.length, lastProcessedIndex: events.length, failed };
 }
 
 /**
@@ -1222,8 +1286,10 @@ async function performCalendarSync(
       const errStr = result.error || '';
       const isRate = result.rateLimited || isCalendarRateLimit(errStr);
       if (isRate) {
-        pauseCalendarSync(config.scriptUrl);
         const partial = Math.min(batchEvents.length, Math.max(0, Number(result.totalProcessed) || 0));
+        if (totalProcessed > 0 || partial > 0) calendarBackoff.delete(config.scriptUrl);
+        pauseCalendarSync(config.scriptUrl);
+        if (partial) markEventsSynced(config, batchEvents.slice(0, partial));
         totalProcessed += partial;
         totalCreated += Number(result.createdCount) || 0;
         totalUpdated += Number(result.updatedCount) || 0;
@@ -1688,7 +1754,7 @@ function doPost(e) {
 
 function isRateLimitError(err) {
   if (!err) return false;
-  return /rate.?limit|too many|quota|كبيرًا جدًا|الحد الأقصى/i.test(err.toString());
+  return /rate.?limit|too many|quota|usage limit|كبيرًا جدًا|الحد الأقصى/i.test(err.toString());
 }
 
 /**

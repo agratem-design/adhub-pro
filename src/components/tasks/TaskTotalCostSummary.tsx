@@ -8,7 +8,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Separator } from '@/components/ui/separator';
 import { 
   DollarSign, Calculator, Ruler, ChevronDown, ChevronUp, 
-  Box, Building2, Landmark, LayoutGrid, Check, Pencil, X, Save, Gift, Square, Zap, CheckCircle2, MapPin, Image as ImageIcon
+  Box, Building2, Landmark, LayoutGrid, Check, Pencil, X, Save, Gift, Square, Zap, CheckCircle2, MapPin, Image as ImageIcon, AlertCircle
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -99,6 +99,40 @@ const InlinePriceInput = ({ value, onChange, label, step = 1, showLabel = true, 
     </Button>
   </div>
 );
+
+// ════════════ سعر المتر للوحة: يحسب المبلغ = سعر المتر × المساحة ════════════
+const MeterPriceInput = ({ area, amount, onAmountChange, disabled, label }: {
+  area: number;
+  amount: number;
+  onAmountChange: (val: number) => void;
+  disabled?: boolean;
+  label: string;
+}) => {
+  const derived = area > 0 ? Math.round((amount / area) * 100) / 100 : 0;
+  const [text, setText] = useState(String(derived));
+  useEffect(() => { if (Math.abs((Number(text) || 0) - derived) > 0.01) setText(String(derived)); }, [derived]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div dir="rtl" className={cn("flex items-center gap-2 rounded-lg border border-border/40 bg-muted/20 px-2 h-9", (disabled || !(area > 0)) && "opacity-60")}>
+      <Ruler className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+      <span className="text-xs text-muted-foreground whitespace-nowrap">{label}</span>
+      <Input
+        dir="ltr"
+        inputMode="decimal"
+        aria-label={label}
+        value={text}
+        disabled={disabled || !(area > 0)}
+        onFocus={e => e.currentTarget.select()}
+        onChange={e => {
+          const t = e.target.value.replace(/[^0-9.]/g, '');
+          setText(t);
+          onAmountChange(Math.round((Number(t) || 0) * area * 100) / 100);
+        }}
+        className="h-7 w-20 text-center font-mono font-bold text-sm border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 px-1"
+      />
+      <span className="text-[11px] text-muted-foreground whitespace-nowrap">د.ل/م² × {area.toFixed(1)}</span>
+    </div>
+  );
+};
 
 interface TaskTotalCostSummaryProps {
   taskId: string;
@@ -1349,6 +1383,9 @@ export function TaskTotalCostSummary({
                                                         className="w-full"
                                                         disabled={isFirstInstall && !isReinstalled}
                                                       />
+                                                      <MeterPriceInput label="سعر المتر" area={item.area} amount={editValues.companyCost}
+                                                        onAmountChange={val => setEditValues(prev => ({...prev, companyCost: val}))}
+                                                        disabled={isFirstInstall && !isReinstalled} />
                                                     </div>
 
                                                     {!isReinstalled ? (
@@ -1375,6 +1412,9 @@ export function TaskTotalCostSummary({
                                                             <Gift className="h-5 w-5" />
                                                           </Button>
                                                         </div>
+                                                        <MeterPriceInput label="سعر المتر" area={item.area} amount={editValues.customerCost}
+                                                          onAmountChange={val => setEditValues(prev => ({...prev, customerCost: val}))}
+                                                          disabled={isFirstInstall} />
                                                       </div>
                                                     ) : (
                                                       <>
@@ -1507,6 +1547,7 @@ export function TaskTotalCostSummary({
                                               <div className="flex items-center gap-2 text-sm flex-wrap">
                                                 <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-700">
                                                    الشركة: {basicCompanyCost.toLocaleString('ar-LY')}
+                                                   {item.area > 0 && basicCompanyCost > 0 && <span className="mr-1 text-[10px] opacity-75">({(basicCompanyCost / item.area).toFixed(1)}/م²)</span>}
                                                 </Badge>
                                                 {item.company_additional_cost && item.company_additional_cost > 0 ? (
                                                   <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300 dark:border-amber-700">
@@ -1533,6 +1574,7 @@ export function TaskTotalCostSummary({
                                                 ) : (
                                                   <Badge className="bg-primary/10 text-primary border-none">
                                                     الزبون: {item.customer_installation_cost.toLocaleString('ar-LY')}
+                                                    {item.area > 0 && <span className="mr-1 text-[10px] opacity-75">({(item.customer_installation_cost / item.area).toFixed(1)}/م²)</span>}
                                                   </Badge>
                                                 )}
                                                 {item.additional_cost && item.additional_cost > 0 ? (

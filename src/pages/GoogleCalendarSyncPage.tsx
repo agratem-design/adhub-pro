@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -56,7 +56,8 @@ import {
   extractCalendarEvents, 
   buildContractDesignsMap,
   formatAlertTimeArabic,
-  syncEventsToGoogleCalendar, 
+  syncEventsToGoogleCalendar,
+  syncEventsAutoContinue,
   filterChangedCalendarEvents,
   resetCalendarSyncMemory,
   cleanOldGoogleCalendarEvents,
@@ -121,6 +122,8 @@ export default function GoogleCalendarSyncPage() {
   const [monthFilter, setMonthFilter] = useState<string>('all');
   // فلتر الزبون: المفتاح = معرف الزبون أو name:<الاسم>
   const [customerFilter, setCustomerFilter] = useState<string>('all');
+  const [waitSeconds, setWaitSeconds] = useState(0);
+  const stopSyncRef = useRef(false);
   const [customerDialog, setCustomerDialog] = useState<{ id: string; name: string; email?: string } | null>(null);
   const [syncLog, setSyncLog] = useState<CalendarSyncLogEntry[]>(() => getCalendarSyncLog());
   useEffect(() => {
@@ -338,15 +341,18 @@ export default function GoogleCalendarSyncPage() {
         totalBatches: Math.ceil(eventsToSync.length / 5),
       });
 
-      const res = await syncEventsToGoogleCalendar(
+      stopSyncRef.current = false;
+      const res = await syncEventsAutoContinue(
         config,
         eventsToSync,
         undefined,
         {
           cleanOld: false,
           batchSize: 5,
-          delayMs: 2500,
+          delayMs: 3000,
           startIndex,
+          onWait: setWaitSeconds,
+          shouldStop: () => stopSyncRef.current,
           onProgress: (p) => {
             setSyncProgress({
               current: p.processed,
@@ -359,52 +365,30 @@ export default function GoogleCalendarSyncPage() {
       );
 
       const failedList = res.failed || [];
+      const sentCount = Math.max(0, (res.lastProcessedIndex ?? res.totalProcessed) - startIndex - failedList.length);
       addCalendarSyncLog({
         source: selectedCustomer ? `مزامنة الزبون ${selectedCustomer.name}` : 'مزامنة جماعية',
-        ok: res.success && !failedList.length, sent: res.totalProcessed - failedList.length, total: eventsToSync.length,
+        ok: res.success && !failedList.length, sent: sentCount, total: eventsToSync.length - startIndex,
         error: res.error, failed: failedList,
       });
       if (failedList.length) {
-        toast.error(`فشل إرسال ${failedList.length} موعد — راجع «سجل الإرسال والأخطاء» أسفل الجدول. أول سبب: ${failedList[0].error}`, { duration: 12000 });
+        toast.error(`فشل إرسال ${failedList.length} موعد وتم تخطيها — راجع «سجل الإرسال والأخطاء». أول سبب: ${failedList[0].error}`, { duration: 12000 });
       }
-      if (res.rateLimited) {
-        // Paused by Google quota rate limit
-        const nextIdx = res.lastProcessedIndex ?? res.totalProcessed;
-        setResumeState({
-          events: eventsToSync,
-          startIndex: nextIdx,
-          totalSynced: res.totalProcessed,
-          totalTarget: eventsToSync.length,
-        });
-        toast.warning(
-          `تمت مزامنة ${res.totalProcessed} من أصل ${eventsToSync.length} موعد. توقفت العملية مؤقتاً بحسب قيود Google لحماية الحساب. يمكنك الانتظار حتى انتهاء فترة التهدئة ثم الضغط على "استئناف المزامنة" لمتابعة باقي المواعيد.`,
-          { duration: 14000 }
-        );
+      if (!res.success) {
+        const nextIdx = res.lastProcessedIndex ?? startIndex;
+        setResumeState({ events: eventsToSync, startIndex: nextIdx, totalSynced: nextIdx, totalTarget: eventsToSync.length });
+        toast.warning(`توقف الإرسال عند ${nextIdx} من ${eventsToSync.length}. ${res.error || ''} اضغط «استئناف المزامنة» للمتابعة.`, { duration: 14000 });
       } else {
         setResumeState(null);
         const cleanMsg = res.deletedCount && res.deletedCount > 0 ? `، وحذف ${res.deletedCount} موعد قديم ومكرر من التقويم` : '';
         const monthLabel = monthFilter !== 'all' ? ` لشهر ${availableMonths.find(m => m.key === monthFilter)?.label || monthFilter}` : '';
-        const okCount = eventsToSync.length - failedList.length;
-        if (okCount > 0) toast.success(`تمت مزامنة ${okCount} موعد قادم بنجاح مع تقويم Google${monthLabel}${cleanMsg}!`);
+        if (sentCount > 0) toast.success(`تمت مزامنة ${sentCount} موعد بنجاح مع تقويم Google${monthLabel}${cleanMsg}!`);
         setConfig(prev => ({ ...prev, lastSync: new Date().toISOString() }));
       }
-    } catch (err: any) {
-      const partial: SyncResult | undefined = err?.syncResult;
-      addCalendarSyncLog({
-        source: selectedCustomer ? `مزامنة الزبون ${selectedCustomer.name}` : 'مزامنة جماعية',
-        ok: false, sent: partial ? partial.totalProcessed : startIndex, total: eventsToSync.length,
-        error: err?.message || 'خطأ غير متوقع', failed: partial?.failed,
-      });
-      // اسمح بالاستئناف بعد الموعد الفاشل بدل إعادة الإرسال من البداية
-      if (partial && typeof partial.lastProcessedIndex === 'number' && partial.lastProcessedIndex + 1 < eventsToSync.length) {
-        setResumeState({ events: eventsToSync, startIndex: partial.lastProcessedIndex + 1, totalSynced: partial.totalProcessed, totalTarget: eventsToSync.length });
-      }
-      toast.error('فشل المزامنة مع تقويم جوجل: ' + (err.message || 'خطأ غير متوقع'), {
-        duration: 12000,
-      });
     } finally {
       setSyncingAll(false);
       setSyncProgress(null);
+      setWaitSeconds(0);
     }
   };
 
@@ -749,7 +733,7 @@ export default function GoogleCalendarSyncPage() {
 
         {/* TAB 1: SCHEDULE & SYNC */}
         <TabsContent value="schedule" className="space-y-4">
-          {retrySeconds > 0 && <div role="status" className="rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm">المزامنة متوقفة مؤقتًا لتخفيف الطلبات. إعادة المحاولة متاحة بعد {retrySeconds} ثانية. هذا عداد تهدئة للتطبيق ولا يضمن انتهاء قيد Google.</div>}
+          {retrySeconds > 0 && !syncingAll && <div role="status" className="rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm">المزامنة متوقفة مؤقتًا لتخفيف الطلبات. إعادة المحاولة متاحة بعد {retrySeconds} ثانية. هذا عداد تهدئة للتطبيق ولا يضمن انتهاء قيد Google.</div>}
           <Card>
             <CardHeader className="pb-3">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -776,12 +760,20 @@ export default function GoogleCalendarSyncPage() {
                     }
                   >
                     <RefreshCw className={`h-4 w-4 ${syncingAll ? 'animate-spin' : ''}`} />
-                    {syncProgress
+                    {syncingAll && waitSeconds > 0
+                      ? `انتظار قيد Google ${waitSeconds} ث ثم يكمل تلقائياً (${syncProgress?.current ?? 0}/${syncProgress?.total ?? 0})`
+                      : syncProgress
                       ? `جاري المزامنة (${syncProgress.current}/${syncProgress.total} - دفعة ${syncProgress.batch} من ${syncProgress.totalBatches})...`
                       : monthFilter !== 'all'
                       ? `مزامنة شهر ${availableMonths.find(m => m.key === monthFilter)?.label || monthFilter} (${filteredEvents.length} موعد)`
                       : `مزامنة القادمة فقط (${stats.upcomingCount}) مع تقويم Google`}
                   </Button>
+
+                  {syncingAll && (
+                    <Button variant="destructive" size="sm" className="cursor-pointer" onClick={() => { stopSyncRef.current = true; }}>
+                      إيقاف الإرسال
+                    </Button>
+                  )}
 
                   <Button
                     variant="outline"

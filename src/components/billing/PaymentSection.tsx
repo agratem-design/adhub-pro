@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Edit, Trash2, Plus, ChevronDown, ChevronUp, Send, Wallet, CreditCard, AlertCircle, DollarSign, Coins, Receipt, AlertTriangle, ArrowRightLeft } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
+import { Edit, Trash2, Plus, ChevronDown, ChevronUp, Send, Wallet, CreditCard, AlertCircle, DollarSign, Coins, AlertTriangle, ArrowRightLeft, Printer, Search } from 'lucide-react';
 import { PaymentRow } from './BillingTypes';
 import { DistributedPaymentDetailsDialog } from './DistributedPaymentDetailsDialog';
 import { supabase } from '@/integrations/supabase/client';
@@ -31,18 +32,21 @@ interface PaymentSectionProps {
   customerId?: string; // 
 }
 
-const getPaymentTypeStyle = (entryType: string): string => {
-  switch (entryType) {
-    case 'receipt':
-      return 'payment-type-receipt';
-    case 'invoice':
-      return 'payment-type-invoice';
-    case 'debt':
-      return 'payment-type-debt';
-    case 'account_payment':
-      return 'payment-type-account';
-    default:
-      return 'payment-type-default';
+const fmtMoney = (n: number) => `${(Number(n) || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} د.ل`;
+const fmtDate = (d?: string | null) => (d ? new Date(d).toLocaleDateString('en-GB') : '—');
+
+/** ألوان شارة الجهة المدفوع لها (متوافقة مع الوضعين الفاتح والداكن) */
+const toneOf = (type: string): string => {
+  switch (type) {
+    case 'عقد': return 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300';
+    case 'أمر عمل': return 'border-indigo-500/30 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300';
+    case 'فاتورة مبيعات': return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
+    case 'فاتورة طباعة': return 'border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300';
+    case 'فاتورة مشتريات': return 'border-purple-500/30 bg-purple-500/10 text-purple-700 dark:text-purple-300';
+    case 'دفعة حساب': return 'border-cyan-500/30 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300';
+    case 'دين سابق':
+    case 'رصيد غير موزع': return 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300';
+    default: return 'border-border bg-muted text-muted-foreground';
   }
 };
 
@@ -252,6 +256,8 @@ export function PaymentSection({
   customerId,
 }: PaymentSectionProps) {
   const [expandedDistributions, setExpandedDistributions] = useState<Set<string>>(new Set());
+  const [listQuery, setListQuery] = useState('');
+  const [listFilter, setListFilter] = useState<'all' | 'single' | 'distributed' | 'unlinked'>('all');
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedDistribution, setSelectedDistribution] = useState<PaymentRow[] | null>(null);
   const [paymentsInCustody, setPaymentsInCustody] = useState<Set<string>>(new Set());
@@ -738,642 +744,342 @@ export function PaymentSection({
     return { receipts, debts, credits };
   }, [payments]);
 
+  // ═══════════ العرض: قائمة موحّدة (دفعات موزعة + فردية) مع بحث وتصفية ═══════════
+  const indexOf = useMemo(() => new Map(payments.map((p, i) => [p.id, i + 1])), [payments]);
+  const infoOf = (p: PaymentRow) => getPaymentTargetInfo(p, contractAdTypesMap, compositeTasksInfoMap, printedInvoicesMap, salesInvoicesMap, purchaseInvoicesMap);
+  const dateOf = (p?: PaymentRow) => new Date(p?.paid_at || p?.created_at || 0).getTime();
+
+  type ListRecord =
+    | { kind: 'group'; id: string; items: PaymentRow[]; first: PaymentRow; total: number; date: number; unlinked: boolean }
+    | { kind: 'single'; id: string; p: PaymentRow; date: number; unlinked: boolean };
+
+  const records = useMemo<ListRecord[]>(() => {
+    const list: ListRecord[] = [];
+    groupedPayments.forEach((items, id) => list.push({
+      kind: 'group', id, items, first: items[0],
+      total: items.reduce((s, p) => s + (Number(p.amount) || 0), 0),
+      date: dateOf(items[0]),
+      unlinked: items.some(p => isUnlinkedPayment(p)),
+    }));
+    individualPayments.forEach(p => list.push({ kind: 'single', id: p.id, p, date: dateOf(p), unlinked: isUnlinkedPayment(p) }));
+    return list.sort((a, b) => b.date - a.date);
+  }, [groupedPayments, individualPayments]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const visibleRecords = useMemo(() => {
+    const q = listQuery.trim().toLowerCase();
+    return records.filter(r => {
+      if (listFilter === 'distributed' && r.kind !== 'group') return false;
+      if (listFilter === 'single' && r.kind !== 'single') return false;
+      if (listFilter === 'unlinked' && !r.unlinked) return false;
+      if (!q) return true;
+      const rows = r.kind === 'group' ? r.items : [r.p];
+      return rows.some(p => {
+        const info = infoOf(p);
+        return [info.badgeLabel, info.statement, p.notes, p.reference, p.method, String(p.amount ?? ''), String(p.contract_number ?? '')]
+          .some(v => String(v || '').toLowerCase().includes(q));
+      });
+    });
+  }, [records, listQuery, listFilter, contractAdTypesMap, compositeTasksInfoMap, printedInvoicesMap, salesInvoicesMap, purchaseInvoicesMap]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const unlinkedCount = records.filter(r => r.unlinked).length;
+  const groupCount = records.filter(r => r.kind === 'group').length;
+
+  const groupLabels = (items: PaymentRow[], distributionId: string) => {
+    const firstPayment = items[0];
+    const hasPurchaseInvoice = items.some(p => p.purchase_invoice_id || p.notes?.includes('مشتريات') || p.notes?.includes('PUR-'));
+    const isBarter = items.some(p => p.method === 'مقايضة');
+    let friendContractNum: number | null = null;
+    let friendAdType: string | null = null;
+    const notesText = firstPayment?.notes || '';
+    const barterMatch = notesText.match(/عقد\s*(\d+)/);
+    if (barterMatch) {
+      friendContractNum = Number(barterMatch[1]);
+    } else {
+      const billboardMatch = notesText.match(/إيجار لوحة[:\s]+([^\n،,•]+)/);
+      const billboardNameInNotes = billboardMatch ? billboardMatch[1].trim() : '';
+      if (billboardNameInNotes) {
+        const matchedRental = friendRentals.find(r => r.billboards?.Billboard_Name?.trim() === billboardNameInNotes || r.billboard_id === billboardNameInNotes);
+        if (matchedRental) friendContractNum = matchedRental.contract_number;
+      }
+    }
+    if (friendContractNum) {
+      const linkedContract = contracts.find(c => Number(c.Contract_Number) === friendContractNum);
+      friendAdType = linkedContract ? (linkedContract['Ad Type'] || linkedContract.ad_type || null) : (friendContractsMap[friendContractNum] || null);
+    }
+    let purchaseNotes = '';
+    if (hasPurchaseInvoice) {
+      const linkedPurId = items.find(p => p.purchase_invoice_id)?.purchase_invoice_id;
+      const purCode = notesText.match(/PUR-\d+/)?.[0] || null;
+      purchaseNotes = (linkedPurId ? purchaseInvoiceNotes[linkedPurId] : null) || (purCode ? purchaseInvoiceNotes[purCode] : null) || '';
+    }
+    const adTypeSuffix = friendAdType ? ` - ${friendAdType}` : '';
+    const barterLabel = hasPurchaseInvoice
+      ? `مقايضة - ${purchaseNotes || 'فاتورة مشتريات'}`
+      : friendContractNum ? `مقايضة - إيجار لوحة عقد #${friendContractNum}${adTypeSuffix}` : 'مقايضة - إيجار لوحة';
+    return {
+      isBarter, barterLabel,
+      custody: paymentsInCustody.has(distributionId) ? (custodyEmployeeNames[distributionId] || 'غير محدد') : null,
+      withdrawal: paymentsWithWithdrawal.has(distributionId) ? (withdrawalEmployeeNames[distributionId] || 'غير محدد') : null,
+    };
+  };
+
+  const Collection = ({ p }: { p: PaymentRow }) => (!showCollectionDetails || !p.collected_via_intermediary) ? null : (
+    <div className="flex flex-wrap gap-x-3 text-[11px] text-muted-foreground">
+      {(Number(p.intermediary_commission) || 0) > 0 && <span>عمولة وسيط <b className="text-destructive">{fmtMoney(Number(p.intermediary_commission))}</b></span>}
+      {(Number(p.transfer_fee) || 0) > 0 && <span>عمولة تحويل <b className="text-destructive">{fmtMoney(Number(p.transfer_fee))}</b></span>}
+      {p.net_amount ? <span>الصافي <b className="text-foreground">{fmtMoney(Number(p.net_amount))}</b></span> : null}
+    </div>
+  );
+
+  const Meta = ({ p, statement }: { p: PaymentRow; statement?: string }) => {
+    const parts = [p.method, p.reference ? `مرجع: ${p.reference}` : '', p.notes && p.notes !== statement ? p.notes : ''].filter(Boolean);
+    return parts.length ? <div className="truncate text-xs text-muted-foreground" title={parts.join(' · ')}>{parts.join(' · ')}</div> : null;
+  };
+
+  const IconBtn = ({ title, onClick, children, tone }: { title: string; onClick: (e: React.MouseEvent) => void; children: React.ReactNode; tone?: 'danger' | 'warn' }) => (
+    <Button type="button" size="icon" variant="ghost" title={title} aria-label={title} onClick={onClick}
+      className={cn('h-8 w-8 text-muted-foreground hover:text-foreground', tone === 'danger' && 'hover:bg-destructive/10 hover:text-destructive', tone === 'warn' && 'text-amber-600 hover:bg-amber-500/10 hover:text-amber-700')}>
+      {children}
+    </Button>
+  );
+
+  const IndexDate = ({ n, p }: { n: number | string; p?: PaymentRow }) => (
+    <div className="flex w-16 shrink-0 flex-col items-center gap-1 text-center">
+      <span className="inline-flex h-7 min-w-[2rem] items-center justify-center rounded-md bg-muted px-2 text-xs font-bold tabular-nums">{n}</span>
+      <span className="text-[11px] tabular-nums text-muted-foreground">{fmtDate(p?.paid_at)}</span>
+    </div>
+  );
+
+  const Remaining = ({ p }: { p: PaymentRow }) => {
+    const rem = Number((p as any).remaining_debt) || 0;
+    return <div className={cn('text-[11px] tabular-nums', rem > 0 ? 'text-destructive' : 'text-emerald-600 dark:text-emerald-400')}>المتبقي بعدها {fmtMoney(rem)}</div>;
+  };
+
   return (
     <>
-      {/* قسم الديون السابقة */}
-      {previousDebts.length > 0 && (
-        <div className="max-w-[96%] mx-auto px-6 mb-6">
-          <Card className="border-0 shadow-lg overflow-hidden border-r-4 border-r-rose-500">
-            <CardHeader className="bg-gradient-to-r from-rose-500/10 to-transparent py-4">
-              <CardTitle className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-rose-500/20 rounded-xl flex items-center justify-center">
-                    <AlertCircle className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+      <div id="payments-section" className="mb-6 space-y-4" dir="rtl">
+        {/* ── الديون السابقة ── */}
+        {previousDebts.length > 0 && (
+          <Card className="overflow-hidden border-rose-500/30">
+            <div className="flex items-center justify-between gap-3 border-b border-rose-500/20 bg-rose-500/5 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+                <span className="font-bold text-rose-700 dark:text-rose-400">الديون السابقة</span>
+                <Badge variant="outline" className="text-xs">{previousDebts.length}</Badge>
+              </div>
+              <span className="font-bold tabular-nums text-rose-700 dark:text-rose-400">{fmtMoney(previousDebts.reduce((s, d) => s + (Number(d.amount) || 0), 0))}</span>
+            </div>
+            <div className="divide-y divide-border">
+              {previousDebts.map(debt => (
+                <div key={debt.id} id={`payment-${debt.id}`} className="flex flex-wrap items-center gap-3 px-4 py-2.5 transition-colors hover:bg-rose-500/5">
+                  <IndexDate n={debt.contract_number ? `#${debt.contract_number}` : '—'} p={debt} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold">{debt.contract_number ? `عقد #${debt.contract_number}` : 'دين عام'}</div>
+                    {debt.notes && <div className="truncate text-xs text-muted-foreground">{debt.notes}</div>}
                   </div>
-                  <div>
-                    <span className="text-rose-600 dark:text-rose-400 font-bold text-lg">الديون السابقة</span>
-                    <p className="text-sm text-muted-foreground">{previousDebts.length} دين</p>
+                  <span className="font-bold tabular-nums text-rose-700 dark:text-rose-400">{fmtMoney(Number(debt.amount))}</span>
+                  <div className="flex items-center gap-0.5">
+                    <Button size="sm" className="h-8 bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => { if (window.confirm('هل تريد تسديد هذا الدين؟')) onEditReceipt(debt); }}>تسديد</Button>
+                    <IconBtn title="تعديل" onClick={() => onEditReceipt(debt)}><Edit className="h-4 w-4" /></IconBtn>
+                    <IconBtn title="حذف" tone="danger" onClick={() => onDeleteReceipt(debt.id)}><Trash2 className="h-4 w-4" /></IconBtn>
                   </div>
                 </div>
-                <Badge className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30 text-lg px-4 py-1.5" variant="outline">
-                  {previousDebts.reduce((sum, d) => sum + (Number(d.amount) || 0), 0).toLocaleString('ar-LY')} د.ل
-                </Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0 pb-4">
-              <div className="rounded-xl border overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50 hover:bg-muted/50">
-                      <TableHead className="text-right font-bold">رقم العقد</TableHead>
-                      <TableHead className="text-right font-bold">المبلغ</TableHead>
-                      <TableHead className="text-right font-bold">التاريخ</TableHead>
-                      <TableHead className="text-right font-bold">ملاحظات</TableHead>
-                      <TableHead className="text-right font-bold">إجراءات</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {previousDebts.map(debt => (
-                      <TableRow key={debt.id} id={`payment-${debt.id}`} className="hover:bg-rose-500/5 transition-all duration-300">
-                        <TableCell className="font-bold">
-                          {debt.contract_number || 'دين عام'}
-                        </TableCell>
-                        <TableCell className="font-bold text-rose-600 dark:text-rose-400">
-                          {(Number(debt.amount) || 0).toLocaleString('ar-LY')} د.ل
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {debt.paid_at ? new Date(debt.paid_at).toLocaleDateString('ar-LY') : '—'}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{debt.notes || '—'}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                              onClick={() => {
-                                if (window.confirm('هل تريد تسديد هذا الدين؟')) {
-                                  onEditReceipt(debt);
-                                }
-                              }}
-                            >
-                              تسديد
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => onEditReceipt(debt)}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() => onDeleteReceipt(debt.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
+              ))}
+            </div>
           </Card>
-        </div>
-      )}
+        )}
 
-      <div id="payments-section" className="max-w-[96%] mx-auto px-6 mb-6">
-        <Card className="border border-amber-500/20 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 shadow-2xl overflow-hidden relative group transition-all duration-300 hover:border-amber-500/30 rounded-2xl">
-          <CardHeader className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border-b border-amber-500/20 text-white py-5">
-            <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-amber-500/15 border border-amber-500/30 rounded-xl flex items-center justify-center shadow-lg">
-                  <CreditCard className="h-6 w-6 text-amber-500" />
-                </div>
-                <div>
-                  <CardTitle className="text-xl font-bold text-white">الدفعات والإيصالات</CardTitle>
-                  <p className="text-white/70 text-sm mt-0.5">{groupedPayments.size + individualPayments.length} سجل</p>
-                </div>
-              </div>
-
-              {/* أزرار الإجراءات */}
-              <div className="flex gap-2 flex-wrap">
-                <Button 
-                  onClick={onAddAccountPayment}
-                  className="bg-emerald-500 hover:bg-emerald-600 text-white shadow-md cursor-pointer transition-all duration-200"
-                  size="sm"
-                >
-                  <Plus className="h-4 w-4 ml-2" />
-                  دفعة على الحساب
-                </Button>
+        <Card className="overflow-hidden">
+          {/* ── الرأس ── */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10"><CreditCard className="h-5 w-5 text-primary" /></div>
+              <div>
+                <div className="font-bold">الدفعات والإيصالات</div>
+                <div className="text-xs text-muted-foreground">{records.length} سجل{groupCount ? ` · ${groupCount} دفعة موزعة` : ''}</div>
               </div>
             </div>
-          </CardHeader>
-          <CardContent className="pt-6 px-6 pb-6">
+            <Button size="sm" onClick={onAddAccountPayment} className="h-9 gap-1.5 bg-emerald-600 text-white hover:bg-emerald-700">
+              <Plus className="h-4 w-4" />دفعة على الحساب
+            </Button>
+          </div>
+
+          <CardContent className="space-y-3 p-4">
             {payments.length > 0 && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mb-5 select-none">
-                {/* Total Collected / Receipts */}
-                <div className="bg-slate-950/45 backdrop-blur-md border border-white/5 hover:border-emerald-500/30 rounded-2xl p-4 flex items-center justify-between shadow-sm transition-all duration-300 hover:-translate-y-0.5 group">
-                  <div className="space-y-1 text-right">
-                    <span className="text-[10px] sm:text-xs font-bold text-muted-foreground/75">إجمالي المقبوضات</span>
-                    <p className="text-base sm:text-lg lg:text-xl font-black text-emerald-400">
-                      {summaryStats.receipts.toLocaleString('ar-LY')} <span className="text-xs font-normal text-white/50 font-tajawal">د.ل</span>
-                    </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {[
+                  { label: 'إجمالي المقبوضات', value: summaryStats.receipts, icon: Coins, cls: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10' },
+                  { label: 'إجمالي الديون السابقة', value: summaryStats.debts, icon: DollarSign, cls: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10' },
+                  { label: 'إجمالي الصادرات والمسترد', value: summaryStats.credits, icon: Wallet, cls: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-500/10' },
+                ].map(s => (
+                  <div key={s.label} className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-3 py-2.5">
+                    <div>
+                      <div className="text-[11px] font-semibold text-muted-foreground">{s.label}</div>
+                      <div className={cn('text-lg font-black tabular-nums', s.cls)}>{fmtMoney(s.value)}</div>
+                    </div>
+                    <div className={cn('rounded-lg p-2', s.bg, s.cls)}><s.icon className="h-4 w-4" /></div>
                   </div>
-                  <div className="p-2.5 rounded-xl bg-green-500/10 text-green-400 group-hover:scale-110 transition-transform shrink-0">
-                    <Coins className="h-4.5 w-4.5" />
-                  </div>
-                </div>
+                ))}
+              </div>
+            )}
 
-                {/* Total Registered Debts */}
-                <div className="bg-slate-950/45 backdrop-blur-md border border-white/5 hover:border-amber-500/30 rounded-2xl p-4 flex items-center justify-between shadow-sm transition-all duration-300 hover:-translate-y-0.5 group">
-                  <div className="space-y-1 text-right">
-                    <span className="text-[10px] sm:text-xs font-bold text-muted-foreground/75">إجمالي الديون السابقة</span>
-                    <p className="text-base sm:text-lg lg:text-xl font-black text-amber-400">
-                      {summaryStats.debts.toLocaleString('ar-LY')} <span className="text-xs font-normal text-white/50 font-tajawal">د.ل</span>
-                    </p>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 group-hover:scale-110 transition-transform shrink-0">
-                    <DollarSign className="h-4.5 w-4.5" />
-                  </div>
-                </div>
+            {unlinkedCount > 0 && (
+              <button type="button" onClick={() => setListFilter('unlinked')}
+                className="flex w-full items-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-right text-sm text-rose-700 transition-colors hover:bg-rose-500/15 dark:text-rose-300">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span className="flex-1"><b>{unlinkedCount}</b> سجل فيه رصيد غير موزع على عقود أو فواتير — يحتاج توزيع</span>
+                <span className="text-xs underline">عرضها</span>
+              </button>
+            )}
 
-                {/* Total Disbursed / Refunds */}
-                <div className="bg-slate-950/45 backdrop-blur-md border border-white/5 hover:border-rose-500/30 rounded-2xl p-4 flex items-center justify-between shadow-sm transition-all duration-300 hover:-translate-y-0.5 group">
-                  <div className="space-y-1 text-right">
-                    <span className="text-[10px] sm:text-xs font-bold text-muted-foreground/75">إجمالي الصادرات والمسترد</span>
-                    <p className="text-base sm:text-lg lg:text-xl font-black text-rose-400">
-                      {summaryStats.credits.toLocaleString('ar-LY')} <span className="text-xs font-normal text-white/50 font-tajawal">د.ل</span>
-                    </p>
-                  </div>
-                  <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-400 group-hover:scale-110 transition-transform shrink-0">
-                    <Wallet className="h-4.5 w-4.5" />
-                  </div>
+            {/* ── البحث والتصفية ── */}
+            {records.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative min-w-[200px] flex-1">
+                  <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input value={listQuery} onChange={e => setListQuery(e.target.value)} placeholder="بحث بالعقد، الفاتورة، المرجع، الملاحظة أو المبلغ" className="h-9 pr-9" aria-label="بحث في الدفعات" />
+                </div>
+                <div role="radiogroup" aria-label="تصفية الدفعات" className="flex gap-1 rounded-lg border border-border bg-muted/30 p-1">
+                  {([['all', 'الكل', records.length], ['single', 'فردية', records.length - groupCount], ['distributed', 'موزعة', groupCount], ['unlinked', 'غير موزع', unlinkedCount]] as const).map(([k, l, n]) => (
+                    <button key={k} type="button" role="radio" aria-checked={listFilter === k} onClick={() => setListFilter(k)}
+                      className={cn('h-7 rounded-md px-2.5 text-xs font-semibold transition-colors', listFilter === k ? 'bg-card shadow-sm ring-1 ring-primary/40' : 'text-muted-foreground hover:text-foreground')}>
+                      {l} <span className="tabular-nums opacity-70">{n}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
-            {payments.length ? (
-              <div className="overflow-x-auto border border-white/10 rounded-xl bg-slate-900/40">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50 hover:bg-muted/50">
-                      <TableHead className="text-right font-bold w-16">#</TableHead>
-                      <TableHead className="text-right font-bold">نوع المدفوع له</TableHead>
-                      <TableHead className="text-right font-bold">الرقم</TableHead>
-                      <TableHead className="text-right font-bold">البيان</TableHead>
-                      <TableHead className="text-right font-bold">النوع</TableHead>
-                      <TableHead className="text-right font-bold">المبلغ</TableHead>
-                      <TableHead className="text-right font-bold">الرصيد</TableHead>
-                      <TableHead className="text-right font-bold">المتبقي من الديون</TableHead>
-                      {showCollectionDetails && (
-                        <>
-                          <TableHead className="text-right font-bold">عمولة وسيط</TableHead>
-                          <TableHead className="text-right font-bold">عمولة تحويل</TableHead>
-                          <TableHead className="text-right font-bold">الصافي</TableHead>
-                        </>
-                      )}
-                      <TableHead className="text-right font-bold">طريقة الدفع</TableHead>
-                      <TableHead className="text-right font-bold">المرجع</TableHead>
-                      <TableHead className="text-right font-bold">التاريخ</TableHead>
-                      <TableHead className="text-right font-bold">ملاحظات</TableHead>
-                      <TableHead className="text-right font-bold">إجراءات</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                <TableBody>
-                  {/* عرض الدفعات الموزعة المجمعة - مرتبة من الأحدث للأقدم */}
-                  {Array.from(groupedPayments.entries())
-                    .sort(([, paymentsA], [, paymentsB]) => {
-                      const dateA = new Date(paymentsA[0]?.paid_at || paymentsA[0]?.created_at || 0).getTime();
-                      const dateB = new Date(paymentsB[0]?.paid_at || paymentsB[0]?.created_at || 0).getTime();
-                      return dateB - dateA; // ترتيب تنازلي (الأحدث أولاً)
-                    })
-                    .map(([distributionId, distributionPayments]) => {
-                    const isExpanded = expandedDistributions.has(distributionId);
-                    const totalAmount = distributionPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-                    const firstPayment = distributionPayments[0];
-                    const isInCustody = paymentsInCustody.has(distributionId);
-                    const hasWithdrawal = paymentsWithWithdrawal.has(distributionId);
 
-                    const hasUnlinkedChild = distributionPayments.some(p => isUnlinkedPayment(p));
-                    const unlinkedChildSum = distributionPayments
-                      .filter(p => isUnlinkedPayment(p))
-                      .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-
-                    const hasPurchaseInvoice = distributionPayments.some(p => p.purchase_invoice_id || p.notes?.includes('مشتريات') || p.notes?.includes('PUR-'));
-                    const isBarter = distributionPayments.some(p => p.method === 'مقايضة');
-                    
-                    let friendContractNum: number | null = null;
-                    let friendAdType: string | null = null;
-
-                    const notesText = firstPayment?.notes || '';
-                    const barterMatch = notesText.match(/عقد\s*(\d+)/);
-                    if (barterMatch) {
-                      friendContractNum = Number(barterMatch[1]);
-                    } else {
-                      const billboardMatch = notesText.match(/إيجار لوحة[:\s]+([^\n،,•]+)/);
-                      const billboardNameInNotes = billboardMatch ? billboardMatch[1].trim() : '';
-                      if (billboardNameInNotes) {
-                        const matchedRental = friendRentals.find(r => 
-                          r.billboards?.Billboard_Name?.trim() === billboardNameInNotes ||
-                          r.billboard_id === billboardNameInNotes
-                        );
-                        if (matchedRental) {
-                          friendContractNum = matchedRental.contract_number;
-                        }
-                      }
-                    }
-                    if (friendContractNum) {
-                      const linkedContract = contracts.find(c => Number(c.Contract_Number) === friendContractNum);
-                      friendAdType = linkedContract 
-                        ? (linkedContract['Ad Type'] || linkedContract.ad_type || null)
-                        : (friendContractsMap[friendContractNum] || null);
-                    }
-
-                    let purchaseNotes = '';
-                    if (hasPurchaseInvoice) {
-                      const linkedPurId = distributionPayments.find(p => p.purchase_invoice_id)?.purchase_invoice_id;
-                      const purMatch = notesText.match(/PUR-\d+/);
-                      const purCode = purMatch ? purMatch[0] : null;
-                      purchaseNotes = (linkedPurId ? purchaseInvoiceNotes[linkedPurId] : null) || (purCode ? purchaseInvoiceNotes[purCode] : null) || '';
-                    }
-
-                    const adTypeSuffix = friendAdType ? ` - ${friendAdType}` : '';
-                    
-                    const barterLabel = hasPurchaseInvoice 
-                      ? `مقايضة - ${purchaseNotes || 'فاتورة مشتريات'}`
-                      : (friendContractNum 
-                        ? `مقايضة - إيجار لوحة عقد #${friendContractNum}${adTypeSuffix}` 
-                        : 'مقايضة - إيجار لوحة');
-
+            {/* ── القائمة ── */}
+            {!payments.length ? (
+              <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">لا توجد دفعات</div>
+            ) : !visibleRecords.length ? (
+              <div className="rounded-xl border border-dashed border-border py-8 text-center text-sm text-muted-foreground">لا توجد نتائج مطابقة</div>
+            ) : (
+              <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
+                {visibleRecords.map(r => {
+                  if (r.kind === 'single') {
+                    const p = r.p;
+                    const info = infoOf(p);
+                    const isDebit = p.entry_type === 'general_credit';
                     return (
-                      <React.Fragment key={distributionId}>
-                        <TableRow
-                          id={`distribution-${distributionId}`}
-                          className={`cursor-pointer transition-all duration-300 ${
-                            hasUnlinkedChild
-                              ? 'bg-rose-950/40 hover:bg-rose-900/50 border-r-4 border-r-rose-500 shadow-[inset_0_0_20px_rgba(244,63,94,0.2)]'
-                              : isInCustody 
-                                ? 'bg-amber-100 dark:bg-amber-950/30 hover:bg-amber-200 dark:hover:bg-amber-950/50' 
-                                : hasWithdrawal 
-                                  ? 'bg-blue-100 dark:bg-blue-950/30 hover:bg-blue-200 dark:hover:bg-blue-950/50' 
-                                  : 'bg-primary/5 hover:bg-primary/10'
-                          }`}
-                          onClick={() => toggleDistribution(distributionId)}
-                        >
-                          <TableCell className="font-bold text-primary">
-                            <span className="inline-flex items-center justify-center min-w-[40px] h-8 px-3 rounded-lg bg-blue-500 text-white text-base font-bold shadow-sm">
-                              {payments.findIndex(p => p.id === firstPayment.id) + 1}
-                            </span>
-                          </TableCell>
-                          <TableCell className="font-bold" colSpan={2}>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                              <Badge variant="secondary" className={isInCustody ? "bg-amber-200 text-amber-800 border-amber-400" : hasWithdrawal ? "bg-blue-200 text-blue-800 border-blue-400" : "bg-primary/20"}>
-                                دفعة موزعة - {distributionPayments.length} بنود
-                              </Badge>
-                              {hasUnlinkedChild && (
-                                <Badge variant="outline" className="bg-rose-500/20 text-rose-300 border-rose-500/50 gap-1.5 font-black animate-pulse shadow-sm">
-                                  <AlertTriangle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
-                                  يوجد رصيد غير موزع: {unlinkedChildSum.toLocaleString('ar-LY')} د.ل (يحتاج توزيع)
-                                </Badge>
-                              )}
-                              {/* عرض بنود التوزيع الذكية مع نوع الإعلان وأرقام الفواتير */}
-                              <div className="flex flex-wrap gap-1.5 pt-0.5">
-                                {distributionPayments.map((p, idx) => {
-                                  const itemInfo = getPaymentTargetInfo(p, contractAdTypesMap, compositeTasksInfoMap, printedInvoicesMap, salesInvoicesMap, purchaseInvoicesMap);
-                                  return (
-                                    <Badge 
-                                      key={idx} 
-                                      variant="outline" 
-                                      className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border shadow-xs ${itemInfo.badgeColor}`}
-                                    >
-                                      {itemInfo.badgeLabel}
-                                    </Badge>
-                                  );
-                                })}
-                              </div>
-                              {isBarter && (
-                                <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-400 dark:bg-purple-950/40 dark:text-purple-400 gap-1 font-semibold text-xs">
-                                  <Link2 className="h-3 w-3" />
-                                  {barterLabel}
-                                </Badge>
-                              )}
-                              {isInCustody && (
-                                <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-400 gap-1">
-                                  <Wallet className="h-3 w-3" />
-                                  عهدة: {custodyEmployeeNames[distributionId] || 'غير محدد'}
-                                </Badge>
-                              )}
-                              {hasWithdrawal && (
-                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-400 gap-1">
-                                  <Wallet className="h-3 w-3" />
-                                  دفع لموظف: {withdrawalEmployeeNames[distributionId] || 'غير محدد'}
-                                </Badge>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground text-sm">
-                            دفعة موزعة على {distributionPayments.length} بنود
-                          </TableCell>
-                          <TableCell>
-                            <span className={getPaymentTypeStyle('receipt')}>
-                              دفعة موزعة
-                            </span>
-                          </TableCell>
-                          <TableCell className="font-bold text-lg text-green-600">
-                            {totalAmount.toLocaleString('ar-LY')} د.ل
-                          </TableCell>
-                          <TableCell className="font-bold text-blue-600">
-                            {((firstPayment as any).balance_after || 0).toLocaleString('ar-LY')} د.ل
-                          </TableCell>
-                          <TableCell className={`font-bold ${((firstPayment as any).remaining_debt || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                            {((firstPayment as any).remaining_debt || 0).toLocaleString('ar-LY')} د.ل
-                          </TableCell>
-                          {showCollectionDetails && (
-                            <>
-                              <TableCell>
-                                {firstPayment.collected_via_intermediary && (Number(firstPayment.intermediary_commission) || 0) > 0 ? (
-                                  <span className="text-red-600 font-medium">
-                                    {(Number(firstPayment.intermediary_commission) || 0).toLocaleString('ar-LY')} د.ل
-                                  </span>
-                                ) : '—'}
-                              </TableCell>
-                              <TableCell>
-                                {firstPayment.collected_via_intermediary && (Number(firstPayment.transfer_fee) || 0) > 0 ? (
-                                  <span className="text-red-600 font-medium">
-                                    {(Number(firstPayment.transfer_fee) || 0).toLocaleString('ar-LY')} د.ل
-                                  </span>
-                                ) : '—'}
-                              </TableCell>
-                              <TableCell>
-                                {firstPayment.collected_via_intermediary && firstPayment.net_amount ? (
-                                  <span className="font-semibold text-primary">
-                                    {(Number(firstPayment.net_amount) || 0).toLocaleString('ar-LY')} د.ل
-                                  </span>
-                                ) : '—'}
-                              </TableCell>
-                            </>
-                          )}
-                          <TableCell>{firstPayment.method || '—'}</TableCell>
-                          <TableCell>{firstPayment.reference || '—'}</TableCell>
-                          <TableCell>
-                            {firstPayment.paid_at ? new Date(firstPayment.paid_at).toLocaleDateString('ar-LY') : '—'}
-                          </TableCell>
-                          <TableCell>{firstPayment.notes || 'دفعة على عقود متعددة'}</TableCell>
-                          <TableCell>
-                            <div className="expenses-actions-cell">
-                              <Button
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleShowDetails(distributionPayments);
-                                }}
-                                className="bg-primary hover:bg-primary/90"
-                              >
-                                عرض التفاصيل
+                      <div key={p.id} id={`payment-${p.id}`}
+                        className={cn('flex flex-wrap items-start gap-3 px-3 py-3 transition-colors hover:bg-muted/30 sm:flex-nowrap sm:items-center', r.unlinked && 'border-r-4 border-r-rose-500 bg-rose-500/5')}>
+                        <IndexDate n={indexOf.get(p.id) ?? '—'} p={p} />
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground">{getPaymentTypeText(p.entry_type)}</span>
+                            <span className={cn('rounded-md border px-2 py-0.5 text-xs font-bold', toneOf(info.type))}>{info.badgeLabel}</span>
+                            {r.unlinked && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-rose-500/15 px-1.5 py-0.5 text-[11px] font-bold text-rose-700 dark:text-rose-300">
+                                <AlertTriangle className="h-3 w-3" />غير موزع
+                              </span>
+                            )}
+                          </div>
+                          <div className="truncate text-sm" title={info.statement}>{info.statement}</div>
+                          <Meta p={p} statement={info.statement} />
+                          <Collection p={p} />
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1 text-left">
+                          <div className={cn('text-lg font-black tabular-nums', isDebit ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>{isDebit ? '−' : ''}{fmtMoney(Number(p.amount))}</div>
+                          <Remaining p={p} />
+                          <div className="flex items-center gap-0.5">
+                            {r.unlinked && onDistributePayment && (
+                              <Button size="sm" className="h-8 gap-1 bg-rose-600 text-white hover:bg-rose-700" onClick={() => onDistributePayment(p)}>
+                                <ArrowRightLeft className="h-3.5 w-3.5" />توزيع
                               </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-
-                        {isExpanded && distributionPayments.map(payment => {
-                          const isUnlinked = isUnlinkedPayment(payment);
-                          return (
-                            <TableRow 
-                              key={payment.id} 
-                              id={`payment-${payment.id}`} 
-                              className={`transition-all duration-300 ${
-                                isUnlinked 
-                                  ? 'bg-rose-950/40 hover:bg-rose-900/50 border-r-4 border-r-rose-500 shadow-[inset_0_0_20px_rgba(244,63,94,0.2)]' 
-                                  : 'bg-accent/30 hover:bg-accent/40'
-                              }`}
-                            >
-                            <TableCell className="pr-8">
-                              <span className="inline-flex items-center justify-center min-w-[32px] h-6 px-2 rounded-md bg-blue-400 text-white text-sm font-bold">
-                                {payments.findIndex(p => p.id === payment.id) + 1}
-                              </span>
-                            </TableCell>
-                            {(() => {
-                              const itemInfo = getPaymentTargetInfo(payment, contractAdTypesMap, compositeTasksInfoMap, printedInvoicesMap, salesInvoicesMap, purchaseInvoicesMap);
-                              return (
-                                <>
-                                  <TableCell className="expenses-contract-number font-bold">
-                                    {itemInfo.type}
-                                  </TableCell>
-                                  <TableCell className="font-mono font-bold">
-                                    {itemInfo.targetNumber}
-                                  </TableCell>
-                                  <TableCell className="text-muted-foreground text-sm font-semibold">
-                                    {itemInfo.statement}
-                                  </TableCell>
-                                </>
-                              );
-                            })()}
-                            <TableCell>
-                              <div className="flex flex-col gap-1 items-start">
-                                <span className={getPaymentTypeStyle(payment.entry_type)}>
-                                  {getPaymentTypeText(payment.entry_type)}
-                                </span>
-                                {isUnlinked && (
-                                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-black bg-rose-500/25 text-rose-300 border border-rose-500/50 animate-pulse shadow-xs">
-                                    <AlertTriangle className="h-3 w-3 text-rose-400 shrink-0" />
-                                    رصيد غير موزع
-                                  </span>
-                                )}
-                              </div>
-                            </TableCell>
-                            <TableCell className={`font-black ${isUnlinked ? 'text-rose-400 text-base' : 'stat-green'}`}>
-                              {(Number(payment.amount) || 0).toLocaleString('ar-LY')} د.ل
-                            </TableCell>
-                            <TableCell>—</TableCell>
-                            <TableCell className={`font-bold ${((payment as any).remaining_debt || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                              {((payment as any).remaining_debt || 0).toLocaleString('ar-LY')} د.ل
-                            </TableCell>
-                            <TableCell colSpan={showCollectionDetails ? 3 : 0}>—</TableCell>
-                            <TableCell>—</TableCell>
-                            <TableCell>—</TableCell>
-                            <TableCell>{payment.notes || '—'}</TableCell>
-                            <TableCell>
-                              <div className="expenses-actions-cell flex items-center gap-1 flex-wrap">
-                                {isUnlinked && onEditDistributedPayment && (
-                                  <Button
-                                    size="sm"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      const distId = payment.distributed_payment_id;
-                                      if (distId) {
-                                        onEditDistributedPayment(distId, distributionPayments);
-                                      }
-                                    }}
-                                    className="bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer shadow-sm flex items-center gap-1"
-                                    title="توزيع الفائض"
-                                  >
-                                    <ArrowRightLeft className="h-3.5 w-3.5 ml-1" />
-                                    توزيع الفائض
-                                  </Button>
-                                )}
-                                <Button
-                                  size="sm"
-                                  onClick={() => onPrintReceipt(payment)}
-                                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                                >
-                                  طباعة
-                                </Button>
-                                {onSendReceipt && (
-                                  <Button
-                                    size="sm"
-                                    onClick={() => onSendReceipt(payment)}
-                                    className="bg-green-600 hover:bg-green-700 text-white"
-                                  >
-                                    <Send className="h-4 w-4 ml-1" />
-                                    إرسال
-                                  </Button>
-                                )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                          );
-                        })}
-                      </React.Fragment>
-                    );
-                  })
-                }
-
-                  {/* عرض الدفعات الفردية */}
-                  {individualPayments.map((payment) => {
-                    const isUnlinked = isUnlinkedPayment(payment);
-                    return (
-                      <TableRow 
-                        key={payment.id} 
-                        id={`payment-${payment.id}`} 
-                        className={`transition-all duration-300 ${isUnlinked ? 'bg-rose-950/40 hover:bg-rose-900/50 border-r-4 border-r-rose-500 shadow-[inset_0_0_20px_rgba(244,63,94,0.2)]' : ''}`}
-                      >
-                      <TableCell className="font-bold text-primary">
-                        <span className="inline-flex items-center justify-center min-w-[40px] h-8 px-3 rounded-lg bg-emerald-500 text-white text-base font-bold shadow-sm">
-                          {payments.findIndex(p => p.id === payment.id) + 1}
-                        </span>
-                      </TableCell>
-                      {(() => {
-                        const itemInfo = getPaymentTargetInfo(payment, contractAdTypesMap, compositeTasksInfoMap, printedInvoicesMap, salesInvoicesMap, purchaseInvoicesMap);
-                        return (
-                          <>
-                            <TableCell className="expenses-contract-number font-bold">
-                              {itemInfo.type}
-                            </TableCell>
-                            <TableCell className="font-mono font-bold">
-                              {itemInfo.targetNumber}
-                            </TableCell>
-                            <TableCell className="text-muted-foreground text-sm font-semibold">
-                              {itemInfo.statement}
-                            </TableCell>
-                          </>
-                        );
-                      })()}
-                      <TableCell>
-                        <div className="flex flex-col gap-1 items-start">
-                          <span className={getPaymentTypeStyle(payment.entry_type)}>
-                            {getPaymentTypeText(payment.entry_type)}
-                          </span>
-                          {isUnlinked && (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-black bg-rose-500/25 text-rose-300 border border-rose-500/50 animate-pulse shadow-xs">
-                              <AlertTriangle className="h-3 w-3 text-rose-400 shrink-0" />
-                              رصيد غير موزع
-                            </span>
-                          )}
+                            )}
+                            <IconBtn title="طباعة إيصال" onClick={() => onPrintReceipt(p)}><Printer className="h-4 w-4" /></IconBtn>
+                            {onSendReceipt && <IconBtn title="إرسال" onClick={() => onSendReceipt(p)}><Send className="h-4 w-4" /></IconBtn>}
+                            <IconBtn title="تعديل" onClick={() => onEditReceipt(p)}><Edit className="h-4 w-4" /></IconBtn>
+                            {r.unlinked && contracts.length > 0 && <IconBtn title="ربط بعقد" tone="warn" onClick={() => openLinkDialog(p)}><Link2 className="h-4 w-4" /></IconBtn>}
+                            <IconBtn title="حذف" tone="danger" onClick={() => onDeleteReceipt(p.id)}><Trash2 className="h-4 w-4" /></IconBtn>
+                          </div>
                         </div>
-                      </TableCell>
-                      <TableCell className={`font-black ${isUnlinked ? 'text-rose-400 text-base' : 'stat-green'}`}>
-                        {(Number(payment.amount) || 0).toLocaleString('ar-LY')} د.ل
-                      </TableCell>
-                      <TableCell className="font-bold text-blue-600">
-                        {((payment as any).balance_after || 0).toLocaleString('ar-LY')} د.ل
-                      </TableCell>
-                      <TableCell className={`font-bold ${((payment as any).remaining_debt || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                        {((payment as any).remaining_debt || 0).toLocaleString('ar-LY')} د.ل
-                      </TableCell>
-                      {showCollectionDetails && (
-                        <>
-                          <TableCell>
-                            {payment.collected_via_intermediary && (Number(payment.intermediary_commission) || 0) > 0 ? (
-                              <span className="text-red-600 font-medium">
-                                {(Number(payment.intermediary_commission) || 0).toLocaleString('ar-LY')} د.ل
+                      </div>
+                    );
+                  }
+
+                  const { id: distributionId, items, first, total } = r;
+                  const isExpanded = expandedDistributions.has(distributionId);
+                  const meta = groupLabels(items, distributionId);
+                  const unlinkedSum = items.filter(p => isUnlinkedPayment(p)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+                  return (
+                    <div key={distributionId} id={`distribution-${distributionId}`} className={cn(r.unlinked && 'border-r-4 border-r-rose-500')}>
+                      <div role="button" tabIndex={0} aria-expanded={isExpanded}
+                        onClick={() => toggleDistribution(distributionId)}
+                        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDistribution(distributionId); } }}
+                        className={cn('flex cursor-pointer flex-wrap items-start gap-3 px-3 py-3 transition-colors hover:bg-muted/30 sm:flex-nowrap sm:items-center',
+                          r.unlinked ? 'bg-rose-500/5' : meta.custody ? 'bg-amber-500/5' : meta.withdrawal ? 'bg-blue-500/5' : 'bg-primary/[0.03]')}>
+                        <IndexDate n={indexOf.get(first.id) ?? '—'} p={first} />
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                            <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-bold text-primary">دفعة موزعة · {items.length} بنود</span>
+                            {items.slice(0, 4).map(p => {
+                              const info = infoOf(p);
+                              return <span key={p.id} className={cn('rounded-md border px-2 py-0.5 text-[11px] font-bold', toneOf(info.type))}>{info.badgeLabel}</span>;
+                            })}
+                            {items.length > 4 && <span className="text-[11px] text-muted-foreground">+{items.length - 4}</span>}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {r.unlinked && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-rose-500/15 px-1.5 py-0.5 text-[11px] font-bold text-rose-700 dark:text-rose-300">
+                                <AlertTriangle className="h-3 w-3" />رصيد غير موزع {fmtMoney(unlinkedSum)}
                               </span>
-                            ) : '—'}
-                          </TableCell>
-                          <TableCell>
-                            {payment.collected_via_intermediary && (Number(payment.transfer_fee) || 0) > 0 ? (
-                              <span className="text-red-600 font-medium">
-                                {(Number(payment.transfer_fee) || 0).toLocaleString('ar-LY')} د.ل
-                              </span>
-                            ) : '—'}
-                          </TableCell>
-                          <TableCell>
-                            {payment.collected_via_intermediary && payment.net_amount ? (
-                              <span className="font-semibold text-primary">
-                                {(Number(payment.net_amount) || 0).toLocaleString('ar-LY')} د.ل
-                              </span>
-                            ) : (Number(payment.amount) || 0).toLocaleString('ar-LY') + ' د.ل'}
-                          </TableCell>
-                        </>
+                            )}
+                            {meta.isBarter && <span className="inline-flex items-center gap-1 rounded-md border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-purple-700 dark:text-purple-300"><Link2 className="h-3 w-3" />{meta.barterLabel}</span>}
+                            {meta.custody && <span className="inline-flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-700 dark:text-amber-300"><Wallet className="h-3 w-3" />عهدة: {meta.custody}</span>}
+                            {meta.withdrawal && <span className="inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 text-[11px] text-blue-700 dark:text-blue-300"><Wallet className="h-3 w-3" />دفع لموظف: {meta.withdrawal}</span>}
+                          </div>
+                          <Meta p={first} />
+                          <Collection p={first} />
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1 text-left">
+                          <div className="text-lg font-black tabular-nums text-emerald-600 dark:text-emerald-400">{fmtMoney(total)}</div>
+                          <Remaining p={first} />
+                          <Button size="sm" variant="outline" className="h-8" onClick={e => { e.stopPropagation(); handleShowDetails(items); }}>التفاصيل</Button>
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="divide-y divide-border/60 border-t border-border/60 bg-muted/20">
+                          {items.map(p => {
+                            const info = infoOf(p);
+                            const unlinked = isUnlinkedPayment(p);
+                            return (
+                              <div key={p.id} id={`payment-${p.id}`} className={cn('flex flex-wrap items-center gap-3 py-2 pl-3 pr-8 sm:flex-nowrap', unlinked && 'bg-rose-500/5')}>
+                                <span className="inline-flex h-6 min-w-[1.75rem] items-center justify-center rounded bg-background px-1.5 text-[11px] font-bold tabular-nums ring-1 ring-border">{indexOf.get(p.id) ?? '—'}</span>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className={cn('rounded-md border px-2 py-0.5 text-[11px] font-bold', toneOf(info.type))}>{info.badgeLabel}</span>
+                                    {unlinked && <span className="text-[11px] font-bold text-rose-700 dark:text-rose-300">غير موزع</span>}
+                                  </div>
+                                  <div className="truncate text-xs text-muted-foreground" title={info.statement}>{info.statement}{p.notes && p.notes !== info.statement ? ` · ${p.notes}` : ''}</div>
+                                </div>
+                                <span className={cn('shrink-0 font-bold tabular-nums', unlinked ? 'text-rose-600 dark:text-rose-400' : 'text-foreground')}>{fmtMoney(Number(p.amount))}</span>
+                                <div className="flex shrink-0 items-center gap-0.5">
+                                  {unlinked && onEditDistributedPayment && p.distributed_payment_id && (
+                                    <Button size="sm" className="h-7 gap-1 bg-rose-600 text-xs text-white hover:bg-rose-700" onClick={() => onEditDistributedPayment(p.distributed_payment_id as string, items)}>
+                                      <ArrowRightLeft className="h-3 w-3" />توزيع الفائض
+                                    </Button>
+                                  )}
+                                  <IconBtn title="طباعة" onClick={() => onPrintReceipt(p)}><Printer className="h-4 w-4" /></IconBtn>
+                                  {onSendReceipt && <IconBtn title="إرسال" onClick={() => onSendReceipt(p)}><Send className="h-4 w-4" /></IconBtn>}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
-                      <TableCell>{payment.method || '—'}</TableCell>
-                      <TableCell>{payment.reference || '—'}</TableCell>
-                      <TableCell>
-                        {payment.paid_at ? new Date(payment.paid_at).toLocaleDateString('ar-LY') : '—'}
-                      </TableCell>
-                      <TableCell>{payment.notes || '—'}</TableCell>
-                      <TableCell>
-                        <div className="expenses-actions-cell flex items-center gap-1 flex-wrap">
-                          {isUnlinked && onDistributePayment && (
-                            <Button
-                              size="sm"
-                              className="bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer shadow-sm flex items-center gap-1"
-                              title="توزيع الدفعة"
-                              onClick={() => onDistributePayment(payment)}
-                            >
-                              <ArrowRightLeft className="h-3.5 w-3.5 ml-1" />
-                              توزيع
-                            </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            onClick={() => onPrintReceipt(payment)}
-                            className="bg-blue-600 hover:bg-blue-700 text-white"
-                          >
-                            طباعة إيصال
-                          </Button>
-                          {onSendReceipt && (
-                            <Button
-                              size="sm"
-                              onClick={() => onSendReceipt(payment)}
-                              className="bg-green-600 hover:bg-green-700 text-white"
-                            >
-                              <Send className="h-4 w-4 ml-1" />
-                              إرسال
-                            </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => onEditReceipt(payment)}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          {isUnlinkedPayment(payment) && contracts.length > 0 && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="border-amber-500 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950"
-                              title="ربط برقم عقد"
-                              onClick={() => openLinkDialog(payment)}
-                            >
-                              <Link2 className="h-4 w-4 ml-1" />
-                              ربط بعقد
-                            </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => onDeleteReceipt(payment.id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          ) : (
-            <div className="expenses-empty-state text-center py-8">لا توجد دفعات</div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Dialog تفاصيل الدفعة الموزعة */}
       {selectedDistribution && (

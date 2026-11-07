@@ -5,7 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { loadInstallationOperationIds } from '@/services/installationOperation';
 import { getCompositeTaskOperationKey, getOperationLabel, normalizeCompositeTaskType } from '@/lib/compositeTaskOperation';
 import { resolveInstallationFacesCount, getAvailableFacesCount } from '@/lib/installationFaces';
-import { operationKeyOf, computeOperation, lineArea, faceAreaFromSize, r2, summarizeStored, type CostLine, type OperationDraft, type OperationType } from '@/lib/compositeCosts';
+import { operationKeyOf, computeOperation, lineArea, linePrintRate, faceAreaFromSize, r2, summarizeStored, type CostLine, type OperationDraft, type OperationType } from '@/lib/compositeCosts';
 import { defaultPrinterId } from '@/services/operationsInventory';
 import { getBillboardsSortMaps, sortBillboardsStandardSync } from '@/lib/billboardSorter';
 
@@ -255,13 +255,28 @@ export async function loadEditor(op: OperationRow): Promise<EditorState> {
   const billboardIds = [...new Set(items.map((i: any) => Number(i.billboard_id)))];
   const [billboards, printItems] = await Promise.all([
     inChunks('billboards', '"ID", "Billboard_Name", "Size", "Level", "Faces_Count", face_dimensions, "Image_URL", "Nearest_Landmark", "District", "City", "Municipality"', 'ID', billboardIds),
-    primary.print_task_id ? inChunks('print_task_items', 'billboard_id', 'task_id', [primary.print_task_id]) : Promise.resolve([]),
+    primary.print_task_id ? inChunks('print_task_items', 'billboard_id, area, unit_cost, customer_unit_cost', 'task_id', [primary.print_task_id]) : Promise.resolve([]),
   ]);
   const bMap = new Map(billboards.map((b: any) => [Number(b.ID), b]));
   const sizes: Record<string, any> = {};
   (sizesR.data || []).forEach((s: any) => { sizes[s.name] = s; sizes[String(s.name).toLowerCase()] = s; });
   const printSet = new Set((printItems as any[]).map(p => Number(p.billboard_id)));
   const hasPrintTask = !!primary.print_task_id;
+  // سعر متر الطباعة لكل لوحة كما حُفظ في بنود الطباعة؛ يُعتبر خاصاً باللوحة فقط إذا اختلف عن السعر العام
+  const ptRow: any = printTaskR.data;
+  const defPrintCust = Number(ptRow?.customer_price_per_meter) || 0;
+  const defPrintComp = Number(ptRow?.price_per_meter) || 0;
+  const printRates = new Map<number, { customer: number | null; company: number | null }>();
+  (printItems as any[]).forEach(p => {
+    const a = Number(p.area) || 0;
+    if (a <= 0) return;
+    const cust = r2((Number(p.customer_unit_cost) || 0) / a);
+    const comp = r2((Number(p.unit_cost) || 0) / a);
+    printRates.set(Number(p.billboard_id), {
+      customer: Math.abs(cust - defPrintCust) > 0.01 ? cust : null,
+      company: Math.abs(comp - defPrintComp) > 0.01 ? comp : null,
+    });
+  });
   const contractOfBoard = new Map<number, number>();
   (contractsR.data || []).forEach((c: any) => parseIds(c.billboard_ids).forEach(id => { if (!contractOfBoard.has(id)) contractOfBoard.set(id, Number(c.Contract_Number)); }));
 
@@ -314,6 +329,8 @@ export async function loadEditor(op: OperationRow): Promise<EditorState> {
       companyPerMeter: i.company_installation_price_per_meter ?? null,
       companyExtra: Number(i.company_additional_cost) || 0,
       inPrint: hasPrintTask ? printSet.has(Number(i.billboard_id)) : true,
+      printCustomerPerMeter: printRates.get(Number(i.billboard_id))?.customer ?? null,
+      printCompanyPerMeter: printRates.get(Number(i.billboard_id))?.company ?? null,
       hasCutout: !!i.has_cutout,
       cutoutCount: Number(i.cutout_count) || 1,
       cutoutCustomerUnit: Number(i.cutout_customer_cost) || 0,
@@ -462,14 +479,16 @@ export async function saveEditor(state: EditorState, lines: EditorLine[], draft:
     }
     const itemRow = (l: EditorLine) => {
       const area = r2(lineArea(l));
+      const compRate = linePrintRate(l, draft, 'company');
+      const custRate = linePrintRate(l, draft, 'customer');
       return {
         description: (l.selectedFaces || Array.from({ length: l.faces }, (_, i) => i + 1)).map(face => `وجه ${face}: ${l.faceLabels?.[face - 1] || l.size} م`).join('، '),
         area,
         faces_count: l.faces,
-        unit_cost: r2(area * draft.printCompanyPerMeter),
-        printer_unit_cost: r2(area * draft.printCompanyPerMeter),
-        total_cost: r2(area * draft.printCompanyPerMeter),
-        customer_unit_cost: totals.print.included ? 0 : r2(area * draft.printCustomerPerMeter),
+        unit_cost: r2(area * compRate),
+        printer_unit_cost: r2(area * compRate),
+        total_cost: r2(area * compRate),
+        customer_unit_cost: totals.print.included ? 0 : r2(area * custRate),
       };
     };
     if (toInsert.length) {
