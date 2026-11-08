@@ -111,7 +111,8 @@ export default function Billboards() {
   const [batchPhotoImportOpen, setBatchPhotoImportOpen] = useState(false);
   // ✅ Billboard selection state
   const [selectedBillboardIds, setSelectedBillboardIds] = useState<Set<number>>(new Set());
-  const [excludeFriendlyAndHidden, setExcludeFriendlyAndHidden] = useState(true);
+  // افتراضياً «اختيار الكل» يشمل كل اللوحات الظاهرة حسب الفلتر؛ الاستثناء اختياري
+  const [excludeFriendlyAndHidden, setExcludeFriendlyAndHidden] = useState(false);
   const [selectAvailableOnly, setSelectAvailableOnly] = useState(false);
   const { data: activeStatusesMap = {} } = useAllActiveBillboardStatuses();
   const [printFilters, setPrintFilters] = useState({

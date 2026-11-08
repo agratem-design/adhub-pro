@@ -170,6 +170,7 @@ export default function Correspondence() {
   const [saving, setSaving] = useState(false);
   const [mode, setMode] = usePersistedState<LetterPrintMode>('correspondence.mode', 'full');
   const [yearOnlyDate, setYearOnlyDate] = usePersistedState<boolean>('correspondence.yearOnlyDate', false);
+  const [noStamp, setNoStamp] = useState(false);
   const [pages, setPages] = useState(1);
 
   const company = companies.find(c => c.id === (draft?.company_id || companyId)) || null;
@@ -193,7 +194,7 @@ export default function Correspondence() {
     if (!c) return;
     const suffix = m === 'full' ? '' : ` (${PRINT_MODE_LABELS[m]})`;
     const w = preparePrintWindow(`مراسلة ${l.reference_number}`);
-    writePrintWindow(w, renderLetterHtml(c, l, window.location.origin, { ...LETTER_LAYOUT, mode: m, yearOnlyDate }), { title: m === 'background' ? `ترويسة ${c.name}` : `مراسلة ${l.reference_number} - ${l.subject || ''}${suffix}`.trim(), showDownloadPdf: true, showShare: true, autoPrint: false });
+    writePrintWindow(w, renderLetterHtml(c, noStamp ? { ...l, with_stamp: false } : l, window.location.origin, { ...LETTER_LAYOUT, mode: m, yearOnlyDate }), { title: m === 'background' ? `ترويسة ${c.name}` : `مراسلة ${l.reference_number} - ${l.subject || ''}${suffix}`.trim(), showDownloadPdf: true, showShare: true, autoPrint: false });
   };
 
   const save = async (andPrint: LetterPrintMode | false = false) => {
@@ -337,7 +338,7 @@ export default function Correspondence() {
             </div>
             <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-3">
               <Button variant="outline" disabled={saving} onClick={() => save(false)}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}حفظ</Button>
-              <PrintMenu label="حفظ وطباعة" onPrint={m => save(m)} yearOnlyDate={yearOnlyDate} onYearOnlyDateChange={setYearOnlyDate} />
+              <PrintMenu label="حفظ وطباعة" onPrint={m => save(m)} yearOnlyDate={yearOnlyDate} onYearOnlyDateChange={setYearOnlyDate} noStamp={noStamp} onNoStampChange={setNoStamp} />
             </div>
           </section>
           <section className="min-w-0 space-y-3 self-start rounded-2xl border border-border bg-muted/30 p-3 md:p-4 xl:sticky xl:top-4">
@@ -391,7 +392,7 @@ export default function Correspondence() {
                         <td className="col-span-2 p-2 md:p-3">
                           <div className="flex flex-wrap items-center justify-end gap-1">
                             {!showArchived && <Button size="sm" variant="outline" className="h-8" onClick={() => open(l)}><Pencil className="h-3.5 w-3.5" />تعديل</Button>}
-                            <PrintMenu size="sm" onPrint={m => print(l, m)} yearOnlyDate={yearOnlyDate} onYearOnlyDateChange={setYearOnlyDate} />
+                            <PrintMenu size="sm" onPrint={m => print(l, m)} yearOnlyDate={yearOnlyDate} onYearOnlyDateChange={setYearOnlyDate} noStamp={noStamp} onNoStampChange={setNoStamp} />
                             <Button size="sm" variant="ghost" className="h-10 w-10" aria-label="نسخ كمراسلة جديدة" title="نسخ كمراسلة جديدة" onClick={() => { const c = companies.find(x => x.id === l.company_id); open({ ...l, id: undefined, created_at: undefined, archived_at: undefined, letter_date: today(), reference_number: nextReference(c?.reference_prefix || '', allLetters.filter(x => x.company_id === l.company_id)) }); }}><Copy className="h-3.5 w-3.5" /></Button>
                             {showArchived
                               ? <Button size="sm" variant="outline" className="h-8" onClick={() => setArchived(l, false)}><ArchiveRestore className="h-3.5 w-3.5" />استرجاع</Button>

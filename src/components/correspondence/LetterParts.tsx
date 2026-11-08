@@ -11,7 +11,7 @@ export const MODE_HINT: Record<LetterPrintMode, string> = {
 };
 
 /** زر طباعة بثلاثة أوضاع */
-export function PrintMenu({ onPrint, size = 'default', label = 'طباعة', yearOnlyDate, onYearOnlyDateChange }: { onPrint: (m: LetterPrintMode) => void; size?: 'sm' | 'default'; label?: string; yearOnlyDate?: boolean; onYearOnlyDateChange?: (checked: boolean) => void }) {
+export function PrintMenu({ onPrint, size = 'default', label = 'طباعة', yearOnlyDate, onYearOnlyDateChange, noStamp, onNoStampChange }: { onPrint: (m: LetterPrintMode) => void; size?: 'sm' | 'default'; label?: string; yearOnlyDate?: boolean; onYearOnlyDateChange?: (checked: boolean) => void; noStamp?: boolean; onNoStampChange?: (checked: boolean) => void }) {
   return (
     <DropdownMenu dir="rtl">
       <DropdownMenuTrigger asChild>
@@ -21,6 +21,12 @@ export function PrintMenu({ onPrint, size = 'default', label = 'طباعة', yea
         {onYearOnlyDateChange && <>
           <DropdownMenuCheckboxItem checked={yearOnlyDate} onCheckedChange={onYearOnlyDateChange} onSelect={e => e.preventDefault()} className="cursor-pointer transition-colors duration-200">
             التاريخ: السنة فقط (اليوم والشهر فارغان)
+          </DropdownMenuCheckboxItem>
+          {!onNoStampChange && <DropdownMenuSeparator />}
+        </>}
+        {onNoStampChange && <>
+          <DropdownMenuCheckboxItem checked={noStamp} onCheckedChange={onNoStampChange} onSelect={e => e.preventDefault()} className="cursor-pointer transition-colors duration-200">
+            طباعة بدون ختم
           </DropdownMenuCheckboxItem>
           <DropdownMenuSeparator />
         </>}

@@ -263,13 +263,17 @@ export interface PastedLetterParts {
   subject?: string;
   body: string;
   closing?: string;
+  signer_name?: string;
   signer_title?: string;
+  /** yyyy-mm-dd من سطر «التاريخ:» */
+  letter_date?: string;
 }
 
 /** بعد normAr (الهمزات ← ا، بدون تنوين) */
 const ORDINALS = 'اولا|ثانيا|ثالثا|رابعا|خامسا|سادسا|سابعا|ثامنا|تاسعا|عاشرا|اخيرا';
 /** نص السطر بدون رموز التنسيق */
 const plainLine = (l: string) => l.replace(/^#{1,6}\s+/, '').replace(/\*\*/g, '').replace(/^[\s>]+/, '').trim();
+const normDigits = (s: string) => s.replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660));
 const normAr = (s: string) => s.replace(/[إأآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[ً-ْـ]/g, '').replace(/\s+/g, ' ').trim();
 
 /**
@@ -296,7 +300,11 @@ export function splitPastedLetter(markup: string, companyNames: string[] = []): 
     if (!p) continue;
     if (reSubject.test(p) && !parts.subject) { parts.subject = p.replace(reSubject, '').trim(); continue; }
     if (reGreeting.test(p) && !parts.greeting) { parts.greeting = p; continue; }
-    if (reMeta.test(p)) continue;
+    if (reMeta.test(p)) {
+      const d = /^التاريخ/.test(p) && normDigits(p).match(/(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{4})/);
+      if (d && +d[2] >= 1 && +d[2] <= 12 && +d[1] >= 1 && +d[1] <= 31) parts.letter_date = `${d[3]}-${d[2].padStart(2, '0')}-${d[1].padStart(2, '0')}`;
+      continue;
+    }
     if (!parts.recipient && !parts.greeting && reRecipient.test(p) && p.length <= 150) { parts.recipient = p; continue; }
     if (!parts.recipient && !parts.subject && !parts.greeting && isCompany(p)) continue;
     break;
@@ -306,16 +314,28 @@ export function splitPastedLetter(markup: string, companyNames: string[] = []): 
   let end = lines.length;
   while (end > i && !plainLine(lines[end - 1])) end--;
   let closeAt = -1;
-  for (let k = end - 1, seen = 0; k >= i && seen < 8; k--) {
+  for (let k = end - 1, seen = 0; k >= i && seen < 16; k--) {
     const p = plainLine(lines[k]);
     if (!p) continue;
     seen++;
     if (reClosing.test(p) && p.length <= 160) { closeAt = k; break; }
   }
+  let attachments = '';
   if (closeAt >= 0) {
     parts.closing = plainLine(lines[closeAt]);
-    const tail = lines.slice(closeAt + 1).map(plainLine).filter(p => p && !isCompany(p) && !/^[.…\-_]+$/.test(p));
-    if (tail.length) parts.signer_title = tail.join(' - ').slice(0, 80);
+    const after = lines.slice(closeAt + 1);
+    // «المرفقات:» وما بعدها قائمة مرفقات (تُلحق بآخر المتن)
+    const attAt = after.findIndex(l => /^(ال)?مرفقات\s*[:：]?$/.test(plainLine(l)));
+    if (attAt >= 0) {
+      const items = after.slice(attAt + 1).map(l => l.trim()).filter(Boolean);
+      if (items.length) attachments = `## المرفقات\n${items.join('\n')}`;
+    }
+    const tail = (attAt >= 0 ? after.slice(0, attAt) : after).map(plainLine)
+      .filter(p => p && !isCompany(p) && !/^[.…\-_]+$/.test(p) && !/^(التوقيع|الختم|التوقيع والختم)\s*[:：]?[\s.…_\-]*$/.test(p));
+    const reTitle = /(مدير|المدير|رئيس|الرئيس|الإدارة|الادارة|مسؤول|المسؤول|نائب|مشرف|المشرف|قسم|إدارة)/;
+    const titleAt = tail.findIndex(p => reTitle.test(p));
+    if (tail.length >= 2 && titleAt > 0) { parts.signer_name = tail.slice(0, titleAt).join(' ').slice(0, 80); parts.signer_title = tail.slice(titleAt).join(' - ').slice(0, 80); }
+    else if (tail.length) parts.signer_title = tail.join(' - ').slice(0, 80);
     end = closeAt;
   }
 
@@ -327,10 +347,11 @@ export function splitPastedLetter(markup: string, companyNames: string[] = []): 
     const t = l.trim();
     if (!t) return '';
     const p = plainLine(t);
-    const fullBold = /^\*\*[^*]+\*\*[:：]?$/.test(t) || /^#{1,6}\s/.test(t);
+    // سطر غامق ينتهي بنقطة (مثل «**إجمالي …: 17 لوحة.**») يبقى غامقاً لا عنواناً
+    const fullBold = (/^\*\*[^*]+\*\*[:：]?$/.test(t) && !/[.。]\s*\*\*$/.test(t)) || /^#{1,6}\s/.test(t);
     if (p.length <= 120 && (fullBold || reOrdinal.test(normAr(p)))) return `## ${p}`;
     return t;
-  }).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }).join('\n').concat(attachments ? `\n\n${attachments}` : '').replace(/\n{3,}/g, '\n\n').trim();
   return parts;
 }
 
@@ -381,7 +402,8 @@ export const parseCellNumber = (c: string): number | null => {
   return /^-?\d+(\.\d+)?%?$/.test(s) ? Number(s.replace('%', '')) : null;
 };
 const isNumericCell = (c: string) => parseCellNumber(c) !== null;
-export const isTotalLabel = (c: string) => /^(\*\*)?\s*(الإجمالي|الاجمالي|المجموع|الإجمالي العام|المجموع الكلي)\s*(\*\*)?$/.test(c.trim());
+/** «الإجمالي» / «المجموع» وما يبدأ بهما (مثل «الإجمالي العام للوحات المعتمدة») */
+export const isTotalLabel = (c: string) => /^(\*\*)?\s*(الإجمالي|الاجمالي|إجمالي|اجمالي|المجموع)(\s[^|]{0,60})?\s*[:：]?\s*(\*\*)?$/.test(c.trim());
 
 /** تحويل النص المبسّط إلى كتل HTML (عناوين/فقرات/قوائم/جداول) */
 export function renderMarkup(text: string): string {
@@ -398,7 +420,7 @@ export function renderMarkup(text: string): string {
     if (!table.length) return;
     const [head, ...rows] = table;
     const td = (c: string) => `<td${isNumericCell(c) ? ' class="num"' : ''}>${cell(c)}</td>`;
-    out.push(`<table data-bid="b${bid++}"><thead><tr>${head.map(c => `<th>${cell(c)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr${isTotalLabel(r[0] || '') ? ' class="total"' : ''}>${r.map(td).join('')}</tr>`).join('')}</tbody></table>`);
+    out.push(`<table data-bid="b${bid++}"><thead><tr>${head.map(c => `<th>${cell(c)}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr${r.slice(0, 2).some(c => isTotalLabel(c || '')) ? ' class="total"' : ''}>${r.map(td).join('')}</tr>`).join('')}</tbody></table>`);
     table = [];
   };
   const flush = () => { flushPara(); flushList(); flushTable(); };

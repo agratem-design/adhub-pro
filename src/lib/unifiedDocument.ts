@@ -136,7 +136,9 @@ export function unifiedDocumentCss(s: DocStyles = {}): string {
   ${D} * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box; }
   ${D} { font-family: '${p.font}', 'Noto Sans Arabic', Arial, sans-serif !important; direction: rtl; color: ${p.text}; background: #fff; line-height: 1.55; font-size: ${p.bodySize}px; margin: 0; }
   .os-root { max-width: 210mm; margin: 0 auto; padding: 28px; background: #fff; }
-  @media print { .os-root { padding: 0; max-width: none; } }
+  .os-root { min-height: 297mm; display: flex; flex-direction: column; }
+  .os-root > .u-footer { margin-top: auto !important; padding-top: 14px !important; }
+  @media print { .os-root { padding: 0; max-width: none; min-height: 0; display: block; } }
 
   .os-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 3px solid ${p.primary}; padding-bottom: 14px; margin-bottom: 18px; break-inside: avoid; }
   .os-head.swap { flex-direction: row-reverse; }
@@ -206,8 +208,8 @@ export function unifiedDocumentCss(s: DocStyles = {}): string {
   ${D} .invoice-customer-details .stats-cards { margin-inline-start: auto; display: flex; gap: 12px; }
   ${D} .invoice-customer-details :is(.stat-card, .stat-value, .stat-label) { display: inline; font-size: 11px !important; border: 0 !important; padding: 0 !important; }
   /* ===== التذييل الموحد: أيقونات داخل دوائر بلون الإعدادات + رقم الصفحة في إطار ===== */
-  .u-closing-message { text-align: center !important; font-size: 11px !important; font-weight: 600; color: #4b5563 !important; margin: 18px 0 8px !important; padding: 0 !important; break-inside: avoid; }
-  .u-footer { display: flex !important; align-items: center !important; justify-content: space-between !important; gap: 16px !important; direction: rtl; border-top: 2px solid ${p.primary} !important; padding: 10px 2px 0 !important; margin: 0 !important; background: transparent !important; font-size: 10.5px !important; line-height: 1.6 !important; color: #374151 !important; break-inside: avoid; }
+  .u-closing-message { text-align: center !important; font-size: 11px !important; font-weight: 600; color: #4b5563 !important; margin: 18px 0 8px !important; padding: 0 !important; break-inside: avoid; page-break-inside: avoid; }
+  .u-footer { display: flex !important; align-items: center !important; justify-content: space-between !important; gap: 16px !important; direction: rtl; border-top: 2px solid ${p.primary} !important; padding: 10px 2px 0 !important; margin: 0 !important; background: transparent !important; font-size: 10.5px !important; line-height: 1.6 !important; color: #374151 !important; break-inside: avoid; page-break-inside: avoid; }
   .u-footer-contacts { display: flex !important; flex: 1; flex-wrap: wrap; align-items: center; justify-content: flex-start !important; gap: 6px 22px !important; }
   .u-footer-contact, .u-page-number { display: inline-flex !important; align-items: center; gap: 6px; white-space: nowrap; color: #374151; }
   .u-fi { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; flex: none; border-radius: 50%; background: color-mix(in srgb, ${p.primary} 12%, #ffffff); color: ${p.primary}; }
