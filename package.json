@@ -106,6 +106,7 @@
     "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "electron": "^45.2.3",
     "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "^7.1.1",

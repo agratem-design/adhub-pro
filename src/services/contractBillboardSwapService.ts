@@ -265,6 +265,35 @@ export async function executeInstantBillboardSwap(
       ? rpcRes.new_billboard_ids.map(String)
       : [];
 
+    // إذا كانت اللوحة المستبدلة هي أصلاً لوحة بديلة مسجلة في paused_billboard_replacements
+    // (تبديل لوحة مبدلة B -> C)، نحدّث مؤشر البديلة فوراً إلى C حتى لا تبقى B معلّقة وتظهر لوحتان بديلتان.
+    try {
+      const { data: existingRepls } = await supabase
+        .from('paused_billboard_replacements' as any)
+        .select('id, paused_billboard_id')
+        .eq('contract_number', Number(contractNumber))
+        .eq('replacement_billboard_id', Number(originalBillboardId));
+      if (Array.isArray(existingRepls) && existingRepls.length > 0) {
+        const { data: replBb } = await supabase
+          .from('billboards')
+          .select('Billboard_Name')
+          .eq('ID', Number(replacementBillboardId))
+          .maybeSingle();
+        const replName = (replBb as any)?.Billboard_Name || null;
+        await supabase
+          .from('paused_billboard_replacements' as any)
+          .update({
+            replacement_billboard_id: Number(replacementBillboardId),
+            ...(replName ? { replacement_billboard_name: replName } : {}),
+            ...(reason?.trim() ? { notes: reason.trim() } : {}),
+          })
+          .eq('contract_number', Number(contractNumber))
+          .eq('replacement_billboard_id', Number(originalBillboardId));
+      }
+    } catch (syncReplErr) {
+      console.warn('Failed to update paused_billboard_replacements on chained swap:', syncReplErr);
+    }
+
     // التبديل ينشئ إيقافاً وبديلة: نُبلغ حسابات الإيقاف والبدائل لتعيد التحميل فوراً
     try {
       window.dispatchEvent(new CustomEvent('paused-billboards-changed', {

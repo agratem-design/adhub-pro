@@ -405,8 +405,37 @@ const isNumericCell = (c: string) => parseCellNumber(c) !== null;
 /** «الإجمالي» / «المجموع» وما يبدأ بهما (مثل «الإجمالي العام للوحات المعتمدة») */
 export const isTotalLabel = (c: string) => /^(\*\*)?\s*(الإجمالي|الاجمالي|إجمالي|اجمالي|المجموع)(\s[^|]{0,60})?\s*[:：]?\s*(\*\*)?$/.test(c.trim());
 
-/** تحويل النص المبسّط إلى كتل HTML (عناوين/فقرات/قوائم/جداول) */
-export function renderMarkup(text: string): string {
+export type ImageAlign = 'center' | 'right' | 'left';
+export interface LetterImageBlock { url: string; caption: string; width: number; align: ImageAlign }
+
+/** يحلل سطر صورة بصيغة «![وصف|75|center](url)» — يعيد null إن لم يكن سطر صورة */
+export function parseImageLine(line: string): LetterImageBlock | null {
+  const m = String(line || '').trim().match(/^!\[([^\]]*)\]\((.+)\)$/);
+  if (!m) return null;
+  const url = m[2].trim().replace(/%29/g, ')');
+  if (!url) return null;
+  const parts = m[1].split('|').map(x => x.trim());
+  let align: ImageAlign = 'center';
+  let width = 75;
+  if (parts.length > 1 && /^(center|right|left)$/i.test(parts[parts.length - 1])) align = parts.pop()!.toLowerCase() as ImageAlign;
+  if (parts.length > 1 && /^\d{1,3}$/.test(parts[parts.length - 1])) {
+    const w = parseInt(parts.pop()!, 10);
+    if (w >= 10 && w <= 100) width = w;
+  }
+  return { url, caption: parts.join(' - ').trim(), width, align };
+}
+
+/** يحوّل بيانات الصورة إلى سطر نصي يُحفظ داخل متن المراسلة */
+export function serializeImageLine(img: { url: string; caption?: string; width?: number; align?: ImageAlign }): string {
+  const cap = String(img.caption || '').replace(/\s*\n\s*/g, ' ').replace(/[|\]\[]/g, '/').trim();
+  const w = Math.max(10, Math.min(100, Math.round(Number(img.width) || 75)));
+  const a: ImageAlign = img.align === 'right' || img.align === 'left' ? img.align : 'center';
+  const meta = a !== 'center' ? `|${w}|${a}` : w !== 75 ? `|${w}` : '';
+  return `![${cap}${meta}](${String(img.url || '').trim().replace(/\)/g, '%29')})`;
+}
+
+/** تحويل النص المبسّط إلى كتل HTML (عناوين/فقرات/قوائم/جداول/صور) */
+export function renderMarkup(text: string, origin = ''): string {
   const lines = String(text || '').replace(/\r/g, '').split('\n');
   const out: string[] = [];
   let para: string[] = [], list: string[] = [], table: string[][] = [];
@@ -428,6 +457,13 @@ export function renderMarkup(text: string): string {
     const l = raw.trimEnd();
     const t = l.trim();
     if (!t) { flush(); continue; }
+    const imgBlock = parseImageLine(t);
+    if (imgBlock) {
+      flush();
+      const src = origin ? abs(imgBlock.url, origin) : imgBlock.url;
+      out.push(`<figure class="letter-img align-${imgBlock.align}" data-bid="b${bid++}"><img src="${esc(src)}" alt="${esc(imgBlock.caption)}" style="width:${imgBlock.width}%"/>${imgBlock.caption ? `<figcaption>${fmt(imgBlock.caption)}</figcaption>` : ''}</figure>`);
+      continue;
+    }
     // فواصل Markdown (--- / ***) وأسوار الكود لا تُطبع
     if (/^(-{3,}|\*{3,}|_{3,}|```.*)$/.test(t)) { flush(); continue; }
     if (/^#{1,6}\s+/.test(t)) { flush(); out.push(`<h3 data-bid="b${bid++}">${fmt(t.replace(/^#{1,6}\s+/, '').replace(/\*\*/g, ''))}</h3>`); continue; }
@@ -460,7 +496,7 @@ export function renderLetterHtml(company: LetterheadCompany, letter: Letter, ori
   const stamp = abs(company.stamp_url, origin);
   const sigImg = abs(company.signature_url, origin);
   const bodyHtml = opts.markup
-    ? renderMarkup(letter.body)
+    ? renderMarkup(letter.body, origin)
     : String(letter.body || '').split(/\n\s*\n/).filter(p => p.trim()).map((p, i) => `<p data-bid="p${i}">${nums(esc(p.trim())).replace(/\n/g, '<br/>')}</p>`).join('');
   const signer = opts.hideSign ? '' : (letter.signer_name ?? '') || company.signer_name || '';
   const signerTitle = opts.hideSign ? '' : (letter.signer_title ?? '') || company.signer_title || '';
@@ -676,6 +712,11 @@ ${fontLink}${doranFace}
   .content td.num { text-align: center; white-space: nowrap; }
   .content tr.total td { font-weight: 800; background: ${color}14; border-top: 1.2pt solid ${color}; }
   .content .closing { font-weight: 700; }
+  .content figure.letter-img { margin: .3em 0 .9em; text-align: center; break-inside: avoid; }
+  .content figure.letter-img.align-right { text-align: right; }
+  .content figure.letter-img.align-left { text-align: left; }
+  .content figure.letter-img img { display: inline-block; max-width: 100%; height: auto; max-height: 300pt; object-fit: contain; border-radius: 2pt; }
+  .content figure.letter-img figcaption { margin-top: .25em; font-size: .8em; color: #555; text-align: center; line-height: 1.4; }
   .sign-wrap { position: absolute; inset: 0; pointer-events: none; }
   .sign { position: absolute; left: 30pt; width: 175pt; top: 657pt; height: 100pt; text-align: center; font-size: 13pt; line-height: 1.45; overflow: hidden; }
   .sign .sn, .sign .st { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

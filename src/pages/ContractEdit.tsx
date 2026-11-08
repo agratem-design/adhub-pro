@@ -3245,10 +3245,15 @@ export default function ContractEdit() {
         }
       }
       updates.customer_id = customerId;
-      const latestRevision = Number(c?.edit_revision ?? currentContract?.edit_revision ?? 0);
-      const saveResult = await saveContractEditAtomic(contractNumber, updates, latestRevision, taskTypes ? { ...taskTypes } : {});
-      if (saveResult && typeof saveResult === 'object') {
-        setCurrentContract(saveResult);
+      // إذا كان التعديل الوحيد هو وجود تبديلات معلّقة دون أي تغيير في حقول أو لوحات العقد الأخرى،
+      // لا نستدعي saveContractEditAtomic منعاً لإنشاء ملحق فارغ إضافي قبل تنفيذ التبديل
+      const onlyHasPendingSwaps = pendingSwaps.length > 0 && draftBaseline !== null && draftFingerprint === draftBaseline;
+      if (!onlyHasPendingSwaps) {
+        const latestRevision = Number(c?.edit_revision ?? currentContract?.edit_revision ?? 0);
+        const saveResult = await saveContractEditAtomic(contractNumber, updates, latestRevision, taskTypes ? { ...taskTypes } : {});
+        if (saveResult && typeof saveResult === 'object') {
+          setCurrentContract(saveResult);
+        }
       }
 
       // التبديلات المعلّقة تُنفَّذ بعد نجاح الحفظ فقط؛ كل تبديل ذرّي ولا يغيّر إجمالي العقد.
@@ -3277,6 +3282,7 @@ export default function ContractEdit() {
           setWorkspaceSection('boards');
           return;
         }
+        setPendingSwaps([]);
         toast.success(`تم اعتماد ${pendingSwaps.length} تبديل للوحات مع الحفظ`);
       }
 

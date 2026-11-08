@@ -432,15 +432,34 @@ function PausedBillboardCardImpl({
 
       {/* Paused/Replaced Banner: Dynamic banner showing replacement or pause status */}
       {replacement || item.hasReplacement ? (
-        <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-600 text-white px-3 py-2 flex items-center justify-between gap-2 shadow-inner border-b border-blue-700/30">
-          <div className="flex items-center gap-2 text-xs font-extrabold truncate">
+        <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-600 text-white px-3 py-2 flex flex-wrap items-center justify-between gap-2 shadow-inner border-b border-blue-700/30">
+          <div className="flex items-center gap-2 text-xs font-extrabold truncate min-w-0">
             <Repeat2 className="h-4 w-4 shrink-0" />
             <span className="uppercase tracking-wider">مستبدلة باللوحة:</span>
             <span className="opacity-95 truncate">
               {replacementBillboard?.Billboard_Name || replacement?.replacement_billboard_name || `#${replacement?.replacement_billboard_id || 'بديلة'}`}
             </span>
           </div>
-          <Badge className="bg-white/20 text-white border-0 text-[10px] font-bold shrink-0">بدون خصم إيقاف</Badge>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setReplaceDialogOpen(true)}
+              className="text-[11px] font-bold px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 text-white transition-colors cursor-pointer"
+              title="تغيير اللوحة البديلة"
+            >
+              تغيير البديل
+            </button>
+            {replacement && (
+              <button
+                type="button"
+                onClick={handleRemoveReplacement}
+                className="text-[11px] font-bold px-2 py-0.5 rounded bg-black/25 hover:bg-black/40 text-white flex items-center gap-1 transition-colors cursor-pointer"
+                title="إلغاء التبديل وإزالة اللوحة البديلة"
+              >
+                <XIcon className="h-3 w-3" /> إلغاء التبديل
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="bg-gradient-to-r from-red-600 via-red-500 to-orange-500 text-white px-3 py-2 flex items-center justify-between gap-2 shadow-inner border-b border-red-700/30">
@@ -782,7 +801,13 @@ function PausedBillboardCardImpl({
         contractEndDate={(raw as any).original_end_date || ''}
         pauseDate={pauseDate}
         pausedBillboardName={name}
-        remainingAmount={effectiveRefund}
+        remainingAmount={
+          effectiveRefund > 0
+            ? effectiveRefund
+            : Number(replacement?.allocated_amount) > 0
+              ? Number(replacement.allocated_amount)
+              : Number(raw.manual_refund ?? raw.refund_amount ?? previewRefundAuto ?? 0)
+        }
         onSaved={() => { loadReplacement(); onChanged?.(); }}
       />
     </div>

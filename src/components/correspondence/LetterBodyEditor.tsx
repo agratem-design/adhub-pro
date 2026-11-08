@@ -1,13 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Bold, ClipboardPaste, Copy, Eraser, Heading, List, ListOrdered, Plus, Sigma, Table2, Trash2, Wand2, X } from 'lucide-react';
+import { AlignCenter, AlignLeft, AlignRight, Bold, ClipboardPaste, Copy, Eraser, Heading, ImagePlus, List, ListOrdered, Loader2, Plus, Sigma, Table2, Trash2, Wand2, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSystemDialog } from '@/contexts/SystemDialogContext';
-import { cleanPastedMarkdown, htmlToMarkup, isTotalLabel, parseCellNumber, renderMarkup, splitPastedLetter, tsvToMarkupTable, type PastedLetterParts } from '@/services/correspondence';
+import { clipboardImageFiles } from '@/lib/imageClipboard';
+import { cleanPastedMarkdown, htmlToMarkup, isTotalLabel, parseCellNumber, parseImageLine, renderMarkup, serializeImageLine, splitPastedLetter, tsvToMarkupTable, type ImageAlign, type PastedLetterParts } from '@/services/correspondence';
 
-/** النص مقسّم إلى فقرات نصية وجداول — يُخزَّن في قاعدة البيانات كنص مبسّط «| a | b |» */
-type Seg = { kind: 'text'; value: string } | { kind: 'table'; rows: string[][] };
+/** النص مقسّم إلى فقرات نصية وجداول وصور — يُخزَّن في قاعدة البيانات كنص مبسّط «| a | b |» و«![وصف](رابط)» */
+type Seg = { kind: 'text'; value: string } | { kind: 'table'; rows: string[][] } | { kind: 'image'; url: string; caption: string; width: number; align: ImageAlign; pending?: boolean };
 
 const isRow = (l: string) => /^\s*\|.*\|\s*$/.test(l);
 const isSep = (cells: string[]) => cells.every(c => /^\s*:?-{2,}:?\s*$/.test(c));
@@ -21,7 +22,7 @@ function normalize(segs: Seg[]): Seg[] {
     const last = out[out.length - 1];
     if (s.kind === 'text' && last?.kind === 'text') last.value = [last.value.trimEnd(), s.value.trimStart()].filter(Boolean).join('\n\n');
     else {
-      if (s.kind === 'table' && last?.kind !== 'text') out.push({ kind: 'text', value: '' });
+      if (s.kind !== 'text' && last?.kind !== 'text') out.push({ kind: 'text', value: '' });
       out.push(s.kind === 'table' ? { kind: 'table', rows: padRows(s.rows) } : { ...s });
     }
   }
@@ -33,6 +34,8 @@ function parseBody(body: string): Seg[] {
   const segs: Seg[] = [];
   for (const line of String(body || '').replace(/\r/g, '').split('\n')) {
     const last = segs[segs.length - 1];
+    const img = parseImageLine(line);
+    if (img) { segs.push({ kind: 'image', ...img }); continue; }
     if (isRow(line)) {
       const cells = splitRow(line);
       if (isSep(cells)) continue;
@@ -47,7 +50,7 @@ function parseBody(body: string): Seg[] {
 const cellOut = (c: string) => (c || '').replace(/\s*\n\s*/g, ' ').replace(/\|/g, '/').trim();
 function serialize(segs: Seg[]): string {
   // الصفوف الفارغة تماماً تبقى في المحرر ولا تُطبع
-  return segs.map(s => (s.kind === 'text' ? s.value.replace(/^\n+|\n+$/g, '') : s.rows.filter(r => r.some(c => c.trim())).map(r => `| ${r.map(cellOut).join(' | ')} |`).join('\n')))
+  return segs.map(s => (s.kind === 'text' ? s.value.replace(/^\n+|\n+$/g, '') : s.kind === 'image' ? (s.pending ? '' : serializeImageLine(s)) : s.rows.filter(r => r.some(c => c.trim())).map(r => `| ${r.map(cellOut).join(' | ')} |`).join('\n')))
     .filter(p => p.trim()).join('\n\n');
 }
 
@@ -249,6 +252,40 @@ function TableBlock({ rows, onChange, onRemove }: { rows: string[][]; onChange: 
   );
 }
 
+type ImageSeg = Extract<Seg, { kind: 'image' }>;
+
+/** صورة داخل المتن: معاينة + وصف + عرض + محاذاة + حذف */
+function ImageBlock({ img, onChange, onRemove }: { img: ImageSeg; onChange: (patch: Partial<ImageSeg>) => void; onRemove: () => void }) {
+  const [broken, setBroken] = useState(false);
+  const aligns: { id: ImageAlign; label: string; Icon: typeof AlignRight }[] = [{ id: 'right', label: 'يمين', Icon: AlignRight }, { id: 'center', label: 'وسط', Icon: AlignCenter }, { id: 'left', label: 'يسار', Icon: AlignLeft }];
+  return (
+    <div className="my-1 overflow-hidden rounded-xl border-2 border-primary/30 bg-primary/[0.03]">
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-primary/20 bg-primary/10 px-2 py-1.5">
+        <span className="me-auto flex items-center gap-1.5 px-1 text-sm font-semibold"><ImagePlus className="h-4 w-4 text-primary" />صورة</span>
+        <div className="inline-flex rounded-lg border border-border bg-background p-0.5" role="group" aria-label="محاذاة الصورة">
+          {aligns.map(({ id, label, Icon }) => (
+            <button key={id} type="button" title={label} aria-label={label} aria-pressed={img.align === id} onClick={() => onChange({ align: id })}
+              className={cn('inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors duration-200', img.align === id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}><Icon className="h-4 w-4" /></button>
+          ))}
+        </div>
+        <label className="flex items-center gap-2 rounded-lg border border-border bg-background px-2 py-1 text-xs text-muted-foreground">العرض
+          <input type="range" min={20} max={100} step={5} value={img.width} onChange={e => onChange({ width: Number(e.target.value) })} className="w-24 accent-primary" aria-label="عرض الصورة" />
+          <span className="w-9 tabular-nums">{img.width}%</span>
+        </label>
+        <Button type="button" size="sm" variant="ghost" className="h-9 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={onRemove}><Trash2 className="h-3.5 w-3.5" />حذف الصورة</Button>
+      </div>
+      <div className={cn('relative flex bg-[repeating-conic-gradient(#f3f3f3_0_25%,#fff_0_50%)] bg-[length:16px_16px] p-3', img.align === 'center' ? 'justify-center' : img.align === 'right' ? 'justify-start' : 'justify-end')} dir="rtl">
+        {broken
+          ? <div className="rounded-lg border border-dashed border-destructive/40 bg-background px-4 py-6 text-center text-sm text-destructive">تعذّر عرض الصورة</div>
+          : <img src={img.url} alt={img.caption} style={{ width: `${img.width}%` }} className={cn('max-h-[420px] rounded object-contain', img.pending && 'opacity-60')} onError={() => setBroken(true)} onLoad={() => setBroken(false)} />}
+        {img.pending && <div className="absolute inset-0 flex items-center justify-center"><span className="flex items-center gap-2 rounded-full bg-background/90 px-3 py-1.5 text-sm font-medium shadow"><Loader2 className="h-4 w-4 animate-spin text-primary" />جارٍ رفع الصورة…</span></div>}
+      </div>
+      <input value={img.caption} dir="rtl" placeholder="وصف أسفل الصورة (اختياري)" onChange={e => onChange({ caption: e.target.value })}
+        className="h-11 w-full border-t border-primary/20 bg-transparent px-3 text-center text-sm outline-none placeholder:text-muted-foreground/70 focus:bg-background focus:ring-2 focus:ring-inset focus:ring-primary/60" />
+    </div>
+  );
+}
+
 type Caret = { i: number; start: number; end: number };
 
 /** محرر نص المراسلة: فقرات + جداول مرئية، مع لصق الجداول والمراسلات الكاملة من ChatGPT وإكسل وWord */
@@ -262,9 +299,14 @@ export function LetterBodyEditor({ value, onChange, font, companyNames = [], onL
   const lastOut = useRef(value);
   const caret = useRef<Caret | null>(null);
   const els = useRef(new Map<number, HTMLTextAreaElement>());
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(0);
+  // أحدث حالة للمحرر (الرفع غير متزامن وقد يكتب المستخدم أثناءه)
+  const segsRef = useRef(segs);
+  segsRef.current = segs;
   // تحميل مراسلة أخرى (أو تغيير خارجي) يعيد بناء المحرر
   useEffect(() => { if (value !== lastOut.current) { lastOut.current = value; setSegs(parseBody(value)); } }, [value]);
-  const commit = (next: Seg[]) => { setSegs(next); const s = serialize(next); lastOut.current = s; onChange(s); };
+  const commit = (next: Seg[]) => { segsRef.current = next; setSegs(next); const s = serialize(next); lastOut.current = s; onChange(s); };
   /** تنفيذ تغيير كبير مع زر «تراجع» في الإشعار */
   const commitUndoable = (next: Seg[], msg: string) => {
     const prev = segs;
@@ -304,6 +346,13 @@ export function LetterBodyEditor({ value, onChange, font, companyNames = [], onL
     return false;
   };
   const pasteInto = (i: number) => (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    // صورة منسوخة (لقطة شاشة / نسخ صورة) ← ترفع وتُدرج عند المؤشر
+    const pastedImages = clipboardImageFiles(e.clipboardData);
+    if (pastedImages.length) {
+      e.preventDefault();
+      void uploadImages(pastedImages, { i, start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd });
+      return;
+    }
     const html = e.clipboardData.getData('text/html'), plain = e.clipboardData.getData('text/plain');
     const markup = clipboardToMarkup(html, plain) ?? (html.trim() ? htmlToMarkup(html) : cleanPastedMarkdown(plain));
     const el = e.currentTarget, at = { i, start: el.selectionStart, end: el.selectionEnd };
@@ -318,6 +367,60 @@ export function LetterBodyEditor({ value, onChange, font, companyNames = [], onL
     if (parts) applyLetter(parts); else toast.info('لم يُعثر على أجزاء مراسلة (الموجَّه إليه، الموضوع، التحية، الختام) لترتيبها');
   };
   const insertTable = () => { const at = caretOrEnd(); insertAt(at.i, at.end, at.end, '| البند | التفاصيل |\n|  |  |', 'أُدرج جدول'); };
+
+  /** إدراج صورة في موضع المؤشر بين الفقرات (pending = معاينة محلية أثناء الرفع ولا تُحفظ في النص بعد) */
+  const placeImage = (url: string, at: Caret, pending = false) => {
+    const cur = segsRef.current;
+    const ok = cur[at.i]?.kind === 'text';
+    const i = ok ? at.i : cur.length - 1;
+    const text = (cur[i] as { value: string }).value;
+    const pos = ok ? Math.min(at.end, text.length) : text.length;
+    const next = normalize([...cur.slice(0, i), { kind: 'text', value: text.slice(0, pos) }, { kind: 'image', url, caption: '', width: 75, align: 'center', pending }, { kind: 'text', value: text.slice(pos) }, ...cur.slice(i + 1)]);
+    commit(next);
+    return { i: next.findIndex(x => x.kind === 'image' && x.url === url) + 1, start: 0, end: 0 } as Caret;
+  };
+  /** استبدال المعاينة المحلية برابط الصورة المرفوعة */
+  const finishImage = (localUrl: string, url: string) => {
+    commit(segsRef.current.map(x => (x.kind === 'image' && x.url === localUrl ? { kind: 'image', url, caption: x.caption, width: x.width, align: x.align } as Seg : x)));
+    URL.revokeObjectURL(localUrl);
+  };
+  const dropImage = (localUrl: string) => {
+    commit(normalize(segsRef.current.filter(x => !(x.kind === 'image' && x.url === localUrl))));
+    URL.revokeObjectURL(localUrl);
+  };
+  /** الصور تظهر فوراً في مكانها (معاينة محلية) ثم تُرفع بالتتابع ويُثبَّت رابطها */
+  const uploadImages = async (files: File[], at: Caret) => {
+    const imgs = files.filter(f => f.type.startsWith('image/'));
+    if (!imgs.length) { toast.error('اختر ملف صورة'); return; }
+    let where = at;
+    const jobs = imgs.map(f => { const local = URL.createObjectURL(f); where = placeImage(local, where, true); return { f, local }; });
+    setUploading(n => n + jobs.length);
+    let svc: typeof import('@/services/imageUploadService') | null = null;
+    let supabaseEnabled = false;
+    try {
+      svc = await import('@/services/imageUploadService');
+      // Supabase Storage يُستخدم فقط إن كان هو المزوّد المفعّل؛ غير ذلك تُجرَّب المزوّدات الخارجية فقط بلا احتياطي إليه
+      supabaseEnabled = (await svc.getImageUploadProvider()) === 'supabase_storage';
+    } catch (e: any) { toast.error(e?.message || 'تعذّر تحديد خدمة رفع الصور', { duration: 9000 }); }
+    for (const { f, local } of jobs) {
+      try {
+        if (!svc) throw new Error('تعذّر رفع الصورة');
+        const name = `letter-image-${Date.now()}`;
+        const url = supabaseEnabled ? await svc.uploadImage(await svc.prepareImageForUpload(f), name, 'letters') : await svc.uploadWithAutoFallback(f, name, 'letters');
+        finishImage(local, url);
+        toast.success('رُفعت الصورة وأُدرجت في النص');
+      } catch (e: any) {
+        dropImage(local);
+        toast.error(`فشل رفع الصورة: ${e?.message || 'خطأ غير معروف'}`, { duration: 9000 });
+      } finally { setUploading(n => n - 1); }
+    }
+  };
+  const onPickImages = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length) void uploadImages(files, caretOrEnd());
+  };
+  const patchSeg = (i: number, patch: Partial<ImageSeg>) => commit(segs.map((x, j) => (j === i && x.kind === 'image' ? { ...x, ...patch } : x)));
   /** لصق من زر (مفيد على الهاتف) عبر Clipboard API */
   const pasteButton = async () => {
     if (!window.isSecureContext || !navigator.clipboard) {
@@ -411,6 +514,8 @@ export function LetterBodyEditor({ value, onChange, font, companyNames = [], onL
         <Button type="button" size="sm" variant="outline" className={tool} onMouseDown={keep} onClick={() => format('numbered')} title="ترقيم تلقائي 1. 2. 3."><ListOrdered className="h-4 w-4" /><span className="hidden sm:inline">ترقيم</span></Button>
         <span className="mx-0.5 h-6 w-px bg-border" aria-hidden="true" />
         <Button type="button" size="sm" variant="outline" className={tool} onMouseDown={keep} onClick={insertTable}><Table2 className="h-4 w-4" />جدول</Button>
+        <input ref={fileInput} type="file" accept="image/*" multiple className="hidden" aria-label="صورة داخل المراسلة" onChange={onPickImages} />
+        <Button type="button" size="sm" variant="outline" className={tool} onMouseDown={keep} disabled={uploading > 0} onClick={() => fileInput.current?.click()} title="إدراج صورة في مكان المؤشر بين النصوص (أو الصق صورة داخل النص)">{uploading > 0 ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}صورة</Button>
         <Button type="button" size="sm" variant="outline" className={tool} onClick={pasteButton}><ClipboardPaste className="h-4 w-4" />لصق</Button>
         {onLetter && <Button type="button" size="sm" variant="outline" className={tool} title="يوزّع الموجَّه إليه والموضوع والتحية والختام على حقولها ويحذف اسم الشركة المكرر" onClick={organize}><Wand2 className="h-4 w-4" />تنظيم</Button>}
         <span className="mx-0.5 h-6 w-px bg-border" aria-hidden="true" />
@@ -425,7 +530,9 @@ export function LetterBodyEditor({ value, onChange, font, companyNames = [], onL
               onChange={v => commit(segs.map((x, j) => (j === i ? { kind: 'text', value: v } : x)))}
               placeholder={i === 0 ? 'اكتب تفاصيل المراسلة هنا… أو الصق مراسلة كاملة من ChatGPT' : i === segs.length - 1 ? 'تابع الكتابة هنا…' : ''}
               className={cn(i === 0 && segs.length === 1 && 'min-h-[14rem]', segs.length > 1 && !s.value && 'py-1 leading-6')} />
-          : <TableBlock key={i} rows={s.rows} onChange={rows => commit(segs.map((x, j) => (j === i ? { kind: 'table', rows } : x)))} onRemove={() => commitUndoable(normalize(segs.filter((_, j) => j !== i)), 'حُذف الجدول')} />)}
+          : s.kind === 'image'
+            ? <ImageBlock key={i} img={s} onChange={patch => patchSeg(i, patch)} onRemove={() => commitUndoable(normalize(segs.filter((_, j) => j !== i)), 'حُذفت الصورة')} />
+            : <TableBlock key={i} rows={s.rows} onChange={rows => commit(segs.map((x, j) => (j === i ? { kind: 'table', rows } : x)))} onRemove={() => commitUndoable(normalize(segs.filter((_, j) => j !== i)), 'حُذف الجدول')} />)}
       </div>
     </div>
   );

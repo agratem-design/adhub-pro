@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { VitePWA } from "vite-plugin-pwa";
+import basicSsl from "@vitejs/plugin-basic-ssl";
 import type { Plugin } from "vite";
 
 // Tailwind 4 يولّد @property { syntax: "<color>" }. معاينات الطباعة تنسخ أنماط الصفحة ثم تمرّرها على DOMPurify،
@@ -40,6 +41,7 @@ export default defineConfig(({ mode }) => ({
     hmr: { overlay: false },
   },
   plugins: [
+    basicSsl(),
     react(),
     tailwindcss(),
     cssSyntaxEscapeForDomPurify(),

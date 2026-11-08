@@ -60,7 +60,7 @@ export function ReplacePausedBillboardDialog({
 }: Props) {
   const [all, setAll] = useState<any[]>([]);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'booked'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'available' | 'booked'>('available');
   const [sortBy, setSortBy] = useState<'price-asc' | 'price-desc' | 'name' | 'default'>('default');
   const [picked, setPicked] = useState<any>(null);
   const [allocated, setAllocated] = useState<number>(0);
@@ -73,9 +73,9 @@ export function ReplacePausedBillboardDialog({
     if (!open) return;
     setPicked(null);
     setSearch('');
-    setStatusFilter('all');
+    setStatusFilter('available');
     setSortBy('default');
-    setAllocated(Math.round(remainingAmount));
+    setAllocated(Number(remainingAmount) || 0);
     setStartDate(pauseDate || '');
     setEndDate(contractEndDate || '');
     setNotes('');
@@ -110,10 +110,10 @@ export function ReplacePausedBillboardDialog({
     return Math.round(remainingAmount - estimatedCost);
   }, [remainingAmount, estimatedCost]);
 
-  // Automatically update allocated amount when estimated cost changes
+  // Preserve exact remaining allocation by default so contract total remains unchanged
   useEffect(() => {
     if (picked) {
-      setAllocated(Math.min(Math.round(remainingAmount), estimatedCost || Math.round(remainingAmount)));
+      setAllocated(Number(remainingAmount) || estimatedCost || 0);
     }
   }, [picked, estimatedCost, remainingAmount]);
 

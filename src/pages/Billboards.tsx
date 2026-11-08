@@ -1959,6 +1959,7 @@ export default function Billboards() {
         selectAvailableOnly={selectAvailableOnly}
         onSetSelectAvailableOnly={setSelectAvailableOnly}
         loadBillboards={loadBillboards}
+        onLocalUpdate={updateBillboardLocal}
       />
 
       {/* حوار اختيار اللوحة لمحرر التراكب والواقعية */}

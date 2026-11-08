@@ -32,7 +32,8 @@ import type { PendingBillboardSwap } from '@/lib/pendingBillboardSwaps';
 import { QuickPauseBillboardDialog } from './QuickPauseBillboardDialog';
 import { toast } from 'sonner';
 import { pauseBillboardFromContract } from '@/services/billboardPauseService';
-import { listReplacementsByContract } from '@/services/pausedBillboardReplacementService';
+import { listReplacementsByContract, removeReplacementByPauseId } from '@/services/pausedBillboardReplacementService';
+import { executeInstantBillboardSwap } from '@/services/contractBillboardSwapService';
 
 // Component to show friend company name
 function FriendCompanyBadge({ billboardId, billboard }: { billboardId: string; billboard: any }) {
@@ -332,6 +333,8 @@ export function SelectedBillboardsCard({
 
   const replacementsMap = useMemo(() => {
     const m = new Map<string, { 
+      pausedBillboardId?: string;
+      replacementRecordId?: string;
       pausedName: string; 
       startDate?: string; 
       endDate?: string; 
@@ -342,6 +345,8 @@ export function SelectedBillboardsCard({
 
     (replacementsList as any[]).forEach((r: any) => {
       m.set(String(r.replacement_billboard_id), {
+        pausedBillboardId: r.paused_billboard_id ? String(r.paused_billboard_id) : undefined,
+        replacementRecordId: r.id ? String(r.id) : undefined,
         pausedName: String(r._paused_billboard_name || r.replacement_billboard_name || ''),
         startDate: String(r.start_date || ''),
         endDate: String(r.end_date || ''),
@@ -1261,14 +1266,36 @@ export function SelectedBillboardsCard({
                     })() : replacementsMap.has(billboardId) && (() => {
                       const info = replacementsMap.get(billboardId)!;
                       return (
-                        <div className="relative z-10 bg-primary/95 text-primary-foreground px-3 py-1.5 border-b border-primary/30 shadow-sm">
-                          <div className="flex items-center gap-1.5 text-xs font-bold truncate">
+                        <div className="relative z-10 bg-primary/95 text-primary-foreground px-3 py-1.5 border-b border-primary/30 shadow-sm flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 text-xs font-bold truncate min-w-0">
                             <ArrowLeftRight className="h-3.5 w-3.5 shrink-0" />
                             <span>لوحة بديلة عن:</span>
                             <span className="bg-black/25 px-1.5 py-0.5 rounded font-extrabold truncate">
                               {info.pausedName || (info.originalId ? `#${info.originalId}` : '—')}
                             </span>
                           </div>
+                          {info.pausedBillboardId && (
+                            <button
+                              type="button"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                const ok = window.confirm('هل تريد إلغاء التبديل وإزالة هذه اللوحة البديلة؟');
+                                if (!ok) return;
+                                try {
+                                  await removeReplacementByPauseId(info.pausedBillboardId!);
+                                  toast.success('تم إلغاء التبديل وإزالة اللوحة البديلة');
+                                  setPausedRefreshKey((k) => k + 1);
+                                  onRefresh?.();
+                                } catch (err: any) {
+                                  toast.error('فشل إلغاء التبديل: ' + (err?.message || ''));
+                                }
+                              }}
+                              className="text-[11px] font-bold px-2 py-0.5 rounded bg-black/25 hover:bg-black/40 text-white flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                              title="إلغاء التبديل وإزالة اللوحة البديلة"
+                            >
+                              <X className="h-3 w-3" /> إلغاء التبديل
+                            </button>
+                          )}
                         </div>
                       );
                     })()}

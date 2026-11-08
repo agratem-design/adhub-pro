@@ -62,6 +62,234 @@ export async function listPausedBillboards(contractNumber: number): Promise<Paus
  *   allocated_amount as fixed price.
  * - Only writes when something actually changed.
  */
+export interface ReconcileContractReplacementsInput {
+  originalIds: string[];
+  originalPrices: any[];
+  pausedRows: Array<{ id?: string; billboard_id: number | string; lifecycle_state?: string | null }>;
+  replRows: Array<{
+    id?: string;
+    paused_billboard_id: string;
+    replacement_billboard_id: number | string;
+    replacement_billboard_name?: string | null;
+    allocated_amount?: number | null;
+    start_date?: string | null;
+    end_date?: string | null;
+    created_at?: string | null;
+  }>;
+  swapLogs?: Array<{
+    created_at?: string | null;
+    details?: any;
+  }>;
+}
+
+export interface ReconcileContractReplacementsResult {
+  ids: string[];
+  prices: any[];
+  staleReplacementBillboardIds: string[];
+  replacementUpdates: Array<{
+    id?: string;
+    paused_billboard_id: string;
+    oldBillboardId: string;
+    newBillboardId: string;
+    newBillboardName?: string | null;
+  }>;
+}
+
+const getPriceRowBoardId = (p: any): string =>
+  String(p?.billboardId ?? p?.billboard_id ?? p?.ID ?? p?.id ?? '').trim();
+
+/**
+ * Pure reconciliation of contract billboard_ids + billboard_prices against
+ * paused_billboards, paused_billboard_replacements, and chained instant swaps.
+ * Ensures a paused slot never produces two active replacement boards (e.g. SJ1233).
+ */
+export function reconcileContractReplacements(
+  input: ReconcileContractReplacementsInput,
+): ReconcileContractReplacementsResult {
+  const activePauses = (input.pausedRows || []).filter(
+    (row) => !row.lifecycle_state || row.lifecycle_state === 'paused',
+  );
+  const activePauseIds = new Set<string>(
+    activePauses.map((r) => String(r.id || '')).filter(Boolean),
+  );
+  const pausedIds = new Set<string>(
+    activePauses.map((r) => String(r.billboard_id)).filter(Boolean),
+  );
+
+  // Deduplicate initial IDs while preserving order and removing paused boards
+  const seenIds = new Set<string>();
+  let ids: string[] = [];
+  for (const rawId of input.originalIds || []) {
+    const id = String(rawId).trim();
+    if (!id || pausedIds.has(id) || seenIds.has(id)) continue;
+    seenIds.add(id);
+    ids.push(id);
+  }
+
+  let prices = (input.originalPrices || []).filter((p: any) => {
+    const bId = getPriceRowBoardId(p);
+    return bId && !pausedIds.has(bId);
+  });
+
+  // Parse swap logs chronologically (oldest -> newest)
+  const parsedSwaps = [...(input.swapLogs || [])]
+    .map((log) => {
+      let details: any = {};
+      try {
+        details = typeof log?.details === 'string' ? JSON.parse(log.details) : log?.details || {};
+      } catch {
+        details = {};
+      }
+      const resObj = details?.result && typeof details.result === 'object' ? details.result : details;
+      const origId = String(
+        resObj?.original_billboard_id ??
+          details?.original_billboard_id ??
+          details?.old_billboard_id ??
+          '',
+      ).trim();
+      const replId = String(
+        resObj?.replacement_billboard_id ??
+          details?.replacement_billboard_id ??
+          details?.new_billboard_id ??
+          '',
+      ).trim();
+      const replName =
+        resObj?.replacement_billboard_name ?? details?.replacement_billboard_name ?? null;
+      const ts = log?.created_at ? new Date(log.created_at).getTime() : 0;
+      return { origId, replId, replName, ts: Number.isFinite(ts) ? ts : 0 };
+    })
+    .filter((s) => s.origId && s.replId && s.origId !== s.replId)
+    .sort((a, b) => a.ts - b.ts);
+
+  const staleSet = new Set<string>();
+  const replacementUpdates: ReconcileContractReplacementsResult['replacementUpdates'] = [];
+
+  for (const r of input.replRows || []) {
+    const pauseId = String(r.paused_billboard_id || '').trim();
+    const recordedReplId = String(r.replacement_billboard_id || '').trim();
+    if (!pauseId || !recordedReplId) continue;
+
+    // If the parent pause is no longer active, its replacement shouldn't be forced in
+    if (activePauseIds.size > 0 && !activePauseIds.has(pauseId)) {
+      continue;
+    }
+
+    let currentReplId = recordedReplId;
+    let currentReplName: string | null | undefined = r.replacement_billboard_name;
+
+    // 1) Follow any swap chain starting from recordedReplId (A -> B -> C)
+    const visited = new Set<string>([currentReplId]);
+    for (const swap of parsedSwaps) {
+      if (swap.origId === currentReplId && !visited.has(swap.replId)) {
+        staleSet.add(currentReplId);
+        currentReplId = swap.replId;
+        if (swap.replName) currentReplName = swap.replName;
+        visited.add(currentReplId);
+      }
+    }
+
+    // 2) Check price rows linked to this pauseId via _replacement_of
+    const linkedPriceRows = prices.filter(
+      (p: any) => String(p?._replacement_of || '') === pauseId,
+    );
+    if (currentReplId === recordedReplId && linkedPriceRows.length > 0) {
+      // If recordedReplId is NOT in originalIds (was swapped out) or another row has richer swap metadata
+      const otherRows = linkedPriceRows.filter(
+        (p: any) => getPriceRowBoardId(p) !== recordedReplId && !pausedIds.has(getPriceRowBoardId(p)),
+      );
+      if (otherRows.length > 0) {
+        const chosenOther =
+          otherRows.find((p: any) => p?.consumedCarryover !== undefined || p?.carriedFromBillboardId !== undefined) ||
+          otherRows[otherRows.length - 1];
+        const otherId = getPriceRowBoardId(chosenOther);
+        if (otherId) {
+          staleSet.add(recordedReplId);
+          currentReplId = otherId;
+          currentReplName = undefined;
+        }
+      }
+    }
+
+    // Any other board claiming _replacement_of === pauseId is a duplicate and must be removed
+    for (const p of linkedPriceRows) {
+      const bId = getPriceRowBoardId(p);
+      if (bId && bId !== currentReplId) {
+        staleSet.add(bId);
+      }
+    }
+
+    if (currentReplId !== recordedReplId && !pausedIds.has(currentReplId)) {
+      replacementUpdates.push({
+        id: r.id,
+        paused_billboard_id: pauseId,
+        oldBillboardId: recordedReplId,
+        newBillboardId: currentReplId,
+        newBillboardName: currentReplName,
+      });
+    }
+
+    // Never re-add a board that is itself paused
+    if (pausedIds.has(currentReplId)) {
+      staleSet.add(currentReplId);
+      continue;
+    }
+
+    if (!ids.includes(currentReplId)) {
+      ids.push(currentReplId);
+    }
+
+    const amount = Number(r.allocated_amount) || 0;
+    const idx = prices.findIndex((p: any) => getPriceRowBoardId(p) === currentReplId);
+    const defaultEntry: any = {
+      billboardId: currentReplId,
+      basePriceBeforeDiscount: amount,
+      priceBeforeDiscount: amount,
+      discountPerBillboard: 0,
+      priceAfterDiscount: amount,
+      contractPrice: amount,
+      finalPrice: amount,
+      printCost: 0,
+      installationCost: 0,
+      totalBillboardPrice: amount,
+      ...(r.start_date ? { startDate: r.start_date } : {}),
+      ...(r.end_date ? { endDate: r.end_date } : {}),
+      isContractualAllocation: true,
+      _replacement_of: pauseId,
+    };
+    if (idx >= 0) {
+      prices[idx] = {
+        ...defaultEntry,
+        ...prices[idx],
+        billboardId: currentReplId,
+        _replacement_of: pauseId,
+      };
+    } else {
+      prices.push(defaultEntry);
+    }
+  }
+
+  if (staleSet.size > 0) {
+    ids = ids.filter((id) => !staleSet.has(String(id)));
+    prices = prices.filter((p: any) => !staleSet.has(getPriceRowBoardId(p)));
+  }
+
+  // Deduplicate prices by billboardId (keep last/merged entry)
+  const priceByBoard = new Map<string, any>();
+  for (const p of prices) {
+    const bId = getPriceRowBoardId(p);
+    if (!bId) continue;
+    priceByBoard.set(bId, p);
+  }
+  prices = Array.from(priceByBoard.values());
+
+  return {
+    ids,
+    prices,
+    staleReplacementBillboardIds: Array.from(staleSet),
+    replacementUpdates,
+  };
+}
+
 export async function syncContractIdsWithPaused(contractNumber: number, persist = true): Promise<string[]> {
   if (!contractNumber) return [];
   const { data: contract } = await supabase
@@ -73,71 +301,106 @@ export async function syncContractIdsWithPaused(contractNumber: number, persist 
 
   const idsStr: string = (contract as any).billboard_ids || '';
   const originalIds = idsStr ? idsStr.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
-  let ids = [...originalIds];
 
-  let prices: any[] = [];
+  let originalPrices: any[] = [];
   try {
     const raw = (contract as any).billboard_prices;
-    if (raw) prices = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    if (!Array.isArray(prices)) prices = [];
+    if (raw) originalPrices = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(originalPrices)) originalPrices = [];
   } catch {
-    prices = [];
+    originalPrices = [];
   }
-  const originalPricesJson = JSON.stringify(prices);
+  const originalPricesJson = JSON.stringify(originalPrices);
 
-  // 1. Remove every paused billboard_id from billboard_ids
-  const pausedRows = (await listPausedBillboards(contractNumber))
-    .filter(row => !row.lifecycle_state || row.lifecycle_state === 'paused');
-  const pausedIds = new Set<string>(
-    (pausedRows || []).map((r: any) => String(r.billboard_id)),
-  );
-  if (pausedIds.size > 0) {
-    ids = ids.filter((x) => !pausedIds.has(String(x)));
-    prices = prices.filter(
-      (p: any) => !pausedIds.has(String(p.billboardId ?? p.billboard_id ?? p.ID ?? p.id ?? '')),
-    );
+  const [pausedRows, replRes, swapLogsRes] = await Promise.all([
+    listPausedBillboards(contractNumber),
+    supabase
+      .from('paused_billboard_replacements' as any)
+      .select('id, paused_billboard_id, replacement_billboard_id, replacement_billboard_name, allocated_amount, start_date, end_date, created_at')
+      .eq('contract_number', contractNumber),
+    supabase
+      .from('activity_log')
+      .select('created_at, details, action')
+      .in('action', ['instant_billboard_swap', 'installed_board_swap'])
+      .eq('contract_number', contractNumber)
+      .order('created_at', { ascending: true }),
+  ]);
+
+  const reconciled = reconcileContractReplacements({
+    originalIds,
+    originalPrices,
+    pausedRows: pausedRows || [],
+    replRows: (replRes.data || []) as any[],
+    swapLogs: (swapLogsRes.data || []) as any[],
+  });
+
+  // Self-heal stale replacement pointers in paused_billboard_replacements (e.g. after chained swap B -> C)
+  for (const upd of reconciled.replacementUpdates) {
+    try {
+      let replName = upd.newBillboardName;
+      if (!replName) {
+        const { data: bb } = await supabase
+          .from('billboards')
+          .select('Billboard_Name')
+          .eq('ID', Number(upd.newBillboardId))
+          .maybeSingle();
+        replName = (bb as any)?.Billboard_Name || null;
+      }
+      const query = supabase
+        .from('paused_billboard_replacements' as any)
+        .update({
+          replacement_billboard_id: Number(upd.newBillboardId),
+          ...(replName ? { replacement_billboard_name: replName } : {}),
+        });
+      if (upd.id) {
+        await query.eq('id', upd.id);
+      } else {
+        await query.eq('paused_billboard_id', upd.paused_billboard_id);
+      }
+    } catch (e) {
+      console.warn('Failed to self-heal paused_billboard_replacements pointer:', e);
+    }
   }
 
-  // 2. Ensure each replacement is registered in billboard_ids and billboard_prices
-  const { data: replRows } = await supabase
-    .from('paused_billboard_replacements' as any)
-    .select('paused_billboard_id, replacement_billboard_id, allocated_amount')
-    .eq('contract_number', contractNumber);
-  for (const r of (replRows || []) as any[]) {
-    const replId = String(r.replacement_billboard_id);
-    if (!ids.includes(replId)) ids.push(replId);
-    const amount = Number(r.allocated_amount) || 0;
-    const idx = prices.findIndex(
-      (p: any) => String(p.billboardId ?? p.billboard_id ?? p.ID ?? p.id ?? '') === replId,
-    );
-    const entry: any = {
-      billboardId: replId,
-      basePriceBeforeDiscount: amount,
-      priceBeforeDiscount: amount,
-      discountPerBillboard: 0,
-      priceAfterDiscount: amount,
-      contractPrice: amount,
-      finalPrice: amount,
-      printCost: 0,
-      installationCost: 0,
-      totalBillboardPrice: amount,
-      _replacement_of: r.paused_billboard_id,
-    };
-    if (idx >= 0) prices[idx] = { ...prices[idx], ...entry };
-    else prices.push(entry);
+  // Release any stale duplicate replacement boards that are no longer in the contract
+  if (reconciled.staleReplacementBillboardIds.length > 0) {
+    const staleNums = reconciled.staleReplacementBillboardIds
+      .map(Number)
+      .filter((n) => Number.isFinite(n) && n > 0);
+    if (staleNums.length > 0) {
+      try {
+        await supabase
+          .from('billboards')
+          .update({
+            Contract_Number: null,
+            Customer_Name: null,
+            Ad_Type: null,
+            Rent_Start_Date: null,
+            Rent_End_Date: null,
+            Status: 'متاح',
+          } as any)
+          .in('ID', staleNums)
+          .eq('Contract_Number', contractNumber);
+      } catch (e) {
+        console.warn('Failed to release stale replacement billboards:', e);
+      }
+    }
   }
 
+  const { ids, prices } = reconciled;
   const changed =
     JSON.stringify(ids) !== JSON.stringify(originalIds) ||
     JSON.stringify(prices) !== originalPricesJson;
 
-  if (changed && persist) {
+  // Always persist when we cleaned up stale duplicate replacements so DB stays consistent
+  if (changed && (persist || reconciled.staleReplacementBillboardIds.length > 0 || reconciled.replacementUpdates.length > 0)) {
     await supabase
       .from('Contract')
       .update({
         billboard_ids: ids.length > 0 ? ids.join(',') : null,
+        billboards_count: ids.length,
         billboard_prices: JSON.stringify(prices),
-      })
+      } as any)
       .eq('Contract_Number', contractNumber);
   }
 
